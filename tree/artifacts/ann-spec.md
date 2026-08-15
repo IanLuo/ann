@@ -27,7 +27,9 @@
   6. Verification runs: on success the node commits (checkpoint) and its artifact is recorded; on failure the subtree re-plans, bounded (§6.2, §21.5).
   7. Tree renders; user reviews step cards; partial execution only where the plan marks it safe.
   8. Goal's success definition verified → done; execution feedback flows into evals (§21.11).
-- Explicitly not a v1 primary flow: a human manually executing every step of a large tree (exists as `mode: human`, deferred as primary).
+- Explicitly not v1: human/automation node *execution* (modes exist in the model; v1 executes agent-mode nodes only — human = reviewer/answerer, automation deferred).
+- Execution order: leaves activate **sequentially** in v1; parallel ready-node execution deferred (design §19 deferred advanced parallel planning).
+- "Standard mode" in this spec = design §9 depth mode; quick/deep modes exist in the model but only standard mode is in the v1 fixture suite.
 
 ## 4. Acceptance criteria
 
@@ -59,7 +61,8 @@
 - NFR-OBS-1 — observability (§14): every run produces a full trace; failures debuggable without guessing.
 - NFR-COM-1 — compatibility: structured output is machine-consumable (plan.json / tree artifacts); model provider is adapter-based (§16).
 - NFR-CST-1 — cost: bounded model calls per node — one grilling pass, one review pass, capped repairs.
-- N/A — hosted/scale NFRs: local-first v1, no multi-tenant service. 10×-worse check: PERF-1 at 10s stalls every step → keep; OBS-1 at 10× = no trace → cut, it's load-bearing for evals.
+- NFR-OPS-1 — operations: one command to run; one command to resume from the last checkpoint (AC8 requires a resume path).
+- N/A — hosted/scale NFRs: local-first v1, no multi-tenant service. 10×-worse check: PERF-1 at 10s stalls every step → keep; OBS-1 at 10× = no trace → cut, it's load-bearing for evals; OPS-1 at 10× = 10 commands → cut.
 
 ## 7. Assumptions & dependencies
 
@@ -118,6 +121,7 @@
 - NFR-OBS-1 → trace completeness check on every fixture (automated).
 - NFR-COM-1 → machine-consumable output assertion (automated).
 - NFR-CST-1 → model-call counter on standard-mode fixture (automated).
+- NFR-OPS-1 → documented commands + smoke test: run fixture, kill, resume (automated).
 
 ---
 
