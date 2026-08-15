@@ -15,9 +15,9 @@ tree/
     <NN>-<name>/<NN>-<child>/...  children = subdirectories
 ```
 
-## Format rules (v0, pre-engine — formalized by n03-system-design)
+## Format rules (pre-engine)
 
-**The locked contract is [`02-tree-format/artifacts/tree-format-spec.md`](nodes/01-goal/02-tree-format/artifacts/tree-format-spec.md).** Rules below are the summary.
+**The locked contract is [`02-tree-format/artifacts/tree-format-spec.md`](nodes/01-goal/02-tree-format/artifacts/tree-format-spec.md)** (upstream design + ann-spec). `02-system-design`'s data-model rung cites it. Rules below are the summary.
 
 - **The directory tree IS the tree.** Parent = dirname · children = subdirectories · id = path (`01-goal/01-grilling`). No `parentId`/`children` fields — they would be second copies of a fact and drift.
 - **Nodes are immutable.** `node.json` is written once at creation and never rewritten. You cannot travel in time: you can't re-parent, re-contract, or delete history. Corrections = new nodes (repair branch, amendment node whose artifact supersedes).

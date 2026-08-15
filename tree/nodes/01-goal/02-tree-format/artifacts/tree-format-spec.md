@@ -88,3 +88,9 @@
 - No DAG edge files (joins deferred, ann-spec §3).
 - No binary blobs in artifacts (text/structured only).
 - No hot-migration of existing trees (A5: this spec freezes v0).
+
+## 10. Evolution — supersede, never edit
+
+- Once locked, this spec is **immutable**. Amending the node structure or format = **a new node** (a task) whose artifact supersedes this spec — with a back-reference to this doc, and a `superseded` event appended here.
+- A superseding spec is a new artifact, never an edit. The format's history stays as visible as the project's.
+- General rule this enforces: **node structure updates are tasks, and tasks are nodes.** The tree cannot be reshaped by editing — only by growing.
