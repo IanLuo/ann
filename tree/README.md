@@ -23,6 +23,7 @@ tree/
 
 ```
 n01-goal (done)
-└── n02-requirement-grilling (blocked → waiting on Q1–Q4 answers)
-    └── (children = implementation slices, spawn only after PRD final)
+└── n02-requirement-grilling (done → artifact: tree/artifacts/ann-spec.md, locked @ 2664511)
+    └── n03-system-design (queued → needs Q1–Q4 answers)
+        └── (children = implementation slices, spawn after system-design artifact)
 ```

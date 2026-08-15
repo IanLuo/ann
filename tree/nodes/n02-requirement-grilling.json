@@ -2,7 +2,7 @@
   "id": "n02-requirement-grilling",
   "parentId": "n01-goal",
   "children": [],
-  "status": "blocked",
+  "status": "done",
   "contract": {
     "intent": "Run the requirement grilling step for building Ann: convert the vague goal into a PRD (or open-questions) artifact that gates the implementation children.",
     "acceptanceCriteria": [
@@ -58,19 +58,9 @@
       }
     ],
     "distanceToGoal": {
-      "unverifiedAcceptanceCriteria": [
-        "PRD covers what/why, scope, success definition, product ACs",
-        "Primary flow named",
-        "KPIs + failure signal present",
-        "NFRs present",
-        "Assumptions listed",
-        "Recovery requirements present",
-        "Blocking questions surfaced with defaults",
-        "Initial slices identified",
-        "Artifact gate respected"
-      ],
-      "remainingFrontierLeaves": ["implementation slices (spec / design §21.12)"],
-      "openQuestions": ["Q1", "Q2", "Q3", "Q4"]
+      "unverifiedAcceptanceCriteria": [],
+      "remainingFrontierLeaves": ["n03-system-design (queued child)", "implementation slices (spec / design §21.12)"],
+      "openQuestions": []
     }
   },
   "execution": {
@@ -79,15 +69,15 @@
     "systemBindings": []
   },
   "quality": {
-    "validationStatus": "partial (spec draft produced; pending user accept + lock)",
-    "reviewStatus": "pending",
-    "evidence": ["tree/artifacts/ann-spec.md (draft)"]
+    "validationStatus": "passed (spec locked @ 2664511)",
+    "reviewStatus": "passed (inline review; fixes in 2664511)",
+    "evidence": ["tree/artifacts/ann-spec.md (locked @ 2664511)", "Q1-Q4 transferred to n03-system-design context"]
   },
   "lifecycle": {
-    "checkpointRef": null,
+    "checkpointRef": "git 2664511 (spec lock — node ACs all satisfied)",
     "repairCount": 0,
     "maxRepairs": 3,
     "startedAt": "2026-08-15",
-    "completedAt": null
+    "completedAt": "2026-08-15"
   }
 }

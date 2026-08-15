@@ -1,0 +1,90 @@
+{
+  "id": "n03-system-design",
+  "parentId": "n02-requirement-grilling",
+  "children": [],
+  "status": "queued",
+  "contract": {
+    "intent": "Produce the system-design doc for Ann (type system-design): components & ownership, data model, boundaries/interfaces, failure modes, scale assumptions — the technique layer. Upstream: tree/artifacts/ann-spec.md (locked).",
+    "acceptanceCriteria": [
+      "Components listed, each with a one-line job and an owner (what does each component refuse to do?)",
+      "Data model defined: StepNode, artifacts, checkpoints, trace — who writes, who reads, stale-read behavior, empty-record decision",
+      "Shared schemas frozen at interfaces (StepNode JSON schema, context packet schema, binding API) — the boundaries that keep components independent",
+      "Failure modes per component: fail-closed vs fail-open is an explicit decision; the one failure that would wreck the product is named",
+      "Scale assumptions stated (tree size, write rate, fixture suite size)",
+      "Q1-Q4 resolved or explicitly parked with defaults (runtime, provider, storage, UI)"
+    ],
+    "targetAreas": ["tree/artifacts/ann-system-design.md", "tree/nodes"],
+    "requiredInputs": [
+      "n02 output (tree/artifacts/ann-spec.md, locked @ 2664511)",
+      "design §15 (persistence), §16 (adapters), §21 (tree model)"
+    ],
+    "expectedOutputs": ["system-design artifact (tree/artifacts/ann-system-design.md)"]
+  },
+  "position": {
+    "pathFromRoot": ["n01-goal", "n02-requirement-grilling", "n03-system-design"],
+    "siblings": [],
+    "openQuestions": [
+      {
+        "id": "Q1",
+        "question": "Runtime/language for the implementation?",
+        "blocking": true,
+        "reason": "Affects every slice; a fresh agent would get it wrong without an answer",
+        "defaultIfUnanswered": "Node.js + TypeScript (original skeleton; mature agent/LLM ecosystem)",
+        "affectedTaskIds": ["slices 1-9"]
+      },
+      {
+        "id": "Q2",
+        "question": "Model provider to start with?",
+        "blocking": true,
+        "reason": "Design §16 is adapter-based, but the first adapter must be chosen",
+        "defaultIfUnanswered": "Adapter-first; first adapter = whatever provider is configured locally (OpenAI-compatible)",
+        "affectedTaskIds": ["slice 2 (grilling impl)"]
+      },
+      {
+        "id": "Q3",
+        "question": "Storage backend for the tree + branch checkpoints?",
+        "blocking": true,
+        "reason": "Spec §9 parks checkpoint mechanics here; choice shapes the core API",
+        "defaultIfUnanswered": "SQLite (better-sqlite3) for tree/index + JSON artifact files on disk",
+        "affectedTaskIds": ["slice 1 (tree persistence)"]
+      },
+      {
+        "id": "Q4",
+        "question": "UI form factor for v1?",
+        "blocking": true,
+        "reason": "Spec §3 names agent-executed CLI as primary flow; one surface must be confirmed",
+        "defaultIfUnanswered": "CLI + tree artifacts on disk (tree view + step cards + full plan renders)",
+        "affectedTaskIds": ["slice 8 (renderers)"]
+      }
+    ],
+    "distanceToGoal": {
+      "unverifiedAcceptanceCriteria": [
+        "Components + owners listed",
+        "Data model defined incl. empty-record decision",
+        "Shared schemas frozen at interfaces",
+        "Failure modes with explicit fail-closed/fail-open",
+        "Scale assumptions stated",
+        "Q1-Q4 resolved or parked with defaults"
+      ],
+      "remainingFrontierLeaves": ["implementation slices (spec / design §21.12)"],
+      "openQuestions": ["Q1", "Q2", "Q3", "Q4"]
+    }
+  },
+  "execution": {
+    "mode": "agent",
+    "contextPacket": "Path: n01-goal (done) → n02-requirement-grilling (done, artifact locked) → n03-system-design. Goal: build Ann (tree-of-steps planning system). Produce tree/artifacts/ann-system-design.md per the 5-rung system-design ladder (components/ownership, data model, interfaces, failure modes, scale). Resolve or park Q1-Q4 (runtime/provider/storage/UI — carried from n02 with defaults). Do not spawn implementation slices until this artifact exists (artifact gate).",
+    "systemBindings": []
+  },
+  "quality": {
+    "validationStatus": "pending",
+    "reviewStatus": "pending",
+    "evidence": []
+  },
+  "lifecycle": {
+    "checkpointRef": null,
+    "repairCount": 0,
+    "maxRepairs": 3,
+    "startedAt": null,
+    "completedAt": null
+  }
+}

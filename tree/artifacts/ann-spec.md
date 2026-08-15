@@ -1,5 +1,10 @@
-# Ann Requirements Spec (v1)
+<!-- specs:locked:2664511 2026-08-15 type=spec -->
 
+## Link contract
+- **upstream** (this doc relies on): design
+- **referrers** (must cite this when they change): n03-system-design,implementation slices review-task
+
+# Ann Requirements Spec (v1)
 *Artifact of node `n02-requirement-grilling`. Supersedes `ann-prd.md` draft (incl. extension 03440cc — its decisions are merged here verbatim). Complete requirements contract for building Ann. Model semantics live in `design` §21 (locked @ eb07146); this doc freezes project decisions. Type: spec (root).*
 
 ## 1. Problem & who breaks
@@ -125,4 +130,5 @@
 
 ---
 
-**Contract rung (confirm before lock):** upstream = `design` (locked @ eb07146). Referrers = `tree/nodes/n03-system-design` (next node), `tree/nodes/n04+ implementation slices`, review-task.
+Locked: 2026-08-15 @ 2664511 · type=spec · upstream `design` (locked @ eb07146) · referrers n03-system-design, implementation slices, review-task
+Last reviewed: 2026-08-15 · owner: user
