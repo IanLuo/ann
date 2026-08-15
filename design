@@ -1,5 +1,10 @@
-# Meta-Assistant 10/10 Design
+<!-- prd:locked:eb07146 2026-08-15 type=system-design -->
 
+## Link contract
+- **upstream** (this doc relies on): none
+- **referrers** (must cite this when they change): AGENTS.md,CURSOR.md
+
+# Meta-Assistant 10/10 Design
 ## 1. Product Definition
 
 Meta-Assistant is a planning system that converts ambiguous human goals into executable instruction plans for downstream task runners.
