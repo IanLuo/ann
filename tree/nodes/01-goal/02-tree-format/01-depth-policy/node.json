@@ -1,0 +1,21 @@
+{
+  "id": "01-goal/02-tree-format/01-depth-policy",
+  "contract": {
+    "intent": "Amend the tree-format-spec to bound depth and path length for long-lived projects: sibling-correction (repairs/amendments never nest), pruning of completed subtrees, name discipline, path budget.",
+    "acceptanceCriteria": [
+      "depth-policy.md artifact exists at artifacts/ — back-references tree-format-spec.md and supersedes §1 (layout) and §7 (engine ACs) where noted",
+      "Sibling-correction semantics defined: retries/amendments = same-level siblings with higher prefix, never nested children",
+      "Pruning rule defined: completed/superseded subtrees may be removed from working tree; git is the archive; live nodes' requiredInputs block pruning of referenced nodes",
+      "Depth expectation + path budget stated (<=8 levels, <=260 chars full path)",
+      "Name discipline stated (segments <=24 chars, kebab-case, no dates/versions in names)",
+      "Engine ACs added: F-AC9 (sibling retry), F-AC10 (prune keeps tree valid)",
+      "02-tree-format node gets an 'extended' event pointing at this amendment"
+    ],
+    "targetAreas": ["artifacts/depth-policy.md", "tree/nodes"],
+    "requiredInputs": [
+      "01-goal/02-tree-format/artifacts/tree-format-spec.md (locked @ ba528d1, esp. §1 layout + §10 evolution)"
+    ],
+    "expectedOutputs": ["depth-policy amendment artifact (artifacts/depth-policy.md)"]
+  },
+  "createdAt": "2026-08-15"
+}
