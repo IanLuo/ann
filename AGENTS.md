@@ -37,7 +37,7 @@ design        — comprehensive design spec (plan contract, workflow, routing, q
 |---|---|
 | the canonical plan contract, workflow model, routing semantics, quality gates, depth modes, MVP scope, evals design, handoff protocol, security constraints | `design` |
 | the tree-of-steps execution model (v2): step node schema, expansion semantics, artifact gate, context packets, distance-to-goal, observer/memory role, external bindings, v2 evals and MVP | `design` §21 |
-| the tree format contract (engine data contract): node directory layout, immutable `node.json`, append-only `events.jsonl`, status derivation, searchable `description.md`, per-node artifacts, checkpoint/RPO | `tree/nodes/01-goal/02-tree-format/artifacts/tree-format-spec.md` |
+| the tree format contract (engine data contract): table of rounds (epics, sequential gates), parallel task groups, immutable `node.json`, append-only `events.jsonl`, status derivation, searchable `description.md`, per-node artifacts, depth policy, checkpoint/RPO | `tree/rounds/04-system-design/00/01-format-amendment-v2/artifacts/tree-format-spec-v2.md` |
 
 ---
 

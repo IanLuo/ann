@@ -1,5 +1,5 @@
 {
-  "id": "01-goal/02-tree-format/01-depth-policy",
+  "id": "03-tree-format/01-depth-policy",
   "contract": {
     "intent": "Amend the tree-format-spec to bound depth and path length for long-lived projects: sibling-correction (repairs/amendments never nest), pruning of completed subtrees, name discipline, path budget.",
     "acceptanceCriteria": [
@@ -13,7 +13,7 @@
     ],
     "targetAreas": ["artifacts/depth-policy.md", "tree/nodes"],
     "requiredInputs": [
-      "01-goal/02-tree-format/artifacts/tree-format-spec.md (locked @ ba528d1, esp. §1 layout + §10 evolution)"
+      "03-tree-format/artifacts/tree-format-spec.md (locked @ ba528d1, esp. §1 layout + §10 evolution)"
     ],
     "expectedOutputs": ["depth-policy amendment artifact (artifacts/depth-policy.md)"]
   },

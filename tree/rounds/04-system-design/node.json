@@ -1,5 +1,5 @@
 {
-  "id": "01-goal/01-grilling/02-system-design",
+  "id": "04-system-design",
   "contract": {
     "intent": "Produce the system-design doc for Ann (type system-design): components & ownership, data model, boundaries/interfaces, failure modes, scale assumptions — the technique layer. Upstream: 01-goal/01-grilling/artifacts/ann-spec.md (locked).",
     "acceptanceCriteria": [
@@ -10,12 +10,13 @@
       "Scale assumptions stated (tree size, write rate, fixture suite size)",
       "Q1-Q4 resolved or explicitly parked with defaults (runtime, provider, storage, UI)"
     ],
-    "targetAreas": ["artifacts/ann-system-design.md", "tree/nodes"],
+    "targetAreas": ["tree/rounds/04-system-design", "00/02-system-design-doc/artifacts/ann-system-design.md"],
     "requiredInputs": [
-      "01-goal/01-grilling output (artifacts/ann-spec.md, locked @ 2664511)",
+      "02-grilling output (artifacts/ann-spec.md, locked @ 2664511)",
+      "03-tree-format output (tree-format-spec v2 via task 01)",
       "design §15 (persistence), §16 (adapters), §21 (tree model)"
     ],
-    "expectedOutputs": ["system-design artifact (artifacts/ann-system-design.md)"]
+    "expectedOutputs": ["round gate evidence: tree-format-spec-v2.md (task 01) + ann-system-design.md (task 02)"]
   },
   "openQuestions": [
     {

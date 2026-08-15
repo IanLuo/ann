@@ -1,5 +1,5 @@
 {
-  "id": "01-goal/02-tree-format",
+  "id": "03-tree-format",
   "contract": {
     "intent": "Freeze the tree format (v0 bootstrap) as a locked spec — the engine's data contract. Referred from AGENTS.md (the instruction file) so every agent session honors it.",
     "acceptanceCriteria": [
@@ -10,7 +10,7 @@
     ],
     "targetAreas": ["tree/README.md", "AGENTS.md", "artifacts/tree-format-spec.md"],
     "requiredInputs": [
-      "01-goal/01-grilling/artifacts/ann-spec.md (locked @ 2664511, esp. A5 format stability)",
+      "02-grilling/artifacts/ann-spec.md (locked @ 2664511, esp. A5 format stability)",
       "design §21.3 (StepNode schema), §21.5 (checkpoints)",
       "tree/README.md (v0 format rules)"
     ],

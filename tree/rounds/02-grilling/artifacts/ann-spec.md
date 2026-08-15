@@ -33,7 +33,7 @@
   7. Tree renders; user reviews step cards; partial execution only where the plan marks it safe.
   8. Goal's success definition verified → done; execution feedback flows into evals (§21.11).
 - Explicitly not v1: human/automation node *execution* (modes exist in the model; v1 executes agent-mode nodes only — human = reviewer/answerer, automation deferred).
-- Execution order: leaves activate **sequentially** in v1; parallel ready-node execution deferred (design §19 deferred advanced parallel planning).
+- Execution order: **rounds are sequential gates** (a round closes only when its goal is met); tasks within a round's group are independent and may run **in parallel** (dependent ordering via task prefix/order). Cross-round parallelism and DAG joins remain deferred (design §19).
 - "Standard mode" in this spec = design §9 depth mode; quick/deep modes exist in the model but only standard mode is in the v1 fixture suite.
 
 ## 4. Acceptance criteria
