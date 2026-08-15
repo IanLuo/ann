@@ -1,0 +1,4 @@
+{"at":"2026-08-15","type":"created","note":"grilling step started: vague goal -> complete requirements contract"}
+{"at":"2026-08-15","type":"extended","note":"user extension (git 03440cc): primary flow, KPIs K1-K4 + failure signal, NFRs, assumptions, recovery"}
+{"at":"2026-08-15","type":"artifact-locked","note":"artifacts/ann-spec.md specs-locked @ 2664511 (type=spec, upstream design, referrers 02-system-design/slices/review-task)"}
+{"at":"2026-08-15","type":"completed","note":"all ACs satisfied; Q1-Q4 transferred to 02-system-design context (git e088045)"}

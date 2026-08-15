@@ -1,10 +1,10 @@
-<!-- synced: 03440cc -->
+<!-- synced: e088045 -->
 
 # CURSOR — Meta-Assistant (2026-08-15)
 
-**Position:** Requirements spec complete (PRD draft, 16 sections). Grilling node `n02` still blocked on Q1–Q4. Next: user answers Q1–Q4 + accepts PRD → prd-lock `tree/artifacts/ann-prd.md` → flip n02 to done → spawn system-design node (technique details) + implementation slices.
+**Position:** Spec locked, grilling done. Next: run n03-system-design (queued) — answer Q1–Q4, produce `tree/artifacts/ann-system-design.md` (components/data/interfaces/failure/scale), lock it, then spawn implementation slices.
 
-**Blockers:** n02 blocked on Q1–Q4 (runtime, provider, storage, UI — defaults in PRD §13).
+**Blockers:** n03 blocked until Q1–Q4 answered (runtime, provider, storage, UI — defaults in node `n03` openQuestions).
 
 **Open:**
 - Q1 runtime (default Node.js + TypeScript)
@@ -14,19 +14,16 @@
 
 **Health:** 🟢 — no build to break (no code yet)
 
-**Verification:** `design` locked @ eb07146 (type=system-design). Tree @ 03440cc: `n01-goal` (done), `n02-requirement-grilling` (blocked), `tree/artifacts/ann-prd.md` (16-section draft incl. KPIs K1–K4, NFRs, assumptions, recovery). Library entry saved (agent-engineering/tree-of-steps-*).
+**Verification:** `design` locked @ eb07146. `tree/artifacts/ann-spec.md` specs-locked @ 2664511 (11-rung contract; K1–K4; NFRs; AC1–AC8; contract upstream=design, referrers n03/slices/review-task). Tree: n01 done, n02 done, n03 queued (e088045). Library entry saved.
 
-**Errors-that-changed-plan:** none
+**Errors-that-changed-plan:** none (one false step: spec promotion initially dropped user's 03440cc PRD extension — reconciled, decisions merged verbatim)
 
 **Decisions:**
 - Canonical model = tree-of-steps v2: eager skeleton, lazy artifact-gated leaves, per-step context packets, tree-as-memory (§21)
-- Ann is built and managed with its own tree-of-steps pattern (dogfooding); tree lives at `tree/` with per-node JSON + artifacts
-- Distance-to-goal is a SET (unverified ACs + frontier leaves + open questions), never a scalar
-- Tree = ownership tree; dependencies = DAG layered on top (joins via requiredInputs)
-- Subtree creation is planner-only in v1; executing agents propose
-- Artifact gate: a node may not spawn children until its own output artifact exists
-- v1 primary flow = agent-executed CLI run; human is reviewer/answerer (PRD §3)
-- K4 failure signal (re-plans/branch > 5) stops feature work — the tree-model-wrong bet metric (PRD §8)
-- MVP re-scoped (§21.12 + PRD §12): grilling → PRD → skeleton → context-packet execution → one GitHub binding
+- Ann is built and managed with its own tree-of-steps pattern (dogfooding); tree at `tree/` with per-node JSON + artifacts
+- Requirements = locked spec: agent-executed CLI primary flow, human = reviewer/answerer, sequential leaves v1, local-first, K4>5 = model-bet failure signal
+- Distance-to-goal is a SET, never a scalar; artifact gate enforced
+- Subtree creation planner-only in v1; agents propose
+- Q1–Q4 are system-design decisions (not spec); carried in n03 context
 
-**Active pointers:** `design`, `AGENTS.md`, `tree/nodes/`, `tree/artifacts/ann-prd.md`
+**Active pointers:** `design`, `AGENTS.md`, `tree/nodes/`, `tree/artifacts/ann-spec.md`

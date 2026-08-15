@@ -5,7 +5,7 @@
 - **referrers** (must cite this when they change): n03-system-design,implementation slices review-task
 
 # Ann Requirements Spec (v1)
-*Artifact of node `n02-requirement-grilling`. Supersedes `ann-prd.md` draft (incl. extension 03440cc — its decisions are merged here verbatim). Complete requirements contract for building Ann. Model semantics live in `design` §21 (locked @ eb07146); this doc freezes project decisions. Type: spec (root).*
+*Artifact of node `01-goal/01-grilling`. Supersedes `ann-prd.md` draft (incl. extension 03440cc — its decisions are merged here verbatim). Complete requirements contract for building Ann. Model semantics live in `design` §21 (locked @ eb07146); this doc freezes project decisions. Type: spec (root).*
 
 ## 1. Problem & who breaks
 

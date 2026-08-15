@@ -1,0 +1,21 @@
+{
+  "id": "01-goal/01-grilling",
+  "contract": {
+    "intent": "Run the requirement grilling step for building Ann: convert the vague goal into the complete requirements contract that gates the implementation children.",
+    "acceptanceCriteria": [
+      "Requirements spec artifact exists at artifacts/ann-spec.md covering the complete 11-rung contract (problem, outcome, scope+primary flow, ACs, KPIs, NFRs, assumptions, data, recovery, security, verification)",
+      "Primary flow named (agent-executed CLI run; human as reviewer/answerer)",
+      "KPIs + failure signal present (K1-K4, K4 as the 'bet was wrong' metric)",
+      "Non-functional requirements present (security, reliability, performance, usability, observability, compatibility, cost)",
+      "Assumptions listed (runner access, agent-mode v1, tree size, local-first, format stability, provider stability)",
+      "Recovery requirements present per §4.13 (failure re-plan, crash resume, corruption)",
+      "Blocking questions surfaced with defaults (Q1 runtime, Q2 provider, Q3 storage, Q4 UI) per §8",
+      "Initial implementation branches (slices) identified",
+      "Artifact gate: node must not spawn children until the spec is locked (Q1-Q4 gate the system-design node, not this one)"
+    ],
+    "targetAreas": ["artifacts/ann-spec.md", "tree/nodes"],
+    "requiredInputs": ["01-goal output (refined goal, success definition)"],
+    "expectedOutputs": ["requirements spec artifact (artifacts/ann-spec.md)"]
+  },
+  "createdAt": "2026-08-15"
+}

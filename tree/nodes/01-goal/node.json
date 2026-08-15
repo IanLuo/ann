@@ -1,0 +1,15 @@
+{
+  "id": "01-goal",
+  "contract": {
+    "intent": "Frame the goal for building Ann: a tree-of-steps planning system that converts ambiguous human goals into executable step trees for downstream runners.",
+    "acceptanceCriteria": [
+      "Goal statement preserves user intent: planning system, tree-of-steps execution, runners are agents/humans/automation",
+      "Success definition recorded: a downstream runner completes the user's goal using only the tree-derived context and ordinary project access",
+      "Design §21 (Tree-of-Steps Execution Model v2) is the canonical spec to build against"
+    ],
+    "targetAreas": ["design", "AGENTS.md"],
+    "requiredInputs": [],
+    "expectedOutputs": ["refined goal", "success definition"]
+  },
+  "createdAt": "2026-08-15"
+}
