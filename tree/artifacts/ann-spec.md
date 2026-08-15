@@ -48,9 +48,9 @@
 - K1 — eval runner success: fixture node executions completing with ACs verified on first pass, **≥ 85%** (v1 end; §21.11 node-level evals).
 - K2 — intake → validated skeleton latency, standard mode, **< 2 min** (trace timestamps).
 - K3 — questions asked per plan, standard mode, **≤ 3** (§8 human-interaction policy).
-- K4 — subtree re-plans per completed branch, **≤ 2** (trace route history).
+- K4 — subtree re-plans per completed branch, **≤ 2 on average across the eval fixture suite** (trace route history; AC4 remains the per-node hard bound of 3).
 - **Failure signal (the "this bet was wrong" metric):** K4 exceeds **5 re-plans per branch** across eval fixtures → the tree model itself is wrong (skeleton quality, context packets, or artifact gates), not individual node bugs. Stop feature work and re-plan the model.
-- All targets measured against the eval fixture suite (§11).
+- All targets measured against the eval fixture suite (§11). Not launch gates; measured continuously from the first fixture.
 
 ## 6. Non-functional requirements
 
