@@ -1,5 +1,10 @@
-# Tree Format Spec v2 — rounds (table of epics)
+<!-- specs:locked:9e37c8f 2026-08-16 type=spec -->
 
+## Link contract
+- **upstream** (this doc relies on): design,02-grilling/artifacts/ann-spec.md
+- **referrers** (must cite this when they change): AGENTS.md,02-system-design-doc implementation slices
+
+# Tree Format Spec v2 — rounds (table of epics)
 *Artifact of task `04-system-design/00/01-format-amendment-v2`. Type: spec. Supersedes `tree-format-spec.md` v1 (locked @ ba528d1) and absorbs `depth-policy.md` (11c3de2) per §10 evolution. Upstream: `design` (locked @ eb07146), `02-grilling/artifacts/ann-spec.md` (locked @ 2664511).*
 
 ## 1. Layout — the table of rounds
