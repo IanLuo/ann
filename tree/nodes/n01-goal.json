@@ -1,0 +1,44 @@
+{
+  "id": "n01-goal",
+  "parentId": null,
+  "children": ["n02-requirement-grilling"],
+  "status": "done",
+  "contract": {
+    "intent": "Frame the goal for building Ann: a tree-of-steps planning system that converts ambiguous human goals into executable step trees for downstream runners.",
+    "acceptanceCriteria": [
+      "Goal statement preserves user intent: planning system, tree-of-steps execution, runners are agents/humans/automation",
+      "Success definition recorded: a downstream runner completes the user's goal using only the tree-derived context and ordinary project access",
+      "Design §21 (Tree-of-Steps Execution Model v2) is the canonical spec to build against"
+    ],
+    "targetAreas": ["design", "AGENTS.md"],
+    "requiredInputs": [],
+    "expectedOutputs": ["refined goal", "success definition"]
+  },
+  "position": {
+    "pathFromRoot": ["n01-goal"],
+    "siblings": [],
+    "openQuestions": [],
+    "distanceToGoal": {
+      "unverifiedAcceptanceCriteria": [],
+      "remainingFrontierLeaves": [],
+      "openQuestions": []
+    }
+  },
+  "execution": {
+    "mode": "agent",
+    "contextPacket": "Root node. Goal: build Ann as a tree-of-steps planning system. Spawn children after goal framing.",
+    "systemBindings": []
+  },
+  "quality": {
+    "validationStatus": "passed",
+    "reviewStatus": "passed",
+    "evidence": ["AGENTS.md (intent, hot invariants)", "design §1, §2, §21"]
+  },
+  "lifecycle": {
+    "checkpointRef": "git 9d5f4a0",
+    "repairCount": 0,
+    "maxRepairs": 3,
+    "startedAt": "2026-08-15",
+    "completedAt": "2026-08-15"
+  }
+}
