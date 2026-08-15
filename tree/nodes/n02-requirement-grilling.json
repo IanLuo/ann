@@ -7,8 +7,13 @@
     "intent": "Run the requirement grilling step for building Ann: convert the vague goal into a PRD (or open-questions) artifact that gates the implementation children.",
     "acceptanceCriteria": [
       "PRD draft artifact exists at tree/artifacts/ann-prd.md covering what/why, scope, success definition, product-level acceptance criteria",
-      "Blocking open questions surfaced with defaults (Q1 runtime, Q2 provider, Q3 storage, Q4 UI) per §8 human-interaction policy",
-      "Initial implementation branches (slices) identified in the PRD",
+      "Primary flow named (agent-executed CLI run; human as reviewer/answerer)",
+      "KPIs + failure signal present (K1-K4, K4 as the 'bet was wrong' metric)",
+      "Non-functional requirements present (security, reliability, performance, usability, observability, compatibility, cost)",
+      "Assumptions listed (runner access, agent-mode v1, tree size, local-first, format stability, provider stability)",
+      "Recovery requirements present per §4.13 (failure re-plan, crash resume, corruption)",
+      "Blocking open questions surfaced with defaults (Q1 runtime, Q2 provider, Q3 storage, Q4 UI) per §8",
+      "Initial implementation branches (slices) identified",
       "Artifact gate: node must not spawn children until Q1-Q4 are answered and the PRD is final"
     ],
     "targetAreas": ["tree/artifacts/ann-prd.md", "tree/nodes"],
@@ -55,11 +60,16 @@
     "distanceToGoal": {
       "unverifiedAcceptanceCriteria": [
         "PRD covers what/why, scope, success definition, product ACs",
+        "Primary flow named",
+        "KPIs + failure signal present",
+        "NFRs present",
+        "Assumptions listed",
+        "Recovery requirements present",
         "Blocking questions surfaced with defaults",
         "Initial slices identified",
         "Artifact gate respected"
       ],
-      "remainingFrontierLeaves": ["implementation slices (PRD §10)"],
+      "remainingFrontierLeaves": ["implementation slices (PRD §15)"],
       "openQuestions": ["Q1", "Q2", "Q3", "Q4"]
     }
   },
