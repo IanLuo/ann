@@ -1,5 +1,10 @@
-# Tree Format Spec (v1)
+<!-- specs:locked:ba528d1 2026-08-15 type=spec -->
 
+## Link contract
+- **upstream** (this doc relies on): design,01-goal/01-grilling/artifacts/ann-spec.md
+- **referrers** (must cite this when they change): AGENTS.md,02-system-design implementation slices
+
+# Tree Format Spec (v1)
 *Artifact of node `01-goal/02-tree-format`. Type: spec. Freezes the v0 bootstrap format as the engine's data contract — ann-spec A5 (format stability, no migration). Model semantics: design §21. Requirements: `01-goal/01-grilling/artifacts/ann-spec.md` (locked @ 2664511).*
 
 ## 1. Layout — the directory tree IS the tree

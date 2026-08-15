@@ -1,1 +1,3 @@
 {"at":"2026-08-15","type":"created","note":"spawned to freeze the bootstrap format as the engine's data contract"}
+{"at":"2026-08-15","type":"artifact-locked","note":"artifacts/tree-format-spec.md specs-locked @ ba528d1 (upstream design + ann-spec; referrers AGENTS.md / 02-system-design / slices)"}
+{"at":"2026-08-15","type":"completed","note":"all ACs satisfied incl. AGENTS.md instruction-file reference"}
