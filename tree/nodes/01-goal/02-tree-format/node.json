@@ -1,0 +1,20 @@
+{
+  "id": "01-goal/02-tree-format",
+  "contract": {
+    "intent": "Freeze the tree format (v0 bootstrap) as a locked spec — the engine's data contract. Referred from AGENTS.md (the instruction file) so every agent session honors it.",
+    "acceptanceCriteria": [
+      "tree-format-spec.md artifact exists at artifacts/ covering: layout, node.json schema, events.jsonl schema + status derivation, description.md card convention, artifacts/ convention, checkpoint/RPO semantics, engine acceptance criteria, edge cases",
+      "Spec locked (type=spec, upstream design + ann-spec)",
+      "AGENTS.md (instruction file) references the spec path",
+      "tree/README.md format-rules section points at the locked spec"
+    ],
+    "targetAreas": ["tree/README.md", "AGENTS.md", "artifacts/tree-format-spec.md"],
+    "requiredInputs": [
+      "01-goal/01-grilling/artifacts/ann-spec.md (locked @ 2664511, esp. A5 format stability)",
+      "design §21.3 (StepNode schema), §21.5 (checkpoints)",
+      "tree/README.md (v0 format rules)"
+    ],
+    "expectedOutputs": ["tree-format-spec artifact (artifacts/tree-format-spec.md)"]
+  },
+  "createdAt": "2026-08-15"
+}

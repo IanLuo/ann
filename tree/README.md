@@ -17,6 +17,8 @@ tree/
 
 ## Format rules (v0, pre-engine — formalized by n03-system-design)
 
+**The locked contract is [`02-tree-format/artifacts/tree-format-spec.md`](nodes/01-goal/02-tree-format/artifacts/tree-format-spec.md).** Rules below are the summary.
+
 - **The directory tree IS the tree.** Parent = dirname · children = subdirectories · id = path (`01-goal/01-grilling`). No `parentId`/`children` fields — they would be second copies of a fact and drift.
 - **Nodes are immutable.** `node.json` is written once at creation and never rewritten. You cannot travel in time: you can't re-parent, re-contract, or delete history. Corrections = new nodes (repair branch, amendment node whose artifact supersedes).
 - **The process is append-only events.** `events.jsonl`: one JSON object per line, `{at, type, note}` — `created · activated · extended · evidence · artifact-locked · completed · failed · superseded`. Status = tail of the log. Appending is the only write operation.
@@ -29,7 +31,8 @@ tree/
 
 ```
 01-goal (done)
-└── 01-grilling (done → artifact: artifacts/ann-spec.md, locked @ 2664511)
-    └── 02-system-design (queued → needs Q1–Q4 answers)
-        └── (children = implementation slices, spawn after system-design artifact)
+├── 01-grilling (done → artifact: artifacts/ann-spec.md, locked @ 2664511)
+│   └── 02-system-design (queued → needs Q1–Q4 answers)
+│       └── (children = implementation slices, spawn after system-design artifact)
+└── 02-tree-format (draft → artifact: artifacts/tree-format-spec.md, lock pending)
 ```
