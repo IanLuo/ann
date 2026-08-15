@@ -6,7 +6,7 @@
   "contract": {
     "intent": "Run the requirement grilling step for building Ann: convert the vague goal into a PRD (or open-questions) artifact that gates the implementation children.",
     "acceptanceCriteria": [
-      "PRD draft artifact exists at tree/artifacts/ann-prd.md covering what/why, scope, success definition, product-level acceptance criteria",
+      "Requirements spec artifact exists at tree/artifacts/ann-spec.md covering the complete 11-rung contract (problem, outcome, scope+primary flow, ACs, KPIs, NFRs, assumptions, data, recovery, security, verification)",
       "Primary flow named (agent-executed CLI run; human as reviewer/answerer)",
       "KPIs + failure signal present (K1-K4, K4 as the 'bet was wrong' metric)",
       "Non-functional requirements present (security, reliability, performance, usability, observability, compatibility, cost)",
@@ -14,11 +14,11 @@
       "Recovery requirements present per §4.13 (failure re-plan, crash resume, corruption)",
       "Blocking open questions surfaced with defaults (Q1 runtime, Q2 provider, Q3 storage, Q4 UI) per §8",
       "Initial implementation branches (slices) identified",
-      "Artifact gate: node must not spawn children until Q1-Q4 are answered and the PRD is final"
+      "Artifact gate: node must not spawn children until the spec is locked (Q1-Q4 gate the system-design node, not this one)"
     ],
-    "targetAreas": ["tree/artifacts/ann-prd.md", "tree/nodes"],
+    "targetAreas": ["tree/artifacts/ann-spec.md", "tree/nodes"],
     "requiredInputs": ["n01-goal output (refined goal, success definition)"],
-    "expectedOutputs": ["PRD artifact (draft + open questions)"]
+    "expectedOutputs": ["requirements spec artifact (tree/artifacts/ann-spec.md)"]
   },
   "position": {
     "pathFromRoot": ["n01-goal", "n02-requirement-grilling"],
@@ -69,19 +69,19 @@
         "Initial slices identified",
         "Artifact gate respected"
       ],
-      "remainingFrontierLeaves": ["implementation slices (PRD §15)"],
+      "remainingFrontierLeaves": ["implementation slices (spec / design §21.12)"],
       "openQuestions": ["Q1", "Q2", "Q3", "Q4"]
     }
   },
   "execution": {
     "mode": "agent",
-    "contextPacket": "Path: n01-goal (done) → grilling. Goal: build Ann (tree-of-steps planning system). Produce PRD draft + surface blocking questions. Do not spawn children yet (artifact gate).",
+    "contextPacket": "Path: n01-goal (done) → grilling. Goal: build Ann (tree-of-steps planning system). Produce requirements spec artifact (tree/artifacts/ann-spec.md) + surface blocking questions. Do not spawn children until the spec is locked (artifact gate).",
     "systemBindings": []
   },
   "quality": {
-    "validationStatus": "partial (PRD draft produced; open questions unresolved)",
+    "validationStatus": "partial (spec draft produced; pending user accept + lock)",
     "reviewStatus": "pending",
-    "evidence": ["tree/artifacts/ann-prd.md (draft)"]
+    "evidence": ["tree/artifacts/ann-spec.md (draft)"]
   },
   "lifecycle": {
     "checkpointRef": null,

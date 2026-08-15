@@ -1,6 +1,6 @@
 # Ann Requirements Spec (v1)
 
-*Artifact of node `n02-requirement-grilling`. Supersedes `ann-prd.md` draft (promoted per specs ladder). Complete requirements contract for building Ann. Model semantics live in `design` §21 (locked @ eb07146); this doc freezes project decisions. Type: spec (root).*
+*Artifact of node `n02-requirement-grilling`. Supersedes `ann-prd.md` draft (incl. extension 03440cc — its decisions are merged here verbatim). Complete requirements contract for building Ann. Model semantics live in `design` §21 (locked @ eb07146); this doc freezes project decisions. Type: spec (root).*
 
 ## 1. Problem & who breaks
 
@@ -11,23 +11,23 @@
 ## 2. Non-negotiable outcome
 
 - A vague natural-language goal becomes a step tree that a downstream runner executes to completion — each step's contract, context, and artifacts present — **without the runner guessing**.
-- Tester pass/fail without arguing: run fixture goal F1 → runner completes it; every executed node's acceptance criteria have evidence; no runner clarification needed. (Measured: KPI-1, §5.)
+- Tester pass/fail without arguing: run fixture goal F1 → runner completes it; every executed node's acceptance criteria have evidence; no runner clarification needed. (Measured: K1, §5.)
+- Dogfooding is the v1 validation path: Ann's own build runs through this tree, so the format is exercised before the engine exists.
 
 ## 3. Scope in / out + primary flow
 
 - In (v1, design §21.12): intake · grilling → PRD-or-questions artifact · skeleton expand + validate · agent-mode node execution with context packets · artifact gate + lazy leaves · per-node deterministic validation + one repair loop · GitHub issue/PR binding · branch checkpoints + trace · renders (tree view / step cards / full plan).
-- Out (v1): joins (DAG edges) until single-branch flow proven · more than one external binding · plugins/marketplace · multi-UI · human-mode execution as the primary path · agent-created subtrees (planner-only).
-- Primary flow (one path — confirm §5 decisions):
-  1. User submits vague goal (one sentence; empty/greeting-only rejected at intake).
-  2. Grilling node runs → requirements artifact; blocking questions surfaced.
+- Out (v1): joins (DAG edges) until single-branch flow proven · more than one external binding · plugins/marketplace · multi-UI · human-mode execution as the primary path · agent-created subtrees (planner-only) · **hosted/multi-tenant service (local-first)**.
+- Primary flow — one path, **agent-executed CLI run**; the user is a reviewer and question-answerer, not an executor:
+  1. User types a vague goal into the CLI: "build me X". (Empty/greeting-only rejected at intake.)
+  2. Grilling node runs → PRD-or-questions draft artifact appears; blocking questions surfaced.
   3. User answers blocking questions or accepts defaults.
-  4. Planner expands + validates skeleton (goal → grilling → branches); artifact gate enforced.
-  5. Leaves activate one at a time; each receives a materialized context packet (§21.7) and executes in agent mode.
-  6. Each node verifies its ACs (deterministic checks + evidence) before commit.
-  7. Failed node → subtree re-plan (route reason, ≤3, checkpoint, fallback).
-  8. Human intervenes only at blocking questions + final plan review.
-  9. Tree renders on demand: tree view + step cards + full plan.
-- Decision locked unless overridden: v1 primary runner = **agent**; human = blocking questions + review.
+  4. Skeleton expands + validates: goal → grilling → branches, every branch with acceptance criteria; artifact gate enforced.
+  5. The frontmost ready node executes via agent, with its context packet (§21.7).
+  6. Verification runs: on success the node commits (checkpoint) and its artifact is recorded; on failure the subtree re-plans, bounded (§6.2, §21.5).
+  7. Tree renders; user reviews step cards; partial execution only where the plan marks it safe.
+  8. Goal's success definition verified → done; execution feedback flows into evals (§21.11).
+- Explicitly not a v1 primary flow: a human manually executing every step of a large tree (exists as `mode: human`, deferred as primary).
 
 ## 4. Acceptance criteria
 
@@ -43,31 +43,33 @@
 
 ## 5. KPIs & failure signal
 
-- KPI-1: runner success rate ≥ 80% on standard-mode fixture goals (runner completes goal without clarification). [proposed]
-- KPI-2: blocking questions per plan ≤ 2 (standard mode). [proposed]
-- KPI-3: grilling → first artifact p95 ≤ 2 min. [proposed]
-- KPI-4: standard-mode runs needing > 1 subtree repair ≤ 20%. [proposed]
-- **Failure signal (off-switch):** runner success on tree-of-steps fixtures ≤ upfront plan-and-execute baseline on the same fixtures → the tree model is the wrong bet → halt, re-design, ship no more slices.
-- Confirmed-by-user needed: the four numbers above.
+- K1 — eval runner success: fixture node executions completing with ACs verified on first pass, **≥ 85%** (v1 end; §21.11 node-level evals).
+- K2 — intake → validated skeleton latency, standard mode, **< 2 min** (trace timestamps).
+- K3 — questions asked per plan, standard mode, **≤ 3** (§8 human-interaction policy).
+- K4 — subtree re-plans per completed branch, **≤ 2** (trace route history).
+- **Failure signal (the "this bet was wrong" metric):** K4 exceeds **5 re-plans per branch** across eval fixtures → the tree model itself is wrong (skeleton quality, context packets, or artifact gates), not individual node bugs. Stop feature work and re-plan the model.
+- All targets measured against the eval fixture suite (§11).
 
 ## 6. Non-functional requirements
 
-- NFR-SEC-1: no secrets in plans, traces, or renders — enforced, not best-effort (design §17).
-- NFR-REL-1: RPO = 0 for committed nodes; a committed node survives crash/kill (AC8).
-- NFR-PERF-1: context packet assembly p95 < 1s on a 500-node tree. [proposed number]
-- NFR-USE-1: a human can act on a single step card without reading the whole plan (step-card comprehension fixture).
-- NFR-OPS-1: one command to run; one command to resume from last checkpoint.
-- N/A — cost & compatibility NFRs: adapter-based (§16), no fixed budget in v1; revisit at system-design. 10×-worse check: PERF-1 at 10s stalls every step → keep. OPS-1 at 10× = 10 commands → cut; one-command is load-bearing.
-- Confirmed-by-user needed: PERF-1 number; drop any NFR that feels decorative.
+- NFR-SEC-1 — security (§17): secrets never appear in plans, traces, or artifacts; destructive-action confirmation required; provenance mandatory; untrusted context never overrides planner policy. Enforced, not best-effort.
+- NFR-REL-1 — reliability: crash-resume from branch checkpoint (AC8; RPO = 0 for committed nodes); repair loops always bounded (max iterations, fallback).
+- NFR-PERF-1 — performance: context-packet assembly **< 1s** at ≤1k-node tree; full-skeleton deterministic validation **< 5s** (standard mode).
+- NFR-USE-1 — usability: a human can understand one step card without the whole plan; tree render is scannable (status-coded).
+- NFR-OBS-1 — observability (§14): every run produces a full trace; failures debuggable without guessing.
+- NFR-COM-1 — compatibility: structured output is machine-consumable (plan.json / tree artifacts); model provider is adapter-based (§16).
+- NFR-CST-1 — cost: bounded model calls per node — one grilling pass, one review pass, capped repairs.
+- N/A — hosted/scale NFRs: local-first v1, no multi-tenant service. 10×-worse check: PERF-1 at 10s stalls every step → keep; OBS-1 at 10× = no trace → cut, it's load-bearing for evals.
 
 ## 7. Assumptions & dependencies
 
 - A1: downstream runner has ordinary project access (design §1). Invalidation: runner without repo access → plan must inline all context (out of scope v1; flag at intake).
-- A2: agent-mode is the v1 executor; human-mode nodes exist but are not primary. Invalidation: human-executed nodes become primary → scope change.
-- A3: tree ≤ ~1k nodes in v1 (anchors NFR-PERF-1). Invalidation: larger trees → revisit perf budget.
-- A4: planner's only external runtime dependency is the LLM provider (adapter, §16). Invalidation: provider down/rate-limited → retry / alternate / ask_user per §12 outcomes.
-- A5: smallest accepted input = one-sentence goal; rejected = empty/greeting-only (intake rule).
-- D1 (dependency): LLM provider API availability (any adapter). Trigger: unavailable → §12 failure outcomes, never silent degradation.
+- A2: node execution is agent-mode in v1; human step execution is a mode, not the primary path. Invalidation: human-executed nodes become primary → scope change.
+- A3: tree size stays under ~1k nodes in v1 (anchors NFR-PERF-1). Invalidation: larger trees → revisit perf budget.
+- A4: local-first; no hosted service in v1. Invalidation: multi-user requirement → scope change.
+- A5: the format bootstrapped in `tree/` is the engine's format — no migration. Invalidation: engine needs a different shape → treat as data migration, costed separately.
+- A6: chosen providers (LLM, GitHub) have stable APIs at v1 build time. Invalidation: breaking API change → adapter layer absorbs it (§16); never in plan semantics.
+- D1 (dependency): LLM provider API availability (any adapter). Trigger: unavailable/rate-limited → retry / alternate / ask_user per §12 outcomes, never silent degradation.
 
 ## 8. Data requirements
 
@@ -78,8 +80,12 @@
 
 ## 9. Rollback & recovery
 
-- Failed node → subtree re-plan: route reason, targeted feedback, max 3, checkpoint, fallback (design §6.2/§7; AC4).
-- Crash/kill → resume from last committed checkpoint (AC8); uncommitted node restarts from spawn.
+| Trigger | Response | Owner |
+|---|---|---|
+| Node execution fails verification | Subtree re-plan: route reason + targeted feedback, ≤3 iterations, checkpoint at last committed node; fallback = mark subtree blocked + keep partial artifact + ask user (§6.2/§7, AC4) | planner kernel |
+| Process crash mid-node | Resume from last branch checkpoint; node restarts with same context packet + evidence so far (AC8) | planner kernel |
+| Artifact corruption / schema drift | Validation refuses; artifact regenerated from node contract; never silent | planner kernel |
+
 - Destructive binding action → confirmation before execution (§17).
 - The one failure that would wreck the product: tree/checkpoint corruption (RPO violation). Mitigation: append-only commits + artifact checksums (decided at system-design).
 
@@ -89,7 +95,7 @@
 - Destructive-action confirmation (§17).
 - Provenance on all context facts and bindings (§4.5, §21.10).
 - Untrusted context cannot override planner policy (§17).
-- Compliance: N/A — personal tool, no regulated data. Explicit, not invented.
+- Compliance: N/A — personal tool, local-first, no regulated data. Explicit, not invented.
 
 ## 11. Verification plan
 
@@ -101,12 +107,17 @@
 - AC6 → GitHub integration fixture: action + provenance artifact in trace (automated).
 - AC7 → standard-mode fixture: validation + one runner review (automated + model review).
 - AC8 → kill -9 mid-node, resume, assert no lost committed nodes (automated crash test).
+- K1 → eval harness over fixture suite, first-pass AC completion (§21.11).
+- K2 → trace timestamps on standard-mode fixture (automated).
+- K3 → fixture count of surfaced blocking questions (automated).
+- K4 → trace route history on failing fixtures (automated).
 - NFR-SEC-1 → redaction check on fixtures with planted secrets (automated).
 - NFR-REL-1 → covered by AC8.
-- NFR-PERF-1 → benchmark fixture at 500 nodes (automated).
+- NFR-PERF-1 → benchmark fixture at 1k nodes: packet assembly + skeleton validation (automated).
 - NFR-USE-1 → step-card comprehension sample (human eval, sampled).
-- NFR-OPS-1 → documented commands + smoke test (automated).
-- KPI-1/2/3/4 → eval harness over the fixture suite (design §21.11) — the bridge to review-task.
+- NFR-OBS-1 → trace completeness check on every fixture (automated).
+- NFR-COM-1 → machine-consumable output assertion (automated).
+- NFR-CST-1 → model-call counter on standard-mode fixture (automated).
 
 ---
 
