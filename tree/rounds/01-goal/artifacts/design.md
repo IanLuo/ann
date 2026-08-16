@@ -1,4 +1,4 @@
-<!-- specs:locked:a414a0b 2026-08-16 type=system-design -->
+<!-- specs:locked:fd1125c 2026-08-16 type=system-design -->
 
 ## Link contract
 - **upstream** (this doc relies on): none
@@ -15,7 +15,7 @@
 
 ## 2. Core principle
 
-- The output plan is the product — and the plan is a **living table of rounds**: sequential, gated rounds (epics); parallel task groups inside a round; every step self-aware (path, siblings, remaining work as a set, artifacts).
+- The product is the **living table of rounds itself** — not a plan artifact, not a planner's output: sequential, gated rounds (epics); parallel task groups inside a round; every step self-aware (path, siblings, remaining work as a set, artifacts).
 - The tree is simultaneously **plan** (contracts forward), **project memory** (artifacts backward), and **observer** (recorded state).
 - Structured data is canonical; markdown is presentation.
 
@@ -36,7 +36,7 @@
 - **Complete artifacts:** a superseding artifact is the **complete merged version**, never a delta.
 - **Bounded loops:** rework/repair have max iterations, checkpoint, fallback; route reason recorded.
 - **Dogfooding:** Ann is built and managed through its own tree.
-- **Untrusted context** never overrides planner policy (kept from old §17).
+- **Untrusted context** never overrides system policy (kept from old §17).
 
 ## 5. Canonical contracts (locked — the source of truth per topic)
 
@@ -51,7 +51,7 @@
 
 - `sourceType`: user input · local file · repo metadata · runtime/tool output · documentation · web source · prior plan · inference · observation · external system (binding).
 - Facts from inference are labeled `inference` + confidence + fallback — never equivalent to sourced facts.
-- Every fact tracks provenance; `usedByTaskIds` maps facts to consumers. Missing/unreliable sources are planning context, not invisible implementation details.
+- Every fact tracks provenance; `usedByTaskIds` maps facts to consumers. Missing/unreliable sources are workflow context, not invisible implementation details.
 
 ## 7. Failures
 
@@ -67,7 +67,7 @@
 ## 9. Extensibility (adapters)
 
 - Replaceable adapters: model provider · tool provider · storage backend · renderer · **user interface (human-gate interaction: talk basic; interactive HTML via plugins)** · context source · validator · eval runner · task runner integration.
-- Core planning semantics survive any adapter swap (§1–8 unaffected by adapter changes).
+- Core tree semantics survive any adapter swap (§1–8 unaffected by adapter changes).
 
 ## 10. Open decisions (NOT decided — do not assume)
 

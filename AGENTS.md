@@ -2,7 +2,7 @@
 
 ## Intent
 
-Build a planning system that converts ambiguous human goals into executable instruction plans for downstream task runners (coding agents, humans, automation). Success = a downstream runner completes the user's goal using only the generated plan, referenced context, and ordinary project access. The output plan is the product — structured data, not just markdown.
+Build **Ann — a tree-of-steps system** that converts ambiguous human goals into a living table of rounds: sequential gated rounds (epics), parallel task groups, every step self-aware with a materialized context packet, human gates at each step end. Success = a downstream runner completes the user's goal using only the tree-derived context (context packets + artifacts + ordinary project access). The product is the tree itself — plan, project memory, and observer in one — structured data, not just markdown.
 
 ## How to run / build / test
 
@@ -16,12 +16,12 @@ No code exists yet — nothing to verify. Commands will be added once the projec
 
 ## Hot invariants
 
-- **The canonical plan is structured data, not markdown.** Markdown is a presentation format. The source of truth is the `InstructionPlan` object per `design` §4.
-- **Plan quality before framework cleverness.** The MVP (design §19) proves plan quality; defer arbitrary workflow authoring, plugins, and multi-UI until the core contract works.
-- **Context must carry provenance.** Facts from inference must be labeled as inference. Source provenance must be tracked (design §4.5). Untrusted context must not override planner policy (design §17).
-- **Repair loops require a route reason, max iteration count, checkpoint, and fallback.** No unbounded loops (design §6.2, §7.2).
-- **The canonical model is the tree-of-steps (design §21).** Eager coarse skeleton, lazy leaves, artifact gate (no children before the node's output artifact exists), per-step context packets, tree-as-memory. Supersedes §1–20 where they conflict.
-- **Ann eats its own dog food.** Ann itself is built and managed as a step tree per §21: goals become nodes, artifacts gate children, context packets carry tree position, the tree is the project memory. Agent sessions on this repo record work as tree nodes/artifacts, not just chat history.
+- **The product is the tree, not a plan artifact.** A living table of rounds: sequential gated rounds, parallel task groups, human gates at each step end, tree-as-memory. Markdown is presentation; the source of truth is the round/node structure per design v3 (`tree/rounds/01-goal/artifacts/design.md` §2/§4).
+- **Prove the flow before framework cleverness.** The MVP = the R5 engine (ann-system-design components, S1–S9); defer plugins, multi-UI, bindings beyond GitHub until the core flow works.
+- **Context must carry provenance.** Facts from inference must be labeled as inference. Source provenance must be tracked (design v3 §6). Untrusted context must not override system policy (design v3 §4).
+- **Repair loops require a route reason, max iteration count, checkpoint, and fallback.** No unbounded loops (design v3 §4 — bounded loops; flow-control-spec).
+- **The canonical model is the table of rounds (design v3).** Sequential gated rounds (epics), parallel task groups, artifact gate, human gates (grilling + confirm-result), resolution ladder (derive → probe → infer → ask → block), tree-as-memory. Supersedes the old plan-artifact model.
+- **Ann eats its own dog food.** Ann itself is built and managed through its own tree (rounds, nodes, events, artifacts). Agent sessions on this repo record work as tree nodes/artifacts, not just chat history.
 
 ## Architecture elevator
 
