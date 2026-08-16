@@ -1,5 +1,10 @@
-# Requirements-Change Protocol (v2)
+<!-- specs:locked:be67673 2026-08-16 type=spec -->
 
+## Link contract
+- **upstream** (this doc relies on): tree/rounds/01-goal/artifacts/design.md,02-grilling/01-spec-rework/artifacts/requirements-spec.md 05-engine/00/01-flow-control/artifacts/flow-control-spec.md,01-format-amendment-v2/artifacts/tree-format-spec-v2.md
+- **referrers** (must cite this when they change): S5 planner kernel,validators implementation slices,review-task
+
+# Requirements-Change Protocol (v2)
 *Artifact of task `05-engine/00/03-change-protocol-amendment`. Type: spec. Complete superseding version — v1 (locked @ 90e53ad) + **logical-name resolution** (grilled decision). Produced per the protocol itself: amendment node → complete artifact → superseded event. Upstream: `tree/rounds/01-goal/artifacts/design.md` (v3), `02-grilling/01-spec-rework/artifacts/requirements-spec.md`, `05-engine/00/01-flow-control/artifacts/flow-control-spec.md`, `01-format-amendment-v2/artifacts/tree-format-spec-v2.md` (all locked). Referrers: S5 planner kernel (enforcement), validators, implementation slices, review-task.*
 
 ## 1. The rule (hard)

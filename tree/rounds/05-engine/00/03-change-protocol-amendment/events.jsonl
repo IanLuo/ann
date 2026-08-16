@@ -1,1 +1,3 @@
 {"at":"2026-08-16","type":"created","note":"spawned per the protocol itself (v1 §2): a change to a locked artifact = amendment node -> complete superseding artifact. Adds logical-name resolution (grilled decision)."}
+{"at":"2026-08-16","type":"artifact-locked","note":"requirements-change-protocol-v2.md specs-locked — logical-name resolution in force"}
+{"at":"2026-08-16","type":"completed","note":"amendment ACs met: complete v2, resolution rule, anchors frozen, edge cases, v1 superseded, index updated"}
