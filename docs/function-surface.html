@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ann — Function Surface (v1 draft)</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --panel2: #1d2130; --ink: #e6e9f0;
+    --dim: #9aa3b5; --line: #2a3040; --accent: #6c8cff; --green: #4ade80;
+    --amber: #fbbf24; --red: #f87171; --purple: #a78bfa;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 15px/1.6 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 32px 24px 96px; }
+  header h1 { font-size: 26px; margin: 0 0 4px; letter-spacing: -0.02em; }
+  header p { color: var(--dim); margin: 0 0 20px; }
+  .statusline { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:24px; }
+  .pill { background: var(--panel2); border:1px solid var(--line); border-radius:999px;
+          padding:3px 12px; font-size:12px; color:var(--dim); }
+  .pill b { color: var(--accent); }
+  nav { position: sticky; top: 0; background: rgba(15,17,21,.92); backdrop-filter: blur(6px);
+        border-bottom:1px solid var(--line); padding:10px 0; margin:0 -24px 24px; }
+  nav .inner { max-width: 960px; margin: 0 auto; padding: 0 24px; display:flex; gap:6px; flex-wrap:wrap; }
+  nav a { color: var(--dim); text-decoration:none; font-size:13px; padding:4px 10px;
+          border-radius:6px; border:1px solid transparent; }
+  nav a:hover { color: var(--ink); background: var(--panel2); border-color: var(--line); }
+  h2 { font-size: 19px; margin: 40px 0 14px; padding-top: 8px; border-top:1px solid var(--line);
+       color: var(--accent); }
+  h2 .phase { color: var(--dim); font-weight: normal; font-size: 13px; margin-left: 8px; }
+  .fcard { background: var(--panel); border:1px solid var(--line); border-radius:10px;
+           padding:14px 16px; margin-bottom:12px; }
+  .fcard .top { display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; }
+  .fid { font-weight:700; color: var(--purple); font-size:13px; min-width:52px; }
+  .fname { font-weight:600; font-size:15px; }
+  .fcard .gesture { color: var(--dim); font-size:13px; margin-top:6px; }
+  .fcard code { background: var(--panel2); border:1px solid var(--line); border-radius:4px;
+                padding:1px 6px; font-size:12.5px; color:var(--ink); }
+  .meta { margin-top:8px; display:flex; gap:14px; flex-wrap:wrap; font-size:12.5px; color:var(--dim); }
+  .meta span b { color: var(--ink); font-weight:600; }
+  a { color: var(--accent); text-decoration:none; }
+  a:hover { text-decoration: underline; }
+  .serve { color: var(--green); }
+  .gate { color: var(--amber); }
+  .rhythm { background: var(--panel2); border:1px solid var(--line); border-radius:10px;
+            padding:16px 20px; margin-top:8px; }
+  .rhythm b { color: var(--ink); }
+  .q { background: var(--panel); border-left:3px solid var(--amber); border-radius:0 10px 10px 0;
+       padding:14px 18px; margin-top:14px; }
+  .q b { color: var(--amber); }
+  footer { margin-top:48px; color: var(--dim); font-size:12.5px; border-top:1px solid var(--line);
+           padding-top:16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <h1>Ann — Function Surface</h1>
+  <p>Draft v1 · the product-building path · <b>18 functions</b> in 6 phases · every function serves a locked requirement</p>
+  <div class="statusline">
+    <span class="pill">upstream: <b>requirements-spec v3</b></span>
+    <span class="pill">flow: <b>flow-control-spec</b></span>
+    <span class="pill">data: <b>tree-format-spec v3</b></span>
+    <span class="pill">status: <b>surface under discussion — nothing detailed yet</b></span>
+  </div>
+</header>
+
+<nav><div class="inner">
+  <a href="#p0">Project start</a><a href="#p1">The flow</a><a href="#p2">Navigation</a>
+  <a href="#p3">Change</a><a href="#p4">Bindings</a><a href="#p5">Maintenance</a>
+  <a href="#rhythm">Rhythm</a><a href="#questions">Open questions</a>
+  <a href="#contracts">Contracts</a>
+</div></nav>
+
+<h2 id="p0">Phase 0 — Project start <span class="phase">one-time setup</span></h2>
+
+<div class="fcard" id="f1">
+  <div class="top"><span class="fid">F1</span><span class="fname">init</span></div>
+  <div class="gesture"><code>ann init &lt;name&gt;</code> — creates the store + goal node (round 1)</div>
+  <div class="meta"><span>gates: <span class="gate">—</span></span><span>serves: <span class="serve">AC-1</span></span></div>
+</div>
+
+<div class="fcard" id="f2">
+  <div class="top"><span class="fid">F2</span><span class="fname">idea</span></div>
+  <div class="gesture"><code>ann idea &lt;text&gt;</code> — the loose one-two-sentence idea lands on the goal node; empty/greeting rejected at intake</div>
+  <div class="meta"><span>gates: <span class="gate">—</span></span><span>serves: <span class="serve">AC-1 · §8 data</span></span></div>
+</div>
+
+<div class="fcard" id="f3">
+  <div class="top"><span class="fid">F3</span><span class="fname">chain</span></div>
+  <div class="gesture"><code>ann chain</code> shows the project's step chain · <code>ann chain edit</code> adds/removes/reorders (config is data, no code)</div>
+  <div class="meta"><span>gates: <span class="gate">—</span></span><span>serves: <span class="serve">AC-3</span></span></div>
+</div>
+
+<h2 id="p1">Phase 1 — The flow <span class="phase">the primary rhythm</span></h2>
+
+<div class="fcard" id="f4">
+  <div class="top"><span class="fid">F4</span><span class="fname">run next</span></div>
+  <div class="gesture">THE primary gesture — Ann proposes the frontmost-ready action; the builder accepts (or steers). One interaction.</div>
+  <div class="meta"><span>gates: <span class="gate">—</span></span><span>serves: <span class="serve">K3 · K4</span></span></div>
+</div>
+
+<div class="fcard" id="f5">
+  <div class="top"><span class="fid">F5</span><span class="fname">validate</span></div>
+  <div class="gesture">The validate step — Ann produces validation + open questions (is it buildable? worth it? what's missing?)</div>
+  <div class="meta"><span>gates: <span class="gate">gate① grilling · gate② confirm</span></span><span>serves: <span class="serve">AC-2 · AC-4</span></span></div>
+</div>
+
+<div class="fcard" id="f6">
+  <div class="top"><span class="fid">F6</span><span class="fname">envision</span></div>
+  <div class="gesture">The envision step — Ann helps imagine the product: how it's used, what it looks like; sorts out what to build, avoids mistakes</div>
+  <div class="meta"><span>gates: <span class="gate">gate① · gate②</span></span><span>serves: <span class="serve">AC-4</span></span></div>
+</div>
+
+<div class="fcard" id="f7">
+  <div class="top"><span class="fid">F7</span><span class="fname">spec</span></div>
+  <div class="gesture">The spec step — Ann produces detailed specs from the vision</div>
+  <div class="meta"><span>gates: <span class="gate">gate① · gate②</span></span><span>serves: <span class="serve">AC-4</span></span></div>
+</div>
+
+<div class="fcard" id="f8">
+  <div class="top"><span class="fid">F8</span><span class="fname">card</span></div>
+  <div class="gesture"><code>ann card &lt;id&gt;</code> — one step's full card: intent, ACs, artifacts, status, history tail</div>
+  <div class="meta"><span>gates: <span class="gate">—</span></span><span>serves: <span class="serve">NFR-USE-2 · K2</span></span></div>
+</div>
+
+<div class="fcard" id="f9">
+  <div class="top"><span class="fid">F9</span><span class="fname">answer</span></div>
+  <div class="gesture">Pending blocking questions surfaced; builder answers or accepts defaults (the ladder's <code>ask</code> rung, batched + deduped)</div>
+  <div class="meta"><span>gates: <span class="gate">—</span></span><span>serves: <span class="serve">K3 · resolution ladder</span></span></div>
+</div>
+
+<h2 id="p2">Phase 2 — Navigation &amp; memory <span class="phase">the structure as UI</span></h2>
+
+<div class="fcard" id="f10">
+  <div class="top"><span class="fid">F10</span><span class="fname">status</span></div>
+  <div class="gesture"><code>ann status</code> — tree view: goal, per-node status, the next action (derived from events)</div>
+  <div class="meta"><span>gates: <span class="gate">—</span></span><span>serves: <span class="serve">K1 · K2</span></span></div>
+</div>
+
+<div class="fcard" id="f11">
+  <div class="top"><span class="fid">F11</span><span class="fname">history</span></div>
+  <div class="gesture"><code>ann history &lt;id&gt;</code> — a node's event log, append-only</div>
+  <div class="meta"><span>gates: <span class="gate">—</span></span><span>serves: <span class="serve">K1 · NFR-OBS-1</span></span></div>
+</div>
+
+<div class="fcard" id="f12">
+  <div class="top"><span class="fid">F12</span><span class="fname">artifact</span></div>
+  <div class="gesture"><code>ann artifact &lt;name&gt;</code> — open the current artifact by logical name (the resolver)</div>
+  <div class="meta"><span>gates: <span class="gate">—</span></span><span>serves: <span class="serve">F-AC13</span></span></div>
+</div>
+
+<h2 id="p3">Phase 3 — Change <span class="phase">the normal case</span></h2>
+
+<div class="fcard" id="f13">
+  <div class="top"><span class="fid">F13</span><span class="fname">change</span></div>
+  <div class="gesture"><code>ann change &lt;artifact&gt; &lt;what changed&gt;</code> — spawns an amendment node → complete superseding artifact → resolution shifts; old stays byte-identical</div>
+  <div class="meta"><span>gates: <span class="gate">amendment gates apply</span></span><span>serves: <span class="serve">AC-7 · change-protocol v2</span></span></div>
+</div>
+
+<h2 id="p4">Phase 4 — Bindings</h2>
+
+<div class="fcard" id="f14">
+  <div class="top"><span class="fid">F14</span><span class="fname">github</span></div>
+  <div class="gesture">Create an issue/PR from a step; destructive actions confirm first; result becomes a provenance artifact</div>
+  <div class="meta"><span>gates: <span class="gate">confirm before destructive</span></span><span>serves: <span class="serve">D3 · NFR-SEC-1</span></span></div>
+</div>
+
+<h2 id="p5">Phase 5 — Maintenance</h2>
+
+<div class="fcard" id="f15">
+  <div class="top"><span class="fid">F15</span><span class="fname">resume</span></div>
+  <div class="gesture">Crash recovery from the last checkpoint (also implicit on start); RPO = 0</div>
+  <div class="meta"><span>gates: <span class="gate">—</span></span><span>serves: <span class="serve">AC-8 · RPO</span></span></div>
+</div>
+
+<div class="fcard" id="f16">
+  <div class="top"><span class="fid">F16</span><span class="fname">prune</span></div>
+  <div class="gesture">Remove superseded subtrees from the working tree; git is the archive; referenced nodes never pruned</div>
+  <div class="meta"><span>gates: <span class="gate">—</span></span><span>serves: <span class="serve">depth policy · F-AC12</span></span></div>
+</div>
+
+<div class="fcard" id="f17">
+  <div class="top"><span class="fid">F17</span><span class="fname">check</span></div>
+  <div class="gesture">Integrity: one-current-per-name, files exist, gates respected (already live: <code>node scripts/resolve.mjs --check</code>)</div>
+  <div class="meta"><span>gates: <span class="gate">—</span></span><span>serves: <span class="serve">F-AC1–13</span></span></div>
+</div>
+
+<div class="fcard" id="f18">
+  <div class="top"><span class="fid">F18</span><span class="fname">config</span></div>
+  <div class="gesture">Provider choice · ask-vs-assume preference (§8) · defaults</div>
+  <div class="meta"><span>gates: <span class="gate">—</span></span><span>serves: <span class="serve">§8 human-interaction policy</span></span></div>
+</div>
+
+<div class="rhythm" id="rhythm">
+  <h2 style="border:none;margin:0 0 8px;padding:0;">The rhythm this implies</h2>
+  <b>status</b> (where are we) → <b>run next</b> (Ann proposes, builder approves) → the step runs → <b>gate①/②</b> (builder grills, confirms, or rejects with feedback) → repeat.
+  <br><b>answer</b> interrupts when the ladder needs the builder · <b>change</b> whenever reality shifts · <b>check / resume / prune</b> on maintenance.
+</div>
+
+<div class="q" id="questions">
+  <b>Three shaping questions before the surface locks:</b>
+  <ol style="margin:8px 0 0;padding-left:20px;">
+    <li>Is the rhythm right — is <code>run next</code> the primary gesture (Ann proposes, builder approves, ≤1 interaction), or does the builder steer steps explicitly?</li>
+    <li>Missing or wrong — anything a builder's hands reach for that's not here (project switch/open, undo/abort a step, search across the tree)?</li>
+    <li>Config scope — F18 just provider + ask-vs-assume, or also step-chain templates (overlaps F3)?</li>
+  </ol>
+</div>
+
+<div id="contracts">
+  <h2>Contracts this surface serves</h2>
+  <ul style="color:var(--dim);font-size:13.5px;">
+    <li><a href="../tree/rounds/01-goal/artifacts/design.md">design (model + invariants)</a></li>
+    <li><a href="../tree/rounds/05-engine/00/05-requirements-amendment/artifacts/requirements-spec-v3.md">requirements-spec v3 (AC-1–7 · K1–K5 · NFRs)</a></li>
+    <li><a href="../tree/rounds/05-engine/00/04-format-amendment-v3/artifacts/tree-format-spec-v3.md">tree-format-spec v3 (data contract)</a></li>
+    <li><a href="../tree/rounds/05-engine/00/01-flow-control/artifacts/flow-control-spec.md">flow-control-spec (gates · ladder · work types)</a></li>
+    <li><a href="../tree/rounds/05-engine/00/03-change-protocol-amendment/artifacts/requirements-change-protocol-v2.md">change-protocol v2</a></li>
+    <li><a href="../tree/rounds/04-system-design/00/02-system-design-doc/artifacts/ann-system-design.md">ann-system-design (components)</a></li>
+    <li>live tools: <code>node scripts/resolve.mjs --specs</code> · <code>--status</code> · <code>--check</code></li>
+  </ul>
+</div>
+
+<footer>
+  Generated for the functional-spec design discussion · v1 draft surface (F1–F18) · not yet locked ·
+  lives at <code>docs/function-surface.html</code>
+</footer>
+</div>
+</body>
+</html>
