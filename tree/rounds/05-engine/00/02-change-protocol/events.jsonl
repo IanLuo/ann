@@ -1,2 +1,4 @@
 {"at":"2026-08-16","type":"created","note":"spawned after immutability violation in this session (locked docs edited + locks rotated) — the protocol is the corrective solution, dogfooded as a proper amendment node"}
 {"at":"2026-08-16","type":"extended","note":"session violation recorded honestly: design v3, tree-format-spec-v2, flow-control-spec, ann-system-design bodies were edited in place + locks rotated @ 257cb79. Their current content stands as truth; the process is recorded, not hidden. Going forward: this protocol only."}
+{"at":"2026-08-16","type":"artifact-locked","note":"requirements-change-protocol.md specs-locked @ 90e53ad — the only path for requirements change going forward"}
+{"at":"2026-08-16","type":"completed","note":"protocol ACs met: amendment path, immutability hard rule, engine enforcement, normal-case framing, locked"}
