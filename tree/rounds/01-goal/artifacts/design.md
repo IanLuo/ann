@@ -5,13 +5,13 @@
 - **referrers** (must cite this when they change): ann-spec,tree-format-spec-v2 flow-control-spec,ann-system-design AGENTS.md
 
 # Ann Model Spec (v3)
-*Canonical model semantics for Ann. R1's artifact. Type: system-design. Supersedes the old `design` (1146 lines, v1–v2): obsolete linear-planning content removed; decided semantics kept as invariants; concrete contracts live in the locked docs (§5) — point, don't restate. Upstream: none. Referrers: ann-spec · tree-format-spec-v2 · flow-control-spec · ann-system-design · AGENTS.md.*
+*Canonical model semantics for Ann. R1's artifact. Type: system-design. Supersedes the old `design` (1146 lines, v1–v2): obsolete linear-planning content removed; decided semantics kept as invariants; concrete contracts live in the locked docs (§5) — point, don't restate. Upstream: none. Referrers: requirements-spec · tree-format-spec-v2 · flow-control-spec · ann-system-design · AGENTS.md.*
 
 ## 1. Product definition
 
 - Ann converts ambiguous human goals into executable step trees for downstream runners (agents, humans, automation).
 - The runner completes the user's goal using only the tree-derived context (context packets + artifacts + ordinary project access).
-- Success measured: K1–K4 on the eval fixture suite; **K4 > 5 re-plans per branch = the model bet is wrong → stop feature work** (ann-spec §5).
+- Success measured: K1–K4 per the requirements spec; **failure signal = advancing to the right next action is not simple, or the proposed action is wrong, across fixtures — the "structure is the log" bet is wrong → stop feature work** (requirements-spec §5).
 
 ## 2. Core principle
 
@@ -42,7 +42,7 @@
 
 | Contract | Location |
 |---|---|
-| Requirements — AC1–AC8, K1–K4, NFRs, primary flow, scope | `tree/rounds/02-grilling/artifacts/ann-spec.md` |
+| Requirements — self-similarity invariant, configurable step chain, AC-1–5, K1–K4, NFRs, primary flow, scope | `tree/rounds/02-grilling/01-spec-rework/artifacts/requirements-spec.md` |
 | Tree format — rounds table, node/event schemas, status derivation, depth policy, checkpoint/RPO | `tree/rounds/04-system-design/00/01-format-amendment-v2/artifacts/tree-format-spec-v2.md` |
 | Flow control — lifecycle, human gates, resolution ladder, per-work-type flows | `tree/rounds/05-engine/00/01-flow-control/artifacts/flow-control-spec.md` (in progress) |
 | Technique — components, interfaces, failure modes, scale | `tree/rounds/04-system-design/00/02-system-design-doc/artifacts/ann-system-design.md` |

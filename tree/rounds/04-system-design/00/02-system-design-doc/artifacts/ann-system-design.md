@@ -11,7 +11,7 @@
 
 - Q1 runtime: **Node.js + TypeScript** — single-process CLI; mature LLM/agent ecosystem; matches original skeleton.
 - Q2 model provider: **adapter-first** (§16); first adapter = OpenAI-compatible chat completions via local config/env; swap by config, never by code changes.
-- Q3 storage: **the file tree per tree-format-spec-v2 IS the source of truth. No SQLite in v1** — ≤1k nodes makes full-tree scans trivial; a read-only in-memory index is built at startup from the files. Revisit only at scale. *(Deviation from the recorded default — justified by scale assumptions §5; nothing else reads the store.)*
+- Q3 storage: **the file tree per tree-format-spec-v2 IS the source of truth. No SQLite in v1** — realistic v1 tree sizes make full-tree scans trivial (no node-count limit per requirements-spec §7 A4; big-data query performance N/A for v1); a read-only in-memory index is built at startup from the files. Revisit only at scale. *(Deviation from the recorded default — justified by scale assumptions §5; nothing else reads the store.)*
 - Q4 UI: **CLI** — `tree view`, `step cards`, `full plan` renders (spec §7). No other surface in v1.
 
 ## 1. Components & ownership
@@ -19,7 +19,9 @@
 | Component | One-line job | Refuses to | Owner (slice) |
 |---|---|---|---|
 | **Tree store** | Reads/writes rounds, nodes, events, artifacts per format v2; builds the in-memory tree; enforces schema, append-only, immutability, round gate | Rewrite history · reorder/delete events · spawn round N+1 before N's `completed` · accept unknown fields/types | S1 |
-| **Planner kernel** | Orchestrates node lifecycle per flow-control-spec (spawn → materialize → gates → validate → activate → execute → verify → commit), frontmost-ready selection, bounded rework + chain append | Edit nodes · run unbounded loops · skip a human gate · spawn children before the artifact gate | S1/S5 |
+| **Planner kernel** | Orchestrates node lifecycle per flow-control-spec (spawn → materialize → gates → validate → activate → execute → verify → commit), frontmost-ready selection, bounded rework + chain append; consumes the project's flow config | Edit nodes · run unbounded loops · skip a human gate · spawn children before the artifact gate | S1/S5 |
+| **Flow config** | Reads/validates per-project step chains (data, not code — requirements-spec AC-3); exposes the chain to the planner kernel | Hard-code flows · let code override project config | S5 |
+| **Envision engine** | Runs the envision step: helps the builder imagine usage + look, sorts out what to build, avoids mistakes; produces the vision artifact | Invent requirements · skip the human gate | S2 |
 | **Human interface** | Presents step cards + artifacts at the human gates (GATE① grilling, GATE② confirm-result); collects accept/reject + feedback (talk v1; interactive HTML via plugins) | Skip a gate · fabricate an acceptance · invent feedback | S8 |
 | **Grilling engine** | Runs the requirement grilling step (template + LLM) → PRD or open-questions artifact | Invent facts · fake precision on novel work (§21.6) | S2 |
 | **Context assembler** | Materializes per-node context packets (deterministic 6-layer, §21.7) | Include unprovenanced facts · put the whole tree in a packet · let LLM summarization override the deterministic skeleton | S3 |
@@ -34,7 +36,7 @@
 
 - **Entities:** `Round` (dir in `tree/rounds/`, index = chain order, status derived) · `Node` (node.json immutable + events.jsonl append-only + description.md + artifacts/) · `Event` `{at, type, note}` + `spawned {parent, order}` · `Artifact` (text/structured files, per-node) · `ContextPacket` (frozen schema §3) · `Trace` (the run's event stream, design §14).
 - **Writers:** planner kernel (spawn/expand/commit events, `completed`/`failed`), adapters (binding results as artifacts + evidence events), validators/reviewer (evidence events). **Readers:** context assembler (builds packets from nodes/events), renderers, eval harness, planner kernel.
-- **Stale reads:** status is derived from the events tail **at read time**; v1 is single-process, so no cross-process cache — the in-memory index is rebuilt only at startup, kept current by direct mutation on append.
+- **Stale reads:** status is derived from the events tail **at read time**; v1 is single-process, so no cross-process cache — the in-memory index is rebuilt only at startup, kept current by direct mutation on append. **Multi-user is a design constraint (requirements-spec §7 A1):** the store must not preclude shared use — append-only events are concurrency-friendly; identity/permissions are future semantics.
 - **Empty records:** node with no artifacts = valid until it must gate children · round with no tasks = valid (root-only) · packet with empty inputs = valid only if the node declares no `requiredInputs` · tree with no rounds = invalid (R1 must exist) · node with no `created` event = invalid.
 
 ## 3. Boundaries & interfaces (frozen schemas)
@@ -69,7 +71,7 @@
 
 ## 5. Scale assumptions
 
-- Tree ≤ **1k nodes**, ≤ **8 levels**, ≤ **260-char paths** (format v2 §8).
+- Tree: **no node-count limit** (the format caps nothing — requirements-spec §7 A4); depth ≤ **8 levels**, ≤ **260-char paths** (format v2 §8 — path hygiene). Big-data query performance **N/A for v1**.
 - Rounds: ≤ dozens. Tasks per round: typical ≤ 20, worst ~100 (fits `00/` one level).
 - Write rate: v1 single-user CLI — < 1 event/sec typical; bursts at node commits. No concurrency in v1 (parallelism = sequential task group execution; store is single-process).
 - Context packets: bounded — path + siblings + relevant ancestors (never whole tree); target < 8k tokens.

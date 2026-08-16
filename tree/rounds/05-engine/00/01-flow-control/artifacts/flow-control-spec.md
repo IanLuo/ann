@@ -9,7 +9,7 @@
 
 ## 1. Scope
 
-- The **workflow semantics** of the engine: node lifecycle, creation, completion, chain append, human gates, input-resolution ladder, per-work-type flows. Common structure × per-type variation (design v3 §2/§4).
+- The **workflow semantics** of the engine: node lifecycle, creation, completion, chain append, human gates, input-resolution ladder, **configurable work-type flows** (step chains are project data — requirements-spec AC-3). Common structure × per-type variation (design v3 §2/§4).
 
 ## 2. Node lifecycle (common skeleton)
 
@@ -34,7 +34,7 @@
   - GATE① reject → **re-materialize** (rework context/approach from artifacts + feedback) → re-validate → back to GATE①.
   - GATE② reject → **re-execute** (rework output from artifacts + feedback) → re-verify → back to GATE②. If the feedback invalidates the *approach*, escalate to the GATE① loop (re-materialize).
   - Resume point is decided by the feedback — never `activate`.
-- **Bound:** 3 rejection cycles per gate; then escalate to a human design decision (force-approve / restructure / block). Rejection cycles count against **K4** (re-plans per branch).
+- **Bound:** 3 rejection cycles per gate; then escalate to a human design decision (force-approve / restructure / block). Rejection cycles **feed the advance-correctness signal (K4, requirements-spec §5)** — sustained rework means the structure isn't producing acceptable output.
 - **Human interface is pluggable (adapter):** talk (v1 — round-and-round: present-draft · collect-decision · collect-feedback · present-question · collect-answer) · interactive HTML / other forms via plugins (deferred, design v3 §9/§10).
 - **Human unreachable/unresponsive → step stays `blocked`** (fail-closed), blocker named.
 
@@ -63,11 +63,15 @@ Ask-vs-infer gate (design v3 §4): **ask** if high impact ∨ low confidence ∧
 - `failed`: bounded attempts exhausted or unrecoverable → preserved via events; sibling retry or escalate.
 - `superseded`: annotates — never overrides a `completed`/`failed` status (format v2 §3).
 
-## 7. Per-work-type flows (common skeleton, varying flow)
+## 7. Work-type flows — CONFIGURABLE step templates (requirements-spec AC-3)
+
+- Flows are **configuration data, not code**: a project defines its step chain; the engine follows it. A default **product template** ships: **idea → validate → envision → detailed specs → continue**.
+- Work types parameterize the common skeleton (materialize / missing-input / verify / chain effect):
 
 | Work type | Materialize | Missing input | Verify | Chain effect |
 |---|---|---|---|---|
-| grilling | batch-ask at end | **ask** (its job is questions) | artifact = PRD/questions | children spawn after artifact |
+| validate/grilling | batch-ask at end | **ask** (its job is questions) | artifact = validation + questions | specs spawn after |
+| envision | vision questions; batch-ask | **ask** (what should it be / look like) | artifact = product vision (usage + look) | detailed specs spawn after |
 | planning/expansion | derive → probe | infer only low-impact | ACs per branch | eager skeleton, lazy leaves |
 | implementation | probe/derive aggressively | infer w/ fallback; ask high-impact | tests + evidence | commit → next frontmost |
 | binding/external | confirm destructive | ask creds/params | provenance artifact (AC6) | result = artifact |

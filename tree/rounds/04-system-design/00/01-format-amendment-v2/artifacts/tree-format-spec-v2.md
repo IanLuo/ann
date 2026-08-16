@@ -9,7 +9,7 @@
 
 ## 1. Layout — the table of rounds
 
-- `tree/rounds/` is the **TABLE**: a chain of rounds — the project's forward progress. One store per project.
+- `tree/rounds/` is the **TABLE**: a chain of rounds — the project's forward progress. One store per project. **Multi-user ready:** a shared store is a future deployment concern; events carry no single-machine assumptions — identity/permissions are future amendments, not blocked by this format (requirements-spec §7 A1).
 - **A round = one step of work = an epic.** Round dir = `<NN>-<name>/`, `NN` = round index (chain order). A round closes **only when its goal is met** (artifacts produced, ACs verified) → then the next round may begin. Rounds are sequential gates; done rounds never change.
 - Round dir contains the **round root** (the epic: `node.json` · `events.jsonl` · `description.md` · `artifacts/`) plus **level dirs** (`00/`, `01/`, …) grouping nodes by depth inside the round:
   - `00/` = the round's **task group** — children of the epic, one subtree each. Tasks are **independent and may proceed in parallel**; dependent ordering uses the sort prefix / `order`.
