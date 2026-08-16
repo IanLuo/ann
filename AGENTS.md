@@ -41,6 +41,7 @@ design (model + invariants) → ann-spec (requirements) → tree-format-spec-v3 
 | flow control: lifecycle, human gates, rejection/rework, resolution ladder, per-work-type flows | `tree/rounds/05-engine/00/01-flow-control/artifacts/flow-control-spec.md` (locked @ 2522b6c) |
 | requirements change: the amendment path (change → amendment node → complete superseding artifact → superseded event → referrer re-pointing); locked artifacts never edited | `tree/rounds/05-engine/00/03-change-protocol-amendment/artifacts/requirements-change-protocol-v2.md` (locked @ be67673) |
 | technique: components & ownership, frozen interfaces, failure modes (fail-closed), scale | `tree/rounds/04-system-design/00/02-system-design-doc/artifacts/ann-system-design.md` |
+| architecture: load-bearing decisions, layers & ownership (single-writer store, web-UI target, per-task models, two-log trace), repo tree, cross-cutting conventions | `tree/rounds/05-engine/00/07-architecture/artifacts/architecture.md` (locked @ fcfa661) |
 
 ---
 
