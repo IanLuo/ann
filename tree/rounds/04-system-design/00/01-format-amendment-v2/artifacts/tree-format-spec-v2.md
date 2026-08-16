@@ -5,7 +5,7 @@
 - **referrers** (must cite this when they change): AGENTS.md,02-system-design-doc implementation slices
 
 # Tree Format Spec v2 — rounds (table of epics)
-*Artifact of task `04-system-design/00/01-format-amendment-v2`. Type: spec. Supersedes `tree-format-spec.md` v1 (locked @ ba528d1) and absorbs `depth-policy.md` (11c3de2) per §10 evolution. Upstream: `design` (locked @ eb07146), `02-grilling/artifacts/ann-spec.md` (locked @ 2664511).*
+*Artifact of task `04-system-design/00/01-format-amendment-v2`. Type: spec. Supersedes `tree-format-spec.md` v1 (locked @ ba528d1) and absorbs `depth-policy.md` (11c3de2) per §10 evolution. Upstream: `tree/rounds/01-goal/artifacts/design.md` (v3, locked @ 257cb79), `02-grilling/01-spec-rework/artifacts/requirements-spec.md` (locked @ 89ace76).*
 
 ## 1. Layout — the table of rounds
 
