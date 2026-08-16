@@ -25,19 +25,21 @@ No code exists yet — nothing to verify. Commands will be added once the projec
 
 ## Architecture elevator
 
-No code layer yet — the architecture exists only as a design spec. The core concept is the **tree-of-steps execution model** (design §21, canonical v2): a living step tree that is simultaneously plan, project memory, and observer — eager validated skeleton, lazy artifact-gated leaves, per-step context packets, node-level quality gates, subtree repair loops. It builds on the quality-gated agentic state graph (design §6): Intake → Context Acquisition → Requirement Normalization → Plan Drafting → Acceptance Criteria Compilation → Deterministic Validation → Runner Simulation Review → Finalization, with typed repair loops and routing semantics (§7). The canonical plan contract is defined in design §4.
+No code layer yet — the architecture exists as a locked contract stack. The core concept is the **table of rounds** (model spec §2): sequential, gated rounds (epics) — design → requirements → format → technique → engine; parallel task groups inside a round; every step self-aware with a materialized context packet; human gates at each step end (grilling + confirm-result); resolution ladder (derive → probe → infer → ask → block); tree-as-memory. Invariants and the contract stack are in `tree/rounds/01-goal/artifacts/design.md` (model, locked) and the four locked contracts it points to.
 
 ```
-design        — comprehensive design spec (plan contract, workflow, routing, quality gates, evals, MVP scope)
+design (model + invariants) → ann-spec (requirements) → tree-format-spec-v2 (data) → flow-control-spec (workflow) → ann-system-design (technique)
 ```
 
 ## Deeper docs
 
 | When you need… | Read… |
 |---|---|
-| the canonical plan contract, workflow model, routing semantics, quality gates, depth modes, MVP scope, evals design, handoff protocol, security constraints | `design` |
-| the tree-of-steps execution model (v2): step node schema, expansion semantics, artifact gate, context packets, distance-to-goal, observer/memory role, external bindings, v2 evals and MVP | `design` §21 |
+| model semantics + invariants (rounds, gates, resolution ladder, provenance, fail-closed, complete artifacts, open decisions) | `tree/rounds/01-goal/artifacts/design.md` |
+| requirements: AC1–AC8, K1–K4, NFRs, primary flow, scope, recovery | `tree/rounds/02-grilling/artifacts/ann-spec.md` |
 | the tree format contract (engine data contract): table of rounds (epics, sequential gates), parallel task groups, immutable `node.json`, append-only `events.jsonl`, status derivation, searchable `description.md`, per-node artifacts, depth policy, checkpoint/RPO | `tree/rounds/04-system-design/00/01-format-amendment-v2/artifacts/tree-format-spec-v2.md` |
+| flow control: lifecycle, human gates, rejection/rework, resolution ladder, per-work-type flows | `tree/rounds/05-engine/00/01-flow-control/artifacts/flow-control-spec.md` (in progress) |
+| technique: components & ownership, frozen interfaces, failure modes (fail-closed), scale | `tree/rounds/04-system-design/00/02-system-design-doc/artifacts/ann-system-design.md` |
 
 ---
 
