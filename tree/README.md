@@ -50,3 +50,7 @@ tree/rounds/
         └── 02-system-design-doc     (queued — blocked on v2 lock + Q1–Q4)
   05-engine        (future — R5, parallel task group)
 ```
+
+## Pre-engine tooling
+
+- `scripts/resolve.mjs` — the derived logical-name resolver (tree-format-spec v3 §4 / F-AC13 seed), built pre-engine in plain Node. `node scripts/resolve.mjs` (map) · `node scripts/resolve.mjs <name>` (path) · `node scripts/resolve.mjs --check` (verify files + one-current-per-name). It is the first engine component, used by the bootstrap itself.
