@@ -1,1 +1,2 @@
 {"at":"2026-08-16","type":"created","note":"spawned as R5 task 01 (first in group — all slices run under it): flow-control = common workflow skeleton + per-type flows + input-resolution ladder"}
+{"at":"2026-08-16","type":"extended","note":"AC added (user rule): superseding artifacts must be the COMPLETE merged version, never delta-only — deltas are side-notes; current artifact = full truth in one file (depth-policy.md = the violation example; format v2 = the model). Lands in flow-control spec + tree-format-spec-v2 §5 clause in next format amendment"}
