@@ -38,7 +38,7 @@ design (model + invariants) → ann-spec (requirements) → tree-format-spec-v2 
 | model semantics + invariants (rounds, gates, resolution ladder, provenance, fail-closed, complete artifacts, open decisions) | `tree/rounds/01-goal/artifacts/design.md` |
 | requirements: AC1–AC8, K1–K4, NFRs, primary flow, scope, recovery | `tree/rounds/02-grilling/artifacts/ann-spec.md` |
 | the tree format contract (engine data contract): table of rounds (epics, sequential gates), parallel task groups, immutable `node.json`, append-only `events.jsonl`, status derivation, searchable `description.md`, per-node artifacts, depth policy, checkpoint/RPO | `tree/rounds/04-system-design/00/01-format-amendment-v2/artifacts/tree-format-spec-v2.md` |
-| flow control: lifecycle, human gates, rejection/rework, resolution ladder, per-work-type flows | `tree/rounds/05-engine/00/01-flow-control/artifacts/flow-control-spec.md` (in progress) |
+| flow control: lifecycle, human gates, rejection/rework, resolution ladder, per-work-type flows | `tree/rounds/05-engine/00/01-flow-control/artifacts/flow-control-spec.md` (locked @ 2522b6c) |
 | technique: components & ownership, frozen interfaces, failure modes (fail-closed), scale | `tree/rounds/04-system-design/00/02-system-design-doc/artifacts/ann-system-design.md` |
 
 ---
