@@ -1,2 +1,3 @@
 {"at":"2026-08-15","type":"created","note":"spawned after 01-grilling artifact locked; queued until Q1-Q4 answered"}
 {"at":"2026-08-15","type":"extended","note":"task group spawned in 00/: 01-format-amendment-v2, 02-system-design-doc; round gate = both tasks' artifacts locked"}
+{"at":"2026-08-16","type":"extended","note":"Q1-Q4 resolved (system-design §0): Node.js+TS runtime; adapter-first OpenAI-compatible provider; file-based store (no SQLite in v1); CLI UI"}
