@@ -1,5 +1,10 @@
-# Architecture Spec (v1)
+<!-- specs:locked:fcfa661 2026-08-16 type=architecture -->
 
+## Link contract
+- **upstream** (this doc relies on): 05-engine/00/06-functional-spec/artifacts/functional-spec.md,04-system-design/00/02-system-design-doc/artifacts/ann-system-design.md
+- **referrers** (must cite this when they change): S1-S9 dev tasks,design tasks
+
+# Architecture Spec (v1)
 *Artifact of task `05-engine/00/07-architecture`. Type: architecture. The load-bearing structure: layers, ownership, repo tree, cross-cutting concerns, pointers. Upstream: `functional-spec` (locked @ 9e60cd8), `ann-system-design` (locked). Referrers: S1–S9 dev tasks, design tasks. Lock management: `specs` skill (lock.sh marker + link contract) + change-protocol v2 (logical names, resolver, amendment path) — this doc locks the same way.*
 
 ## Rung 1 — Load-bearing decisions
