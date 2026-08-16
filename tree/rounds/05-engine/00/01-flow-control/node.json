@@ -1,0 +1,26 @@
+{
+  "id": "05-engine/00/01-flow-control",
+  "contract": {
+    "intent": "Define and lock the flow-control semantics — the common workflow skeleton (node creation, completion, chain append) plus per-work-type flows and the input-resolution ladder. This is the contract the planner kernel (S5) implements; all other slices run under it.",
+    "acceptanceCriteria": [
+      "Common skeleton documented: lifecycle (spawn → materialize → validate → activate → execute → verify → commit), gates (round, artifact, completion), statuses (queued/active/blocked/done/failed/superseded)",
+      "HUMAN GATES at each end of every step: entry gate = grilling (human validates understanding/approach before execution); exit gate = confirm-result (human confirms the step's output before commit). Each step STOPS and waits for human input at both gates",
+      "Rejection semantics: when the human rejects at either gate, the step reworks based on its artifacts + the recorded feedback — bounded (max iterations, checkpoint preserved, fallback); rejected attempts preserved via events, rework = sibling-correction",
+      "Human-interface adapter contract (pluggable): basic = talk (round-and-round conversation); other forms (e.g., interactive HTML) supported via plugins; the adapter handles present-draft / collect-decision / collect-feedback / present-question / collect-answer",
+      "Node/nodeGroup creation + chain-append rules: planner-only creation, sibling-correction retries, parallel groups, round N+1 only after round N's completed event, requiredInputs = previous rounds'/steps' artifacts",
+      "Completion semantics: ACs verified + evidence + artifact gate + human confirmation; done/failed/superseded",
+      "Input-resolution ladder integrated at materialize: derive → probe → infer (labeled, forbidden on high-impact/no-fallback) → ask (batched, deduped) → block — per the silent-inference rule (design §8)",
+      "Per-work-type flow definitions for v1 kinds: grilling, planning/expansion, implementation, binding, review (+ human mode) — common structure, varying flow",
+      "Flow-control spec locked (upstream design §6/§21, ann-spec, tree-format-spec-v2); S5 planner kernel cites it"
+    ],
+    "targetAreas": ["artifacts/flow-control-spec.md", "tree/rounds"],
+    "requiredInputs": [
+      "design §6 (quality-gated state graph), §21.5 (node lifecycle), §21.6 (grilling)",
+      "02-grilling/artifacts/ann-spec.md (locked @ 9e37c8f — ACs, K1-K4, §8 policy)",
+      "04-system-design/00/01-format-amendment-v2/artifacts/tree-format-spec-v2.md (locked @ 9e37c8f)",
+      "04-system-design/00/02-system-design-doc/artifacts/ann-system-design.md (locked @ ca32421 — components §1)"
+    ],
+    "expectedOutputs": ["flow-control spec (artifacts/flow-control-spec.md, locked)"]
+  },
+  "createdAt": "2026-08-16"
+}
