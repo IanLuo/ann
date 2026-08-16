@@ -1,4 +1,4 @@
-<!-- specs:locked:a414a0b 2026-08-16 type=system-design -->
+<!-- specs:locked:2522b6c 2026-08-16 type=system-design -->
 
 ## Link contract
 - **upstream** (this doc relies on): tree/rounds/01-goal/artifacts/design.md,02-grilling/artifacts/ann-spec.md 01-format-amendment-v2/artifacts/tree-format-spec-v2.md

@@ -1,4 +1,4 @@
-<!-- specs:locked:a414a0b 2026-08-16 type=spec -->
+<!-- specs:locked:2522b6c 2026-08-16 type=spec -->
 
 ## Link contract
 - **upstream** (this doc relies on): tree/rounds/01-goal/artifacts/design.md

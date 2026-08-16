@@ -1,5 +1,10 @@
-# Flow Control Spec (v1)
+<!-- specs:locked:2522b6c 2026-08-16 type=spec -->
 
+## Link contract
+- **upstream** (this doc relies on): tree/rounds/01-goal/artifacts/design.md,02-grilling/artifacts/ann-spec.md 01-format-amendment-v2/artifacts/tree-format-spec-v2.md
+- **referrers** (must cite this when they change): S5 planner kernel,implementation slices review-task
+
+# Flow Control Spec (v1)
 *Artifact of task `05-engine/00/01-flow-control`. Type: spec. Upstream: `tree/rounds/01-goal/artifacts/design.md` (v3, locked), `02-grilling/artifacts/ann-spec.md` (locked), `01-format-amendment-v2/artifacts/tree-format-spec-v2.md` (locked). Referrers: S5 planner kernel, implementation slices, review-task.*
 
 ## 1. Scope
