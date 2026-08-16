@@ -1,0 +1,21 @@
+{
+  "id": "02-grilling/01-spec-rework",
+  "contract": {
+    "intent": "Write the FRESH requirements spec for Ann — clean-room, elicited rung-by-rung from the user (existing docs were reference only, not template). Supersedes ann-spec.md per the complete-artifact rule.",
+    "acceptanceCriteria": [
+      "Fresh spec artifact exists at artifacts/requirements-spec.md — complete 11-rung contract, no leftover references to superseded docs",
+      "Self-similarity invariant present: Ann's output structure = Ann's own structure (the dogfooding tree is the reference implementation)",
+      "Primary flow = configurable step chain (default template: idea → validate → envision → detailed specs → continue); steps are separately-managed gated nodes; flow config is data, not code",
+      "KPIs K1-K4 per accepted numbers (derived-state accuracy 100%, locate <=2 interactions, advance <=1, next-action correctness >=95%); failure signal = advance friction / wrong next-action across fixtures",
+      "Multi-user = design constraint (not v1 feature); no node-count limit in the format; big-data query performance N/A for v1",
+      "Spec locked (type=spec, upstream design v3); ann-spec gets a superseded event"
+    ],
+    "targetAreas": ["artifacts/requirements-spec.md", "AGENTS.md", "tree/README.md"],
+    "requiredInputs": [
+      "tree/rounds/01-goal/artifacts/design.md (v3, locked — model semantics + invariants)",
+      "Elicited answers (this session): rungs 1-11 + contract — recorded in the spec itself"
+    ],
+    "expectedOutputs": ["requirements-spec.md (locked, complete)"]
+  },
+  "createdAt": "2026-08-16"
+}
