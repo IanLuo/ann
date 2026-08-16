@@ -1,7 +1,7 @@
-<!-- specs:locked:2522b6c 2026-08-16 type=spec -->
+<!-- specs:locked:257cb79 2026-08-16 type=spec -->
 
 ## Link contract
-- **upstream** (this doc relies on): tree/rounds/01-goal/artifacts/design.md,02-grilling/artifacts/ann-spec.md
+- **upstream** (this doc relies on): tree/rounds/01-goal/artifacts/design.md,02-grilling/01-spec-rework/artifacts/requirements-spec.md
 - **referrers** (must cite this when they change): AGENTS.md,02-system-design-doc implementation slices
 
 # Tree Format Spec v2 — rounds (table of epics)

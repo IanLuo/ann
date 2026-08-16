@@ -1,8 +1,8 @@
-<!-- specs:locked:fd1125c 2026-08-16 type=system-design -->
+<!-- specs:locked:257cb79 2026-08-16 type=system-design -->
 
 ## Link contract
 - **upstream** (this doc relies on): none
-- **referrers** (must cite this when they change): ann-spec,tree-format-spec-v2 flow-control-spec,ann-system-design AGENTS.md
+- **referrers** (must cite this when they change): requirements-spec,tree-format-spec-v2 flow-control-spec,ann-system-design AGENTS.md
 
 # Ann Model Spec (v3)
 *Canonical model semantics for Ann. R1's artifact. Type: system-design. Supersedes the old `design` (1146 lines, v1–v2): obsolete linear-planning content removed; decided semantics kept as invariants; concrete contracts live in the locked docs (§5) — point, don't restate. Upstream: none. Referrers: requirements-spec · tree-format-spec-v2 · flow-control-spec · ann-system-design · AGENTS.md.*
