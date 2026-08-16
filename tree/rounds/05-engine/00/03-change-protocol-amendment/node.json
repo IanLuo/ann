@@ -1,0 +1,20 @@
+{
+  "id": "05-engine/00/03-change-protocol-amendment",
+  "contract": {
+    "intent": "Amend the Requirements-Change Protocol (v1, locked @ 90e53ad) to add logical-name resolution: references by stable logical name + section anchor, resolved from events at read time — so supersession never breaks a referrer's internal reference. Produces a COMPLETE superseding artifact (per the protocol itself).",
+    "acceptanceCriteria": [
+      "requirements-change-protocol-v2.md artifact exists — complete doc = v1 content + the logical-name resolution rule",
+      "Resolution rule stated: artifacts = immutable commits; logical names = derived branch tips; current(name) = latest artifact-locked, non-superseded artifact with that name",
+      "Superseding artifacts reuse the logical name + preserve existing section anchors (renumbering forbidden, validator-enforced)",
+      "Edge cases covered: supersession chains, direct path refs to superseded artifacts (forward pointer + warning), name collisions (one current per name), node.json requiredInputs resolution",
+      "v2 locked (type=spec); v1 gets a superseded event; AGENTS.md index points at v2"
+    ],
+    "targetAreas": ["artifacts/requirements-change-protocol-v2.md", "AGENTS.md"],
+    "requiredInputs": [
+      "05-engine/00/02-change-protocol/artifacts/requirements-change-protocol.md (v1, locked @ 90e53ad)",
+      "Grilled decision (this session): references resolvable, not kept fresh"
+    ],
+    "expectedOutputs": ["requirements-change-protocol-v2.md (locked, complete)"]
+  },
+  "createdAt": "2026-08-16"
+}
