@@ -1,5 +1,10 @@
-# Tree Format Spec (v3)
+<!-- specs:locked:012ca5f 2026-08-16 type=spec -->
 
+## Link contract
+- **upstream** (this doc relies on): tree/rounds/01-goal/artifacts/design.md,02-grilling/01-spec-rework/artifacts/requirements-spec.md
+- **referrers** (must cite this when they change): flow-control-spec,change-protocol ann-system-design,AGENTS.md implementation slices
+
+# Tree Format Spec (v3)
 *Artifact of task `05-engine/00/04-format-amendment-v3`. Type: spec. Complete superseding version — v2 (locked @ 257cb79) + **the resolution mechanism** (structured event schema + derived logical-name resolution; change-protocol v2 §2). Produced per the change protocol: amendment node → complete artifact → superseded event. Upstream: `tree/rounds/01-goal/artifacts/design.md` (v3, locked), `02-grilling/01-spec-rework/artifacts/requirements-spec.md` (locked). Referrers: flow-control-spec · change-protocol · ann-system-design · AGENTS.md · implementation slices.*
 
 ## 1. Layout — the table of rounds
