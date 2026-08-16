@@ -1,7 +1,7 @@
-<!-- specs:locked:9e37c8f 2026-08-16 type=spec -->
+<!-- specs:locked:a414a0b 2026-08-16 type=spec -->
 
 ## Link contract
-- **upstream** (this doc relies on): design
+- **upstream** (this doc relies on): tree/rounds/01-goal/artifacts/design.md
 - **referrers** (must cite this when they change): tree-format-spec-v2,02-system-design-doc implementation slices,review-task
 
 # Ann Requirements Spec (v1)
