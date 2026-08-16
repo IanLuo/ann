@@ -41,7 +41,7 @@ tree/
 ```
 tree/rounds/
   01-goal          (done — R1 gate met: design §21 locked)
-  02-grilling      (done — R2: ann-spec locked @ 2664511)
+  02-grilling      (done — R2: requirements-spec locked @ 89ace76; ann-spec superseded)
   03-tree-format   (done — R3: format v1 locked @ ba528d1; superseded by v2)
     └── 01-depth-policy  (superseded — absorbed into v2)
   04-system-design (active — R4: tasks spawned, gate pending)

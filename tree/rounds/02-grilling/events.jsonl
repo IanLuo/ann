@@ -2,3 +2,4 @@
 {"at":"2026-08-15","type":"extended","note":"user extension (git 03440cc): primary flow, KPIs K1-K4 + failure signal, NFRs, assumptions, recovery"}
 {"at":"2026-08-15","type":"artifact-locked","note":"artifacts/ann-spec.md specs-locked @ 2664511 (type=spec, upstream design, referrers 02-system-design/slices/review-task)"}
 {"at":"2026-08-15","type":"completed","note":"all ACs satisfied; Q1-Q4 transferred to 02-system-design context (git e088045)"}
+{"at":"2026-08-16","type":"superseded","note":"artifacts/ann-spec.md superseded by 01-spec-rework/artifacts/requirements-spec.md (fresh clean-room spec, locked @ 89ace76)"}

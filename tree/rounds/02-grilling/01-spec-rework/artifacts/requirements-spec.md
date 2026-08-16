@@ -1,5 +1,10 @@
-# Ann Requirements Spec (fresh v2)
+<!-- specs:locked:89ace76 2026-08-16 type=spec -->
 
+## Link contract
+- **upstream** (this doc relies on): tree/rounds/01-goal/artifacts/design.md
+- **referrers** (must cite this when they change): tree-format-spec-v2,flow-control-spec ann-system-design,implementation slices review-task
+
+# Ann Requirements Spec (fresh v2)
 *Artifact of task `02-grilling/01-spec-rework`. Type: spec. Elicited clean-room, rung-by-rung from the builder — the existing docs were reference only, never the template. Supersedes `ann-spec.md` (accreted draft) per the complete-artifact rule: this is the complete requirements contract. Upstream: `tree/rounds/01-goal/artifacts/design.md` (v3, locked). Referrers: tree-format-spec-v2 · flow-control-spec · ann-system-design · implementation slices · review-task.*
 
 ## 1. Problem & who breaks
