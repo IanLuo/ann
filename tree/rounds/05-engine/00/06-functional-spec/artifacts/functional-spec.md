@@ -1,5 +1,10 @@
-# Functional Spec (v1)
+<!-- specs:locked:9e60cd8 2026-08-16 type=spec -->
 
+## Link contract
+- **upstream** (this doc relies on): tree/rounds/05-engine/00/05-requirements-amendment/artifacts/requirements-spec-v3.md,05-engine/00/01-flow-control/artifacts/flow-control-spec.md
+- **referrers** (must cite this when they change): architecture,ann-system-design implementation slices,review-task
+
+# Functional Spec (v1)
 *Artifact of task `05-engine/00/06-functional-spec`. Type: spec. The function contract: the surface (what the builder can DO with Ann), the settled flow decisions, and the interaction model. Deep per-function detail (exact commands, output formats, edge cases) is written into the slice task contracts during the build; this spec fixes the surface + interaction shape. Upstream: `requirements-spec` (v3), `flow-control-spec`. Referrers: architecture · ann-system-design · implementation slices · review-task.*
 
 ## 1. The surface (settled)
