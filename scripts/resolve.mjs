@@ -112,6 +112,35 @@ const args = process.argv.slice(2);
 const current = resolve();
 const problems = check(current);
 
+if (args.includes('--specs')) {
+  // Full specs index: read each current artifact's lock marker + link contract.
+  const rows = [];
+  for (const [name, l] of [...current.entries()].sort()) {
+    const full = join(ROOT, l.path);
+    let type = '', sha = l.sha || '', upstream = '', referrers = '';
+    try {
+      const head = readFileSync(full, 'utf8').split('\n').slice(0, 10);
+      for (const line of head) {
+        const m = line.match(/specs:locked:([0-9a-f]+) [0-9-]+ type=(\S+)/);
+        if (m) { sha = m[1]; type = m[2]; }
+        const u = line.match(/\*\*upstream\*\* \(this doc relies on\): (.*)/);
+        if (u) upstream = u[1];
+        const r = line.match(/\*\*referrers\*\* \(must cite this when they change\): (.*)/);
+        if (r) referrers = r[1];
+      }
+    } catch { /* unreadable artifact — row still shows */ }
+    rows.push({ name, type, sha, upstream, referrers, path: l.path });
+  }
+  for (const r of rows) {
+    console.log(`\n${r.name}  [${r.type || '?'}]  @ ${r.sha || '?'}`);
+    console.log(`  path:      ${r.path}`);
+    if (r.upstream) console.log(`  upstream:  ${r.upstream}`);
+    if (r.referrers) console.log(`  referrers: ${r.referrers}`);
+  }
+  if (problems.length) { console.error('\nPROBLEMS:'); for (const p of problems) console.error('  ' + p); process.exit(1); }
+  process.exit(0);
+}
+
 if (args.includes('--check')) {
   for (const p of problems) console.error(p);
   console.log(problems.length === 0 ? `OK — ${current.size} current artifacts, verified.` : `${problems.length} problem(s).`);
