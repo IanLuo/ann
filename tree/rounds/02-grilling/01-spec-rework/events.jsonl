@@ -1,3 +1,4 @@
 {"at":"2026-08-16","type":"created","note":"spawned per user directive: fresh spec, clean-room, not generated from the current stuff"}
 {"at":"2026-08-16","type":"artifact-locked","note":"requirements-spec.md specs-locked @ 89ace76 (upstream design v3)"}
 {"at":"2026-08-16","type":"completed","note":"all 6 ACs met: fresh complete contract, self-similarity, configurable chain, K1-K4 + failure signal, multi-user design-constraint, superseded ann-spec"}
+{"at":"2026-08-16","type":"superseded","note":"artifacts/requirements-spec.md (v2) superseded by 05-engine/00/05-requirements-amendment/artifacts/requirements-spec-v3.md (logical name: requirements-spec) — closes audit gaps: K5, AC-6, AC-7, D3"}
