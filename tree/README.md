@@ -8,7 +8,7 @@ Ann is built and managed with its own tree-of-steps model (design §21 — dogfo
 - **A round = one step of work = an epic**, gated: a round closes only when its goal is met (artifacts locked, ACs verified) → next round begins. Rounds are sequential; done rounds never change.
 - **Inside a round:** the epic root + `00/` = the round's task group (independent tasks, may run in parallel; order by prefix). Tasks can decompose further (level dirs).
 - **Round dependency:** each round's root consumes the previous round's artifact. R1 (goal) is the base step.
-- Full contract: **`04-system-design/00/01-format-amendment-v2/artifacts/tree-format-spec-v2.md`** (supersedes v1 + depth policy).
+- Full contract: **`05-engine/00/04-format-amendment-v3/artifacts/tree-format-spec-v3.md`** (supersedes v1 + depth policy).
 
 ## Layout
 
@@ -23,7 +23,7 @@ tree/
       <NN>-<level>/<NN>-<task>/   depth-grouped nodes (00/ = the task group)
 ```
 
-## Format rules (summary — see tree-format-spec-v2)
+## Format rules (summary — see tree-format-spec-v3)
 
 - **Directory tree IS the tree.** Parent = dirname · children = subdirectories · id = path from `tree/rounds/`. No `parentId`/`children` fields.
 - **Nodes immutable.** `node.json` written once, never rewritten. Corrections = new nodes (sibling-correction: same level, higher prefix — never nested children).

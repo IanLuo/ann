@@ -28,7 +28,7 @@ No code exists yet — nothing to verify. Commands will be added once the projec
 No code layer yet — the architecture exists as a locked contract stack. The core concept is the **table of rounds** (model spec §2): sequential, gated rounds (epics) — design → requirements → format → technique → engine; parallel task groups inside a round; every step self-aware with a materialized context packet; human gates at each step end (grilling + confirm-result); resolution ladder (derive → probe → infer → ask → block); tree-as-memory. Invariants and the contract stack are in `tree/rounds/01-goal/artifacts/design.md` (model, locked) and the four locked contracts it points to.
 
 ```
-design (model + invariants) → ann-spec (requirements) → tree-format-spec-v2 (data) → flow-control-spec (workflow) → ann-system-design (technique)
+design (model + invariants) → ann-spec (requirements) → tree-format-spec-v3 (data) → flow-control-spec (workflow) → ann-system-design (technique)
 ```
 
 ## Deeper docs
@@ -37,7 +37,7 @@ design (model + invariants) → ann-spec (requirements) → tree-format-spec-v2 
 |---|---|
 | model semantics + invariants (rounds, gates, resolution ladder, provenance, fail-closed, complete artifacts, open decisions) | `tree/rounds/01-goal/artifacts/design.md` |
 | requirements (fresh spec): self-similarity invariant, configurable step chain (idea → validate → envision → specs → continue), AC-1–5, K1–K4 + failure signal, NFRs, assumptions, data, recovery, security, verification | `tree/rounds/02-grilling/01-spec-rework/artifacts/requirements-spec.md` |
-| the tree format contract (engine data contract): table of rounds (epics, sequential gates), parallel task groups, immutable `node.json`, append-only `events.jsonl`, status derivation, searchable `description.md`, per-node artifacts, depth policy, checkpoint/RPO | `tree/rounds/04-system-design/00/01-format-amendment-v2/artifacts/tree-format-spec-v2.md` |
+| the tree format contract (engine data contract): table of rounds (epics, sequential gates), parallel task groups, immutable `node.json`, append-only `events.jsonl`, status derivation, searchable `description.md`, per-node artifacts, depth policy, checkpoint/RPO | `tree/rounds/05-engine/00/04-format-amendment-v3/artifacts/tree-format-spec-v3.md` (locked @ 012ca5f) |
 | flow control: lifecycle, human gates, rejection/rework, resolution ladder, per-work-type flows | `tree/rounds/05-engine/00/01-flow-control/artifacts/flow-control-spec.md` (locked @ 2522b6c) |
 | requirements change: the amendment path (change → amendment node → complete superseding artifact → superseded event → referrer re-pointing); locked artifacts never edited | `tree/rounds/05-engine/00/03-change-protocol-amendment/artifacts/requirements-change-protocol-v2.md` (locked @ be67673) |
 | technique: components & ownership, frozen interfaces, failure modes (fail-closed), scale | `tree/rounds/04-system-design/00/02-system-design-doc/artifacts/ann-system-design.md` |
