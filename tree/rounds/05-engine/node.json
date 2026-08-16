@@ -1,0 +1,21 @@
+{
+  "id": "05-engine",
+  "contract": {
+    "intent": "Build the engine v1 per ann-system-design (locked @ ca32421): tree store, planner kernel, grilling, context assembler, validators, runner reviewer, provider + GitHub adapters, renderers, eval harness — the parallel task group.",
+    "acceptanceCriteria": [
+      "All slices in the group deliver their component + unit tests",
+      "ann-spec AC1-AC8 pass on the fixture suite",
+      "K1 >= 85% first-pass AC completion; K2 < 2 min; K3 <= 3 questions; K4 <= 2 re-plans/branch on fixtures",
+      "Failure signal rule armed: K4 > 5 across fixtures -> stop feature work (spec §5)",
+      "Engine is dogfooded: ann's own tree is managed through the engine (round-trip test F-AC8)"
+    ],
+    "targetAreas": ["src/", "tree/rounds/05-engine/00/"],
+    "requiredInputs": [
+      "04-system-design output: ann-system-design.md (locked @ ca32421)",
+      "02-grilling output: ann-spec.md (locked @ 9e37c8f)",
+      "01-format-amendment-v2 output: tree-format-spec-v2.md (locked @ 9e37c8f)"
+    ],
+    "expectedOutputs": ["engine v1 (working CLI: plan/run/tree/step/resume)", "eval harness results (K1-K4)"]
+  },
+  "createdAt": "2026-08-16"
+}
