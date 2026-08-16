@@ -5,7 +5,7 @@
 - **referrers** (must cite this when they change): R5 implementation slices,architecture (future) review-task
 
 # Ann System Design (v1)
-*Artifact of task `04-system-design/00/02-system-design-doc`. Type: system-design. Upstream: `design` (locked @ eb07146), `02-grilling/artifacts/ann-spec.md` (locked @ 9e37c8f), `01-format-amendment-v2/artifacts/tree-format-spec-v2.md` (locked @ 9e37c8f). Referrers: architecture (future), R5 implementation slices.*
+*Artifact of task `04-system-design/00/02-system-design-doc`. Type: system-design. Upstream: `tree/rounds/01-goal/artifacts/design.md` (v3, locked @ 257cb79), `02-grilling/01-spec-rework/artifacts/requirements-spec.md` (locked @ 89ace76), `01-format-amendment-v2/artifacts/tree-format-spec-v2.md` (locked @ 257cb79). Referrers: architecture (future), R5 implementation slices.*
 
 ## 0. Q1–Q4 resolutions (blocking questions closed)
 

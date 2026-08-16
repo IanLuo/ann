@@ -5,7 +5,7 @@
 - **referrers** (must cite this when they change): S5 planner kernel,implementation slices review-task
 
 # Flow Control Spec (v1)
-*Artifact of task `05-engine/00/01-flow-control`. Type: spec. Upstream: `tree/rounds/01-goal/artifacts/design.md` (v3, locked), `02-grilling/artifacts/ann-spec.md` (locked), `01-format-amendment-v2/artifacts/tree-format-spec-v2.md` (locked). Referrers: S5 planner kernel, implementation slices, review-task.*
+*Artifact of task `05-engine/00/01-flow-control`. Type: spec. Upstream: `tree/rounds/01-goal/artifacts/design.md` (v3, locked @ 257cb79), `02-grilling/01-spec-rework/artifacts/requirements-spec.md` (locked @ 89ace76), `01-format-amendment-v2/artifacts/tree-format-spec-v2.md` (locked @ 257cb79). Referrers: S5 planner kernel, implementation slices, review-task.*
 
 ## 1. Scope
 
