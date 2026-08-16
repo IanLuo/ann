@@ -53,4 +53,4 @@ tree/rounds/
 
 ## Pre-engine tooling
 
-- `scripts/resolve.mjs` — the derived logical-name resolver (tree-format-spec v3 §4 / F-AC13 seed), built pre-engine in plain Node. `node scripts/resolve.mjs` (map) · `<name>` (path) · `--check` (verify) · `--specs` (full index: name, type, @sha, path, upstreams, referrers — read from lock markers). It is the first engine component, used by the bootstrap itself.
+- `scripts/resolve.mjs` — the derived logical-name resolver (tree-format-spec v3 §4 / F-AC13 seed), built pre-engine in plain Node. `node scripts/resolve.mjs` (map) · `<name>` (path) · `--check` (verify) · `--specs` (full contract index) · `--status [filter]` (node status derived from events, format v3 §3). It is the first engine component, used by the bootstrap itself.

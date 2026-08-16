@@ -108,9 +108,44 @@ function check(current) {
   return problems;
 }
 
+function statusOf(events) {
+  // format v3 §3: status = tail mapping; superseded annotates completed/failed, never overrides.
+  let status = 'queued';
+  for (const ev of events) {
+    switch (ev.type) {
+      case 'created': status = 'queued'; break;
+      case 'activated': status = 'active'; break;
+      case 'completed': status = 'done'; break;
+      case 'failed': status = 'failed'; break;
+      case 'superseded': if (status !== 'done' && status !== 'failed') status = 'superseded'; break;
+      // extended / evidence / artifact-locked annotate only
+    }
+  }
+  return status;
+}
+
+function allStatuses() {
+  const out = [];
+  for (const file of walk(ROUNDS)) {
+    const id = file.replace(new RegExp('^' + ROOT + '/tree/rounds/'), '').replace(/\/events\.jsonl$/, '');
+    out.push({ id, status: statusOf(parseEvents(file)) });
+  }
+  return out.sort((a, b) => a.id.localeCompare(b.id));
+}
+
 const args = process.argv.slice(2);
 const current = resolve();
 const problems = check(current);
+
+if (args.includes('--status')) {
+  const filter = args.find((a) => !a.startsWith('--'));
+  const all = allStatuses();
+  for (const n of all) {
+    if (filter && !n.id.includes(filter)) continue;
+    console.log(`${n.id.padEnd(58)} ${n.status}`);
+  }
+  process.exit(0);
+}
 
 if (args.includes('--specs')) {
   // Full specs index: read each current artifact's lock marker + link contract.
