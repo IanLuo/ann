@@ -1,3 +1,4 @@
 {"at":"2026-08-15","type":"created","note":"spawned as R4 task 01: supersede tree-format-spec v1 with v2 (rounds model)"}
 {"at":"2026-08-16","type":"artifact-locked","note":"tree-format-spec-v2.md specs-locked @ 9e37c8f (upstream design + ann-spec; referrers AGENTS.md / 02-system-design-doc / slices)"}
 {"at":"2026-08-16","type":"completed","note":"ACs met: v2 locked, v1 + depth-policy superseded, AGENTS.md + README point at v2"}
+{"at":"2026-08-16","type":"superseded","note":"artifacts/tree-format-spec-v2.md superseded by 05-engine/00/04-format-amendment-v3/artifacts/tree-format-spec-v3.md (logical name: tree-format-spec) — adds the resolution mechanism (structured event schema + derived current(name))"}
