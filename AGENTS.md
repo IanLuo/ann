@@ -36,7 +36,7 @@ design (model + invariants) → ann-spec (requirements) → tree-format-spec-v3 
 | When you need… | Read… |
 |---|---|
 | model semantics + invariants (rounds, gates, resolution ladder, provenance, fail-closed, complete artifacts, open decisions) | `tree/rounds/01-goal/artifacts/design.md` |
-| requirements (fresh spec): self-similarity invariant, configurable step chain (idea → validate → envision → specs → continue), AC-1–5, K1–K4 + failure signal, NFRs, assumptions, data, recovery, security, verification | `tree/rounds/02-grilling/01-spec-rework/artifacts/requirements-spec.md` |
+| requirements (fresh spec v3): self-similarity invariant, configurable step chain, AC-1–7, K1–K5 + failure signal, NFRs, assumptions, data, recovery, security, verification | `tree/rounds/05-engine/00/05-requirements-amendment/artifacts/requirements-spec-v3.md` (locked @ 80eeaae) |
 | the tree format contract (engine data contract): table of rounds (epics, sequential gates), parallel task groups, immutable `node.json`, append-only `events.jsonl`, status derivation, searchable `description.md`, per-node artifacts, depth policy, checkpoint/RPO | `tree/rounds/05-engine/00/04-format-amendment-v3/artifacts/tree-format-spec-v3.md` (locked @ 012ca5f) |
 | flow control: lifecycle, human gates, rejection/rework, resolution ladder, per-work-type flows | `tree/rounds/05-engine/00/01-flow-control/artifacts/flow-control-spec.md` (locked @ 2522b6c) |
 | requirements change: the amendment path (change → amendment node → complete superseding artifact → superseded event → referrer re-pointing); locked artifacts never edited | `tree/rounds/05-engine/00/03-change-protocol-amendment/artifacts/requirements-change-protocol-v2.md` (locked @ be67673) |
