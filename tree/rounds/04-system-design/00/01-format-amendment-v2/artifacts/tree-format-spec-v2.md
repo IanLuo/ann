@@ -24,7 +24,7 @@ Schema unchanged from v1. `id` = path from `tree/rounds/`. Round root: `contract
 
 ## 3. events.jsonl — append-only process log
 
-Schema unchanged from v1. One JSON object per line: `{"at","type","note"}`. Types: `created · activated · extended · evidence · artifact-locked · completed · failed · superseded` (+ `spawned` with `parent`+`order` when a child task is created). **Status = tail mapping** (v1). A round's status is derived from its root: `queued` (created) · `active` (activated) · `done` (completed, gate met). **APPEND-ONLY** — no reorder, no rewrite, no deletion.
+Schema unchanged from v1. One JSON object per line: `{"at","type","note"}`. Types: `created · activated · extended · evidence · artifact-locked · completed · failed · superseded` (+ `spawned` with `parent`+`order` when a child task is created). **Status = tail mapping** (v1). **`superseded` ANNOTATES — never overrides a `completed`/`failed` status** (a completed round whose artifact is later superseded stays `done`; only a non-completed node derives `superseded`). A round's status is derived from its root: `queued` (created) · `active` (activated) · `done` (completed, gate met). **APPEND-ONLY** — no reorder, no rewrite, no deletion.
 
 ## 4. description.md — searchable card
 
@@ -32,7 +32,7 @@ Required per node (v1 conventions +): `parent round:` line (round index + id), `
 
 ## 5. artifacts/ — per-node outputs
 
-v1 rules unchanged: outputs in the node's own `artifacts/`; artifact gate (children spawn only after `expectedOutputs` exist); artifacts immutable; supersession = new artifact + `superseded` event, never overwrite. **Round artifacts = the round's gate evidence** (e.g., a locked spec).
+v1 rules unchanged: outputs in the node's own `artifacts/`; artifact gate (children spawn only after `expectedOutputs` exist); artifacts immutable; supersession = new artifact + `superseded` event, never overwrite. **A superseding artifact is the COMPLETE merged version, never a delta** (flow-control §8) — deltas are side-notes; the current artifact is the full truth in one file. **Round artifacts = the round's gate evidence** (e.g., a locked spec).
 
 ## 6. Checkpoints & RPO
 

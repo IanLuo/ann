@@ -21,9 +21,9 @@
 
 ## 3. Scope in / out + primary flow
 
-- In (v1, design §21.12): intake · grilling → PRD-or-questions artifact · skeleton expand + validate · agent-mode node execution with context packets · artifact gate + lazy leaves · per-node deterministic validation + one repair loop · GitHub issue/PR binding · branch checkpoints + trace · renders (tree view / step cards / full plan).
+- In (v1): intake · grilling → PRD-or-questions artifact · rounds skeleton · agent-mode node execution with context packets · artifact gate · per-node deterministic validation + bounded rework · GitHub issue/PR binding · branch checkpoints + trace · renders (tree view / step cards / full plan).
 - Out (v1): joins (DAG edges) until single-branch flow proven · more than one external binding · plugins/marketplace · multi-UI · human-mode execution as the primary path · agent-created subtrees (planner-only) · **hosted/multi-tenant service (local-first)**.
-- Primary flow — one path, **agent-executed CLI run**; the user is a reviewer and question-answerer, not an executor:
+- Primary flow — one path, **agent-executed CLI run**; the system executes, the user holds the **human gates at each step end** (grilling + confirm-result per flow-control-spec):
   1. User types a vague goal into the CLI: "build me X". (Empty/greeting-only rejected at intake.)
   2. Grilling node runs → PRD-or-questions draft artifact appears; blocking questions surfaced.
   3. User answers blocking questions or accepts defaults.
@@ -32,8 +32,8 @@
   6. Verification runs: on success the node commits (checkpoint) and its artifact is recorded; on failure the subtree re-plans, bounded (§6.2, §21.5).
   7. Tree renders; user reviews step cards; partial execution only where the plan marks it safe.
   8. Goal's success definition verified → done; execution feedback flows into evals (§21.11).
-- Explicitly not v1: human/automation node *execution* (modes exist in the model; v1 executes agent-mode nodes only — human = reviewer/answerer, automation deferred).
-- Execution order: **rounds are sequential gates** (a round closes only when its goal is met); tasks within a round's group are independent and may run **in parallel** (dependent ordering via task prefix/order). Cross-round parallelism and DAG joins remain deferred (design §19).
+- Explicitly not v1: human/automation node *execution* (modes exist in the model; v1 executes agent-mode nodes only — human = gate-holder at each step end, automation deferred).
+- Execution order: **rounds are sequential gates** (a round closes only when its goal is met); tasks within a round's group are independent and may run **in parallel** (dependent ordering via task prefix/order). Cross-round parallelism and DAG joins remain deferred (flow-control §5/§9).
 - "Standard mode" in this spec = design §9 depth mode; quick/deep modes exist in the model but only standard mode is in the v1 fixture suite.
 
 ## 4. Acceptance criteria
@@ -51,8 +51,8 @@
 ## 5. KPIs & failure signal
 
 - K1 — eval runner success: fixture node executions completing with ACs verified on first pass, **≥ 85%** (v1 end; §21.11 node-level evals).
-- K2 — intake → validated skeleton latency, standard mode, **< 2 min** (trace timestamps).
-- K3 — questions asked per plan, standard mode, **≤ 3** (§8 human-interaction policy).
+- K2 — intake → validated skeleton latency, standard mode, **< 2 min machine time, excluding human wait** (trace timestamps).
+- K3 — **blocking questions** asked per plan (NOT gate approvals), standard mode, **≤ 3** (flow-control §4).
 - K4 — subtree re-plans per completed branch, **≤ 2 on average across the eval fixture suite** (trace route history; AC4 remains the per-node hard bound of 3).
 - **Failure signal (the "this bet was wrong" metric):** K4 exceeds **5 re-plans per branch** across eval fixtures → the tree model itself is wrong (skeleton quality, context packets, or artifact gates), not individual node bugs. Stop feature work and re-plan the model.
 - All targets measured against the eval fixture suite (§11). Not launch gates; measured continuously from the first fixture.

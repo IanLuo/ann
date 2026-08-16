@@ -19,7 +19,8 @@
 | Component | One-line job | Refuses to | Owner (slice) |
 |---|---|---|---|
 | **Tree store** | Reads/writes rounds, nodes, events, artifacts per format v2; builds the in-memory tree; enforces schema, append-only, immutability, round gate | Rewrite history · reorder/delete events · spawn round N+1 before N's `completed` · accept unknown fields/types | S1 |
-| **Planner kernel** | Orchestrates node lifecycle (spawn → materialize → validate → execute → verify → commit), frontmost-ready selection, subtree re-plan with route reasons + bounds | Edit nodes · run unbounded loops · execute unverified nodes · spawn children before the artifact gate | S1/S5 |
+| **Planner kernel** | Orchestrates node lifecycle per flow-control-spec (spawn → materialize → gates → validate → activate → execute → verify → commit), frontmost-ready selection, bounded rework + chain append | Edit nodes · run unbounded loops · skip a human gate · spawn children before the artifact gate | S1/S5 |
+| **Human interface** | Presents step cards + artifacts at the human gates (GATE① grilling, GATE② confirm-result); collects accept/reject + feedback (talk v1; interactive HTML via plugins) | Skip a gate · fabricate an acceptance · invent feedback | S8 |
 | **Grilling engine** | Runs the requirement grilling step (template + LLM) → PRD or open-questions artifact | Invent facts · fake precision on novel work (§21.6) | S2 |
 | **Context assembler** | Materializes per-node context packets (deterministic 6-layer, §21.7) | Include unprovenanced facts · put the whole tree in a packet · let LLM summarization override the deterministic skeleton | S3 |
 | **Validators** | Deterministic checks: schema, artifact gate, append-only, round gate, distance-to-goal as set, redaction | Judgment calls (that is the reviewer's job) · scalar progress numbers | S4 |
@@ -58,6 +59,7 @@
 | Tree store | Disk full/write error → commit fails **fail-closed**, node not marked done; resume from last checkpoint (RPO=0) | Schema violation → validation refuses with the violating path | fail-closed |
 | Context assembler | Missing required input → packet incomplete → node **blocked** naming the missing input | — | fail-closed |
 | GitHub binding | Down → action **fails-closed** (no fake success), node blocked, retry ≤3 | Non-2xx → recorded as failed action with response | fail-closed |
+| Human interface | Human unreachable/unresponsive → step stays `blocked`, blocker named; no timeout-fabrication | — | fail-closed |
 | Runner reviewer | Model failure → verdict `confusion` (safe default) → bounded repair loop | — | fail-closed |
 | Renderers | — | Corrupt tree → refuse render, name the invalid node | fail-closed |
 | Eval harness | Fixture fails to run → counted as FAIL (no silent skip) | — | fail-closed |
