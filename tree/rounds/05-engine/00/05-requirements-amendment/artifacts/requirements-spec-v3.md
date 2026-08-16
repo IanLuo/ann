@@ -1,5 +1,10 @@
-# Ann Requirements Spec (v3)
+<!-- specs:locked:80eeaae 2026-08-16 type=spec -->
 
+## Link contract
+- **upstream** (this doc relies on): tree/rounds/01-goal/artifacts/design.md
+- **referrers** (must cite this when they change): tree-format-spec,flow-control-spec change-protocol,ann-system-design implementation slices,review-task
+
+# Ann Requirements Spec (v3)
 *Artifact of task `05-engine/00/05-requirements-amendment`. Type: spec. Complete superseding version — v2 (locked @ 89ace76) + the audit-gap closures (K5 · AC-6 · AC-7 · D3). Produced per the change protocol: amendment node → complete artifact → superseded event. Upstream: `tree/rounds/01-goal/artifacts/design.md` (v3, locked). Referrers: tree-format-spec · flow-control-spec · change-protocol · ann-system-design · implementation slices · review-task.*
 
 ## 1. Problem & who breaks
