@@ -2,3 +2,4 @@
 {"at":"2026-08-16","type":"artifact-locked","note":"tree-format-spec-v4.md specs-locked — store-review closures in force (logical name: tree-format-spec)"}
 {"at":"2026-08-16","type":"completed","note":"all 7 review closures in the complete v4; v3 superseded"}
 {"at":"2026-08-17","type":"confirmed","gate":"confirm","note":"user confirmed via gate2-confirmation report (confirm-all)"}
+{"at":"2026-08-17","type":"superseded","note":"artifacts/tree-format-spec-v4.md superseded by 11-format-amendment-v5/artifacts/tree-format-spec-v5.md (logical name: tree-format-spec) — gate events + completion rule"}
