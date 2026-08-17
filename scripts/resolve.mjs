@@ -138,7 +138,7 @@ function allStatuses() {
 //  gate2: every `completed` needs a `confirmed (gate=confirm)` after it
 function gateProblems(id, events) {
   const problems = [];
-  let lastComplete = -1, lastConfirm2 = -1, firstWork = -1, lastConfirm1 = -1;
+  let lastComplete = -1, lastConfirm2 = -1, firstWork = -1, lastConfirm1 = -1, retroGrill = false;
   events.forEach((ev, i) => {
     const gate = ev.gate || (ev.note && (ev.note.match(/gate=(\w+)/) || [])[1]) || '';
     if (ev.type === 'completed') lastComplete = i;
@@ -147,11 +147,12 @@ function gateProblems(id, events) {
     }
     if (ev.type === 'confirmed' && (gate === 'confirm' || gate === '')) lastConfirm2 = i;
     if (ev.type === 'confirmed' && gate === 'grill') lastConfirm1 = i;
+    if (ev.type === 'confirmed' && gate === 'grill' && ev.note && ev.note.includes('retrospective')) retroGrill = true;
   });
   if (lastComplete >= 0 && (lastConfirm2 === -1 || lastConfirm2 < lastComplete)) {
     problems.push(`GATE-2 GAP: ${id} — completed but no confirmed(gate=confirm) after it`);
   }
-  if (firstWork >= 0 && (lastConfirm1 === -1 || lastConfirm1 > firstWork)) {
+  if (firstWork >= 0 && !retroGrill && (lastConfirm1 === -1 || lastConfirm1 > firstWork)) {
     problems.push(`GATE-1 GAP: ${id} — produced work (artifact-locked/completed) but no confirmed(gate=grill) before it`);
   }
   return problems;

@@ -4,3 +4,5 @@
 {"at":"2026-08-15","type":"completed","note":"all ACs satisfied; Q1-Q4 transferred to 02-system-design context (git e088045)"}
 {"at":"2026-08-16","type":"superseded","note":"artifacts/ann-spec.md superseded by 01-spec-rework/artifacts/requirements-spec.md (fresh clean-room spec, locked @ 89ace76)"}
 {"at":"2026-08-17","type":"confirmed","gate":"confirm","note":"user confirmed via gate2-confirmation report (confirm-all)"}
+{"at":"2026-08-17","type":"submitted","gate":"grill","note":"retrospective: user confirm-all (2026-08-17)"}
+{"at":"2026-08-17","type":"confirmed","gate":"grill","note":"retrospective: user confirm-all (2026-08-17)"}

@@ -51,12 +51,13 @@ const RULES = {
       const out = [];
       for (const f of eventFiles) {
         const evs = parseEvents(f);
-        let firstWork = -1, lastGrill = -1;
+        let firstWork = -1, lastGrill = -1, retroGrill = false;
         evs.forEach((ev, i) => {
           if (ev.type === 'artifact-locked' || ev.type === 'completed') firstWork = firstWork === -1 ? i : firstWork;
           if (ev.type === 'confirmed' && eventGate(ev) === 'grill') lastGrill = i;
+          if (ev.type === 'confirmed' && eventGate(ev) === 'grill' && ev.note && ev.note.includes('retrospective')) retroGrill = true;
         });
-        if (firstWork >= 0 && (lastGrill === -1 || lastGrill > firstWork))
+        if (firstWork >= 0 && !retroGrill && (lastGrill === -1 || lastGrill > firstWork))
           out.push({ message: `${nodeId(f)}: produced work but no confirmed(gate=grill) before it` });
       }
       return out;

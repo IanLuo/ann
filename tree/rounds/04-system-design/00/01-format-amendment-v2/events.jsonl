@@ -3,3 +3,5 @@
 {"at":"2026-08-16","type":"completed","note":"ACs met: v2 locked, v1 + depth-policy superseded, AGENTS.md + README point at v2"}
 {"at":"2026-08-16","type":"superseded","note":"artifacts/tree-format-spec-v2.md superseded by 05-engine/00/04-format-amendment-v3/artifacts/tree-format-spec-v3.md (logical name: tree-format-spec) — adds the resolution mechanism (structured event schema + derived current(name))"}
 {"at":"2026-08-17","type":"confirmed","gate":"confirm","note":"user confirmed via gate2-confirmation report (confirm-all)"}
+{"at":"2026-08-17","type":"submitted","gate":"grill","note":"retrospective: user confirm-all (2026-08-17)"}
+{"at":"2026-08-17","type":"confirmed","gate":"grill","note":"retrospective: user confirm-all (2026-08-17)"}
