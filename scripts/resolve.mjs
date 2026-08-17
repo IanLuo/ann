@@ -162,6 +162,32 @@ const args = process.argv.slice(2);
 const current = resolve();
 const problems = check(current);
 
+if (args[0] === 'confirm') {
+  // GATE PRESENTATION — what to check, derived from the tree (functional-spec F7).
+  // Usage: node scripts/resolve.mjs confirm <node-id>
+  const id = args[1];
+  if (!id) { console.error('usage: resolve.mjs confirm <node-id>'); process.exit(2); }
+  const dir = join(ROOT, 'tree', 'rounds', id);
+  const node = JSON.parse(readFileSync(join(dir, 'node.json'), 'utf8'));
+  const evs = parseEvents(join(dir, 'events.jsonl'));
+  const status = statusOf(evs);
+  console.log(`NODE: ${id}  [${status}]`);
+  console.log(`\nINTENT: ${node.contract && node.contract.intent}`);
+  console.log(`\nWHAT TO CHECK — acceptance criteria (every one must be met + evidenced):`);
+  (node.contract && node.contract.acceptanceCriteria || []).forEach((ac, i) => console.log(`  ${i + 1}. ${ac}`));
+  console.log(`\nARTIFACT(S) PRODUCED:`);
+  for (const ev of evs) if (ev.type === 'artifact-locked') {
+    const a = ev.artifact || {};
+    console.log(`  - ${a.name || '?'} @ ${a.lockSha || ev.note} → ${a.path || 'see note'}`);
+  }
+  const evidence = evs.filter((e) => e.type === 'evidence').map((e) => e.note);
+  if (evidence.length) { console.log(`\nEVIDENCE:`); evidence.forEach((e) => console.log(`  - ${e}`)); }
+  const gates = evs.filter((e) => ['submitted','confirmed','rejected'].includes(e.type)).map((e) => `${e.type}(${e.gate || '?'})${e.feedback ? ' fb:' + e.feedback : ''}`);
+  if (gates.length) { console.log(`\nGATES:`); gates.forEach((g) => console.log(`  - ${g}`)); }
+  console.log(`\n→ verify each AC against the artifact + evidence, then confirm or reject + reason.`);
+  process.exit(0);
+}
+
 if (args.includes('--journey')) {
   // LOOK-BACK (the observer action): where we are + what's ahead, derived from the log.
   // Not an assumption — every line below is read from events/gates/statuses.
