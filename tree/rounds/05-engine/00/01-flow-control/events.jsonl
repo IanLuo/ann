@@ -6,3 +6,4 @@
 {"at":"2026-08-17","type":"confirmed","gate":"confirm","note":"user confirmed via gate2-confirmation report (confirm-all)"}
 {"at":"2026-08-17","type":"submitted","gate":"grill","note":"retrospective: user confirm-all (2026-08-17)"}
 {"at":"2026-08-17","type":"confirmed","gate":"grill","note":"retrospective: user confirm-all (2026-08-17)"}
+{"at":"2026-08-17","type":"superseded","note":"artifacts/flow-control-spec.md (v1) superseded by 13-flow-control-amendment/artifacts/flow-control-spec-v2.md (logical name: flow-control-spec) — adds the LOOK-BACK step"}

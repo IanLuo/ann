@@ -1,0 +1,21 @@
+{
+  "id": "05-engine/00/13-flow-control-amendment",
+  "contract": {
+    "intent": "Amend flow-control-spec (v1) to v2 — the LOOK-BACK step: when a task completes, the engine reviews the journey briefly (statuses, gates, artifacts, round state — derived from the log), determines where we are + what's ahead, and grounds the next-task proposal in that — never assumed. The observer action (design v3). Powers F5 run next. Produces a COMPLETE superseding artifact.",
+    "acceptanceCriteria": [
+      "flow-control-spec-v2.md artifact exists — complete doc = v1 content + the look-back step",
+      "Lifecycle gains: commit → LOOK-BACK (journey review from events) → determine next (grounded) → propose/advance",
+      "activate/frontmost-ready redefined as the OUTPUT of the look-back (prefix orders; readiness gate-validated; never assumed)",
+      "Round-advance decided from the look-back (round gate validated from the log)",
+      "Look-back implemented pre-engine: scripts/resolve.mjs --journey (where we are + what's ahead)",
+      "v2 locked (type=spec); v1 gets a superseded event; resolver/AGENTS point at v2"
+    ],
+    "targetAreas": ["artifacts/flow-control-spec-v2.md", "scripts/resolve.mjs"],
+    "requiredInputs": [
+      "05-engine/00/01-flow-control/artifacts/flow-control-spec.md (v1, locked @ 2522b6c)",
+      "User decision: at completion, look back — check the journey, find what's ahead, ground the next task (no assumption)"
+    ],
+    "expectedOutputs": ["flow-control-spec-v2.md (locked, complete)"]
+  },
+  "createdAt": "2026-08-17"
+}
