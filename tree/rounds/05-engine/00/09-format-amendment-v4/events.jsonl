@@ -1,1 +1,3 @@
 {"at":"2026-08-16","type":"created","note":"spawned per the store review: format v3 -> v4 amendment, complete superseding artifact. Closes 7 findings incl. file ownership/write timing + description.md frontmatter."}
+{"at":"2026-08-16","type":"artifact-locked","note":"tree-format-spec-v4.md specs-locked — store-review closures in force (logical name: tree-format-spec)"}
+{"at":"2026-08-16","type":"completed","note":"all 7 review closures in the complete v4; v3 superseded"}
