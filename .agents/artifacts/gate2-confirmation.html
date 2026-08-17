@@ -13,22 +13,24 @@
   :root { color-scheme: light dark;
           --sug:#4a7dff; --imp:#e8a33d; --crit:#e5484d; --amber:#e8a33d;
           --paper:      light-dark(#f6f1e3, #1d1a15);   /* newsprint */
-          --ink:        light-dark(#1a1a1a, #e8e2d3);
+          --ink:        light-dark(#4d4943, #c9c2b2);   /* body ink — clearly muted warm gray */
+          --ink-strong: light-dark(#33302c, #e0dbcc);   /* headings — softer than before */
           --ink-soft:   light-dark(#00000045, #ffffff45);  /* muted text */
-          --rule:       light-dark(rgba(26,26,26,.30), rgba(232,226,211,.30));  /* decorative lines — faint, never text-weight */
+          --rule:       light-dark(rgba(26,26,26,.26), rgba(232,226,211,.26));  /* decorative lines — fainter */
           --border:     light-dark(#0000002e, #ffffff2e); }  /* thin, light border */
   body { font-family: Georgia, "Times New Roman", serif; background: var(--paper); color: var(--ink);
-         max-width: 46rem; margin: 2rem auto; padding: 2.5rem 3rem; line-height: 1.7; font-size: 1.05rem; }
+         max-width: 46rem; margin: 2rem auto; padding: 2.5rem 3rem; line-height: 1.8; font-size: .96rem;
+         font-weight: 400; }
 
-  /* Masthead — the artifact title as a newspaper nameplate. Faint double rule. */
-  h1[data-anchor="title"] { font-size: 2.6rem; font-weight: 700; line-height: 1.1;
+  /* Masthead — the artifact title as a newspaper nameplate. Narrow, faint double rule. */
+  h1[data-anchor="title"] { font-size: 2rem; font-weight: 500; line-height: 1.15; color: var(--ink-strong);
          text-align: center; letter-spacing: .01em; margin: 0 0 .4rem;
-         border-bottom: 4px double var(--rule); padding-bottom: .8rem; }
+         border-bottom: 2px double var(--rule); padding-bottom: .8rem; }
 
-  /* Section rules — classic newspaper sub-head rule, faint. */
-  h2 { font-size: 1.4rem; font-weight: 700; margin: 1.9rem 0 .5rem;
-       border-bottom: 2px solid var(--rule); padding-bottom: .25rem; }
-  h3 { font-size: 1.15rem; font-weight: 700; margin: 1.4rem 0 .3rem; }
+  /* Section rules — classic newspaper sub-head rule, faint and thin. */
+  h2 { font-size: 1.12rem; font-weight: 500; color: var(--ink-strong); margin: 1.6rem 0 .45rem;
+       border-bottom: 1px solid var(--rule); padding-bottom: .25rem; }
+  h3 { font-size: .98rem; font-weight: 500; color: var(--ink-strong); margin: 1.1rem 0 .3rem; }
 
   p { margin: .55rem 0; }
   ul, ol { margin: .5rem 0 .5rem 1.4rem; padding: 0; }
@@ -116,54 +118,53 @@
      between iterations — the pasted feedback resolves by id.
      ============================================================ -->
 
-<h1 data-anchor="title">Gate② Confirmation — Pending Nodes</h1>
-<p style="text-align:center;color:var(--ink-soft);font-size:.9rem;">Every node completed without your confirmation · click a node to annotate: <b>confirm</b>, or <b>reject + feedback</b> · then Done and paste back</p>
+<h1 data-anchor="title">Gate² Confirmation — 17 nodes, one action</h1>
+<p style="text-align:center;color:var(--ink-soft);font-size:.9rem;">Each node shows: <b>what it produced → the point (what you're accepting)</b> → confirm or reject+reason · default = all confirm · exceptions carry feedback</p>
 
-<h2 data-anchor="section-rule">The rule this fixes</h2>
-<p data-anchor="rule-flow">Flow-control §6: <code>done ⇔ ACs + evidence + artifact + gate② accepted</code>. We recorded <code>completed</code> events without the gate② confirm — the confirm action was designed (functional-spec F7 talk-loop) but <b>unrecordable</b>: the event schema has no gate events.</p>
-<p data-anchor="rule-design">Design (format v5): <code>submitted</code> (node presented at gate) · <code>confirmed</code> (gate accepted) · <code>rejected</code> (gate rejected + feedback) — each with <code>gate: "grill" | "confirm"</code>. A node with <code>submitted</code> but no decision = <b>blocked</b>; <code>completed</code> may be written <b>only after</b> <code>confirmed (gate=confirm)</code>.</p>
+<h2 data-anchor="section-template">The confirmation template (standard, functional-spec F7)</h2>
+<p data-anchor="template-shape"><b>[node]</b> produced <b>[artifact, logical name, lock sha]</b> — <b>the point:</b> <em>one line stating what you're accepting</em> — action: <b>✓ confirm as done</b> | <b>✗ reject + reason</b>. No re-reading required; a confirmed node needs no further work.</p>
 
-<h2 data-anchor="section-pending">Pending gate② confirmations (14)</h2>
+<h2 data-anchor="section-batch">Batch — 17 nodes awaiting gate²</h2>
 
-<h3 data-anchor="r1">R1 — goal (round)</h3>
-<ul data-anchor="r1-nodes">
-  <li data-anchor="node-r1-goal">01-goal — artifact: design v3, goal.md — <em>confirm?</em></li>
+<h3 data-anchor="h-r1">R1 · goal</h3>
+<ul data-anchor="nodes-r1">
+  <li data-anchor="node-01-goal"><b>01-goal</b> → design v3 + goal.md <i>(logical: design)</i> — <b>point:</b> the project goal + success definition are correct — <em>confirm?</em></li>
 </ul>
 
-<h3 data-anchor="r2">R2 — grilling (round)</h3>
-<ul data-anchor="r2-nodes">
-  <li data-anchor="node-r2-grilling">02-grilling — artifact: requirements-spec v3 — <em>confirm?</em></li>
-  <li data-anchor="node-r2-spec-rework">02-grilling/01-spec-rework — produced requirements-spec — <em>confirm?</em></li>
+<h3 data-anchor="h-r2">R2 · grilling</h3>
+<ul data-anchor="nodes-r2">
+  <li data-anchor="node-02-grilling"><b>02-grilling</b> → round artifacts — <b>point:</b> the requirements round is valid — <em>confirm?</em></li>
+  <li data-anchor="node-02-spec-rework"><b>02-grilling/01-spec-rework</b> → requirements-spec <i>(v2, superseded)</i> — <b>point:</b> the fresh clean-room requirements contract was correct — <em>confirm?</em></li>
 </ul>
 
-<h3 data-anchor="r3">R3 — tree-format (round)</h3>
-<ul data-anchor="r3-nodes">
-  <li data-anchor="node-r3-tree-format">03-tree-format — artifact: format v1 (superseded by v4) — <em>confirm?</em></li>
+<h3 data-anchor="h-r3">R3 · tree-format</h3>
+<ul data-anchor="nodes-r3">
+  <li data-anchor="node-03-tree-format"><b>03-tree-format</b> → format v1 <i>(superseded by v4)</i> — <b>point:</b> the format round's work is accepted; current = v4 — <em>confirm?</em></li>
 </ul>
 
-<h3 data-anchor="r4">R4 — system-design (round)</h3>
-<ul data-anchor="r4-nodes">
-  <li data-anchor="node-r4-sysdesign">04-system-design — artifacts: format v2 (superseded), system-design v1 (superseded) — <em>confirm?</em></li>
-  <li data-anchor="node-r4-format-v2">04-system-design/00/01-format-amendment-v2 — produced format v2 (superseded) — <em>confirm?</em></li>
-  <li data-anchor="node-r4-sysdesign-doc">04-system-design/00/02-system-design-doc — produced system-design v1 (superseded) — <em>confirm?</em></li>
+<h3 data-anchor="h-r4">R4 · system-design</h3>
+<ul data-anchor="nodes-r4">
+  <li data-anchor="node-04-sysdesign"><b>04-system-design</b> → round artifacts — <b>point:</b> the system-design round is valid — <em>confirm?</em></li>
+  <li data-anchor="node-04-format-v2"><b>04-system-design/00/01-format-amendment-v2</b> → format v2 <i>(superseded by v4)</i> — <b>point:</b> accepted — <em>confirm?</em></li>
+  <li data-anchor="node-04-sysdesign-doc"><b>04-system-design/00/02-system-design-doc</b> → system-design v1 <i>(superseded by v2)</i> — <b>point:</b> accepted — <em>confirm?</em></li>
 </ul>
 
-<h3 data-anchor="r5">R5 — engine (round tasks, all done)</h3>
-<ul data-anchor="r5-nodes">
-  <li data-anchor="node-r5-flow-control">05-engine/00/01-flow-control — flow-control-spec — <em>confirm?</em></li>
-  <li data-anchor="node-r5-change-protocol">05-engine/00/02-change-protocol — change-protocol v1 (superseded) — <em>confirm?</em></li>
-  <li data-anchor="node-r5-change-amendment">05-engine/00/03-change-protocol-amendment — change-protocol v2 — <em>confirm?</em></li>
-  <li data-anchor="node-r5-format-v3">05-engine/00/04-format-amendment-v3 — format v3 (superseded) — <em>confirm?</em></li>
-  <li data-anchor="node-r5-req-amendment">05-engine/00/05-requirements-amendment — requirements-spec v3 — <em>confirm?</em></li>
-  <li data-anchor="node-r5-functional">05-engine/00/06-functional-spec — functional-spec — <em>confirm?</em></li>
-  <li data-anchor="node-r5-arch">05-engine/00/07-architecture — architecture — <em>confirm?</em></li>
-  <li data-anchor="node-r5-validation">05-engine/00/08-system-design-validation — conformance report — <em>confirm?</em></li>
-  <li data-anchor="node-r5-format-v4">05-engine/00/09-format-amendment-v4 — format v4 — <em>confirm?</em></li>
-  <li data-anchor="node-r5-sysdesign-v2">05-engine/00/10-system-design-amendment — system-design v2 — <em>confirm?</em></li>
+<h3 data-anchor="h-r5">R5 · engine — spec tasks</h3>
+<ul data-anchor="nodes-r5">
+  <li data-anchor="node-05-flow-control"><b>05-engine/00/01-flow-control</b> → flow-control-spec — <b>point:</b> the workflow semantics (lifecycle, gates, ladder, flows) are correct — <em>confirm?</em></li>
+  <li data-anchor="node-05-change-v1"><b>05-engine/00/02-change-protocol</b> → change-protocol v1 <i>(superseded by v2)</i> — <b>point:</b> accepted — <em>confirm?</em></li>
+  <li data-anchor="node-05-change-v2"><b>05-engine/00/03-change-protocol-amendment</b> → change-protocol v2 — <b>point:</b> the amendment path (logical-name resolution) is correct — <em>confirm?</em></li>
+  <li data-anchor="node-05-format-v3"><b>05-engine/00/04-format-amendment-v3</b> → format v3 <i>(superseded by v4)</i> — <b>point:</b> accepted — <em>confirm?</em></li>
+  <li data-anchor="node-05-req-v3"><b>05-engine/00/05-requirements-amendment</b> → requirements-spec v3 — <b>point:</b> the audit closures (K5, AC-6/7, D3) are correct — <em>confirm?</em></li>
+  <li data-anchor="node-05-functional"><b>05-engine/00/06-functional-spec</b> → functional-spec — <b>point:</b> the function surface F1–F17 + interaction model are correct — <em>confirm?</em></li>
+  <li data-anchor="node-05-arch"><b>05-engine/00/07-architecture</b> → architecture — <b>point:</b> the load-bearing structure (layers, concurrency, two-log) is correct — <em>confirm?</em></li>
+  <li data-anchor="node-05-validation"><b>05-engine/00/08-system-design-validation</b> → conformance report — <b>point:</b> the conformance findings + routing are accepted — <em>confirm?</em></li>
+  <li data-anchor="node-05-format-v4"><b>05-engine/00/09-format-amendment-v4</b> → format v4 — <b>point:</b> the store-review closures (file ownership, frontmatter, append-order) are correct — <em>confirm?</em></li>
+  <li data-anchor="node-05-sysdesign-v2"><b>05-engine/00/10-system-design-amendment</b> → system-design v2 — <b>point:</b> the conformance closures (per-task models, two-log) are correct — <em>confirm?</em></li>
 </ul>
 
-<h2 data-anchor="section-action">The action</h2>
-<p data-anchor="action-batch">Annotate each node <b>confirm</b> (or reject + feedback). When you paste back, I append <code>confirmed (gate=confirm)</code> to each confirmed node, record rejections, spawn <b>format v5</b> (gate events + completion rule + F-AC), and from now on every node completion passes through gate② — recorded, not assumed.</p>
+<h2 data-anchor="section-action">The action — no meaningless work</h2>
+<p data-anchor="action-confirm-all"><b>Confirm all = one action.</b> Paste back "confirm all" (or annotate any node <b>reject</b> + reason). I append <code>confirmed (gate=confirm)</code> via the append script for every accepted node, run <code>--check</code> to prove the gaps cleared to zero, then spawn format v5 (gate events as spec) and start the build. Confirmed nodes are done — no further review, ever.</p>
 
 
 <!-- Required chrome markup — keep verbatim. -->

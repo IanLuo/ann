@@ -3,3 +3,4 @@
 {"at":"2026-08-16","type":"artifact-locked","note":"requirements-change-protocol.md specs-locked @ 90e53ad — the only path for requirements change going forward"}
 {"at":"2026-08-16","type":"completed","note":"protocol ACs met: amendment path, immutability hard rule, engine enforcement, normal-case framing, locked"}
 {"at":"2026-08-16","type":"superseded","note":"artifacts/requirements-change-protocol.md (v1) superseded by 03-change-protocol-amendment/artifacts/requirements-change-protocol-v2.md — adds logical-name resolution (references resolvable, not kept fresh)"}
+{"at":"2026-08-17","type":"confirmed","gate":"confirm","note":"user confirmed via gate2-confirmation report (confirm-all)"}

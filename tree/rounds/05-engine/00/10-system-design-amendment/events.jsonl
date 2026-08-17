@@ -1,3 +1,4 @@
 {"at":"2026-08-17","type":"created","note":"spawned per conformance routing: E-1/E-2 errors -> change-protocol amendment of ann-system-design; W-1..W-3 folded"}
 {"at":"2026-08-17","type":"artifact-locked","note":"ann-system-design-v2.md system-design-locked — conformance closed (logical name: ann-system-design)"}
 {"at":"2026-08-17","type":"completed","note":"E-1/E-2 + W-1..W-3 all closed in the complete v2; v1 superseded"}
+{"at":"2026-08-17","type":"confirmed","gate":"confirm","note":"user confirmed via gate2-confirmation report (confirm-all)"}

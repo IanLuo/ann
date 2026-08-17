@@ -4,3 +4,4 @@
 {"at":"2026-08-15","type":"extended","note":"01-depth-policy amendment: depth policy supersedes §1 layout + §7 engine ACs where noted (F-AC9 sibling retry, F-AC10 prune)"}
 {"at":"2026-08-15","type":"superseded","note":"artifacts/tree-format-spec.md (v1) superseded by tree-format-spec-v2.md (R4 task 01, rounds model)"}
 {"at":"2026-08-15","type":"superseded","note":"01-depth-policy draft absorbed into tree-format-spec-v2.md §8"}
+{"at":"2026-08-17","type":"confirmed","gate":"confirm","note":"user confirmed via gate2-confirmation report (confirm-all)"}

@@ -3,3 +3,4 @@
 {"at":"2026-08-16","type":"artifact-locked","note":"ann-system-design.md system-design-locked @ ca32421 (upstream design + ann-spec + tree-format-spec-v2)"}
 {"at":"2026-08-16","type":"completed","note":"all 5 ladder rungs + Q1-Q4 resolution in artifact; task ACs met"}
 {"at":"2026-08-17","type":"superseded","note":"artifacts/ann-system-design.md (v1) superseded by 05-engine/00/10-system-design-amendment/artifacts/ann-system-design-v2.md (logical name: ann-system-design) — conformance closures E-1/E-2/W-1..W-3"}
+{"at":"2026-08-17","type":"confirmed","gate":"confirm","note":"user confirmed via gate2-confirmation report (confirm-all)"}

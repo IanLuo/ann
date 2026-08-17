@@ -2,3 +2,4 @@
 {"at":"2026-08-15","type":"extended","note":"task group spawned in 00/: 01-format-amendment-v2, 02-system-design-doc; round gate = both tasks' artifacts locked"}
 {"at":"2026-08-16","type":"extended","note":"Q1-Q4 resolved (system-design §0): Node.js+TS runtime; adapter-first OpenAI-compatible provider; file-based store (no SQLite in v1); CLI UI"}
 {"at":"2026-08-16","type":"completed","note":"R4 gate met — both task artifacts locked (tree-format-spec-v2 @ 9e37c8f, ann-system-design @ ca32421)"}
+{"at":"2026-08-17","type":"confirmed","gate":"confirm","note":"user confirmed via gate2-confirmation report (confirm-all)"}

@@ -1,3 +1,4 @@
 {"at":"2026-08-16","type":"created","note":"spawned per /grill audit: functional-spec is the missing experience layer (functions + interaction + views), before architecture and the build"}
 {"at":"2026-08-16","type":"artifact-locked","note":"functional-spec.md specs-locked — surface F1-F17 + settled decisions + interaction model"}
 {"at":"2026-08-16","type":"completed","note":"surface + flow decisions + interaction model locked; deep detail delegated to slice task contracts"}
+{"at":"2026-08-17","type":"confirmed","gate":"confirm","note":"user confirmed via gate2-confirmation report (confirm-all)"}

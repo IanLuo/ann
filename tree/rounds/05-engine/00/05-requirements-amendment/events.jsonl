@@ -1,3 +1,4 @@
 {"at":"2026-08-16","type":"created","note":"spawned per change-protocol §3 (audit -> amendment): closes the /grill /specs audit gaps — K5 completion metric, AC-6 self-similarity, AC-7 requirements change, D3 binding dependency"}
 {"at":"2026-08-16","type":"artifact-locked","note":"requirements-spec-v3.md specs-locked — audit gaps closed (logical name: requirements-spec)"}
 {"at":"2026-08-16","type":"completed","note":"amendment ACs met: K5/AC-6/AC-7/D3 + verification in the complete v3; v2 superseded"}
+{"at":"2026-08-17","type":"confirmed","gate":"confirm","note":"user confirmed via gate2-confirmation report (confirm-all)"}

@@ -16,7 +16,7 @@
  * else derive from the artifact filename minus a version suffix (-vN).
  */
 
-import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync, statSync, appendFileSync } from 'node:fs';
 import { join, dirname, basename } from 'node:path';
 
 const ROOT = process.cwd();
@@ -217,7 +217,7 @@ if (args[0] === 'append') {
     console.error(`append rejected: bad schema (at + known type required, got ${ev.type})`); process.exit(1);
   }
   const line = JSON.stringify(ev) + '\n';
-  require('node:fs').appendFileSync(file, line);
+  appendFileSync(file, line);
   const problems = gateProblems(id, parseEvents(file));
   console.log(`appended ${ev.type}${ev.gate ? ' (gate=' + ev.gate + ')' : ''} → ${id}`);
   if (problems.length) { console.error(problems.join('\n')); process.exit(1); }
