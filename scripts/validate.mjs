@@ -80,9 +80,10 @@ const RULES = {
     },
   },
   'event-schema': {
-    check: () => {
+    check: (params) => {
       const TYPES = ['created','activated','extended','evidence','artifact-locked','completed','failed','superseded','submitted','confirmed','rejected'];
       const out = [];
+      const legacy = params.legacyProse === true;
       for (const f of eventFiles) {
         readFileSync(f, 'utf8').split('\n').forEach((raw, i) => {
           const l = raw.trim();
@@ -91,8 +92,10 @@ const RULES = {
           try { ev = JSON.parse(l); } catch { out.push({ message: `${nodeId(f)}:${i + 1}: invalid JSON` }); return; }
           if (!ev.at || !ev.type || !TYPES.includes(ev.type))
             out.push({ message: `${nodeId(f)}:${i + 1}: bad schema (at + known type required, got type=${ev.type})` });
-          if (ev.type === 'artifact-locked' && !ev.artifact) out.push({ message: `${nodeId(f)}:${i + 1}: artifact-locked missing structured artifact` });
-          if (ev.type === 'superseded' && !ev.successor) out.push({ message: `${nodeId(f)}:${i + 1}: superseded missing structured successor` });
+          if (ev.type === 'artifact-locked' && !ev.artifact)
+            out.push({ message: `${nodeId(f)}:${i + 1}: artifact-locked missing structured artifact${legacy ? ' (legacy prose)' : ''}`, info: legacy });
+          if (ev.type === 'superseded' && !ev.successor)
+            out.push({ message: `${nodeId(f)}:${i + 1}: superseded missing structured successor${legacy ? ' (legacy prose)' : ''}`, info: legacy });
         });
       }
       return out;
@@ -208,7 +211,7 @@ for (const r of rulesCfg) {
   if (!r.enabled || (target && r.id !== target)) continue;
   const rule = RULES[r.id];
   if (!rule) { findings.push({ id: r.id, severity: 'error', message: `rule '${r.id}' has no implementation` }); continue; }
-  for (const f of rule.check(r.params || {})) findings.push({ id: r.id, severity: r.severity, message: f.message });
+  for (const f of rule.check(r.params || {})) findings.push({ id: r.id, severity: f.info ? 'info' : r.severity, message: f.message });
 }
 
 const bySev = { error: [], warning: [], info: [] };
@@ -216,5 +219,6 @@ for (const f of findings) (bySev[f.severity] || bySev.warning).push(f);
 
 if (bySev.error.length) { console.error(`ERROR (${bySev.error.length}):`); bySev.error.forEach((f) => console.error(`  [${f.id}] ${f.message}`)); }
 if (bySev.warning.length) { console.log(`WARNING (${bySev.warning.length}):`); bySev.warning.forEach((f) => console.log(`  [${f.id}] ${f.message}`)); }
+if (bySev.info.length) { console.log(`INFO (${bySev.info.length}):`); bySev.info.slice(0, 5).forEach((f) => console.log(`  [${f.id}] ${f.message}`)); if (bySev.info.length > 5) console.log(`  … ${bySev.info.length - 5} more`); }
 console.log(bySev.error.length === 0 && bySev.warning.length === 0 ? 'OK — no findings.' : `${bySev.error.length} error(s), ${bySev.warning.length} warning(s).`);
 process.exit(bySev.error.length === 0 ? (allowWarnings ? 0 : 0) : 1);
