@@ -1,0 +1,223 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Store-Format Review — v3 audit</title>
+<style>
+  :root { color-scheme: light dark;
+          --sug:#4a7dff; --imp:#e8a33d; --crit:#e5484d; --amber:#e8a33d;
+          --paper:      light-dark(#f6f1e3, #1d1a15);
+          --ink:        light-dark(#1a1a1a, #e8e2d3);
+          --ink-soft:   light-dark(#00000045, #ffffff45);
+          --rule:       light-dark(rgba(26,26,26,.30), rgba(232,226,211,.30));
+          --border:     light-dark(#0000002e, #ffffff2e); }
+  body { font-family: Georgia, "Times New Roman", serif; background: var(--paper); color: var(--ink);
+         max-width: 46rem; margin: 2rem auto; padding: 2.5rem 3rem; line-height: 1.7; font-size: 1.05rem; }
+  h1[data-anchor="title"] { font-size: 2.2rem; font-weight: 700; line-height: 1.15;
+         text-align: center; letter-spacing: .01em; margin: 0 0 .4rem;
+         border-bottom: 4px double var(--rule); padding-bottom: .8rem; }
+  h2 { font-size: 1.4rem; font-weight: 700; margin: 1.9rem 0 .5rem;
+       border-bottom: 2px solid var(--rule); padding-bottom: .25rem; }
+  h3 { font-size: 1.15rem; font-weight: 700; margin: 1.4rem 0 .3rem; }
+  p { margin: .55rem 0; }
+  ul, ol { margin: .5rem 0 .5rem 1.4rem; padding: 0; }
+  li { margin: .3rem 0; }
+  code { font-family: ui-monospace, monospace; font-size: .92em; background: light-dark(#0001, #fff1);
+         border-radius: 3px; padding: 0 .2em; }
+  a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+  [data-anchor] { cursor: pointer; border-radius: 4px; }
+  [data-anchor]:hover { background: light-dark(rgba(0,0,0,.04), rgba(255,255,255,.05)); }
+  [data-anchor].marked { background: color-mix(in srgb, var(--amber) 7%, transparent); }
+  [data-anchor].marked::after { content: "●"; color: color-mix(in srgb, var(--amber) 45%, transparent);
+                                margin-left: 6px; font-size: .65rem; }
+  .sev { display:inline-block; font-size:.72rem; letter-spacing:.05em; text-transform:uppercase;
+         border:1px solid var(--border); border-radius:999px; padding:.05rem .5rem; margin-right:.4rem; }
+  .sev.real { color: var(--crit); } .sev.minor { color: var(--imp); } .sev.pass { color: var(--sug); }
+  #form { position: fixed; z-index: 10; width: 16rem; background: var(--paper); color: var(--ink);
+          border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 10px 30px #0005;
+          font-size: .95rem; overflow: hidden; }
+  #form .head { padding: .45rem .6rem; border-bottom: 1px solid var(--border);
+                font-size: .72rem; letter-spacing: .06em; text-transform: uppercase;
+                color: var(--ink-soft); }
+  #form .body { padding: .6rem; }
+  #form textarea { width: 100%; box-sizing: border-box; min-height: 3.2rem; font-size: .95rem; font-family: inherit;
+                   padding: .4rem; border-radius: 4px; border: 1px solid var(--border);
+                   background: var(--paper); color: var(--ink); margin-bottom: .4rem; }
+  #levels { display: flex; gap: .35rem; margin-bottom: .5rem; }
+  #levels .lvl { flex: 1; display: flex; align-items: center; justify-content: center; gap: .3rem;
+                 padding: .45rem 0; font-size: .72rem; border-radius: 6px;
+                 border: 1px solid var(--border); background: transparent; color: var(--ink);
+                 font-family: inherit; cursor: pointer; }
+  #levels .lvl::before { content: "●"; font-size: .55rem; }
+  #levels .lvl[data-sev="suggestion"]::before { color: var(--sug); }
+  #levels .lvl[data-sev="important"]::before { color: var(--imp); }
+  #levels .lvl[data-sev="critical"]::before { color: var(--crit); }
+  #levels .lvl.active { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+  #levels .lvl.active::before { color: var(--paper); }
+  #form .actions { display: flex; gap: .4rem; }
+  #form .actions button { flex: 1; padding: .5rem 0; font-size: .85rem; border-radius: 6px; cursor: pointer; }
+  #add { background: var(--ink); color: var(--paper); border: 0; }
+  #cancel { background: transparent; border: 1px solid var(--border); color: var(--ink); }
+  #done { position: fixed; bottom: 1rem; right: 1rem; z-index: 20; padding: .7rem 1.4rem; border: 0;
+          border-radius: 999px; background: var(--ink); color: var(--paper); font-size: 1rem;
+          cursor: pointer; box-shadow: 0 6px 16px #0005; font-family: Georgia, serif; }
+  #raw { position: fixed; bottom: 1.35rem; right: 7.2rem; z-index: 20; font-size: .75rem;
+         color: var(--ink-soft); cursor: pointer; font-family: Georgia, serif; }
+  #status { position: fixed; bottom: 1rem; left: 1rem; z-index: 20; font-size: .8rem; color: var(--ink-soft); }
+</style>
+</head>
+<body>
+
+<h1 data-anchor="title">Tree-Format Spec v3 — Store Review</h1>
+<p style="text-align:center;color:var(--ink-soft);font-size:.9rem;">Audit of the locked data contract vs. the tree that uses it · every element below is clickable to annotate</p>
+
+<h2 data-anchor="section-findings">Findings — drift between spec and practice</h2>
+
+<h3 data-anchor="finding-task-placement"><span class="sev real">real</span> Task placement inconsistent</h3>
+<p data-anchor="finding-task-placement-detail">R2/R3 tasks sit <b>flat under the round</b> (<code>02-grilling/01-spec-rework</code>, <code>03-tree-format/01-depth-policy</code>); R4/R5 use the spec's <code>00/</code> task group (<code>05-engine/00/01-…</code>). The spec §1 mandates <code>00/</code> = the task group — two shapes exist in one tree.</p>
+<p data-anchor="position-task-placement"><b>Position:</b> keep historical, no hot migration (spec §10 forbids restructuring existing trees). Document the two shapes as legacy + standard; the validator tolerates both; new tasks always use <code>00/</code>.</p>
+
+<h3 data-anchor="finding-spawned"><span class="sev real">real</span> <code>spawned</code> event is vestigial</h3>
+<p data-anchor="finding-spawned-detail">Spec §3 lists <code>spawned</code> (with parent+order) as an event type — <b>zero events use it</b>. Children are structural (directories) now; it's leftover from the old flat model.</p>
+<p data-anchor="position-spawned"><b>Position:</b> remove <code>spawned</code> from the spec — the child's <code>created</code> event IS the spawn record.</p>
+
+<h3 data-anchor="finding-requiredinputs"><span class="sev real">real</span> <code>requiredInputs</code> use paths + shas, not logical names</h3>
+<p data-anchor="finding-requiredinputs-detail">Spec §1/§2 say previous artifacts are named <b>by logical name</b>; practice writes <code>"R1 output: design §21 (locked @ eb07146)"</code> — a historical snapshot, not a durable reference. Predates the resolution convention.</p>
+<p data-anchor="position-requiredinputs"><b>Position:</b> new nodes use logical names; existing are historical (node.json is immutable). State this explicitly.</p>
+
+<h3 data-anchor="finding-at"><span class="sev real">real</span> <code>at</code> is date-only — ordering ambiguity</h3>
+<p data-anchor="finding-at-detail">Events carry <code>"at":"2026-08-16"</code>. Two events for the same name on the same day can't be ordered by timestamp. The resolver's "latest" currently uses a sha tiebreak — a hack.</p>
+<p data-anchor="position-at"><b>Position:</b> ordering = <b>append order within a file</b> (already the design); <code>at</code> is informational. Resolution correctness comes from the one-current-per-name validator + superseded events, not timestamp sorting. Fix the resolver tiebreak; state this in the spec.</p>
+
+<h3 data-anchor="finding-name"><span class="sev minor">minor</span> Name discipline violated</h3>
+<p data-anchor="finding-name-detail">Three task names exceed the ≤24-char rule (§8): <code>08-system-design-validation</code> (27), <code>05-requirements-amendment</code> (25), <code>03-change-protocol-amendment</code> (29).</p>
+<p data-anchor="position-name"><b>Position:</b> keep (no hot migration); enforce for new nodes.</p>
+
+<h3 data-anchor="finding-cards"><span class="sev minor">minor</span> Card lines + schema enumeration</h3>
+<p data-anchor="finding-cards-detail">17 cards exist; 11 carry the required <code>round goal met?</code> / <code>group position:</code> lines. §2 says "schema unchanged from v2" without enumerating node.json fields — S1 needs the exact schema.</p>
+<p data-anchor="position-cards"><b>Position:</b> enumerate the node.json schema inline; cards converge on the required lines as derived views.</p>
+
+<h2 data-anchor="section-passed">What passed — no action</h2>
+<ul data-anchor="passed-list">
+  <li data-anchor="passed-immutability">Immutability + append-only enforced in practice; status derivation correct (superseded-annotates works on the live tree)</li>
+  <li data-anchor="passed-resolution">Resolution works end-to-end (v1→v2→v3 chains; 8 current artifacts verified)</li>
+  <li data-anchor="passed-rest">Depth budget · prefix ordering · one-store-per-project · multi-user-ready note all hold</li>
+  <li data-anchor="passed-check"><code>--check</code> (files exist, one current per name) passes</li>
+</ul>
+
+<h2 data-anchor="section-decision">The decision</h2>
+<p data-anchor="decision-detail">Six findings → one <b>format v4 amendment</b> (per the change protocol: amendment node → complete superseding doc → supersede v3 → lock). The positions above are recommendations — confirm or override, especially <b>task placement (keep legacy)</b> and <b>drop <code>spawned</code></b>.</p>
+
+<!-- Required: Done button + inline form + script. Keep verbatim. -->
+<button id="done">Done · <span id="count">0</span></button>
+<span id="raw" title="Copy as raw JSON">raw</span>
+<div id="status"></div>
+
+<div id="form" hidden>
+  <div class="head">Feedback</div>
+  <div class="body">
+    <textarea id="comment" rows="3" placeholder="Feedback at this spot…"></textarea>
+    <div id="levels">
+      <button class="lvl active" data-sev="suggestion">suggestion</button>
+      <button class="lvl" data-sev="important">important</button>
+      <button class="lvl" data-sev="critical">critical</button>
+    </div>
+    <div class="actions"><button id="add">Add</button><button id="cancel">Cancel</button></div>
+  </div>
+</div>
+
+<script>
+  // Click-to-annotate + Done-copy-close. Keep verbatim. Uses
+  // document.execCommand('copy'), NOT navigator.clipboard — unavailable on file://.
+  const ANNOTATIONS = [];
+  let target = null;   // {el, id, snippet}
+  let severity = 'suggestion';
+
+  document.addEventListener('click', (e) => {
+    const el = e.target.closest('[data-anchor]');
+    if (!el) return;
+    e.preventDefault();
+    target = { el, id: el.dataset.anchor, snippet: el.textContent.trim().slice(0, 80) };
+    showForm(el);
+  });
+
+  // Position the dialog beside the clicked element, clamped fully on-screen.
+  function showForm(el) {
+    const f = document.getElementById('form');
+    f.hidden = false;                                   // make it measurable
+    const r = el.getBoundingClientRect();
+    const w = f.offsetWidth, h = f.offsetHeight;
+    let x = Math.max(4, Math.min(r.left, window.innerWidth - w - 4));
+    let y = r.bottom + 6;
+    if (y + h > window.innerHeight - 4) y = Math.max(4, r.top - h - 6);  // flip above if needed
+    f.style.left = x + 'px';
+    f.style.top = y + 'px';
+    document.getElementById('comment').value = '';
+    document.getElementById('comment').focus();
+  }
+
+  // Severity as three toggle buttons (no dropdown).
+  document.querySelectorAll('#levels .lvl').forEach((b) => {
+    b.onclick = () => {
+      severity = b.dataset.sev;
+      document.querySelectorAll('#levels .lvl').forEach((x) => x.classList.toggle('active', x === b));
+    };
+  });
+
+  document.getElementById('cancel').onclick = () => {
+    document.getElementById('form').hidden = true;
+    target = null;
+  };
+
+  document.getElementById('add').onclick = () => {
+    const c = document.getElementById('comment').value.trim();
+    if (!target || !c) return;
+    ANNOTATIONS.push({ anchor: { id: target.id, snippet: target.snippet }, comment: c, severity });
+    target.el.classList.add('marked');
+    document.getElementById('count').textContent = ANNOTATIONS.length;
+    document.getElementById('form').hidden = true;
+    target = null;
+  };
+
+  // Copy in a compact, readable line format: id (severity): comment — "snippet".
+  function renderFeedback() {
+    return ANNOTATIONS.map((a) =>
+      a.anchor.id + ' (' + a.severity + '): ' + a.comment +
+      ' — "' + a.anchor.snippet.slice(0, 40) + '…"'
+    ).join('\n');
+  }
+
+  function copyText(text) {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch (err) { ok = false; }
+    document.body.removeChild(ta);
+    return ok;
+  }
+
+  document.getElementById('done').onclick = () => {
+    const btn = document.getElementById('done');
+    const status = document.getElementById('status');
+    if (ANNOTATIONS.length === 0) { status.textContent = 'No feedback yet — click any element to add.'; return; }
+    if (!copyText(renderFeedback())) {
+      status.textContent = 'Copy failed — select manually:\n' + renderFeedback();
+      return;
+    }
+    btn.textContent = 'Copied ✓';
+    status.textContent = 'Paste it into the AI window, then close this tab.';
+    setTimeout(() => { try { window.close(); } catch (err) {} }, 200);
+  };
+
+  document.getElementById('raw').onclick = () => {
+    const status = document.getElementById('status');
+    if (ANNOTATIONS.length === 0) { status.textContent = 'No feedback yet.'; return; }
+    status.textContent = copyText(JSON.stringify(ANNOTATIONS)) ? 'Raw JSON copied.' : 'Copy failed.';
+  };
+</script>
+</body>
+</html>

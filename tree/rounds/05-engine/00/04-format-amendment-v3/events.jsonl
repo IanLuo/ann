@@ -1,3 +1,4 @@
 {"at":"2026-08-16","type":"created","note":"spawned per change-protocol §3: format v2 -> v3 amendment, complete superseding artifact. Adds the structured event schema + derived logical-name resolution."}
 {"at":"2026-08-16","type":"artifact-locked","note":"tree-format-spec-v3.md specs-locked — resolution mechanism in force (logical name: tree-format-spec)"}
 {"at":"2026-08-16","type":"completed","note":"amendment ACs met: structured event schema, derived resolution, one current per name, anchors frozen, F-AC13, v2 superseded"}
+{"at":"2026-08-16","type":"superseded","note":"artifacts/tree-format-spec-v3.md superseded by 09-format-amendment-v4/artifacts/tree-format-spec-v4.md (logical name: tree-format-spec) — store-review closures"}
