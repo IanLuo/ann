@@ -3,3 +3,5 @@
 {"at":"2026-08-17","type":"submitted","gate":"grill","note":"retrospective: user confirm-all (2026-08-17)"}
 {"at":"2026-08-17","type":"confirmed","gate":"grill","note":"retrospective: user confirm-all (2026-08-17)"}
 {"at":"2026-08-17","type":"extended","note":"FIXED gate-confirmation template (functional-spec F7 presentation): scripts/resolve.mjs confirm <id> — intent / what-to-check (ACs) / artifacts / evidence / gates, derived from the tree; the same shape every time, no ad-hoc reports. Spec reference: functional-spec interaction model (to fold at next functional-spec touch)."}
+{"at":"2026-08-17","type":"confirmed","gate":"confirm","note":"retrospective: user confirm-all (2026-08-17)"}
+{"at":"2026-08-17","type":"completed","note":"validation system green (0 errors, 4 warnings, legacy INFO); user confirmed"}

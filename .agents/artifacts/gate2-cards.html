@@ -118,36 +118,40 @@
      between iterations — the pasted feedback resolves by id.
      ============================================================ -->
 
-<h1 data-anchor="title">Gate② Confirmation — two cards</h1>
-<p style="text-align:center;color:var(--ink-soft);font-size:.9rem;">Fixed template (functional-spec F7) · each card shows <b>intent → what to check (ACs) → artifact → evidence → gates</b> · annotate to confirm or reject+reason · then Done → paste back</p>
+<h1 data-anchor="title">Gate② Confirmation — two cards (complete template)</h1>
+<p style="text-align:center;color:var(--ink-soft);font-size:.9rem;">Fixed template · every section always renders — <b>empty is an explicit "(none)" state, never hidden</b> · annotate to confirm or reject+reason · Done → paste back</p>
 
 <h2 data-anchor="card-12">Card 1 — 05-engine/00/12-validation-system <span style="color:var(--ink-soft);font-size:.8rem;">[queued]</span></h2>
-<p data-anchor="intent-12"><b>Intent:</b> the configurable event-validation system — rules registry + config (enable/disable, severity, params) + report; S4 validators seed; the gate/resolution/schema checks become managed rules, not hardcoded script logic.</p>
+<p data-anchor="intent-12"><b>Intent:</b> the configurable event-validation system — rules registry + config (enable/disable, severity, params) + report; S4 validators seed.</p>
 <h3 data-anchor="section-ac-12">What to check — acceptance criteria</h3>
 <ol data-anchor="acs-12">
-  <li data-anchor="ac-12-1"><code>scripts/validate.mjs</code> — runs active rules; grouped report by severity; exit code by worst severity</li>
-  <li data-anchor="ac-12-2"><code>scripts/validation.config.json</code> — rule config {id, enabled, severity, params}; tune/disable without code changes</li>
-  <li data-anchor="ac-12-3">Rules registry covers: gate-1, gate-2, event schema, one-current-per-name, resolution files-exist, depth budget, name discipline, card presence</li>
+  <li data-anchor="ac-12-1"><code>scripts/validate.mjs</code> — runs active rules; grouped report; severity-based exit</li>
+  <li data-anchor="ac-12-2"><code>scripts/validation.config.json</code> — manage enable/severity/params without code</li>
+  <li data-anchor="ac-12-3">Rules cover: gate-1, gate-2, event-schema, one-current-per-name, resolution-files, depth, name, card</li>
   <li data-anchor="ac-12-4">Each rule: id, defaultSeverity, description, check(tree) → findings[]</li>
-  <li data-anchor="ac-12-5">Config can disable a rule or override severity (e.g., depth = warning in quick mode)</li>
-  <li data-anchor="ac-12-6">Task done with a running system, reported against the live tree</li>
+  <li data-anchor="ac-12-5">Config can disable/override severity (e.g., depth = warning in quick mode)</li>
+  <li data-anchor="ac-12-6">Running system, reported against the live tree</li>
 </ol>
-<p data-anchor="evidence-12"><b>Evidence:</b> live report — 9 rules · 0 errors · 4 warnings (legacy name-discipline) · legacy prose events = INFO (managed by config).</p>
-<p data-anchor="gates-12"><b>Gates:</b> submitted+confirmed (grill) ✓ · <b>awaiting gate②</b></p>
+<p data-anchor="artifact-12"><b>ARTIFACT(S):</b> <i>(none — no artifact-locked event; deliverable is the working system, see evidence)</i></p>
+<p data-anchor="evidence-12"><b>EVIDENCE:</b> live report — 9 rules · 0 errors · 4 warnings (legacy name) · legacy prose = INFO (config-managed)</p>
+<p data-anchor="gates-12"><b>GATES:</b> submitted+confirmed (grill) ✓ · <b>awaiting gate②</b></p>
+<p data-anchor="oqs-12"><b>OPEN QUESTIONS:</b> (none)</p>
 
 <h2 data-anchor="card-13">Card 2 — 05-engine/00/13-flow-control-amendment <span style="color:var(--ink-soft);font-size:.8rem;">[done]</span></h2>
-<p data-anchor="intent-13"><b>Intent:</b> flow-control v2 — the <b>LOOK-BACK step</b>: at task completion, review the journey briefly (statuses, gates, artifacts, round state — derived from the log), determine where we are + what's ahead, ground the next-task proposal in that — never assumed. The observer action (design v3); powers F5 run next.</p>
+<p data-anchor="intent-13"><b>Intent:</b> flow-control v2 — the <b>LOOK-BACK step</b>: at task completion, review the journey (derived from the log), determine where we are + what's ahead, ground the next-task proposal — never assumed. The observer action (design v3); powers F5 run next.</p>
 <h3 data-anchor="section-ac-13">What to check — acceptance criteria</h3>
 <ol data-anchor="acs-13">
-  <li data-anchor="ac-13-1"><code>flow-control-spec-v2.md</code> exists — complete doc = v1 content + the look-back step</li>
-  <li data-anchor="ac-13-2">Lifecycle gains: <code>commit → LOOK-BACK (journey review) → determine next (grounded) → propose/advance</code></li>
-  <li data-anchor="ac-13-3">activate/frontmost-ready redefined as the OUTPUT of the look-back (prefix orders; readiness gate-validated; never assumed)</li>
-  <li data-anchor="ac-13-4">Round-advance decided from the look-back (round gate validated from the log)</li>
-  <li data-anchor="ac-13-5">Look-back implemented pre-engine: <code>scripts/resolve.mjs --journey</code> (where we are + what's ahead)</li>
-  <li data-anchor="ac-13-6">v2 locked (type=spec); v1 gets a superseded event; resolver/AGENTS point at v2</li>
+  <li data-anchor="ac-13-1"><code>flow-control-spec-v2.md</code> exists — complete = v1 + look-back</li>
+  <li data-anchor="ac-13-2">Lifecycle gains: <code>commit → LOOK-BACK → determine next (grounded) → propose/advance</code></li>
+  <li data-anchor="ac-13-3">frontmost-ready = OUTPUT of the look-back (gate-validated, never assumed)</li>
+  <li data-anchor="ac-13-4">Round-advance decided from the look-back (round gate from the log)</li>
+  <li data-anchor="ac-13-5">Look-back pre-engine: <code>scripts/resolve.mjs --journey</code></li>
+  <li data-anchor="ac-13-6">v2 locked; v1 superseded; resolver/AGENTS point at v2</li>
 </ol>
-<p data-anchor="artifact-13"><b>Artifact:</b> <code>flow-control-spec-v2.md</code> — specs-locked @ 8e68bfa (logical name: <code>flow-control-spec</code>)</p>
-<p data-anchor="gates-13"><b>Gates:</b> <b>awaiting gate① + gate②</b> (retrospective)</p>
+<p data-anchor="artifact-13"><b>ARTIFACT(S):</b> flow-control-spec-v2.md — specs-locked @ 8e68bfa (logical name: flow-control-spec)</p>
+<p data-anchor="evidence-13"><b>EVIDENCE:</b> <i>(none — no evidence events recorded)</i></p>
+<p data-anchor="gates-13"><b>GATES:</b> <i>(none — awaiting gate① + gate②, retrospective)</i></p>
+<p data-anchor="oqs-13"><b>OPEN QUESTIONS:</b> (none)</p>
 
 <h2 data-anchor="section-action">The action</h2>
 <p data-anchor="action-confirm-all">Annotate each card <b>confirm</b> (or reject + reason). Paste back → I record the gate events via the append script (retrospective), <code>--check</code> goes fully green, and the look-back points at the build: S1–S9 spawn next.</p>

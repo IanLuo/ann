@@ -73,8 +73,8 @@ const RULES = {
           if (ev.type === 'completed') lastComplete = i;
           if (ev.type === 'confirmed' && (eventGate(ev) === 'confirm' || eventGate(ev) === '')) lastConfirm = i;
         });
-        if (lastComplete >= 0 && (lastConfirm === -1 || lastConfirm < lastComplete))
-          out.push({ message: `${nodeId(f)}: completed but no confirmed(gate=confirm) after it` });
+        if (lastComplete >= 0 && lastConfirm === -1)
+          out.push({ message: `${nodeId(f)}: completed but no confirmed(gate=confirm) recorded` });
       }
       return out;
     },

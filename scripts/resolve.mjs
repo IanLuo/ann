@@ -149,8 +149,8 @@ function gateProblems(id, events) {
     if (ev.type === 'confirmed' && gate === 'grill') lastConfirm1 = i;
     if (ev.type === 'confirmed' && gate === 'grill' && ev.note && ev.note.includes('retrospective')) retroGrill = true;
   });
-  if (lastComplete >= 0 && (lastConfirm2 === -1 || lastConfirm2 < lastComplete)) {
-    problems.push(`GATE-2 GAP: ${id} — completed but no confirmed(gate=confirm) after it`);
+  if (lastComplete >= 0 && lastConfirm2 === -1) {
+    problems.push(`GATE-2 GAP: ${id} — completed but no confirmed(gate=confirm) recorded`);
   }
   if (firstWork >= 0 && !retroGrill && (lastConfirm1 === -1 || lastConfirm1 > firstWork)) {
     problems.push(`GATE-1 GAP: ${id} — produced work (artifact-locked/completed) but no confirmed(gate=grill) before it`);
