@@ -1,0 +1,2 @@
+{"at":"2026-08-17","type":"created","note":"spawned per user directive: checks must be a configurable/managed system, not hardcoded — the S4 validators seed"}
+{"at":"2026-08-17","type":"evidence","note":"validation system live: 9 configurable rules (gate-1/2, event-schema, one-current, resolution-files, card, depth, name, round-gate); report: 44 errors (gate backlogs + legacy prose artifact-locked), 4 warnings (name discipline)"}

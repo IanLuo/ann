@@ -1,0 +1,13 @@
+{
+  "rules": [
+    { "id": "gate-1", "enabled": true, "severity": "error", "description": "produced work requires confirmed(gate=grill) before it" },
+    { "id": "gate-2", "enabled": true, "severity": "error", "description": "completed requires confirmed(gate=confirm) after it" },
+    { "id": "event-schema", "enabled": true, "severity": "error", "description": "every event line is valid JSON with a known type" },
+    { "id": "one-current-per-name", "enabled": true, "severity": "error", "description": "no two non-superseded artifacts share a logical name" },
+    { "id": "resolution-files-exist", "enabled": true, "severity": "error", "description": "every current artifact's file exists on disk" },
+    { "id": "card-present", "enabled": true, "severity": "warning", "description": "every node has description.md" },
+    { "id": "depth-budget", "enabled": true, "severity": "warning", "params": { "maxDepth": 8, "maxPathChars": 260 }, "description": "tree depth and path length within budget" },
+    { "id": "name-discipline", "enabled": true, "severity": "warning", "params": { "maxSegment": 24 }, "description": "path segments kebab-case, <= 24 chars" },
+    { "id": "round-gate", "enabled": true, "severity": "warning", "description": "no round N+1 work before round N completed" }
+  ]
+}
