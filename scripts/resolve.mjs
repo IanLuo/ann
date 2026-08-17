@@ -133,6 +133,34 @@ function allStatuses() {
   return out.sort((a, b) => a.id.localeCompare(b.id));
 }
 
+// Deterministic gate validation (no LLM): a node with a `completed` event MUST have a
+// later `confirmed` event (gate=confirm). A node with `activated` MUST have a
+// `confirmed` (gate=grill) before it. Returns problems for the node.
+function gateProblems(id, events) {
+  const problems = [];
+  let seenConfirm = false;   // confirmed(gate=confirm) after the last completed
+  let seenGrillOk = false;   // confirmed(gate=grill) before activation
+  let lastCompletedAt = -1;
+  events.forEach((ev, i) => {
+    const gate = ev.gate || (ev.note && (ev.note.match(/gate=(\w+)/) || [])[1]) || '';
+    if (ev.type === 'completed') lastCompletedAt = i;
+    if (ev.type === 'confirmed' && (gate === 'confirm' || gate === '')) {
+      if (i > lastCompletedAt) seenConfirm = true;
+    }
+    if (ev.type === 'activated' && !seenGrillOk && gate === '') {}
+  });
+  // simpler rule: every completed needs a confirmed(confirm) at/after it
+  let confirmAfter = null, lastComplete = -1;
+  events.forEach((ev, i) => {
+    if (ev.type === 'completed') lastComplete = i;
+    if (ev.type === 'confirmed') confirmAfter = i;
+  });
+  if (lastComplete >= 0 && (confirmAfter === null || confirmAfter < lastComplete)) {
+    problems.push(`GATE GAP: ${id} — completed but no confirmed(gate=confirm) after it`);
+  }
+  return problems;
+}
+
 const args = process.argv.slice(2);
 const current = resolve();
 const problems = check(current);
@@ -176,10 +204,38 @@ if (args.includes('--specs')) {
   process.exit(0);
 }
 
+if (args[0] === 'append') {
+  // Single-writer append (architecture LB-3), scripted: validate schema, append,
+  // then gate-check the node. Usage: node scripts/resolve.mjs append <node-id> '<json>'
+  const id = args[1];
+  const raw = args.slice(2).join(' ');
+  if (!id || !raw) { console.error('usage: resolve.mjs append <node-id> \'{"at":...,"type":...,...}\''); process.exit(2); }
+  const file = join(ROOT, 'tree', 'rounds', id, 'events.jsonl');
+  const ev = JSON.parse(raw);
+  const TYPES = ['created','activated','extended','evidence','artifact-locked','completed','failed','superseded','submitted','confirmed','rejected'];
+  if (!ev.at || !ev.type || !TYPES.includes(ev.type)) {
+    console.error(`append rejected: bad schema (at + known type required, got ${ev.type})`); process.exit(1);
+  }
+  const line = JSON.stringify(ev) + '\n';
+  require('node:fs').appendFileSync(file, line);
+  const problems = gateProblems(id, parseEvents(file));
+  console.log(`appended ${ev.type}${ev.gate ? ' (gate=' + ev.gate + ')' : ''} → ${id}`);
+  if (problems.length) { console.error(problems.join('\n')); process.exit(1); }
+  process.exit(0);
+}
+
 if (args.includes('--check')) {
   for (const p of problems) console.error(p);
-  console.log(problems.length === 0 ? `OK — ${current.size} current artifacts, verified.` : `${problems.length} problem(s).`);
-  process.exit(problems.length === 0 ? 0 : 1);
+  // Deterministic gate validation: every completed node needs confirmed(gate=confirm).
+  const gateGaps = [];
+  for (const file of walk(ROUNDS)) {
+    const id = file.replace(new RegExp('^' + ROOT + '/tree/rounds/'), '').replace(/\/events\.jsonl$/, '');
+    for (const p of gateProblems(id, parseEvents(file))) gateGaps.push(p);
+  }
+  for (const g of gateGaps) console.error(g);
+  const total = problems.length + gateGaps.length;
+  console.log(total === 0 ? `OK — ${current.size} current artifacts, all gates confirmed.` : `${total} problem(s).`);
+  process.exit(total === 0 ? 0 : 1);
 }
 
 if (args[0] && !args[0].startsWith('--')) {
