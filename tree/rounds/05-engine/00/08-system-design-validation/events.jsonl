@@ -1,1 +1,2 @@
 {"at":"2026-08-16","type":"created","note":"spawned per user callout: next work must be nodes, not prose — validates system-design against the locked function surface before the build"}
+{"at":"2026-08-17","type":"evidence","note":"conformance report: F1-F17 covered; 13 components no orphans (flow-executor criterion); E-1 provider per-task models, E-2 two-log trace -> amendment; W-1..W-3 folded"}
