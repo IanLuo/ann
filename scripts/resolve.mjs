@@ -133,30 +133,26 @@ function allStatuses() {
   return out.sort((a, b) => a.id.localeCompare(b.id));
 }
 
-// Deterministic gate validation (no LLM): a node with a `completed` event MUST have a
-// later `confirmed` event (gate=confirm). A node with `activated` MUST have a
-// `confirmed` (gate=grill) before it. Returns problems for the node.
+// Deterministic gate validation (no LLM) — F-AC15, both gates:
+//  gate1: work (artifact-locked/completed) requires a `confirmed (gate=grill)` before it
+//  gate2: every `completed` needs a `confirmed (gate=confirm)` after it
 function gateProblems(id, events) {
   const problems = [];
-  let seenConfirm = false;   // confirmed(gate=confirm) after the last completed
-  let seenGrillOk = false;   // confirmed(gate=grill) before activation
-  let lastCompletedAt = -1;
+  let lastComplete = -1, lastConfirm2 = -1, firstWork = -1, lastConfirm1 = -1;
   events.forEach((ev, i) => {
     const gate = ev.gate || (ev.note && (ev.note.match(/gate=(\w+)/) || [])[1]) || '';
-    if (ev.type === 'completed') lastCompletedAt = i;
-    if (ev.type === 'confirmed' && (gate === 'confirm' || gate === '')) {
-      if (i > lastCompletedAt) seenConfirm = true;
-    }
-    if (ev.type === 'activated' && !seenGrillOk && gate === '') {}
-  });
-  // simpler rule: every completed needs a confirmed(confirm) at/after it
-  let confirmAfter = null, lastComplete = -1;
-  events.forEach((ev, i) => {
     if (ev.type === 'completed') lastComplete = i;
-    if (ev.type === 'confirmed') confirmAfter = i;
+    if (ev.type === 'artifact-locked' || ev.type === 'completed') {
+      if (firstWork === -1) firstWork = i;
+    }
+    if (ev.type === 'confirmed' && (gate === 'confirm' || gate === '')) lastConfirm2 = i;
+    if (ev.type === 'confirmed' && gate === 'grill') lastConfirm1 = i;
   });
-  if (lastComplete >= 0 && (confirmAfter === null || confirmAfter < lastComplete)) {
-    problems.push(`GATE GAP: ${id} — completed but no confirmed(gate=confirm) after it`);
+  if (lastComplete >= 0 && (lastConfirm2 === -1 || lastConfirm2 < lastComplete)) {
+    problems.push(`GATE-2 GAP: ${id} — completed but no confirmed(gate=confirm) after it`);
+  }
+  if (firstWork >= 0 && (lastConfirm1 === -1 || lastConfirm1 > firstWork)) {
+    problems.push(`GATE-1 GAP: ${id} — produced work (artifact-locked/completed) but no confirmed(gate=grill) before it`);
   }
   return problems;
 }
