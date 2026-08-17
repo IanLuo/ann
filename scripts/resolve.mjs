@@ -162,6 +162,35 @@ const args = process.argv.slice(2);
 const current = resolve();
 const problems = check(current);
 
+if (args.includes('--journey')) {
+  // LOOK-BACK (the observer action): where we are + what's ahead, derived from the log.
+  // Not an assumption — every line below is read from events/gates/statuses.
+  const all = allStatuses();
+  const rounds = [...new Set(all.map((n) => n.id.split('/')[0]))].sort();
+  console.log('=== WHERE WE ARE ===');
+  for (const r of rounds) {
+    const nodes = all.filter((n) => n.id === r || n.id.startsWith(r + '/'));
+    const root = nodes.find((n) => n.id === r);
+    const tasks = nodes.filter((n) => n.id !== r);
+    console.log(`${r.padEnd(6)} ${root ? root.status : '?'}${tasks.length ? ' — tasks: ' + tasks.map((t) => t.id.replace(r + '/', '') + ':' + t.status).join(', ') : ''}`);
+  }
+  console.log('\n=== WHAT IS AHEAD ===');
+  const active = all.find((n) => n.id.split('/').length === 1 && n.status === 'queued' || all.filter((n) => n.id.split('/').length === 1).find((n) => n.status === 'active'));
+  const currentRound = rounds.find((r) => { const root = all.find((n) => n.id === r); return root && (root.status === 'active' || (root.status === 'queued' && r === rounds[rounds.length - 1])); });
+  if (currentRound) {
+    const root = all.find((n) => n.id === currentRound);
+    console.log(`active round: ${currentRound} (${root.status})`);
+    const ready = all.filter((n) => n.id.startsWith(currentRound + '/') && (n.status === 'queued' || n.status === 'active'))
+                     .sort((a, b) => a.id.localeCompare(b.id));
+    if (ready.length) { console.log(`frontmost-ready: ${ready[0].id} (${ready[0].status})`); ready.slice(1).forEach((t) => console.log(`  also ready: ${t.id}`)); }
+    else console.log('no ready tasks in round — round gate may need review');
+  } else {
+    console.log('no active round — next round to spawn after gate review');
+  }
+  console.log('\n(grounded in: statuses + gates + validation — run --check / validate.mjs for the proof)');
+  process.exit(0);
+}
+
 if (args.includes('--status')) {
   const filter = args.find((a) => !a.startsWith('--'));
   const all = allStatuses();
