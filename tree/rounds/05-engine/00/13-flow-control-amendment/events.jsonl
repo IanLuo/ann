@@ -1,1 +1,3 @@
 {"at":"2026-08-17","type":"created","note":"spawned per user decision: task completion must LOOK BACK (journey review) to determine the next task — grounded, not assumed. Amendment node per change-protocol."}
+{"at":"2026-08-17","type":"artifact-locked","note":"flow-control-spec-v2.md specs-locked — the LOOK-BACK step in force (logical name: flow-control-spec)"}
+{"at":"2026-08-17","type":"completed","note":"look-back in the lifecycle + frontmost-ready as its output + round advance from the log; v1 superseded"}
