@@ -1,1 +1,3 @@
 {"at":"2026-08-17","type":"created","note":"spawned per the gate-confirmation action: the gate events (submitted/confirmed/rejected) become spec — format v4 -> v5 amendment"}
+{"at":"2026-08-17","type":"artifact-locked","note":"tree-format-spec-v5.md specs-locked — gate events + completion rule in force (logical name: tree-format-spec)"}
+{"at":"2026-08-17","type":"completed","note":"gate events spec'd + F-AC15; v4 superseded; 17 gate confirmations already recorded under this rule"}
