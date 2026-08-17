@@ -175,15 +175,25 @@ if (args[0] === 'confirm') {
   console.log(`\nINTENT: ${node.contract && node.contract.intent}`);
   console.log(`\nWHAT TO CHECK — acceptance criteria (every one must be met + evidenced):`);
   (node.contract && node.contract.acceptanceCriteria || []).forEach((ac, i) => console.log(`  ${i + 1}. ${ac}`));
-  console.log(`\nARTIFACT(S) PRODUCED:`);
-  for (const ev of evs) if (ev.type === 'artifact-locked') {
+  // FIXED TEMPLATE — every section always renders; empty is an explicit state, never hidden.
+  console.log(`\nARTIFACT(S):`);
+  const lockedEvs = evs.filter((e) => e.type === 'artifact-locked');
+  if (lockedEvs.length) for (const ev of lockedEvs) {
     const a = ev.artifact || {};
-    console.log(`  - ${a.name || '?'} @ ${a.lockSha || ev.note} → ${a.path || 'see note'}`);
-  }
+    console.log(`  - ${a.name || '?'} @ ${a.lockSha || '?'} → ${a.path || 'see note'}`);
+  } else console.log(`  - (none — no artifact-locked event recorded)`);
   const evidence = evs.filter((e) => e.type === 'evidence').map((e) => e.note);
-  if (evidence.length) { console.log(`\nEVIDENCE:`); evidence.forEach((e) => console.log(`  - ${e}`)); }
+  console.log(`\nEVIDENCE:`);
+  if (evidence.length) evidence.forEach((e) => console.log(`  - ${e}`));
+  else console.log(`  - (none — no evidence events recorded)`);
   const gates = evs.filter((e) => ['submitted','confirmed','rejected'].includes(e.type)).map((e) => `${e.type}(${e.gate || '?'})${e.feedback ? ' fb:' + e.feedback : ''}`);
-  if (gates.length) { console.log(`\nGATES:`); gates.forEach((g) => console.log(`  - ${g}`)); }
+  console.log(`\nGATES:`);
+  if (gates.length) gates.forEach((g) => console.log(`  - ${g}`));
+  else console.log(`  - (none — no gate events recorded)`);
+  const oqs = (node.openQuestions || []);
+  console.log(`\nOPEN QUESTIONS:`);
+  if (oqs.length) oqs.forEach((q) => console.log(`  - ${q.id}: ${q.question}${q.blocking ? ' [blocking]' : ''}`));
+  else console.log(`  - (none)`);
   console.log(`\n→ verify each AC against the artifact + evidence, then confirm or reject + reason.`);
   process.exit(0);
 }
