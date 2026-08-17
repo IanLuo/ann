@@ -2,3 +2,4 @@
 {"at":"2026-08-17","type":"evidence","note":"validation system live: 9 configurable rules (gate-1/2, event-schema, one-current, resolution-files, card, depth, name, round-gate); report: 44 errors (gate backlogs + legacy prose artifact-locked), 4 warnings (name discipline)"}
 {"at":"2026-08-17","type":"submitted","gate":"grill","note":"retrospective: user confirm-all (2026-08-17)"}
 {"at":"2026-08-17","type":"confirmed","gate":"grill","note":"retrospective: user confirm-all (2026-08-17)"}
+{"at":"2026-08-17","type":"extended","note":"FIXED gate-confirmation template (functional-spec F7 presentation): scripts/resolve.mjs confirm <id> — intent / what-to-check (ACs) / artifacts / evidence / gates, derived from the tree; the same shape every time, no ad-hoc reports. Spec reference: functional-spec interaction model (to fold at next functional-spec touch)."}
