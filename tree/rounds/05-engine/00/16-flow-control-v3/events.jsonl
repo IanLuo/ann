@@ -1,0 +1,1 @@
+{"at":"2026-08-18","type":"created","note":"spawned per user directive: we have no mechanism to close a task/round by shifting scope — spec closure-by-transfer first, then apply it (R5 closes, build moves to R6)"}

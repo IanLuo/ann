@@ -4,3 +4,4 @@
 {"at":"2026-08-17","type":"submitted","gate":"grill","note":"retrospective: user confirm-all"}
 {"at":"2026-08-17","type":"confirmed","gate":"grill","note":"retrospective: user confirm-all"}
 {"at":"2026-08-17","type":"confirmed","gate":"confirm","note":"retrospective: user confirm-all"}
+{"at":"2026-08-18","type":"superseded","note":"artifacts/flow-control-spec-v2.md superseded by 16-flow-control-v3/artifacts/flow-control-spec-v3.md (logical name: flow-control-spec) — adds closure-by-transfer"}
