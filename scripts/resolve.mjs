@@ -165,6 +165,33 @@ const args = process.argv.slice(2);
 const current = resolve();
 const problems = check(current);
 
+if (args[0] === 'journey') {
+  // A NODE'S JOURNEY (F11 history, pre-engine): the event walk — where it came from,
+  // what happened to it, where it stands. Usage: node scripts/resolve.mjs journey <id>
+  const id = args[1];
+  if (!id) { console.error('usage: resolve.mjs journey <node-id>'); process.exit(2); }
+  const file = join(ROOT, 'tree', 'rounds', id, 'events.jsonl');
+  const evs = parseEvents(file);
+  console.log(`JOURNEY: ${id}`);
+  console.log(`---------`);
+  evs.forEach((ev, i) => {
+    const gate = ev.gate && typeof ev.gate === 'object'
+      ? `gate: ${ev.gate.old || '?'} → ${ev.gate.new || '?'}`
+      : ev.gate ? ` (gate=${ev.gate})` : '';
+    const extra = ev.type === 'artifact-locked'
+      ? ` ${(ev.artifact && ev.artifact.name) || ''} @ ${(ev.artifact && ev.artifact.lockSha) || (ev.note.match(/@\s*([0-9a-f]{7,})/) || [])[1] || ''}`
+      : ev.type === 'superseded'
+        ? ` → ${(ev.successor && ev.successor.path) || (ev.note.match(/superseded by\s+([\w./-]+\.md)/) || [])[1] || ''}`
+        : ev.type === 'transferred' ? ` → ${ev.target || ''}` : '';
+    console.log(`${String(i + 1).padStart(2)}. ${ev.at || ''}  ${ev.type}${gate ? ' ' + gate : ''}${extra}`);
+    if (ev.note) console.log(`      ${ev.note}`);
+    if (ev.feedback) console.log(`      feedback: ${ev.feedback}`);
+  });
+  console.log(`---------`);
+  console.log(`STATUS: ${statusOf(evs)}${evs.some((e) => e.type === 'superseded') ? ' · artifact superseded' : ''}`);
+  process.exit(0);
+}
+
 if (args[0] === 'confirm') {
   // GATE PRESENTATION — what to check, derived from the tree (functional-spec F7).
   // Usage: node scripts/resolve.mjs confirm <node-id>
