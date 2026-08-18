@@ -1,5 +1,10 @@
-# Resource / Registry Spec (v1)
+<!-- specs:locked:9c3705e 2026-08-18 type=spec -->
 
+## Link contract
+- **upstream** (this doc relies on): 04-system-design/00/10-system-design-amendment/artifacts/ann-system-design-v2.md,05-engine/00/07-architecture/artifacts/architecture.md
+- **referrers** (must cite this when they change): implementation slices,validators the specs ritual,review-task
+
+# Resource / Registry Spec (v1)
 *Artifact of task `05-engine/00/14-resource-registry-spec`. Type: spec. The general management pattern for **anything configurable that consumers reference** — rules, ladders, adapters, models, flows, bindings, surfaces. One registry per class = single source of truth; consumers read; config manages; no layer duplicates. Instance #1: the rule registry (ask/check/decide), carrying the root-cause fixes. Upstream: `ann-system-design` (v2, locked), `architecture` (locked). Referrers: implementation slices, validators, the specs ritual, review-task.*
 
 ## 1. The problem this fixes

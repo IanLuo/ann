@@ -1,1 +1,3 @@
 {"at":"2026-08-17","type":"created","note":"spawned per user directive: the registry/management pattern is NOT in any spec — spec it first, as a GENERAL pattern (rules/ladders/adapters/flows/bindings/surfaces share it), rule registry = instance 1"}
+{"at":"2026-08-17","type":"artifact-locked","note":"resource-registry-spec.md specs-locked — the registry pattern is now in the contract stack (logical name: resource-registry)"}
+{"at":"2026-08-17","type":"completed","note":"general pattern spec'd; rule registry = instance 1 with the root-cause fixes as initial content"}
