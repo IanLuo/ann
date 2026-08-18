@@ -1,3 +1,6 @@
 {"at":"2026-08-18","type":"created","note":"spawned per the tech-stack discussion: record the seven decisions with how: discussed provenance under the resource-center rung"}
 {"at":"2026-08-18","type":"artifact-locked","note":"ann-system-design-v3.md system-design-locked — the stack is decided, with provenance (logical name: ann-system-design)"}
 {"at":"2026-08-18","type":"completed","note":"TS-1..TS-7 + Q1-Q4 provenance recorded; v2 superseded"}
+{"at":"2026-08-18","type":"submitted","gate":"grill","note":"retrospective: user confirm-all"}
+{"at":"2026-08-18","type":"confirmed","gate":"grill","note":"retrospective: user confirm-all"}
+{"at":"2026-08-18","type":"confirmed","gate":"confirm","note":"retrospective: user confirm-all"}
