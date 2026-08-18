@@ -163,15 +163,16 @@ function gateProblems(id, events) {
 
 // Command registry — the declaration; --help renders from it (derived, never drifts).
 const COMMANDS = [
-  { name: '--check', args: '', desc: 'integrity + gates (OK = green)', serves: 'F-AC1-16' },
-  { name: '--status', args: '[filter]', desc: 'every node\'s derived status (+ artifact-superseded marker)', serves: 'K1' },
+  { name: 'locate', args: '<name> [anchor]', desc: 'resolve a logical name → current path, and locate an anchor in it', serves: 'tree-format-spec F-AC13 · resolution' },
+  { name: '--check', args: '', desc: 'integrity + gates (OK = green)', serves: 'tree-format-spec F-AC1-16' },
+  { name: '--status', args: '[filter]', desc: 'every node\'s derived status (+ artifact-superseded marker)', serves: 'requirements-spec K1' },
   { name: '--journey', args: '', desc: 'the forest look-back: where we are + what\'s ahead', serves: 'flow-control-spec §2a (look-back)' },
-  { name: 'journey|--journey', args: '<id>', desc: 'one node\'s full event walk', serves: 'F11' },
-  { name: '--tree', args: '<id>', desc: 'a node + every descendant\'s events, one walk', serves: 'F11' },
-  { name: '--specs', args: '', desc: 'the locked contract stack (name · type · @sha · path · upstreams)', serves: 'F-AC13' },
-  { name: 'confirm', args: '<id>', desc: 'a node\'s gate card: intent · ACs · artifacts · evidence · gates', serves: 'F7' },
-  { name: 'append', args: '<id> \'<json>\'', desc: 'single-writer append: validates schema, appends, gate-checks', serves: 'LB-3' },
-  { name: '--help', args: '[command]', desc: 'this usage, generated from the command registry', serves: 'resource center' },
+  { name: 'journey|--journey', args: '<id>', desc: 'one node\'s full event walk', serves: 'functional-spec F11' },
+  { name: '--tree', args: '<id>', desc: 'a node + every descendant\'s events, one walk', serves: 'functional-spec F11' },
+  { name: '--specs', args: '', desc: 'the locked contract stack (name · type · @sha · path · upstreams)', serves: 'tree-format-spec F-AC13' },
+  { name: 'confirm', args: '<id>', desc: 'a node\'s gate card: intent · ACs · artifacts · evidence · gates', serves: 'functional-spec F7' },
+  { name: 'append', args: '<id> \'<json>\'', desc: 'single-writer append: validates schema, appends, gate-checks', serves: 'architecture LB-3' },
+  { name: '--help', args: '[command]', desc: 'this usage, generated from the command registry', serves: 'resource-registry spec' },
 ];
 
 const args = process.argv.slice(2);
@@ -305,6 +306,27 @@ if (args.includes('--status')) {
   process.exit(0);
 }
 
+if (args[0] === 'locate') {
+  // Anchor lookup: logical name → current path, then find the anchor in the doc.
+  const name = args[1], anchor = args[2];
+  if (!name) { console.error('usage: resolve.mjs locate <name> [anchor]'); process.exit(2); }
+  const l = current.get(name);
+  if (!l) { console.error(`locate: no current artifact for '${name}'`); process.exit(1); }
+  const full = join(ROOT, l.path);
+  console.log(`${name} → ${l.path}${l.sha ? '  @ ' + l.sha : ''}`);
+  if (!anchor) process.exit(0);
+  const lines = readFileSync(full, 'utf8').split('\n');
+  const re = new RegExp(anchor.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+  const hits = [];
+  lines.forEach((ln, i) => { if (re.test(ln)) hits.push(i); });
+  if (!hits.length) { console.error(`locate: anchor '${anchor}' not found in ${name} (anchors are stable — section renumbering is a validator error)`); process.exit(1); }
+  for (const i of hits.slice(0, 3)) {
+    console.log(`\n── line ${i + 1} ──`);
+    for (let j = Math.max(0, i - 1); j <= Math.min(lines.length - 1, i + 4); j++) console.log(lines[j]);
+  }
+  process.exit(0);
+}
+
 if (args[0] === '--help' || args.includes('--help')) {
   const want = args.find((a) => !a.startsWith('--') && a !== 'help') || (args.includes('--help') && args[args.indexOf('--help') + 1] && !args[args.indexOf('--help') + 1].startsWith('--') ? args[args.indexOf('--help') + 1] : null);
   if (want) {
@@ -315,7 +337,7 @@ if (args[0] === '--help' || args.includes('--help')) {
   }
   console.log('resolve.mjs — the pre-engine CLI (all state derived from tree/ + rules/, no LLM, no server)');
   console.log('');
-  for (const c of COMMANDS) console.log(`  ${(c.name + ' ' + c.args).padEnd(28)} ${c.desc}`);
+  for (const c of COMMANDS) console.log(`  ${(c.name + ' ' + c.args).padEnd(26)} ${c.desc}${c.serves ? '  ·  serves: ' + c.serves : ''}`);
   console.log('\nvalidate.mjs — the rule registry report: run it, --rules, or one rule id');
   process.exit(0);
 }
