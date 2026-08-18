@@ -18,7 +18,7 @@ import { join } from 'node:path';
 
 const ROOT = process.cwd();
 const ROUNDS = join(ROOT, 'tree', 'rounds');
-const CONFIG = JSON.parse(readFileSync(join(ROOT, 'scripts', 'validation.config.json'), 'utf8'));
+const CONFIG = JSON.parse(readFileSync(join(ROOT, 'rules', 'check', 'rules.json'), 'utf8'));  // the registry (resource-registry spec)
 
 function walk(dir, acc = []) {
   for (const entry of readdirSync(dir)) {
@@ -172,6 +172,32 @@ const RULES = {
       return out;
     },
   },
+  'high-impact-defaulted': {
+    check: () => {
+      const out = [];
+      for (const nf of nodeFiles) {
+        let node;
+        try { node = JSON.parse(readFileSync(nf, 'utf8')); } catch { continue; }
+        const blocking = (node.openQuestions || []).filter((q) => q.blocking);
+        if (!blocking.length) continue;
+        const evs = parseEvents(nf.replace(/node\.json$/, 'events.jsonl'));
+        const done = evs.some((e) => e.type === 'artifact-locked' || e.type === 'completed');
+        const prov = evs.some((e) => e.note && /discussed|defaulted|inferred/.test(e.note));
+        if (done && !prov)
+          out.push({ message: `${nodeId(nf)}: ${blocking.length} blocking question(s) resolved without resolution-provenance record (how=discussed|defaulted|inferred)` });
+      }
+      return out;
+    },
+  },
+  'registry-integrity': {
+    check: () => {
+      const out = [];
+      const registryIds = new Set((CONFIG.rules || []).map((r) => r.id));
+      for (const id of registryIds) if (!RULES[id]) out.push({ message: `registry rule '${id}' has no implementation` });
+      for (const id of Object.keys(RULES)) if (!registryIds.has(id)) out.push({ message: `implemented rule '${id}' is not in the registry` });
+      return out;
+    },
+  },
   'round-gate': {
     check: () => {
       const out = [];
@@ -199,7 +225,7 @@ const rulesCfg = CONFIG.rules;
 const cfgById = Object.fromEntries(rulesCfg.map((r) => [r.id, r]));
 
 if (args.includes('--rules')) {
-  for (const r of rulesCfg) console.log(`${r.enabled ? 'on ' : 'off'} ${r.id.padEnd(22)} [${r.severity}] ${r.description}`);
+  for (const r of rulesCfg) console.log(`${r.enabled ? 'on ' : 'off'} ${r.id.padEnd(22)} [${r.severity}] ${r.definition || r.description}`);
   process.exit(0);
 }
 

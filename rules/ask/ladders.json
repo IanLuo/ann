@@ -1,0 +1,30 @@
+{
+  "spec": [
+    "problem & who breaks",
+    "non-negotiable outcome",
+    "scope in/out + primary flow",
+    "acceptance criteria",
+    "KPIs & failure signal",
+    "non-functional requirements",
+    "assumptions & dependencies",
+    "data requirements",
+    "rollback & recovery",
+    "security & compliance",
+    "verification plan"
+  ],
+  "system-design": [
+    "components & ownership",
+    "data model",
+    "boundaries & interfaces",
+    "failure modes",
+    "scale assumptions",
+    "implementation constraints & tech stack (language/runtime, tooling, dependencies — elicited before components lock; INHERITED choices re-elicited if load-bearing)"
+  ],
+  "architecture": [
+    "load-bearing structure",
+    "layers & ownership",
+    "repo tree",
+    "cross-cutting concerns",
+    "pointers"
+  ]
+}

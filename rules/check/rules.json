@@ -1,0 +1,15 @@
+{
+  "rules": [
+    { "id": "gate-1", "category": "check", "kind": "rule", "enabled": true, "severity": "error", "params": {}, "definition": "produced work (artifact-locked/completed) requires confirmed(gate=grill) before it (retrospective records honored)" },
+    { "id": "gate-2", "category": "check", "kind": "rule", "enabled": true, "severity": "error", "params": {}, "definition": "completed requires a confirmed(gate=confirm) recorded (position-insensitive)" },
+    { "id": "event-schema", "category": "check", "kind": "rule", "enabled": true, "severity": "error", "params": { "legacyProse": true }, "definition": "every event line valid JSON with a known type; artifact-locked/superseded carry structured fields (legacy prose tolerated)" },
+    { "id": "one-current-per-name", "category": "check", "kind": "rule", "enabled": true, "severity": "error", "params": {}, "definition": "no two non-superseded artifacts share a logical name" },
+    { "id": "resolution-files-exist", "category": "check", "kind": "rule", "enabled": true, "severity": "error", "params": {}, "definition": "every current artifact's file exists on disk" },
+    { "id": "card-present", "category": "check", "kind": "rule", "enabled": true, "severity": "warning", "params": {}, "definition": "every node has description.md" },
+    { "id": "depth-budget", "category": "check", "kind": "rule", "enabled": true, "severity": "warning", "params": { "maxDepth": 8, "maxPathChars": 260 }, "definition": "tree depth and path length within budget" },
+    { "id": "name-discipline", "category": "check", "kind": "rule", "enabled": true, "severity": "warning", "params": { "maxSegment": 24 }, "definition": "path segments kebab-case, <= 24 chars (legacy tolerated)" },
+    { "id": "round-gate", "category": "check", "kind": "rule", "enabled": true, "severity": "warning", "params": {}, "definition": "no round N+1 work before round N completed" },
+    { "id": "high-impact-defaulted", "category": "check", "kind": "rule", "enabled": true, "severity": "warning", "params": {}, "definition": "a blocking (high-impact) openQuestion resolved on a completed node must carry resolution provenance (discussed|defaulted|inferred); defaulted/inferred without explicit user decision = flagged (the tech-stack lesson)" },
+    { "id": "registry-integrity", "category": "check", "kind": "rule", "enabled": true, "severity": "error", "params": {}, "definition": "every rule id in the registry has an implementation in the validators; every registry file exists" }
+  ]
+}

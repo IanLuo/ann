@@ -1,0 +1,13 @@
+{
+  "ladder": [
+    { "step": "derive", "note": "from ancestors/siblings (tree memory); provenance: derived-from" },
+    { "step": "probe", "note": "read project state / external systems; provenance: observation" },
+    { "step": "infer", "note": "labeled inference + confidence + fallback; FORBIDDEN when high-impact and no safe fallback" },
+    { "step": "ask", "note": "user question (impact, options, default); batched, deduped" },
+    { "step": "block", "note": "node blocked, missing input named; partial_final only with user acceptance" }
+  ],
+  "provenance": {
+    "how": ["discussed", "defaulted", "inferred"],
+    "rule": "every resolution records how it was reached; HIGH-IMPACT must be 'discussed' — a default can never masquerade as a decision (the tech-stack lesson)"
+  }
+}
