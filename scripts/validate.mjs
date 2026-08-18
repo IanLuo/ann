@@ -189,6 +189,29 @@ const RULES = {
       return out;
     },
   },
+  'closure-integrity': {
+    check: () => {
+      const out = [];
+      const allIds = new Set();
+      for (const nf of nodeFiles) allIds.add(nodeId(nf));
+      for (const f of eventFiles) {
+        const evs = parseEvents(f);
+        const id = nodeId(f);
+        let revised = -1, completed = -1, closureOk = false, transferredTargets = [];
+        evs.forEach((ev, i) => {
+          if (ev.type === 'gate-revised') revised = i;
+          if (ev.type === 'completed') completed = i;
+          if (ev.type === 'transferred' || ev.type === 'deferred') closureOk = true;
+          if (ev.type === 'transferred' && ev.target) transferredTargets.push(ev.target);
+        });
+        if (revised >= 0 && completed > revised && !closureOk)
+          out.push({ message: `${id}: gate-revised but closed without transferred/deferred (F-AC16)` });
+        for (const t of transferredTargets) if (!allIds.has(t) && !allIds.has('tree/rounds/' + t))
+          out.push({ message: `${id}: transferred target '${t}' does not exist (F-AC16)` });
+      }
+      return out;
+    },
+  },
   'registry-integrity': {
     check: () => {
       const out = [];
