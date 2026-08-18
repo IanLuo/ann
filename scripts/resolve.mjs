@@ -165,11 +165,7 @@ const args = process.argv.slice(2);
 const current = resolve();
 const problems = check(current);
 
-if (args[0] === 'journey') {
-  // A NODE'S JOURNEY (F11 history, pre-engine): the event walk — where it came from,
-  // what happened to it, where it stands. Usage: node scripts/resolve.mjs journey <id>
-  const id = args[1];
-  if (!id) { console.error('usage: resolve.mjs journey <node-id>'); process.exit(2); }
+function nodeJourney(id) {
   const file = join(ROOT, 'tree', 'rounds', id, 'events.jsonl');
   const evs = parseEvents(file);
   console.log(`JOURNEY: ${id}`);
@@ -189,6 +185,13 @@ if (args[0] === 'journey') {
   });
   console.log(`---------`);
   console.log(`STATUS: ${statusOf(evs)}${evs.some((e) => e.type === 'superseded') ? ' · artifact superseded' : ''}`);
+}
+
+if (args[0] === 'journey' || (args.includes('--journey') && args[1])) {
+  // A NODE'S JOURNEY (F11 history): the event walk. Usage: resolve.mjs journey <id> | --journey <id>
+  const id = args[args[0] === 'journey' ? 1 : 1];
+  if (!id) { console.error('usage: resolve.mjs journey <node-id>'); process.exit(2); }
+  nodeJourney(id);
   process.exit(0);
 }
 
