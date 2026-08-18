@@ -165,7 +165,7 @@ function gateProblems(id, events) {
 const COMMANDS = [
   { name: '--check', args: '', desc: 'integrity + gates (OK = green)', serves: 'F-AC1-16' },
   { name: '--status', args: '[filter]', desc: 'every node\'s derived status (+ artifact-superseded marker)', serves: 'K1' },
-  { name: '--journey', args: '', desc: 'the forest look-back: where we are + what\'s ahead', serves: 'flow v2' },
+  { name: '--journey', args: '', desc: 'the forest look-back: where we are + what\'s ahead', serves: 'flow-control-spec §2a (look-back)' },
   { name: 'journey|--journey', args: '<id>', desc: 'one node\'s full event walk', serves: 'F11' },
   { name: '--tree', args: '<id>', desc: 'a node + every descendant\'s events, one walk', serves: 'F11' },
   { name: '--specs', args: '', desc: 'the locked contract stack (name · type · @sha · path · upstreams)', serves: 'F-AC13' },
