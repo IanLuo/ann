@@ -1,1 +1,6 @@
 {"at":"2026-08-16","type":"created","note":"spawned after R4 gate met (ann-system-design locked @ ca32421); task group planned, tasks spawn at activation"}
+{"at":"2026-08-18","type":"extended","note":"GATE RE-SCOPE (closure-by-transfer, human decision): R5's original gate (engine v1 works) transfers verbatim to R6; R5's revised gate = specification + tooling complete (15 tasks done, 9 contracts locked, gates confirmed)"}
+{"at":"2026-08-18","type":"completed","note":"R5 closes under its revised gate: specification round complete — 9 locked contracts, resolver/validators/journey/confirm/append + rules registry, all gates confirmed"}
+{"at":"2026-08-18","type":"confirmed","gate":"confirm","note":"retrospective: user closure decision (move build to next round)"}
+{"at":"2026-08-18","type":"submitted","gate":"grill","note":"retrospective: user closure decision"}
+{"at":"2026-08-18","type":"confirmed","gate":"grill","note":"retrospective: user closure decision"}

@@ -1,0 +1,21 @@
+{
+  "id": "06-engine-build",
+  "contract": {
+    "intent": "Build the engine v1 — the 13 components (ann-system-design v3 §1) as a parallel task group: tree store, planner kernel, flow config, grilling/envision engines, context assembler, validators, runner reviewer, provider adapter, GitHub binding, human interface, renderers, eval harness. The build was transferred here verbatim from R5's original gate (closure-by-transfer, flow-control v3).",
+    "acceptanceCriteria": [
+      "Engine v1 works: CLI (plan/run/tree/step/resume) per functional-spec F1-F17",
+      "K1-K5 measured on the fixture suite (K1 derived-accuracy 100% · K2 locate <=2 · K3 advance <=1 · K4 correctness >=95% · K5 first-pass completion >=85%)",
+      "Tree store implements tree-format-spec v5 (file ownership, write timing, event schema, gates, F-AC1-15)",
+      "Validators consume the rules registry (rules/check); resolver/journey/confirm/append absorbed from the seeds",
+      "Dogfooding round-trip: the engine manages this tree (F-AC8)",
+      "Failure signal armed: advance friction / wrong next-action / K5 below target = stop feature work"
+    ],
+    "targetAreas": ["src/", "tree/rounds/06-engine-build/00/"],
+    "requiredInputs": [
+      "design (logical)", "requirements-spec", "tree-format-spec", "flow-control-spec",
+      "change-protocol", "functional-spec", "architecture", "ann-system-design", "resource-registry"
+    ],
+    "expectedOutputs": ["engine v1 (working CLI)", "eval harness results (K1-K5)"]
+  },
+  "createdAt": "2026-08-18"
+}
