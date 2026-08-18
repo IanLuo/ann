@@ -4,3 +4,5 @@
 {"at":"2026-08-18","type":"confirmed","gate":"confirm","note":"retrospective: user closure decision (move build to next round)"}
 {"at":"2026-08-18","type":"submitted","gate":"grill","note":"retrospective: user closure decision"}
 {"at":"2026-08-18","type":"confirmed","gate":"grill","note":"retrospective: user closure decision"}
+{"at":"2026-08-18","type":"gate-revised","gate":{"old":"engine v1 works + K1-K5","new":"specification + tooling complete (build transfers to R6)"},"note":"retrospective: user closure decision"}
+{"at":"2026-08-18","type":"transferred","target":"06-engine-build","scope":"engine v1 works + K1-K5 measured (R5 original gate, verbatim)","note":"retrospective: build moved to R6"}

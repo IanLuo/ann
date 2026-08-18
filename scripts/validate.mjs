@@ -81,7 +81,7 @@ const RULES = {
   },
   'event-schema': {
     check: (params) => {
-      const TYPES = ['created','activated','extended','evidence','artifact-locked','completed','failed','superseded','submitted','confirmed','rejected'];
+      const TYPES = ['created','activated','extended','evidence','artifact-locked','completed','failed','superseded','submitted','confirmed','rejected','gate-revised','transferred','deferred'];
       const out = [];
       const legacy = params.legacyProse === true;
       for (const f of eventFiles) {

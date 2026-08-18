@@ -274,7 +274,7 @@ if (args[0] === 'append') {
   if (!id || !raw) { console.error('usage: resolve.mjs append <node-id> \'{"at":...,"type":...,...}\''); process.exit(2); }
   const file = join(ROOT, 'tree', 'rounds', id, 'events.jsonl');
   const ev = JSON.parse(raw);
-  const TYPES = ['created','activated','extended','evidence','artifact-locked','completed','failed','superseded','submitted','confirmed','rejected'];
+  const TYPES = ['created','activated','extended','evidence','artifact-locked','completed','failed','superseded','submitted','confirmed','rejected','gate-revised','transferred','deferred'];
   if (!ev.at || !ev.type || !TYPES.includes(ev.type)) {
     console.error(`append rejected: bad schema (at + known type required, got ${ev.type})`); process.exit(1);
   }
