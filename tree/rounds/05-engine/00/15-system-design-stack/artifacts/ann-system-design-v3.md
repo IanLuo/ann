@@ -1,3 +1,9 @@
+<!-- specs:locked:2b0a30f 2026-08-18 type=system-design -->
+
+## Link contract
+- **upstream** (this doc relies on): tree/rounds/01-goal/artifacts/design.md,02-grilling/01-spec-rework/artifacts/requirements-spec.md 05-engine/00/09-format-amendment-v4/artifacts/tree-format-spec-v4.md,05-engine/00/07-architecture/artifacts/architecture.md
+- **referrers** (must cite this when they change): S1-S9 implementation slices,design tasks review-task
+
 # Ann System Design (v2)
 *Artifact of task `05-engine/00/10-system-design-amendment`. Type: system-design. Complete superseding version — v1 + the conformance closures (per-task model selection · two-log trace · F9 owner · single-writer cross-ref · coverage criterion). Produced per the change protocol: amendment node → complete artifact → superseded event. Upstream: `tree/rounds/01-goal/artifacts/design.md` (v3, locked), `requirements-spec` (v3, locked), `tree-format-spec` (v4, locked), `architecture` (locked). Referrers: S1–S9 implementation slices, design tasks, review-task.*
 
