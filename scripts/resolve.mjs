@@ -306,6 +306,36 @@ if (args.includes('--status')) {
   process.exit(0);
 }
 
+if (args.includes('--gantt')) {
+  // GANTT from the journey: per-node span = first event date → completed/last event date.
+  const rows = [];
+  for (const f of walk(ROUNDS)) {
+    const id = f.replace(new RegExp('^' + ROOT + '/tree/rounds/'), '').replace(/\/events\.jsonl$/, '');
+    const evs = parseEvents(f);
+    if (!evs.length) continue;
+    const dates = evs.map((e) => e.at).filter(Boolean).sort();
+    const start = dates[0];
+    const comp = evs.find((e) => e.type === 'completed');
+    const end = comp ? comp.at || start : dates[dates.length - 1];
+    rows.push({ id, start, end });
+  }
+  const allD = rows.flatMap((r) => [r.start, r.end]).sort();
+  const d0 = allD[0], d1 = allD[allD.length - 1];
+  const addDays = (ds, n) => { const [y, m, d] = ds.split('-').map(Number); const dt = new Date(Date.UTC(y, m - 1, d + n)); return dt.toISOString().slice(0, 10); };
+  const days = [];
+  for (let i = 0; addDays(d0, i) <= d1; i++) days.push(addDays(d0, i));
+  console.log(`GANTT (${days.length} day(s): ${d0} → ${d1})`);
+  const head = '       ' + days.map((d) => d.slice(5)).join(' ');
+  console.log(head);
+  for (const r of rows) {
+    const si = days.indexOf(r.start), ei = days.indexOf(r.end);
+    let line = '';
+    for (let i = 0; i < days.length; i++) line += i >= si && i <= ei ? '▓▓' : '  ';
+    console.log(`${r.id.padEnd(10).slice(0, 10)} ${line}  ${r.start}→${r.end}`);
+  }
+  process.exit(0);
+}
+
 if (args[0] === 'locate') {
   // Anchor lookup: logical name → current path, then find the anchor in the doc.
   const name = args[1], anchor = args[2];
