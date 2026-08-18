@@ -128,7 +128,10 @@ function allStatuses() {
   const out = [];
   for (const file of walk(ROUNDS)) {
     const id = file.replace(new RegExp('^' + ROOT + '/tree/rounds/'), '').replace(/\/events\.jsonl$/, '');
-    out.push({ id, status: statusOf(parseEvents(file)) });
+    const evs = parseEvents(file);
+    // artifact currency: superseded annotates completed (format v3) — show BOTH facts
+    const superseded = evs.some((e) => e.type === 'superseded');
+    out.push({ id, status: statusOf(evs) + (superseded ? ' · artifact superseded' : '') });
   }
   return out.sort((a, b) => a.id.localeCompare(b.id));
 }
