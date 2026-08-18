@@ -4,3 +4,4 @@
 {"at":"2026-08-17","type":"confirmed","gate":"confirm","note":"user confirmed via gate2-confirmation report (confirm-all)"}
 {"at":"2026-08-17","type":"submitted","gate":"grill","note":"retrospective: user confirm-all (2026-08-17)"}
 {"at":"2026-08-17","type":"confirmed","gate":"grill","note":"retrospective: user confirm-all (2026-08-17)"}
+{"at":"2026-08-18","type":"superseded","note":"artifacts/ann-system-design-v2.md superseded by 15-system-design-stack/artifacts/ann-system-design-v3.md (logical name: ann-system-design) — tech-stack decisions with provenance"}
