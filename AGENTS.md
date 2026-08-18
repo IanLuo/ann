@@ -47,32 +47,18 @@ design (model + invariants) → ann-spec (requirements) → tree-format-spec-v3 
 
 ## State-tracking protocol
 
-Current state is tracked in **`CURSOR.md`** at the repo root. Read it before every
-session. It carries forward-looking state git can't express. git history IS the
-work-history record. Rewrite `CURSOR.md` in-place at the end of every session.
-Never append — append is rot. Hard cap: ≤40 lines / ≤2000 characters.
-Every file path in it must exist at write time.
+Session state lives in **the tree** — derived, never hand-maintained. Start every session with:
 
-### Inclusion gate — record X iff:
-(a) X is NOT recoverable by running one command against an artifact (git/code/CI), AND
+```bash
+node scripts/resolve.mjs --journey   # where we are + what's ahead (the look-back)
+node scripts/resolve.mjs --check     # integrity + gates
+node scripts/resolve.mjs --specs     # the contract stack
+```
+
+State = the tree (statuses, gates, artifacts, events). History = git. Nothing hand-maintained — a handwritten state sidecar is the dual-write drift the tree exists to eliminate. **`CURSOR.md` is retired** (2026-08-17): the inclusion gate below is how we keep the tree honest instead.
+
+### Inclusion gate — record X in the tree iff:
+(a) X is NOT recoverable by running one command against an artifact (git/code/CI/tree), AND
 (b) a fresh agent would plausibly get WRONG without it.
 
-### Cursor fields
-
-| Field | Content |
-|---|---|
-| synced | `<!-- synced: <git sha> -->` — staleness oracle (compare to `git rev-parse HEAD`) |
-| Position | current step + next action, merged into one field |
-| Blockers | what's stuck + why — to avoid re-hitting the wall |
-| Open issues | unresolved questions / assumptions / pending decisions |
-| Health | 🟢 green or 🔴 broken + known-broken items |
-| Verification | claimed-done vs verified-done, with evidence (test/command @ sha) |
-| Errors-that-changed-plan | only failures that redirected the work, not transient retries |
-| Decisions | one present-tense line per resolved invariant, not a deliberation timeline |
-| Active pointers | file paths → verified to exist at write time |
-
-### Rules
-- **Rewrite in-place, never append.** A cursor that only grows is a bug.
-- **Pointers over contents.** Where state lives in an artifact, store the *command* or *path*, not the output. Can't drift; costs less.
-- **Every path must exist at write time.**
-- **Decisions collapse to one present-tense line.** Not a timeline.
+Where state lives in an artifact, store the *command* or *path*, not the output. Can't drift; costs less. Decisions collapse to one present-tense line, locked in the contracts or recorded as events — not a deliberation timeline.
