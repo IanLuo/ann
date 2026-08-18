@@ -163,16 +163,16 @@ function gateProblems(id, events) {
 
 // Command registry — the declaration; --help renders from it (derived, never drifts).
 const COMMANDS = [
-  { name: 'locate', args: '<name> [anchor]', desc: 'resolve a logical name → current path, and locate an anchor in it', serves: 'tree-format-spec F-AC13 · resolution' },
-  { name: '--check', args: '', desc: 'integrity + gates (OK = green)', serves: 'tree-format-spec F-AC1-16' },
-  { name: '--status', args: '[filter]', desc: 'every node\'s derived status (+ artifact-superseded marker)', serves: 'requirements-spec K1' },
-  { name: '--journey', args: '', desc: 'the forest look-back: where we are + what\'s ahead', serves: 'flow-control-spec §2a (look-back)' },
-  { name: 'journey|--journey', args: '<id>', desc: 'one node\'s full event walk', serves: 'functional-spec F11' },
-  { name: '--tree', args: '<id>', desc: 'a node + every descendant\'s events, one walk', serves: 'functional-spec F11' },
-  { name: '--specs', args: '', desc: 'the locked contract stack (name · type · @sha · path · upstreams)', serves: 'tree-format-spec F-AC13' },
-  { name: 'confirm', args: '<id>', desc: 'a node\'s gate card: intent · ACs · artifacts · evidence · gates', serves: 'functional-spec F7' },
-  { name: 'append', args: '<id> \'<json>\'', desc: 'single-writer append: validates schema, appends, gate-checks', serves: 'architecture LB-3' },
-  { name: '--help', args: '[command]', desc: 'this usage, generated from the command registry', serves: 'resource-registry spec' },
+  { name: 'locate', args: '<name> [anchor]', desc: 'resolve a logical name → current path, and locate an anchor in it' },
+  { name: '--check', args: '', desc: 'integrity + gates (OK = green)' },
+  { name: '--status', args: '[filter]', desc: 'every node\'s derived status (+ artifact-superseded marker)' },
+  { name: '--journey', args: '', desc: 'the forest look-back: where we are + what\'s ahead' },
+  { name: 'journey|--journey', args: '<id>', desc: 'one node\'s full event walk' },
+  { name: '--tree', args: '<id>', desc: 'a node + every descendant\'s events, one walk' },
+  { name: '--specs', args: '', desc: 'the locked contract stack (name · type · @sha · path · upstreams)' },
+  { name: 'confirm', args: '<id>', desc: 'a node\'s gate card: intent · ACs · artifacts · evidence · gates' },
+  { name: 'append', args: '<id> \'<json>\'', desc: 'single-writer append: validates schema, appends, gate-checks' },
+  { name: '--help', args: '[command]', desc: 'this usage, generated from the command registry' },
 ];
 
 const args = process.argv.slice(2);
