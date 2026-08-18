@@ -1,0 +1,17 @@
+{
+  "id": "05-engine/00/17-format-amendment-v6",
+  "contract": {
+    "intent": "Amend tree-format-spec v5 to v6 — the CLOSURE EVENTS: gate-revised, transferred, deferred (structured), so closing a task/round by transfer is deterministic and checkable, never prose-only (F-AC16). Produces a COMPLETE superseding artifact.",
+    "acceptanceCriteria": [
+      "tree-format-spec-v6.md artifact exists — complete doc = v5 + closure events",
+      "gate-revised {gate:{old,new}} · transferred {target, scope verbatim} · deferred {reason}",
+      "F-AC16: completed-after-gate-revised requires transferred|deferred; transferred target must exist",
+      "v6 locked; v5 superseded; R5's closure re-recorded with structured events",
+      "A closure-integrity validation rule added to the registry"
+    ],
+    "targetAreas": ["artifacts/tree-format-spec-v6.md", "rules/check/rules.json"],
+    "requiredInputs": ["11-format-amendment-v5/artifacts/tree-format-spec-v5.md (locked)", "User decision: closure needs dedicated events (transferred / deferred / gate-revised), not prose"],
+    "expectedOutputs": ["tree-format-spec-v6.md (locked, complete)"]
+  },
+  "createdAt": "2026-08-18"
+}

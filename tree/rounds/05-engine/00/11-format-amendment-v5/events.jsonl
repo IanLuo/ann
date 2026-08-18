@@ -4,3 +4,4 @@
 {"at":"2026-08-17","type":"submitted","gate":"grill","note":"retrospective: user confirm-all (2026-08-17)"}
 {"at":"2026-08-17","type":"confirmed","gate":"grill","note":"retrospective: user confirm-all (2026-08-17)"}
 {"at":"2026-08-17","type":"confirmed","gate":"confirm","note":"retrospective: user confirm-all (2026-08-17)"}
+{"at":"2026-08-18","type":"superseded","note":"artifacts/tree-format-spec-v5.md superseded by 17-format-amendment-v6/artifacts/tree-format-spec-v6.md (logical name: tree-format-spec) — adds closure events (gate-revised/transferred/deferred)"}
