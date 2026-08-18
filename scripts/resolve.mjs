@@ -161,6 +161,19 @@ function gateProblems(id, events) {
   return problems;
 }
 
+// Command registry — the declaration; --help renders from it (derived, never drifts).
+const COMMANDS = [
+  { name: '--check', args: '', desc: 'integrity + gates (OK = green)', serves: 'F-AC1-16' },
+  { name: '--status', args: '[filter]', desc: 'every node\'s derived status (+ artifact-superseded marker)', serves: 'K1' },
+  { name: '--journey', args: '', desc: 'the forest look-back: where we are + what\'s ahead', serves: 'flow v2' },
+  { name: 'journey|--journey', args: '<id>', desc: 'one node\'s full event walk', serves: 'F11' },
+  { name: '--tree', args: '<id>', desc: 'a node + every descendant\'s events, one walk', serves: 'F11' },
+  { name: '--specs', args: '', desc: 'the locked contract stack (name · type · @sha · path · upstreams)', serves: 'F-AC13' },
+  { name: 'confirm', args: '<id>', desc: 'a node\'s gate card: intent · ACs · artifacts · evidence · gates', serves: 'F7' },
+  { name: 'append', args: '<id> \'<json>\'', desc: 'single-writer append: validates schema, appends, gate-checks', serves: 'LB-3' },
+  { name: '--help', args: '[command]', desc: 'this usage, generated from the command registry', serves: 'resource center' },
+];
+
 const args = process.argv.slice(2);
 const current = resolve();
 const problems = check(current);
@@ -185,6 +198,28 @@ function nodeJourney(id) {
   });
   console.log(`---------`);
   console.log(`STATUS: ${statusOf(evs)}${evs.some((e) => e.type === 'superseded') ? ' · artifact superseded' : ''}`);
+}
+
+if (args.includes('--tree')) {
+  // SUBTREE JOURNEY: a node + every descendant's events, one walk.
+  const root = args[1] || args[args.indexOf('--tree') + 1];
+  if (!root) { console.error('usage: resolve.mjs --tree <node-id>'); process.exit(2); }
+  const base = join(ROOT, 'tree', 'rounds', root);
+  const files = [];
+  const scan = (dir) => { for (const e of readdirSync(dir)) { const p = join(dir, e); if (statSync(p).isDirectory()) scan(p); else if (e === 'events.jsonl') files.push(p); } };
+  scan(base);
+  files.sort();
+  for (const f of files) {
+    const id = f.replace(new RegExp('^' + ROOT + '/tree/rounds/'), '').replace(/\/events\.jsonl$/, '');
+    const evs = parseEvents(f);
+    console.log(`\n▸ ${id}  [${statusOf(evs)}${evs.some((e) => e.type === 'superseded') ? ' · artifact superseded' : ''}]`);
+    for (const ev of evs) {
+      const gate = ev.gate && typeof ev.gate === 'object' ? ` gate: ${ev.gate.old || '?'} → ${ev.gate.new || '?'}` : ev.gate ? ` (gate=${ev.gate})` : '';
+      const extra = ev.type === 'transferred' ? ` → ${ev.target || ''}` : '';
+      console.log(`   ${ev.at || ''} ${ev.type}${gate}${extra}${ev.note ? ' — ' + ev.note.slice(0, 90) : ''}`);
+    }
+  }
+  process.exit(0);
 }
 
 if (args[0] === 'journey' || (args.includes('--journey') && args[1])) {
@@ -267,6 +302,21 @@ if (args.includes('--status')) {
     if (filter && !n.id.includes(filter)) continue;
     console.log(`${n.id.padEnd(58)} ${n.status}`);
   }
+  process.exit(0);
+}
+
+if (args[0] === '--help' || args.includes('--help')) {
+  const want = args.find((a) => !a.startsWith('--') && a !== 'help') || (args.includes('--help') && args[args.indexOf('--help') + 1] && !args[args.indexOf('--help') + 1].startsWith('--') ? args[args.indexOf('--help') + 1] : null);
+  if (want) {
+    const c = COMMANDS.find((x) => x.name === want) || COMMANDS.find((x) => x.name.includes(want));
+    if (!c) { console.error(`no command '${want}'`); process.exit(1); }
+    console.log(`${c.name} ${c.args}\n  ${c.desc}\n  serves: ${c.serves}`);
+    process.exit(0);
+  }
+  console.log('resolve.mjs — the pre-engine CLI (all state derived from tree/ + rules/, no LLM, no server)');
+  console.log('');
+  for (const c of COMMANDS) console.log(`  ${(c.name + ' ' + c.args).padEnd(28)} ${c.desc}`);
+  console.log('\nvalidate.mjs — the rule registry report: run it, --rules, or one rule id');
   process.exit(0);
 }
 

@@ -247,6 +247,15 @@ const args = process.argv.slice(2);
 const rulesCfg = CONFIG.rules;
 const cfgById = Object.fromEntries(rulesCfg.map((r) => [r.id, r]));
 
+if (args.includes('--help')) {
+  console.log('validate.mjs — the rule registry report (rules/check/rules.json, resource-registry spec)');
+  console.log('  (no args)   run all enabled rules · grouped report · exit by worst severity');
+  console.log('  --rules     list every rule + its config');
+  console.log('  <rule-id>   run one rule (e.g. gate-2, closure-integrity)');
+  console.log('  SEVERITY=warning  tolerate warnings (exit 0)');
+  process.exit(0);
+}
+
 if (args.includes('--rules')) {
   for (const r of rulesCfg) console.log(`${r.enabled ? 'on ' : 'off'} ${r.id.padEnd(22)} [${r.severity}] ${r.definition || r.description}`);
   process.exit(0);
