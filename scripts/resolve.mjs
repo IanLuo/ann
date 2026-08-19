@@ -288,7 +288,7 @@ if (args.includes('--journey')) {
     const ready = all.filter((n) => n.id.startsWith(currentRound + '/') && (n.status === 'queued' || n.status === 'active'))
                      .sort((a, b) => a.id.localeCompare(b.id));
     if (ready.length) { console.log(`frontmost-ready: ${ready[0].id} (${ready[0].status})`); ready.slice(1).forEach((t) => console.log(`  also ready: ${t.id}`)); }
-    else console.log('no ready tasks in round — round gate may need review');
+    else console.log('no ready tasks in leg — leg gate may need review');
   } else {
     console.log('no active round — next round to spawn after gate review');
   }
