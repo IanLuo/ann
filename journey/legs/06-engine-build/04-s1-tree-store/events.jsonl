@@ -1,1 +1,3 @@
 {"at":"2026-08-19","type":"created","note":"spawned by bookkeeper (agent)"}
+{"at":"2026-08-19","type":"submitted","gate":"grill","note":"bookkeeper submission (agent)"}
+{"at":"2026-08-19","type":"confirmed","gate":"grill","note":"accepted (agent)"}
