@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store } from '../store.js';
@@ -162,6 +162,59 @@ describe('Store — check() integrity', () => {
     expect(problems.filter((p) => p.includes('GATE-2'))).toHaveLength(1); // 01-a completed without confirm gate
     writeNode('01-goal/01-a', {}, [ev('created'), ev('submitted', { gate: 'grill' }), ev('confirmed', { gate: 'grill' }), ev('submitted', { gate: 'confirm' }), ev('confirmed', { gate: 'confirm' }), ev('completed')]);
     expect(new Store(root).check()).toEqual([]);
+  });
+
+  it('flags a MISSING current artifact file (resolution fail-closed)', () => {
+    writeNode('01-goal/01-a', {}, [ev('created'), ev('artifact-locked', { artifact: { name: 'spec', path: 'journey/legs/01-goal/01-a/artifacts/does-not-exist.md', lockSha: 'a' } })]);
+    const s = new Store(root);
+    expect(s.check().some((p) => p.includes('MISSING: spec'))).toBe(true);
+  });
+
+  it('flags a locked-but-orphaned name (one current per name)', () => {
+    writeNode('01-goal/01-a', {}, [ev('created'), ev('artifact-locked', { artifact: { name: 'spec', path: 'p1.md', lockSha: 'a' } })]);
+    writeNode('01-goal/02-b', {}, [ev('created'), ev('artifact-locked', { artifact: { name: 'spec', path: 'p2.md', lockSha: 'b' } }), ev('superseded', { successor: { name: 'other', path: 'p3.md' } })]);
+    // 02-b superseded with a DIFFERENT successor name — 'spec' has a current (01-a), so no orphan:
+    expect(new Store(root).check().some((p) => p.includes('NO CURRENT'))).toBe(false);
+  });
+
+  it('does not false-positive an orphan when all producers of a name are superseded toward it', () => {
+    writeNode('01-goal/01-a', {}, [ev('created'), ev('artifact-locked', { artifact: { name: 'spec', path: 'p1.md', lockSha: 'a' } })]);
+    writeNode('01-goal/02-b', {}, [ev('created'), ev('artifact-locked', { artifact: { name: 'spec', path: 'p2.md', lockSha: 'b' } })]);
+    writeNode('01-goal/02-b', {}, [ev('created'), ev('artifact-locked', { artifact: { name: 'spec', path: 'p2.md', lockSha: 'b' } }), ev('superseded', { successor: { name: 'spec', path: 'p3.md' } })]);
+    writeNode('01-goal/01-a', {}, [ev('created'), ev('artifact-locked', { artifact: { name: 'spec', path: 'p1.md', lockSha: 'a' } }), ev('superseded', { successor: { name: 'spec', path: 'p2.md' } })]);
+    expect(new Store(root).check().some((p) => p.includes('NO CURRENT'))).toBe(false);
+  });
+});
+
+describe('Store — spawn (creation record + created event through the single writer)', () => {
+  beforeEach(() => { makeStore(); });
+  afterEach(() => { rmSync(root, { recursive: true, force: true }); });
+
+  it('writes node.json + the created event via appendEvent', () => {
+    const s = new Store(root);
+    s.spawn('01-goal', { contract: { intent: 'x', acceptanceCriteria: ['a'] } });
+    expect(existsSync(join(root, 'journey', 'legs', '01-goal', 'node.json'))).toBe(true);
+    expect(s.events('01-goal').map((e) => e.type)).toEqual(['created']);
+    expect(s.status('01-goal')).toBe('queued');
+  });
+
+  it('rejects a re-spawn (immutable id)', () => {
+    const s = new Store(root);
+    s.spawn('01-goal', { contract: { intent: 'x', acceptanceCriteria: ['a'] } });
+    expect(() => new Store(root).spawn('01-goal', {})).toThrow();
+  });
+});
+
+describe('Store — append-only and leg-root discipline', () => {
+  beforeEach(() => { makeStore(); });
+  afterEach(() => { rmSync(root, { recursive: true, force: true }); });
+
+  it('refuses events on a new leg root (v8 §12/§13 — leg roots have no log)', () => {
+    writeNode('07-new-leg', {}, [ev('created')]); // a NEW leg carrying an event — violation
+    const s = new Store(root);
+    expect(s.legRootDisciplineProblems()).toEqual(['07-new-leg: leg root carries events (v8 §3) — leg roots have no log']);
+    writeNode('01-goal', {}, [ev('created'), ev('completed')]); // grandfathered leg
+    expect(new Store(root).legRootDisciplineProblems().length).toBe(1); // only the new leg flagged
   });
 });
 

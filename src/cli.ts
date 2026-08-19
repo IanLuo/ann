@@ -262,10 +262,8 @@ function cmdSpawn(id: string, raw: string) {
   }
   let contract: unknown;
   try { contract = JSON.parse(raw); } catch (e) { console.error(`spawn rejected: bad contract JSON (${(e as Error).message})`); process.exit(1); }
+  store.spawn(id, contract, WHO);
   const dir = join(ROOT, 'journey', 'legs', id);
-  mkdirSync(join(dir, 'artifacts'), { recursive: true });
-  writeFileSync(nodeFile(id), JSON.stringify({ id, contract, createdAt: TODAY }, null, 2) + '\n');
-  appendFileSync(eventFile(id), JSON.stringify({ at: TODAY, type: 'created', note: `spawned by bookkeeper (${WHO})` }) + '\n');
   const intent = ((contract as { contract?: { intent?: string } }).contract?.intent) || '';
   const terms = (intent.match(/[A-Za-z][A-Za-z0-9-]{3,}/g) || []).slice(0, 8).join(', ');
   writeFileSync(join(dir, 'description.md'), `# ${last}\n\n- id: \`${id}\` · status: queued · type: ${segs.length > 1 ? 'task' : 'leg'}\n- summary: ${intent.split('\n')[0]}\n- search terms: ${terms}\n`);

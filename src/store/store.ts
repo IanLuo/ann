@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, appendFileSync, existsSync, statSync, lstatSync } from 'node:fs';
+import { readdirSync, readFileSync, appendFileSync, existsSync, statSync, lstatSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join, basename } from 'node:path';
 import { VOCAB } from './vocab.js';
 
@@ -198,6 +198,20 @@ export class Store {
     if (gaps.length) throw new Error(gaps.join('\n'));
     appendFileSync(join(this.legs, id, 'events.jsonl'), JSON.stringify(event) + '\n');
     node.events = prospective;
+  }
+
+  /** Spawn a node: write the immutable creation record, then the `created` event
+   *  through appendEvent (every event write flows through the single writer). */
+  spawn(id: string, contract: unknown, who = 'agent'): void {
+    if (this.nodes.has(id)) throw new Error(`spawn rejected: ${id} already exists (node.json immutable — no re-spawn)`);
+    const dir = join(this.legs, id);
+    mkdirSync(join(dir, 'artifacts'), { recursive: true });
+    writeFileSync(
+      join(this.legs, id, 'node.json'),
+      JSON.stringify({ id, contract, createdAt: new Date().toISOString().slice(0, 10) }, null, 2) + '\n',
+    );
+    this.nodes.set(id, { id, events: [] });
+    this.appendEvent(id, { at: new Date().toISOString().slice(0, 10), type: 'created', note: `spawned by bookkeeper (${who})` });
   }
 
   /** GATE-1/GATE-2 (F-AC15): tasks only — leg roots carry no events (v8). */
