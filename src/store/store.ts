@@ -55,19 +55,23 @@ export class Store {
     this.load();
   }
 
-  private walk(dir: string, acc: string[] = []): string[] {
+  private walk(dir: string, acc: string[] = [], file: string): string[] {
     for (const entry of readdirSync(dir)) {
       const p = join(dir, entry);
-      if (!lstatSync(p).isSymbolicLink() && statSync(p).isDirectory()) this.walk(p, acc);
-      else if (entry === 'events.jsonl') acc.push(p);
+      if (!lstatSync(p).isSymbolicLink() && statSync(p).isDirectory()) this.walk(p, acc, file);
+      else if (entry === file) acc.push(p);
     }
     return acc;
   }
 
   private load(): void {
-    for (const file of this.walk(this.legs)) {
-      const id = file.replace(new RegExp('^' + this.legs + '/'), '').replace(/\/events\.jsonl$/, '');
-      this.nodes.set(id, { id, events: this.parse(file) });
+    // Node EXISTENCE comes from node.json (v8: leg roots have no events.jsonl);
+    // events are optional (tasks have them, leg roots don't).
+    for (const file of this.walk(this.legs, [], 'node.json')) {
+      const id = file.replace(new RegExp('^' + this.legs + '/'), '').replace(/\/node\.json$/, '');
+      const evFile = file.replace(/node\.json$/, 'events.jsonl');
+      const events = existsSync(evFile) ? this.parse(evFile) : [];
+      this.nodes.set(id, { id, events });
     }
   }
 

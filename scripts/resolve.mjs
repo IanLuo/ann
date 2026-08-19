@@ -145,12 +145,22 @@ function legStatus(id, raw) {
   return ready.length ? ready[0].status : 'blocked';
 }
 
+function walkNodes(dir, acc = []) {
+  for (const entry of readdirSync(dir)) {
+    const p = join(dir, entry);
+    if (!lstatSync(p).isSymbolicLink() && statSync(p).isDirectory()) walkNodes(p, acc);
+    else if (entry === 'node.json') acc.push(p);
+  }
+  return acc;
+}
+
 function allStatuses() {
   // Two-pass: raw task statuses from events, then leg roots derive from children (v7 §12).
+  // Node EXISTENCE comes from node.json (v8: leg roots have no events.jsonl); events optional.
   const raw = [];
-  for (const file of walk(ROUNDS)) {
-    const id = file.replace(new RegExp('^' + ROOT + '/journey/legs/'), '').replace(/\/events\.jsonl$/, '');
-    const evs = parseEvents(file);
+  for (const file of walkNodes(ROUNDS)) {
+    const id = file.replace(new RegExp('^' + ROOT + '/journey/legs/'), '').replace(/\/node\.json$/, '');
+    const evs = existsSync(file.replace(/node\.json$/, 'events.jsonl')) ? parseEvents(file.replace(/node\.json$/, 'events.jsonl')) : [];
     const superseded = evs.some((e) => e.type === 'superseded');
     raw.push({ id, status: statusOf(evs), superseded });
   }
@@ -239,12 +249,12 @@ if (args.includes('--branch')) {
   if (!root) { console.error('usage: resolve.mjs --branch <node-id>'); process.exit(2); }
   const base = join(ROOT, 'journey', 'legs', root);
   const files = [];
-  const scan = (dir) => { for (const e of readdirSync(dir)) { const p = join(dir, e); if (!lstatSync(p).isSymbolicLink() && statSync(p).isDirectory()) scan(p); else if (e === 'events.jsonl') files.push(p); } };
+  const scan = (dir) => { for (const e of readdirSync(dir)) { const p = join(dir, e); if (!lstatSync(p).isSymbolicLink() && statSync(p).isDirectory()) scan(p); else if (e === 'node.json') files.push(p); } };
   scan(base);
-  files.sort();
+  files.sort((a, b) => (a + '.e').localeCompare(b + '.e'));
   for (const f of files) {
-    const id = f.replace(new RegExp('^' + ROOT + '/journey/legs/'), '').replace(/\/events\.jsonl$/, '');
-    const evs = parseEvents(f);
+    const id = f.replace(new RegExp('^' + ROOT + '/journey/legs/'), '').replace(/\/node\.json$/, '');
+    const evs = existsSync(f.replace(/node\.json$/, 'events.jsonl')) ? parseEvents(f.replace(/node\.json$/, 'events.jsonl')) : [];
     const st = id.includes('/') ? statusOf(evs) : (legStatus(id, allStatuses().map((n) => ({ id: n.id, status: n.status.replace(' · artifact superseded', '') }))) || statusOf(evs));
     console.log(`\n▸ ${id}  [${st}${evs.some((e) => e.type === 'superseded') ? ' · artifact superseded' : ''}]`);
     for (const ev of evs) {
@@ -602,9 +612,10 @@ if (args.includes('--check')) {
   for (const p of problems) console.error(p);
   // Deterministic gate validation: every completed node needs confirmed(gate=confirm).
   const gateGaps = [];
-  for (const file of walk(ROUNDS)) {
-    const id = file.replace(new RegExp('^' + ROOT + '/journey/legs/'), '').replace(/\/events\.jsonl$/, '');
-    for (const p of gateProblems(id, parseEvents(file))) gateGaps.push(p);
+  for (const file of walkNodes(ROUNDS)) {
+    const id = file.replace(new RegExp('^' + ROOT + '/journey/legs/'), '').replace(/\/node\.json$/, '');
+    const evs = existsSync(file.replace(/node\.json$/, 'events.jsonl')) ? parseEvents(file.replace(/node\.json$/, 'events.jsonl')) : [];
+    for (const p of gateProblems(id, evs)) gateGaps.push(p);
   }
   for (const g of gateGaps) console.error(g);
   // Artifact integrity (v8): marker-stripped blob vs recorded lockSha. New locks use
