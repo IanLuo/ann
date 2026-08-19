@@ -1,0 +1,23 @@
+{
+  "id": "05-engine/10-system-design-amendment",
+  "contract": {
+    "intent": "Amend ann-system-design (locked) to v2 per conformance report E-1/E-2 + W-1..W-3: Provider adapter gains per-task model selection; two-log trace replaces single-log framing; F9 spec owner clarified (Planner kernel); Tree store cross-references single-writer appendEvent; coverage criterion wording. Produces a COMPLETE superseding artifact (change-protocol §3).",
+    "acceptanceCriteria": [
+      "ann-system-design-v2.md artifact exists — complete doc = v1 content + the 5 conformance closures",
+      "Provider adapter: multiple providers + per-task model selection (v1 grain = task; F17 holds lists + defaults; tasks override)",
+      "Trace: two distinct logs — project event log (the tree) + runtime operational log (requests/errors/timings, separate)",
+      "F9 spec: Planner kernel owns spec expansion; Grilling engine = validate/requirements-grilling",
+      "Tree store cross-references the single-writer appendEvent() choke point (architecture LB-3)",
+      "Coverage criterion stated: components serve functions OR flow steps",
+      "v2 locked (type=system-design); v1 gets a superseded event; resolver/AGENTS point at v2"
+    ],
+    "targetAreas": ["artifacts/ann-system-design-v2.md", "AGENTS.md"],
+    "requiredInputs": [
+      "04-system-design/00/02-system-design-doc/artifacts/ann-system-design.md (locked — v1)",
+      "05-engine/00/08-system-design-validation/artifacts/conformance-report.md (E-1/E-2/W-1..W-3)",
+      "05-engine/00/07-architecture/artifacts/architecture.md (locked — per-task models, two-log trace, single-writer)"
+    ],
+    "expectedOutputs": ["ann-system-design-v2.md (locked, complete)"]
+  },
+  "createdAt": "2026-08-17"
+}

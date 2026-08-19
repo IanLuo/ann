@@ -1,0 +1,17 @@
+{
+  "id": "05-engine/15-system-design-stack",
+  "contract": {
+    "intent": "Amend ann-system-design v2 to v3 — record the seven tech-stack decisions with how: discussed provenance (loaded from the resource center rung, user-confirmed 2026-08-18) and re-label Q1-Q4 with honest provenance. Produces a COMPLETE superseding artifact.",
+    "acceptanceCriteria": [
+      "ann-system-design-v3.md artifact exists — complete doc = v2 + tech-stack section + Q1-Q4 provenance",
+      "TS-1..TS-7 recorded with how: discussed (language, CLI, tests, build, pkg, provider, web-UI)",
+      "Q1-Q4 re-labeled with honest provenance (discussed — re-elicited from defaults)",
+      "v3 locked (type=system-design); v2 gets a superseded event; AGENTS/resolver point at v3",
+      "The high-impact-defaulted rule now has provenance to check against"
+    ],
+    "targetAreas": ["artifacts/ann-system-design-v3.md", "AGENTS.md"],
+    "requiredInputs": ["10-system-design-amendment/artifacts/ann-system-design-v2.md (locked)", "tech-stack artifact (user confirmed all seven, 2026-08-18)"],
+    "expectedOutputs": ["ann-system-design-v3.md (locked, complete)"]
+  },
+  "createdAt": "2026-08-18"
+}

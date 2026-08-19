@@ -1,0 +1,22 @@
+{
+  "id": "04-system-design/02-system-design-doc",
+  "contract": {
+    "intent": "Produce the system-design doc for Ann (type system-design): components & ownership, data model, boundaries/interfaces, failure modes, scale assumptions — the technique layer, built on the locked spec + format v2.",
+    "acceptanceCriteria": [
+      "Components listed, each with a one-line job and an owner (what does each component refuse to do?)",
+      "Data model defined: StepNode, artifacts, checkpoints, trace — who writes, who reads, stale-read behavior, empty-record decision",
+      "Shared schemas frozen at interfaces (StepNode JSON schema, context packet schema, binding API)",
+      "Failure modes per component: fail-closed vs fail-open explicit; the one failure that would wreck the product named",
+      "Scale assumptions stated (tree size, write rate, fixture suite size)",
+      "Q1-Q4 resolved or explicitly parked with defaults (runtime, provider, storage, UI)"
+    ],
+    "targetAreas": ["artifacts/ann-system-design.md", "tree/rounds"],
+    "requiredInputs": [
+      "02-grilling/artifacts/ann-spec.md (locked @ 2664511)",
+      "01-format-amendment-v2 output: tree-format-spec-v2.md (locked)",
+      "design §15 (persistence), §16 (adapters), §21 (tree model)"
+    ],
+    "expectedOutputs": ["system-design artifact (artifacts/ann-system-design.md)"]
+  },
+  "createdAt": "2026-08-15"
+}

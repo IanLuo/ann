@@ -1,0 +1,23 @@
+{
+  "id": "05-engine/05-requirements-amendment",
+  "contract": {
+    "intent": "Amend requirements-spec (v2, locked @ 89ace76) to v3 — close the audit gaps: K5 completion-success metric, AC-6 self-similarity conformance, AC-7 requirements-change contract, D3 binding dependency. Produces a COMPLETE superseding artifact (change-protocol §3).",
+    "acceptanceCriteria": [
+      "requirements-spec-v3.md artifact exists — complete doc = v2 content + the audit-gap closures",
+      "K5 added: first-pass AC completion on fixtures (>= 85%), with the failure signal extended (steps can't complete = the flow is wrong, not the navigation)",
+      "AC-6 added: a fixture project's tree conforms to tree-format-spec (same structure as Ann's own); verified by the format validator on both; includes the dogfooding round-trip",
+      "AC-7 added: a mid-project requirement change lands as an amendment node → complete superseding artifact under the same logical name → superseded event → referrers resolve to the new current (change-protocol v2)",
+      "D3 added: GitHub binding API availability (fail-closed per flow-control)",
+      "Verification plan updated for K5, AC-6, AC-7, D3",
+      "v3 locked (type=spec); v2 gets a superseded event; AGENTS.md index points at v3; referrers use logical names"
+    ],
+    "targetAreas": ["artifacts/requirements-spec-v3.md", "AGENTS.md"],
+    "requiredInputs": [
+      "02-grilling/01-spec-rework/artifacts/requirements-spec.md (v2, locked @ 89ace76)",
+      "05-engine/00/03-change-protocol-amendment/artifacts/requirements-change-protocol-v2.md (locked @ be67673)",
+      "05-engine/00/04-format-amendment-v3/artifacts/tree-format-spec-v3.md (locked @ 012ca5f)"
+    ],
+    "expectedOutputs": ["requirements-spec-v3.md (locked, complete)"]
+  },
+  "createdAt": "2026-08-16"
+}

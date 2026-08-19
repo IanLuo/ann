@@ -1,0 +1,22 @@
+{
+  "id": "05-engine/06-functional-spec",
+  "contract": {
+    "intent": "Produce the functional-spec — the detailed contract of what the builder can DO with Ann: the function surface (F1-F16), per-function contracts (purpose → AC/KPI traceability, inputs, outputs, interactions/gates, failure edges, verification), the interaction model (gate talk-loop), and the v1 views section (tree view, step card, status, gate presentation). Fills the missing layer between requirements and architecture.",
+    "acceptanceCriteria": [
+      "functional-spec.md artifact exists at artifacts/ — complete: function surface + per-function contracts + interaction model + v1 views",
+      "Every function traces to AC/KPI/NFR (requirements-spec v3) and to components (ann-system-design) via mapping tables",
+      "Interaction model defined once: gate talk-loop (present card -> collect decision -> collect feedback), referenced by all functions",
+      "Failure edges per function: fail-closed, blocker named, no fabrication",
+      "Views section for v1 (CLI text): tree view, step card contents, status display, gate presentation — the K1-K3 measurable surface",
+      "Spec locked (type=spec, upstream requirements-spec + flow-control-spec); indexed in AGENTS.md; resolvable via resolve.mjs"
+    ],
+    "targetAreas": ["artifacts/functional-spec.md", "AGENTS.md"],
+    "requiredInputs": [
+      "05-engine/00/05-requirements-amendment/artifacts/requirements-spec-v3.md (locked @ 80eeaae — ACs, K1-K5, NFRs)",
+      "05-engine/00/01-flow-control/artifacts/flow-control-spec.md (locked @ 2522b6c — gates, ladder, work types)",
+      "04-system-design/00/02-system-design-doc/artifacts/ann-system-design.md (locked — components)"
+    ],
+    "expectedOutputs": ["functional-spec.md (locked, complete)"]
+  },
+  "createdAt": "2026-08-16"
+}

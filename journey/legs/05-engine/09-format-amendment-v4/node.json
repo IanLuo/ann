@@ -1,0 +1,22 @@
+{
+  "id": "05-engine/09-format-amendment-v4",
+  "contract": {
+    "intent": "Amend tree-format-spec v3 (locked @ 012ca5f) to v4 — the store-review closures: legacy task-placement note, drop spawned, requiredInputs by logical name, append-order/at-informational, name discipline enforce-new, file ownership & write timing, description.md frontmatter. Produces a COMPLETE superseding artifact (change-protocol §3).",
+    "acceptanceCriteria": [
+      "tree-format-spec-v4.md artifact exists — complete doc = v3 content + the 7 store-review amendments",
+      "§2 node.json schema enumerated inline (id, contract{intent,acceptanceCriteria,targetAreas,requiredInputs,expectedOutputs}, openQuestions, createdAt)",
+      "§3 spawned removed; ordering = append order within file; at informational; structured artifact-locked/superseded kept",
+      "§5 file ownership & write timing: round-root vs task files, what each holds, when written (round gate, artifact gate, artifact-locked moment)",
+      "§6 description.md frontmatter schema: name, type, round, status(derived), summary, find-me-when (skill.md-style AI clues); body = free-form card; regenerable",
+      "Legacy note: R2/R3 flat task placement tolerated; new tasks always use 00/",
+      "v4 locked (type=spec); v3 gets a superseded event; AGENTS.md + resolver point at v4"
+    ],
+    "targetAreas": ["artifacts/tree-format-spec-v4.md", "AGENTS.md"],
+    "requiredInputs": [
+      "05-engine/00/04-format-amendment-v3/artifacts/tree-format-spec-v3.md (locked @ 012ca5f)",
+      "Store review (annotated artifact .agents/artifacts/store-format-review.html — 7 closures)"
+    ],
+    "expectedOutputs": ["tree-format-spec-v4.md (locked, complete)"]
+  },
+  "createdAt": "2026-08-16"
+}

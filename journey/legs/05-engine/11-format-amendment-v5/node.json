@@ -1,0 +1,21 @@
+{
+  "id": "05-engine/11-format-amendment-v5",
+  "contract": {
+    "intent": "Amend tree-format-spec v4 (locked @ fbaba13) to v5 — the gate events in the event schema: submitted / confirmed / rejected (with gate grill|confirm + feedback), and the completion rule: completed may be written only after confirmed(gate=confirm) (validator-enforced, F-AC15). Produces a COMPLETE superseding artifact.",
+    "acceptanceCriteria": [
+      "tree-format-spec-v5.md artifact exists — complete doc = v4 content + gate events + completion rule",
+      "Event types add: submitted / confirmed / rejected — each with gate (grill|confirm); rejected carries feedback",
+      "Completion rule: completed may be written only after confirmed(gate=confirm); a node with submitted but no decision = blocked (waiting on human)",
+      "Gate flow: submitted(gate=grill) → confirmed/rejected(gate=grill) before execution; submitted(gate=confirm) → confirmed/rejected(gate=confirm) before completed",
+      "F-AC15: gate invariants enforced by the validator (the deterministic check that flagged 17 gaps)",
+      "v5 locked (type=spec); v4 gets a superseded event; AGENTS.md + resolver point at v5"
+    ],
+    "targetAreas": ["artifacts/tree-format-spec-v5.md", "AGENTS.md"],
+    "requiredInputs": [
+      "05-engine/00/09-format-amendment-v4/artifacts/tree-format-spec-v4.md (locked @ fbaba13)",
+      "Gate confirmation action (17 confirmed events appended, 2026-08-17)"
+    ],
+    "expectedOutputs": ["tree-format-spec-v5.md (locked, complete)"]
+  },
+  "createdAt": "2026-08-17"
+}

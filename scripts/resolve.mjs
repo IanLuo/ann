@@ -16,7 +16,7 @@
  * else derive from the artifact filename minus a version suffix (-vN).
  */
 
-import { readFileSync, existsSync, readdirSync, statSync, appendFileSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync, statSync, lstatSync, appendFileSync } from 'node:fs';
 import { join, dirname, basename } from 'node:path';
 
 const ROOT = process.cwd();
@@ -25,7 +25,7 @@ const ROUNDS = join(ROOT, 'journey', 'legs');
 function walk(dir, acc = []) {
   for (const entry of readdirSync(dir)) {
     const p = join(dir, entry);
-    if (statSync(p).isDirectory()) walk(p, acc);
+    if (!lstatSync(p).isSymbolicLink() && statSync(p).isDirectory()) walk(p, acc);
     else if (entry === 'events.jsonl') acc.push(p);
   }
   return acc;
@@ -130,7 +130,7 @@ function statusOf(events) {
 //  frontmost-ready child exists        → that child's status (lowest prefix among not-done/failed/superseded)
 //  no frontmost-ready (all failed/etc) → blocked (escalate: retry / transfer / close)
 function legStatus(id, raw) {
-  const children = raw.filter((n) => n.id.startsWith(id + '/') && n.id.split('/').length <= 3);
+  const children = raw.filter((n) => n.id.startsWith(id + '/') && n.id.split('/').length === 2);
   if (!children.length) return raw.find((n) => n.id === id)?.status || 'queued';
   if (children.every((c) => c.status === 'done' || c.status === 'superseded')) return 'done';
   const ready = children.filter((c) => !['done', 'failed', 'superseded'].includes(c.status)).sort((a, b) => a.id.localeCompare(b.id));
@@ -225,7 +225,7 @@ if (args.includes('--branch')) {
   if (!root) { console.error('usage: resolve.mjs --branch <node-id>'); process.exit(2); }
   const base = join(ROOT, 'journey', 'legs', root);
   const files = [];
-  const scan = (dir) => { for (const e of readdirSync(dir)) { const p = join(dir, e); if (statSync(p).isDirectory()) scan(p); else if (e === 'events.jsonl') files.push(p); } };
+  const scan = (dir) => { for (const e of readdirSync(dir)) { const p = join(dir, e); if (!lstatSync(p).isSymbolicLink() && statSync(p).isDirectory()) scan(p); else if (e === 'events.jsonl') files.push(p); } };
   scan(base);
   files.sort();
   for (const f of files) {

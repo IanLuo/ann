@@ -13,7 +13,7 @@
  *   SEVERITY=warning node scripts/validate.mjs → tolerate warnings (exit 0)
  */
 
-import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync, statSync, lstatSync } from 'node:fs';
 import { join } from 'node:path';
 
 const ROOT = process.cwd();
@@ -23,7 +23,7 @@ const CONFIG = JSON.parse(readFileSync(join(ROOT, 'rules', 'check', 'rules.json'
 function walk(dir, acc = []) {
   for (const entry of readdirSync(dir)) {
     const p = join(dir, entry);
-    if (statSync(p).isDirectory()) walk(p, acc);
+    if (!lstatSync(p).isSymbolicLink() && statSync(p).isDirectory()) walk(p, acc);
     else if (entry === 'events.jsonl' || entry === 'node.json' || entry === 'description.md') acc.push(p);
   }
   return acc;
@@ -231,7 +231,7 @@ const RULES = {
       const legs = [...new Set(nodeFiles.map((nf) => nodeId(nf).split('/')[0]))].sort();
       const taskDone = (id) => parseEvents(join(ROUNDS, id, 'events.jsonl')).some((e) => e.type === 'completed' || e.type === 'superseded'); // superseded = closed (absorbed), e.g. 01-depth-policy
       const legTasksDone = (leg) => {
-        const tasks = nodeFiles.map((nf) => nodeId(nf)).filter((id) => id.startsWith(leg + '/') && id.split('/').length <= 3);
+        const tasks = nodeFiles.map((nf) => nodeId(nf)).filter((id) => id.startsWith(leg + '/') && id.split('/').length === 2);
         if (!tasks.length) return taskDone(leg); // childless leg → its own record (L1 base step; new legs have none → not done)
         return tasks.every(taskDone);
       };

@@ -1,0 +1,21 @@
+{
+  "id": "05-engine/12-validation-system",
+  "contract": {
+    "intent": "Build the small event-validation system — a configurable rules runner (S4 validators seed): rules registry + config (enable/disable, severity, thresholds) + report. Secures the flow deterministically; the gate/resolution/schema checks become managed rules, not hardcoded script logic.",
+    "acceptanceCriteria": [
+      "scripts/validate.mjs — runs the active rules against the tree; grouped report by severity; exit code by worst severity",
+      "scripts/validation.config.json — rule config: {id, enabled, severity, params}; management surface (tune/disable without code changes)",
+      "Rules registry covers: gate-1 (work requires confirmed grill), gate-2 (completed requires confirmed confirm), event schema, one-current-per-name, resolution files-exist, depth budget, name discipline, card presence",
+      "Each rule: id, defaultSeverity, description, check(tree) → findings[]",
+      "Config can disable a rule or override severity (e.g., depth = warning in quick mode)",
+      "Task done with running system; reported against the live tree"
+    ],
+    "targetAreas": ["scripts/validate.mjs", "scripts/validation.config.json", "tree/rounds"],
+    "requiredInputs": [
+      "05-engine/00/09-format-amendment-v4/artifacts/tree-format-spec-v4.md (locked — §3 events, §5 resolution, §7 F-ACs, §8 depth/name)",
+      "scripts/resolve.mjs (existing checks — gate, resolution, status)"
+    ],
+    "expectedOutputs": ["validation system (scripts + config), rules documented"]
+  },
+  "createdAt": "2026-08-17"
+}
