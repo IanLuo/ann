@@ -1,3 +1,4 @@
 {"at":"2026-08-19","type":"created","note":"spawned by bookkeeper (agent)"}
 {"at":"2026-08-19","type":"submitted","gate":"grill","note":"bookkeeper submission (agent)"}
 {"at":"2026-08-19","type":"confirmed","gate":"grill","note":"accepted (agent)"}
+{"at":"2026-08-19","type":"evidence","note":"checkpoint 03c81a1: first implementation chunk — src/store (Store + vocab registry + 20 vitest tests, typecheck clean); project scaffold (package.json/tsconfig/vitest/.gitignore). Remaining ACs: absorb scripts/resolve.mjs+validate.mjs into the store CLI; broaden F-AC test coverage; GATE② pending."}
