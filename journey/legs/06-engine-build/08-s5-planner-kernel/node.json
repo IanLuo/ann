@@ -1,0 +1,34 @@
+{
+  "id": "06-engine-build/08-s5-planner-kernel",
+  "contract": {
+    "contract": {
+      "intent": "Planner kernel + Flow config + Provider adapter (S5) — orchestrates node lifecycle per flow-control-spec v4 (spawn to materialize to GATE1 to validate to activate to execute to verify to GATE2 to commit to look-back); frontmost-ready selection; bounded rework + chain append; owns spec expansion (F9); consumes per-project flow config (data, not code — AC-3); uniform LLM interface with multiple providers + per-task model selection (F17).",
+      "acceptanceCriteria": [
+        "Lifecycle orchestration per flow-control-spec v4; every human decision at a task gate",
+        "Frontmost-ready selection: prefix order, failed/superseded siblings skipped",
+        "Bounded rework: 3 rejections per gate then escalate; no unbounded loops",
+        "Flow config: reads/validates project step chains (data, not code); step-chain templates (F3); code never overrides project config",
+        "Provider adapter: multiple providers + per-task model selection (F17); retries + rate-limit handling; fail-closed structured error on failure",
+        "Spec expansion (F9): detailed specs from the vision artifact",
+        "Unit tests (vitest)"
+      ],
+      "targetAreas": [
+        "src/kernel/",
+        "src/adapters/"
+      ],
+      "requiredInputs": [
+        "flow-control-spec",
+        "requirements-spec",
+        "functional-spec",
+        "journey-format-spec",
+        "ann-system-design"
+      ],
+      "expectedOutputs": [
+        "src/kernel/ planner kernel + flow config",
+        "src/adapters/ provider adapter",
+        "unit tests"
+      ]
+    }
+  },
+  "createdAt": "2026-08-19"
+}

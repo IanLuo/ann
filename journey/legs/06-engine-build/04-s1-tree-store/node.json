@@ -1,0 +1,30 @@
+{
+  "id": "06-engine-build/04-s1-tree-store",
+  "contract": {
+    "contract": {
+      "intent": "Tree store (S1) — reads/writes legs, nodes, events, artifacts per journey-format-spec v8; builds the in-memory tree; enforces schema, append-only, immutability, leg gate; owns the single appendEvent() write function (architecture LB-3 — the only writer); exposes derived views (status/resolution/branch) for shared readers. Absorbs scripts/resolve.mjs + validate.mjs as the store seed.",
+      "acceptanceCriteria": [
+        "appendEvent() is the ONLY write path (LB-3): schema validated against the vocab registry, append-only, no reorder/delete/rewrite",
+        "In-memory tree built from files at startup; derived views: leg status from tasks (v8 §12), resolution current(name), branch walk",
+        "Schema enforcement: unknown fields/types rejected (vocab registry); immutable node.json never rewritten",
+        "Leg gate: no leg N+1 work before all leg N tasks done (derived aggregate, v8 §13)",
+        "Unit tests (vitest) covering the store-relevant F-AC1..F-AC17"
+      ],
+      "targetAreas": [
+        "src/store/"
+      ],
+      "requiredInputs": [
+        "journey-format-spec",
+        "resource-registry",
+        "change-protocol",
+        "requirements-spec"
+      ],
+      "expectedOutputs": [
+        "src/store/ tree store + derived views",
+        "unit tests",
+        "resolver/validators absorbed from scripts/"
+      ]
+    }
+  },
+  "createdAt": "2026-08-19"
+}

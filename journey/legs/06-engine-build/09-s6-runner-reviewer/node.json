@@ -1,0 +1,26 @@
+{
+  "id": "06-engine-build/09-s6-runner-reviewer",
+  "contract": {
+    "contract": {
+      "intent": "Runner reviewer (S6) — runner-simulation review per node (can the runner execute without guessing?) consumed by F7 gate2 review; bounded review loops (max iterations). Refuses to pass blocking confusion.",
+      "acceptanceCriteria": [
+        "Simulation review: for a node context packet, can the runner execute without guessing?",
+        "Blocking confusion to rejection with named blockers — never pass",
+        "Bounded loops: max iterations then escalate (no unbounded review)",
+        "Unit tests (vitest)"
+      ],
+      "targetAreas": [
+        "src/engines/"
+      ],
+      "requiredInputs": [
+        "flow-control-spec",
+        "design"
+      ],
+      "expectedOutputs": [
+        "src/engines/ runner reviewer",
+        "unit tests"
+      ]
+    }
+  },
+  "createdAt": "2026-08-19"
+}

@@ -1,0 +1,27 @@
+{
+  "id": "06-engine-build/10-s7-github-binding",
+  "contract": {
+    "contract": {
+      "intent": "GitHub binding (S7) — create issue/PR (F13); record action + result as a provenance artifact (AC6); confirm before destructive actions. Refuses to act without confirmation on destructive actions or fake success on failure.",
+      "acceptanceCriteria": [
+        "Issue/PR creation (F13) via the GitHub API",
+        "Provenance artifact recorded per action (AC6): action, result, links",
+        "Destructive actions require confirmation before acting",
+        "No fake success: structured error on failure (fail-closed)",
+        "Unit tests with mocked API (vitest)"
+      ],
+      "targetAreas": [
+        "src/adapters/"
+      ],
+      "requiredInputs": [
+        "functional-spec",
+        "requirements-spec"
+      ],
+      "expectedOutputs": [
+        "src/adapters/ github binding",
+        "unit tests"
+      ]
+    }
+  },
+  "createdAt": "2026-08-19"
+}

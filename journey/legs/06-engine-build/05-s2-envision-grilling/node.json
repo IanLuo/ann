@@ -1,0 +1,29 @@
+{
+  "id": "06-engine-build/05-s2-envision-grilling",
+  "contract": {
+    "contract": {
+      "intent": "Envision + Grilling engines (S2) — runs the envision step (F8: imagine usage + look, produce the vision artifact) and the validate/grilling step (F4: the idea exit gate, validation + questions; requirements-grilling template + LLM to PRD). Refuses to invent facts or fake precision on novel work (design §21.6).",
+      "acceptanceCriteria": [
+        "Envision: vision artifact (usage + look) per F8; batch-ask questions (flow-control v4 table)",
+        "Grilling: validation + questions per F4; requirements-grilling (template + LLM) to PRD artifact",
+        "Never invents facts: every output carries provenance (design §6)",
+        "Provider calls go through the provider adapter interface (frozen interface — no direct provider access)",
+        "Unit tests (vitest)"
+      ],
+      "targetAreas": [
+        "src/engines/"
+      ],
+      "requiredInputs": [
+        "flow-control-spec",
+        "requirements-spec",
+        "design",
+        "functional-spec"
+      ],
+      "expectedOutputs": [
+        "src/engines/ envision + grilling",
+        "unit tests"
+      ]
+    }
+  },
+  "createdAt": "2026-08-19"
+}
