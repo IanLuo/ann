@@ -109,7 +109,7 @@ function check(current) {
 }
 
 function statusOf(events) {
-  // format v3 §3: status = tail mapping; superseded annotates completed/failed, never overrides.
+  // format v7 §3: status = tail mapping (TASKS); superseded annotates completed/failed, never overrides.
   let status = 'queued';
   for (const ev of events) {
     switch (ev.type) {
@@ -124,14 +124,32 @@ function statusOf(events) {
   return status;
 }
 
+// Derived leg status (journey-format-spec v7 §12) — a pure function of the leg's tasks:
+//  all direct children done            → done
+//  no children                         → own lifecycle from root events (grandfathered childless legs, e.g. L1; new legs have no root events → queued)
+//  frontmost-ready child exists        → that child's status (lowest prefix among not-done/failed/superseded)
+//  no frontmost-ready (all failed/etc) → blocked (escalate: retry / transfer / close)
+function legStatus(id, raw) {
+  const children = raw.filter((n) => n.id.startsWith(id + '/') && n.id.split('/').length <= 3);
+  if (!children.length) return raw.find((n) => n.id === id)?.status || 'queued';
+  if (children.every((c) => c.status === 'done' || c.status === 'superseded')) return 'done';
+  const ready = children.filter((c) => !['done', 'failed', 'superseded'].includes(c.status)).sort((a, b) => a.id.localeCompare(b.id));
+  return ready.length ? ready[0].status : 'blocked';
+}
+
 function allStatuses() {
-  const out = [];
+  // Two-pass: raw task statuses from events, then leg roots derive from children (v7 §12).
+  const raw = [];
   for (const file of walk(ROUNDS)) {
     const id = file.replace(new RegExp('^' + ROOT + '/journey/legs/'), '').replace(/\/events\.jsonl$/, '');
     const evs = parseEvents(file);
-    // artifact currency: superseded annotates completed (format v3) — show BOTH facts
     const superseded = evs.some((e) => e.type === 'superseded');
-    out.push({ id, status: statusOf(evs) + (superseded ? ' · artifact superseded' : '') });
+    raw.push({ id, status: statusOf(evs), superseded });
+  }
+  const out = [];
+  for (const n of raw) {
+    const status = n.id.split('/').length === 1 ? legStatus(n.id, raw) : n.status;
+    out.push({ id: n.id, status: status + (n.superseded ? ' · artifact superseded' : '') });
   }
   return out.sort((a, b) => a.id.localeCompare(b.id));
 }
@@ -288,9 +306,11 @@ if (args.includes('--journey')) {
     const ready = all.filter((n) => n.id.startsWith(currentRound + '/') && (n.status === 'queued' || n.status === 'active'))
                      .sort((a, b) => a.id.localeCompare(b.id));
     if (ready.length) { console.log(`frontmost-ready: ${ready[0].id} (${ready[0].status})`); ready.slice(1).forEach((t) => console.log(`  also ready: ${t.id}`)); }
+    else if (root.status.startsWith('done')) console.log('LEG GATE REVIEW: all spawned tasks done — verify the epic ACs (node.json contract) before advancing or spawning remaining tasks');
     else console.log('no ready tasks in leg — leg gate may need review');
   } else {
-    console.log('no active round — next round to spawn after gate review');
+    const done = rounds.filter((r) => all.find((n) => n.id === r && n.status.startsWith('done')));
+    console.log(done.length ? `no active leg — previous leg (${done[done.length - 1]}) derived done; LEG GATE REVIEW before spawning the next leg` : 'no active round — next leg to spawn after gate review');
   }
   console.log('\n(grounded in: statuses + gates + validation — run --check / validate.mjs for the proof)');
   process.exit(0);

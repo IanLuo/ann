@@ -1,4 +1,4 @@
-<!-- draft — lock pending (specs ritual stamps sha at lock) -->
+<!-- specs:locked:bee8e89 2026-08-19 type=spec -->
 
 ## Link contract
 - **upstream** (this doc relies on): journey/legs/01-goal/artifacts/design.md,02-grilling/01-spec-rework/artifacts/requirements-spec.md,05-engine/00/17-format-amendment-v6/artifacts/tree-format-spec-v6.md
@@ -169,7 +169,7 @@ find-me-when:
 | Children | Leg status |
 |---|---|
 | all `done` (or `superseded`-annotated `done`) | **done** |
-| no children (nothing spawned) | **queued** — a leg without tasks can never be `done` (nothing worked) |
+| no children (nothing spawned) | own lifecycle from root events — grandfathered childless legs only (L1, the base step); new legs carry no root events → **queued**, never `done` |
 | frontmost-ready child exists (lowest prefix among not-done, not-failed, not-superseded) | that child's status (`queued` / `active` / `blocked`) |
 | all remaining children `failed`/`superseded` (no frontmost-ready) | **blocked** — escalate: retry / transfer / close (flow-control §5) |
 

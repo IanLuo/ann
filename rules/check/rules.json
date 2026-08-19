@@ -84,9 +84,18 @@
       "category": "check",
       "kind": "rule",
       "enabled": true,
-      "severity": "warning",
+      "severity": "error",
       "params": {},
-      "definition": "no round N+1 work before round N completed"
+      "definition": "no leg N+1 work before all of leg N's tasks done (derived aggregate — v7 §12)"
+    },
+    {
+      "id": "leg-root-discipline",
+      "category": "check",
+      "kind": "rule",
+      "enabled": true,
+      "severity": "error",
+      "params": {},
+      "definition": "leg roots carry no events (v7 §3/§12) — L1-L6 grandfathered; new legs have no root log"
     },
     {
       "id": "high-impact-defaulted",

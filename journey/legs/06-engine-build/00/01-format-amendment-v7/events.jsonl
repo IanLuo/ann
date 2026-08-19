@@ -1,1 +1,7 @@
 {"at":"2026-08-18","type":"created","note":"spawned per user decision (2026-08-18 design discussion): round finishedness must DERIVE from its tasks — the finish/transfer decision is made on the task, each task confirms at its end; the round's event list shrinks to structure; closure lives on tasks. Amendment node per change-protocol."}
+{"at":"2026-08-19","type":"submitted","gate":"grill","note":"user grilling session (2026-08-18/19): decisions 1-7 confirmed — leg roots carry no events, derived leg status, leg gate = aggregate, closure task, grandfathering + inertness, read discipline, journey/leg naming"}
+{"at":"2026-08-19","type":"confirmed","gate":"grill","note":"grill passed — the derived-status model is right"}
+{"at":"2026-08-19","type":"artifact-locked","artifact":{"name":"journey-format-spec","path":"journey/legs/06-engine-build/00/01-format-amendment-v7/artifacts/journey-format-spec-v7.md","lockSha":"bee8e89"},"note":"journey-format-spec-v7.md specs-locked — derived leg status + journey/leg naming in force (formerly tree-format-spec)"}
+{"at":"2026-08-19","type":"submitted","gate":"confirm","note":"lock + supersede + implementation complete"}
+{"at":"2026-08-19","type":"confirmed","gate":"confirm","note":"user: lock it"}
+{"at":"2026-08-19","type":"completed","note":"journey-format-spec-v7: derived leg status (frontmost-ready table, no leg-root events), leg gate = aggregate, closure-task pattern, read discipline, journey/leg renaming; v6 superseded; validator/rules implementation pending this event"}

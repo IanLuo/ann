@@ -50,6 +50,7 @@ const RULES = {
     check: () => {
       const out = [];
       for (const f of eventFiles) {
+        if (!nodeId(f).includes('/')) continue; // v7: gate rules apply to tasks only — leg roots carry no events
         const evs = parseEvents(f);
         let firstWork = -1, lastGrill = -1, retroGrill = false;
         evs.forEach((ev, i) => {
@@ -67,6 +68,7 @@ const RULES = {
     check: () => {
       const out = [];
       for (const f of eventFiles) {
+        if (!nodeId(f).includes('/')) continue; // v7: gate rules apply to tasks only
         const evs = parseEvents(f);
         let lastComplete = -1, lastConfirm = -1;
         evs.forEach((ev, i) => {
@@ -195,6 +197,7 @@ const RULES = {
       const allIds = new Set();
       for (const nf of nodeFiles) allIds.add(nodeId(nf));
       for (const f of eventFiles) {
+        if (!nodeId(f).includes('/')) continue; // v7: closure rules apply to tasks only
         const evs = parseEvents(f);
         const id = nodeId(f);
         let revised = -1, completed = -1, closureOk = false, transferredTargets = [];
@@ -222,20 +225,34 @@ const RULES = {
     },
   },
   'round-gate': {
+    // v7: the leg gate is the DERIVED AGGREGATE — leg N+1 spawns only when all of leg N's tasks are done.
     check: () => {
       const out = [];
-      const rounds = new Map();
-      for (const nf of nodeFiles) {
-        const rel = nodeId(nf);
-        const roundId = rel.split('/')[0];
-        if (!rounds.has(roundId)) rounds.set(roundId, { root: rel === roundId ? null : null, done: false });
-        if (rel === roundId) rounds.get(roundId).root = rel;
+      const legs = [...new Set(nodeFiles.map((nf) => nodeId(nf).split('/')[0]))].sort();
+      const taskDone = (id) => parseEvents(join(ROUNDS, id, 'events.jsonl')).some((e) => e.type === 'completed' || e.type === 'superseded'); // superseded = closed (absorbed), e.g. 01-depth-policy
+      const legTasksDone = (leg) => {
+        const tasks = nodeFiles.map((nf) => nodeId(nf)).filter((id) => id.startsWith(leg + '/') && id.split('/').length <= 3);
+        if (!tasks.length) return taskDone(leg); // childless leg → its own record (L1 base step; new legs have none → not done)
+        return tasks.every(taskDone);
+      };
+      for (let i = 1; i < legs.length; i++) {
+        const prev = legs[i - 1], cur = legs[i];
+        if (!legTasksDone(prev)) out.push({ message: `${cur}: leg spawned before all of ${prev}'s tasks done (derived leg gate, v7 §12)` });
       }
-      for (const [roundId, info] of rounds) {
-        const evs = parseEvents(join(ROUNDS, roundId, 'events.jsonl'));
-        const done = evs.some((e) => e.type === 'completed');
-        const next = roundId.replace(/^\d+/, (m) => String(Number(m) + 1).padStart(m.length, '0'));
-        if (!done && rounds.has(next)) out.push({ message: `${next}: round spawned before ${roundId} completed` });
+      return out;
+    },
+  },
+  'leg-root-discipline': {
+    // v7 §3/§12: leg roots carry no events — a leg's existence is its directory, its activity is its tasks.
+    // Grandfathered: L1-L6 (recorded pre-v7; inert — never read for state).
+    check: () => {
+      const out = [];
+      const GRANDFATHERED = new Set(['01-goal', '02-grilling', '03-tree-format', '04-system-design', '05-engine', '06-engine-build']);
+      for (const nf of nodeFiles) {
+        const id = nodeId(nf);
+        if (id.includes('/') || GRANDFATHERED.has(id)) continue;
+        const evs = parseEvents(join(ROUNDS, id, 'events.jsonl'));
+        if (evs.length) out.push({ message: `${id}: leg root carries events (v7 §3) — leg roots have no log; record process facts on tasks` });
       }
       return out;
     },

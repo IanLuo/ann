@@ -4,3 +4,4 @@
 {"at":"2026-08-18","type":"confirmed","gate":"grill","note":"retrospective: user confirm-all (2026-08-18)"}
 {"at":"2026-08-18","type":"completed","note":"flow-control-spec-v3: closure-by-transfer in force — look-back → gate unmet + remaining work → human decision → gate re-scope (amendment record) → ACs transfer verbatim → close (completed + gate-confirm) → next carries the goal; same mechanism at task level; v2 superseded"}
 {"at":"2026-08-18","type":"confirmed","gate":"confirm","note":"retrospective: user confirm-all (2026-08-18)"}
+{"at":"2026-08-19","type":"superseded","successor":{"name":"flow-control-spec","path":"journey/legs/06-engine-build/00/02-flow-control-v4/artifacts/flow-control-spec-v4.md"},"note":"flow-control-spec-v3.md superseded by flow-control-spec-v4.md — closure on a closure task, derived leg completion"}

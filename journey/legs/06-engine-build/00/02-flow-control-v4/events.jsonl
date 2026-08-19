@@ -1,1 +1,7 @@
 {"at":"2026-08-18","type":"created","note":"spawned per user decision (2026-08-18): the decision of finish, like transfer, is made on the TASK, not on the node — each task confirms at its end, so the round's finishedness derives from its tasks. Amendment node per change-protocol; coordinates with 01-format-amendment-v7."}
+{"at":"2026-08-19","type":"submitted","gate":"grill","note":"user grilling session: closure on a closure task with own gates; leg completion derived; leg roots carry no gates/events"}
+{"at":"2026-08-19","type":"confirmed","gate":"grill","note":"grill passed"}
+{"at":"2026-08-19","type":"artifact-locked","artifact":{"name":"flow-control-spec","path":"journey/legs/06-engine-build/00/02-flow-control-v4/artifacts/flow-control-spec-v4.md","lockSha":"43beff2"},"note":"flow-control-spec-v4.md specs-locked — closure-on-task + derived leg completion in force"}
+{"at":"2026-08-19","type":"submitted","gate":"confirm","note":"lock + supersede + implementation complete"}
+{"at":"2026-08-19","type":"confirmed","gate":"confirm","note":"user: lock it"}
+{"at":"2026-08-19","type":"completed","note":"flow-control-spec-v4: closure-by-transfer executed as a closure task (gate-revised + transferred/deferred, own GATE1/GATE2); leg completion = derived aggregate; leg roots carry no gates; v3 superseded; validator/rules implementation pending this event"}

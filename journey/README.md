@@ -8,7 +8,7 @@ Ann is built and managed with its own journey-of-legs model (design §21 — dog
 - **A leg (formerly round) = one step of work = an epic**, gated: a leg closes only when its goal is met (artifacts locked, ACs verified) → next leg begins. Legs are sequential; done legs never change.
 - **Leg status is derived from its tasks** (format v7): all tasks done → leg done; leg roots carry **no events** — existence is structural, activity is task states, and closure-by-transfer is recorded on a closure task, never the leg root.
 - **Inside a leg:** the leg root + `00/` = the leg's task group (independent tasks, may run in parallel; order by prefix). Tasks can decompose further (level dirs).
-- Full contract: **`journey/legs/06-engine-build/00/01-format-amendment-v7/artifacts/journey-format-spec-v7.md`** (lock pending; supersedes v6).
+- Full contract: **`journey/legs/06-engine-build/00/01-format-amendment-v7/artifacts/journey-format-spec-v7.md`** (locked @ bee8e89; supersedes v6).
 
 ## Layout
 

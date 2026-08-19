@@ -4,3 +4,4 @@
 {"at":"2026-08-18","type":"confirmed","gate":"grill","note":"retrospective: user confirm-all (2026-08-18)"}
 {"at":"2026-08-18","type":"completed","note":"tree-format-spec-v6: closure events structured — gate-revised {gate:{old,new}} · transferred {target, scope verbatim} · deferred {reason}; F-AC16 closure-integrity rule added to the registry (validate.mjs); v5 superseded; R5 closure re-recorded with structured events"}
 {"at":"2026-08-18","type":"confirmed","gate":"confirm","note":"retrospective: user confirm-all (2026-08-18)"}
+{"at":"2026-08-19","type":"superseded","successor":{"name":"journey-format-spec","path":"journey/legs/06-engine-build/00/01-format-amendment-v7/artifacts/journey-format-spec-v7.md"},"note":"tree-format-spec-v6.md superseded by journey-format-spec-v7.md — derived leg status + journey/leg naming; logical name renamed tree-format-spec → journey-format-spec (format §5 forward pointer)"}
