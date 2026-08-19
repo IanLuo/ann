@@ -24,7 +24,9 @@ journey/
 
 Leg roots have **no `events.jsonl`** (v7). Tasks carry the process log.
 
-## Format rules (summary — see journey-format-spec v7)
+## Format rules (summary — see journey-format-spec v8)
+
+- **Leg-level events are INERT** (v8 §12): parsed only for display (journey/branch walks, resolution, the childless-leg fallback) — never read for status and never policed. Conformance (leg roots carry no events) is enforced by the **write path** (`spawn` never creates leg events); the validator rule + grandfathered-leg list were removed as redundant (2026-08-19). The locked spec's "the validator enforces" sentence is aspirational — the writer is the enforcement.
 
 - **State is derived, never asserted.** Agents never read `events.jsonl` directly — state comes from the scripts (`--journey`/`--status`/`--check`/`--specs`/`--branch`). Files are read as *content* (artifacts) only.
 - **Nodes immutable.** `node.json` written once, never rewritten. Corrections = new nodes (sibling-correction: same level, higher prefix — never nested children).
