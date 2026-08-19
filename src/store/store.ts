@@ -28,11 +28,15 @@ const GRANDFATHERED_LEGS = new Set([
   '06-engine-build',
 ]);
 
-/** Legacy path normalization: recorded paths from the pre-journey era
- *  (`tree/rounds/…`) resolve to the current layout (`journey/legs/…`).
- *  The one load-bearing case is the design artifact's structured event; the
- *  symlink compat layer was removed in favor of this single code normalizer. */
-export const legacyPath = (p: string): string => p.replace(/^tree\/rounds\//, 'journey/legs/');
+/** Legacy path normalization: recorded paths from the pre-journey era resolve to
+ *  the current layout. Two cases: the store rename (`tree/rounds/…` →
+ *  `journey/legs/…`) and the flatten (`journey/legs/<leg>/00/<task>/…` →
+ *  `journey/legs/<leg>/<task>/…`). The symlink compat layers were removed in
+ *  favor of this single code normalizer. */
+export const legacyPath = (p: string): string =>
+  p
+    .replace(/^tree\/rounds\//, 'journey/legs/')
+    .replace(/^(journey\/legs\/[^/]+)\/00\//, '$1/');
 
 /**
  * The tree store (S1) — reads/writes legs, nodes, events, artifacts per

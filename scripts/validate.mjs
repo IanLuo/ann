@@ -132,7 +132,7 @@ const RULES = {
       for (const f of eventFiles) {
         for (const ev of parseEvents(f)) {
           if (ev.type === 'artifact-locked' && ev.artifact && ev.artifact.path) {
-            const full = join(ROOT, ev.artifact.path.replace(/^tree\/rounds\//, 'journey/legs/'));
+            const full = join(ROOT, ev.artifact.path.replace(/^tree\/rounds\//, 'journey/legs/').replace(/^(journey\/legs\/[^/]+)\/00\//, '$1/'));
             if (!existsSync(full)) out.push({ message: `missing artifact file: ${ev.artifact.path}` });
           }
         }

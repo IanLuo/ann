@@ -110,6 +110,16 @@ describe('Store — resolution current(name) (format §5)', () => {
     expect(s.current('design')?.path).toBe('journey/legs/01-goal/artifacts/design.md');
     expect(s.check()).toEqual([]); // no MISSING — the legacy path resolves
   });
+
+  it('normalizes legacy /00/ recorded paths (the flatten, v8)', () => {
+    const dir = join(root, 'journey', 'legs', '01-goal', '01-a');
+    mkdirSync(join(dir, 'artifacts'), { recursive: true });
+    writeFileSync(join(dir, 'artifacts', 'spec.md'), 'body');
+    writeNode('01-goal/01-a', {}, [ev('created'), ev('submitted', { gate: 'grill' }), ev('confirmed', { gate: 'grill' }), ev('artifact-locked', { artifact: { name: 'spec', path: 'journey/legs/01-goal/00/01-a/artifacts/spec.md', lockSha: 'a' } })]);
+    const s = new Store(root);
+    expect(s.current('spec')?.path).toBe('journey/legs/01-goal/01-a/artifacts/spec.md');
+    expect(s.check()).toEqual([]); // no MISSING — the /00/ path resolves
+  });
 });
 
 describe('Store — appendEvent, the single writer (LB-3)', () => {
