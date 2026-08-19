@@ -16,7 +16,9 @@
  * else derive from the artifact filename minus a version suffix (-vN).
  */
 
-import { readFileSync, existsSync, readdirSync, statSync, lstatSync, appendFileSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync, statSync, lstatSync, appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { execSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { join, dirname, basename } from 'node:path';
 
 const ROOT = process.cwd();
@@ -182,7 +184,7 @@ function gateProblems(id, events) {
 // Command registry — the declaration; --help renders from it (derived, never drifts).
 const COMMANDS = [
   { name: 'locate', args: '<name> [anchor]', desc: 'resolve a logical name → current path, and locate an anchor in it' },
-  { name: '--check', args: '', desc: 'integrity + gates (OK = green)' },
+  { name: '--check', args: '', desc: 'integrity + gates + artifact hashes (OK = green)' },
   { name: '--status', args: '[filter]', desc: 'every node\'s derived status (+ artifact-superseded marker)' },
   { name: '--journey', args: '', desc: 'the forest look-back: where we are + what\'s ahead' },
   { name: 'journey|--journey', args: '<id>', desc: 'one node\'s full event walk' },
@@ -190,6 +192,11 @@ const COMMANDS = [
   { name: '--specs', args: '', desc: 'the locked contract stack (name · type · @sha · path · upstreams)' },
   { name: 'confirm', args: '<id>', desc: 'a node\'s gate card: intent · ACs · artifacts · evidence · gates' },
   { name: 'append', args: '<id> \'<json>\'', desc: 'single-writer append: validates schema, appends, gate-checks' },
+  { name: 'spawn', args: '<id> \'<contract-json>\'', desc: 'create a node (leg or task): shape/name/parent/artifact-gate/leg-gate validated; writes node.json + created + card' },
+  { name: 'gate', args: '<id> grill|confirm accept|reject [feedback]', desc: 'record a human gate decision (submits first; 3-reject bound → escalate)' },
+  { name: 'lock', args: '<id> <name> [type]', desc: 'stamp the lock marker + artifact-locked event (one current per name; hash-verifying sha)' },
+  { name: 'supersede', args: '<id> <name> <path> [note]', desc: 'record a superseded event with structured successor' },
+  { name: 'card', args: '<id>', desc: 'regenerate description.md from contract + events (the only rewritable file)' },
   { name: '--help', args: '[command]', desc: 'this usage, generated from the command registry' },
 ];
 
@@ -441,6 +448,146 @@ if (args[0] === 'append') {
   process.exit(0);
 }
 
+// ---- Bookkeeper: every store mutation goes through a command, never a hand edit ----
+const TODAY = new Date().toISOString().slice(0, 10);
+const WHO = process.env.RECORDED_BY || 'agent';
+const nodeFile = (id) => join(ROOT, 'journey', 'legs', id, 'node.json');
+const eventFile = (id) => join(ROOT, 'journey', 'legs', id, 'events.jsonl');
+
+if (args[0] === 'spawn') {
+  // Create a node (leg or task). Validates shape (v8 flat), name discipline, parent
+  // existence, artifact gate (task parent has a locked artifact), leg gate (new leg
+  // only after previous leg's tasks all done), prefix uniqueness. Writes node.json
+  // (immutable), the `created` event, and a skeleton card.
+  const id = args[1];
+  const raw = args.slice(2).join(' ');
+  if (!id || !raw || id.startsWith('--')) { console.error('usage: resolve.mjs spawn <id> \'{"contract":{"intent":...,"acceptanceCriteria":[...]}}\''); process.exit(2); }
+  const segs = id.split('/');
+  const last = segs[segs.length - 1];
+  if (segs.includes('00')) { console.error('spawn rejected: the 00/ level dir was removed in v8 — tasks live directly under the leg'); process.exit(1); }
+  if (!/^\d{2}-[a-z0-9]+(-[a-z0-9]+)*$/.test(last)) { console.error(`spawn rejected: last segment '${last}' must be NN-kebab-case`); process.exit(1); }
+  if (last.length > 24) { console.error(`spawn rejected: segment '${last}' exceeds 24 chars`); process.exit(1); }
+  if (existsSync(nodeFile(id))) { console.error(`spawn rejected: ${id} already exists`); process.exit(1); }
+  if (segs.length > 1) {
+    const parent = segs.slice(0, -1).join('/');
+    if (!existsSync(nodeFile(parent))) { console.error(`spawn rejected: parent ${parent} does not exist`); process.exit(1); }
+    if (parent.split('/').length >= 2) { // a task parent must have a locked artifact (artifact gate)
+      const pe = parseEvents(eventFile(parent));
+      if (!pe.some((e) => e.type === 'artifact-locked')) { console.error(`spawn rejected: artifact gate — parent task ${parent} has no artifact-locked event`); process.exit(1); }
+    }
+    const sibDir = join(ROOT, 'journey', 'legs', parent);
+    const sibs = readdirSync(sibDir).filter((e) => !lstatSync(join(sibDir, e)).isSymbolicLink() && existsSync(join(sibDir, e, 'node.json')));
+    if (sibs.includes(last)) { console.error(`spawn rejected: sibling ${last} already exists`); process.exit(1); }
+    const prefix = last.split('-')[0];
+    const clash = sibs.find((s) => s.startsWith(prefix + '-'));
+    if (clash) { console.error(`spawn rejected: prefix ${prefix} already used by sibling ${clash}`); process.exit(1); }
+  } else {
+    // New leg: leg gate — previous leg's tasks must all be done (derived, v7 §12)
+    const legs = readdirSync(ROUNDS).filter((e) => !lstatSync(join(ROUNDS, e)).isSymbolicLink()).sort();
+    const idx = legs.indexOf(id);
+    if (idx > 0) {
+      const prevDir = join(ROUNDS, legs[idx - 1]);
+      const prevTasks = readdirSync(prevDir).filter((e) => !lstatSync(join(prevDir, e)).isSymbolicLink() && existsSync(join(prevDir, e, 'node.json')));
+      const allDone = prevTasks.length > 0 && prevTasks.every((t) => parseEvents(join(prevDir, t, 'events.jsonl')).some((e) => e.type === 'completed' || e.type === 'superseded'));
+      if (!allDone) { console.error(`spawn rejected: leg gate — previous leg ${legs[idx - 1]} has unfinished tasks`); process.exit(1); }
+    }
+  }
+  let contract;
+  try { contract = JSON.parse(raw); } catch (e) { console.error(`spawn rejected: bad contract JSON (${e.message})`); process.exit(1); }
+  const dir = join(ROOT, 'journey', 'legs', id);
+  mkdirSync(join(dir, 'artifacts'), { recursive: true });
+  writeFileSync(nodeFile(id), JSON.stringify({ id, contract, createdAt: TODAY }, null, 2) + '\n');
+  appendFileSync(eventFile(id), JSON.stringify({ at: TODAY, type: 'created', note: `spawned by bookkeeper (${WHO})` }) + '\n');
+  const intent = (contract.contract && contract.contract.intent) || contract.intent || '';
+  const terms = (intent.match(/[A-Za-z][A-Za-z0-9-]{3,}/g) || []).slice(0, 8).join(', ');
+  writeFileSync(join(dir, 'description.md'), `# ${last}\n\n- id: \`${id}\` · status: queued · type: ${segs.length > 1 ? 'task' : 'leg'}\n- summary: ${intent.split('\n')[0]}\n- search terms: ${terms}\n`);
+  console.log(`spawned ${id} (${segs.length > 1 ? 'task' : 'leg'})`);
+  process.exit(0);
+}
+
+if (args[0] === 'gate') {
+  // Record a human gate decision: submits first if no pending submission, then
+  // confirmed/rejected. 3 rejection cycles per gate → escalate (flow-control v3 §3).
+  const id = args[1], gate = args[2], decision = args[3];
+  const feedback = args.slice(4).join(' ');
+  if (!id || !['grill', 'confirm'].includes(gate) || !['accept', 'reject'].includes(decision)) {
+    console.error('usage: resolve.mjs gate <id> grill|confirm accept|reject [feedback]'); process.exit(2);
+  }
+  if (!existsSync(eventFile(id))) { console.error(`gate: no node ${id}`); process.exit(1); }
+  const file = eventFile(id);
+  const evs = parseEvents(file);
+  const pending = evs.filter((e) => e.type === 'submitted' && e.gate === gate && !evs.slice(evs.indexOf(e) + 1).some((x) => x.type === 'confirmed' && x.gate === gate));
+  if (!pending.length) appendFileSync(file, JSON.stringify({ at: TODAY, type: 'submitted', gate, note: `bookkeeper submission (${WHO})` }) + '\n');
+  const rejects = evs.filter((e) => e.type === 'rejected' && e.gate === gate).length;
+  if (decision === 'reject' && rejects >= 3) { console.error('gate: 3 rejection cycles exhausted — escalate to a human design decision (force-approve / restructure / block)'); process.exit(1); }
+  const ev = decision === 'accept'
+    ? { at: TODAY, type: 'confirmed', gate, note: `accepted (${WHO})` }
+    : { at: TODAY, type: 'rejected', gate, feedback, note: `rejected (${WHO})` };
+  appendFileSync(file, JSON.stringify(ev) + '\n');
+  const problems = gateProblems(id, parseEvents(file));
+  if (problems.length) { console.error(problems.join('\n')); process.exit(1); }
+  console.log(`gate ${gate}: ${decision} → ${id}`);
+  process.exit(0);
+}
+
+function blobSha(content) { return createHash('sha1').update('blob ' + Buffer.byteLength(content) + '\n' + content).digest('hex'); }
+
+if (args[0] === 'lock') {
+  // Stamp the lock marker + artifact-locked event. lockSha = git blob sha of the
+  // artifact content WITHOUT the marker line (the hash-verifying convention, v8).
+  const id = args[1], name = args[2], type = args[3] || 'spec';
+  if (!id || !name) { console.error('usage: resolve.mjs lock <id> <name> [type]'); process.exit(2); }
+  if (!existsSync(nodeFile(id))) { console.error(`lock: no node ${id}`); process.exit(1); }
+  if (current.has(name)) { console.error(`lock rejected: '${name}' is already current (${current.get(name).path}) — supersede it first`); process.exit(1); }
+  const artDir = join(ROOT, 'journey', 'legs', id, 'artifacts');
+  const candidates = existsSync(artDir) ? readdirSync(artDir).filter((f) => f.endsWith('.md')) : [];
+  const file = existsSync(join(artDir, name + '.md')) ? join(artDir, name + '.md') : (candidates.length === 1 ? join(artDir, candidates[0]) : null);
+  if (!file) { console.error(`lock: no artifacts/${name}.md; candidates: ${candidates.join(', ') || '(none)'}`); process.exit(1); }
+  const content = readFileSync(file, 'utf8').replace(/^<!-- specs:locked:[^\n]* -->\n?/, '').replace(/^<!-- draft[^\n]* -->\n?/, '');
+  const sha = blobSha(content).slice(0, 7);
+  writeFileSync(file, `<!-- specs:locked:${sha} ${TODAY} type=${type} -->\n` + content);
+  appendFileSync(eventFile(id), JSON.stringify({ at: TODAY, type: 'artifact-locked', artifact: { name, path: 'journey/legs/' + id + '/artifacts/' + basename(file), lockSha: sha }, note: `${basename(file)} specs-locked via bookkeeper (${WHO})` }) + '\n');
+  const problems = gateProblems(id, parseEvents(eventFile(id)));
+  if (problems.length) { console.error(problems.join('\n')); process.exit(1); }
+  console.log(`locked ${name} @ ${sha} → ${id}`);
+  process.exit(0);
+}
+
+if (args[0] === 'supersede') {
+  // Record a superseded event with a structured successor (forward pointer, format §5).
+  const id = args[1], name = args[2], path = args[3];
+  const note = args.slice(4).join(' ');
+  if (!id || !name || !path) { console.error('usage: resolve.mjs supersede <id> <name> <artifact-path-from-ROOT> [note]'); process.exit(2); }
+  if (!existsSync(nodeFile(id))) { console.error(`supersede: no node ${id}`); process.exit(1); }
+  if (!existsSync(join(ROOT, path))) { console.error(`supersede: target path ${path} not found`); process.exit(1); }
+  appendFileSync(eventFile(id), JSON.stringify({ at: TODAY, type: 'superseded', successor: { name, path }, note: note || `${name} superseded → ${path} (${WHO})` }) + '\n');
+  console.log(`superseded ${name} → ${path} on ${id}`);
+  process.exit(0);
+}
+
+if (args[0] === 'card') {
+  // Regenerate description.md (the only rewritable file, §4) from contract + events.
+  const id = args[1];
+  if (!id || !existsSync(nodeFile(id))) { console.error('usage: resolve.mjs card <id> (node must exist)'); process.exit(2); }
+  const node = JSON.parse(readFileSync(nodeFile(id), 'utf8'));
+  const evs = parseEvents(eventFile(id));
+  const status = allStatuses().find((n) => n.id === id)?.status || 'queued';
+  const artifacts = evs.filter((e) => e.type === 'artifact-locked').map((e) => {
+    const a = e.artifact || {};
+    const nm = a.name || (e.note.match(/logical name:\s*([\w.-]+)/) || [])[1] || '';
+    return nm ? `- ${nm}: ${a.path || ''}` : null;
+  }).filter(Boolean);
+  const dir = join(ROOT, 'journey', 'legs', id);
+  const kids = readdirSync(dir).filter((e) => !lstatSync(join(dir, e)).isSymbolicLink() && existsSync(join(dir, e, 'node.json'))).sort();
+  const last = id.split('/').pop();
+  const intent = (node.contract && node.contract.intent) || '';
+  const terms = (intent.match(/[A-Za-z][A-Za-z0-9-]{3,}/g) || []).slice(0, 8).join(', ');
+  const body = `# ${last}\n\n- id: \`${id}\` · status: ${status} · type: ${id.split('/').length === 1 ? 'leg' : 'task'}\n- summary: ${intent.split('\n')[0]}\n- search terms: ${terms}\n\n## artifacts\n${artifacts.join('\n') || '(none yet)'}\n\n## children\n${kids.length ? kids.map((k) => `- ${id}/${k}`).join('\n') : '(none)'}\n`;
+  writeFileSync(join(dir, 'description.md'), body);
+  console.log(`card regenerated → ${id}`);
+  process.exit(0);
+}
+
 if (args.includes('--check')) {
   for (const p of problems) console.error(p);
   // Deterministic gate validation: every completed node needs confirmed(gate=confirm).
@@ -450,7 +597,47 @@ if (args.includes('--check')) {
     for (const p of gateProblems(id, parseEvents(file))) gateGaps.push(p);
   }
   for (const g of gateGaps) console.error(g);
-  const total = problems.length + gateGaps.length;
+  // Artifact integrity (v8): marker-stripped blob vs recorded lockSha. New locks use
+  // the blob convention and verify exactly; legacy commit-style shas verify via git
+  // history when resolvable; draft-marker-era stamps are noted as unverified.
+  const hashNotes = [];
+  for (const [name, l] of current) {
+    const full = join(ROOT, l.path);
+    if (!existsSync(full)) continue; // already flagged MISSING above
+    const content = readFileSync(full, 'utf8');
+    const stripped = content.replace(/^<!-- specs:locked:[^\n]* -->\n?/, '').replace(/^<!-- draft[^\n]* -->\n?/, '');
+    const h = blobSha(stripped).slice(0, 7);
+    const markerSha = (content.match(/specs:locked:([0-9a-f]{7,})/) || [])[1] || l.sha || '';
+    if (markerSha && h === markerSha.slice(0, 7)) continue; // verified — blob convention
+    let kind = '';
+    try { kind = execSync(`git cat-file -t ${markerSha}`, { encoding: 'utf8' }).trim(); } catch {}
+    if (kind === 'commit') {
+      try {
+        const hit = execSync(`git ls-tree -r --name-only ${markerSha} | grep -F "${basename(l.path)}" | head -1`, { encoding: 'utf8' }).trim();
+        if (hit) {
+          let at = execSync(`git show ${markerSha}:${hit}`, { encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 });
+          at = at.replace(/^<!-- specs:locked:[^\n]* -->\n?/, '');
+          if (blobSha(at).slice(0, 7) === h) hashNotes.push({ sev: 'ok', msg: `${name}: verified vs lock commit ${markerSha.slice(0, 7)}` });
+          else hashNotes.push({ sev: 'warn', msg: `${name}: edited after lock commit ${markerSha.slice(0, 7)} (pre-integrity era; see 'git log -- ${l.path}'); re-lock via 'bookkeeper lock' if intentional` });
+        } else hashNotes.push({ sev: 'info', msg: `${name}: lock commit ${markerSha.slice(0, 7)} — basename not found (unverified)` });
+      } catch { hashNotes.push({ sev: 'info', msg: `${name}: legacy lock commit ${markerSha.slice(0, 7)} unverified` }); }
+    } else if (kind === 'blob') {
+      hashNotes.push({ sev: 'info', msg: `${name}: legacy blob stamp (draft-marker era) — not hash-verified; re-lock with 'bookkeeper lock' for a verifying sha` });
+    } else {
+      hashNotes.push({ sev: 'error', msg: `${name}: lockSha ${markerSha || '(none)'} is neither commit nor blob` });
+    }
+  }
+  // Working-tree tamper check: current artifacts modified but not committed.
+  for (const [name, l] of current) {
+    try { execSync(`git diff --quiet HEAD -- "${l.path}"`); } catch { hashNotes.push({ sev: 'error', msg: `${name}: uncommitted modification on disk (${l.path})` }); }
+  }
+  const errors = problems.length + gateGaps.length + hashNotes.filter((n) => n.sev === 'error').length;
+  for (const n of hashNotes) {
+    if (n.sev === 'error') console.error(`  [hash] ${n.msg}`);
+    else if (n.sev === 'warn') console.log(`  [hash-warn] ${n.msg}`);
+    else console.log(`  [hash] ${n.msg}`);
+  }
+  const total = errors;
   console.log(total === 0 ? `OK — ${current.size} current artifacts, all gates confirmed.` : `${total} problem(s).`);
   process.exit(total === 0 ? 0 : 1);
 }

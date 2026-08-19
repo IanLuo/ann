@@ -58,7 +58,7 @@ node scripts/resolve.mjs --check     # integrity + gates
 node scripts/resolve.mjs --specs     # the contract stack
 ```
 
-**Never read `events.jsonl` directly** — state comes exclusively from the scripts (`--journey`/`--status`/`--check`/`--specs`/`--branch`); the log is machine-parse-only and may hold inert legacy facts (v7 read discipline). Agents read journey files as *content* (artifacts) only; state is never read from files.
+**Never read `events.jsonl` directly** — state comes exclusively from the scripts (`--journey`/`--status`/`--check`/`--specs`/`--branch`); the log is machine-parse-only and may hold inert legacy facts (v7 read discipline). **Never hand-edit `node.json`/`events.jsonl` either** — all mutations go through the bookkeeper (`spawn`/`gate`/`lock`/`supersede`/`card`/`append`). `--check` verifies artifact hashes and flags uncommitted tampering.
 
 State = the journey (statuses, gates, artifacts, events). History = git. Nothing hand-maintained — a handwritten state sidecar is the dual-write drift the journey exists to eliminate. **`CURSOR.md` is retired** (2026-08-17): the inclusion gate below is how we keep the journey honest instead.
 
