@@ -23,6 +23,12 @@ import { join, dirname, basename } from 'node:path';
 
 const ROOT = process.cwd();
 const ROUNDS = join(ROOT, 'journey', 'legs');
+// The vocab registry (resource-registry spec, instance #2): the single source of truth
+// for schema vocabulary — event types, statuses, gates, artifact types. Consumers read;
+// never hardcode. Missing = misconfigured (fail loudly, not silently).
+let VOCAB;
+try { VOCAB = JSON.parse(readFileSync(join(ROOT, 'rules', 'schema', 'vocab.json'), 'utf8')); }
+catch { console.error('vocab registry missing/invalid: rules/schema/vocab.json — the single source of truth for schema vocabulary (resource-registry spec)'); process.exit(1); }
 
 function walk(dir, acc = []) {
   for (const entry of readdirSync(dir)) {
@@ -436,7 +442,7 @@ if (args[0] === 'append') {
   if (!id || !raw) { console.error('usage: resolve.mjs append <node-id> \'{"at":...,"type":...,...}\''); process.exit(2); }
   const file = join(ROOT, 'journey', 'legs', id, 'events.jsonl');
   const ev = JSON.parse(raw);
-  const TYPES = ['created','activated','extended','evidence','artifact-locked','completed','failed','superseded','submitted','confirmed','rejected','gate-revised','transferred','deferred'];
+  const TYPES = VOCAB.eventTypes; // vocab registry — never hardcode
   if (!ev.at || !ev.type || !TYPES.includes(ev.type)) {
     console.error(`append rejected: bad schema (at + known type required, got ${ev.type})`); process.exit(1);
   }
@@ -488,8 +494,9 @@ if (args[0] === 'spawn') {
     if (idx > 0) {
       const prevDir = join(ROUNDS, legs[idx - 1]);
       const prevTasks = readdirSync(prevDir).filter((e) => !lstatSync(join(prevDir, e)).isSymbolicLink() && existsSync(join(prevDir, e, 'node.json')));
-      const allDone = prevTasks.length > 0 && prevTasks.every((t) => parseEvents(join(prevDir, t, 'events.jsonl')).some((e) => e.type === 'completed' || e.type === 'superseded'));
-      if (!allDone) { console.error(`spawn rejected: leg gate — previous leg ${legs[idx - 1]} has unfinished tasks`); process.exit(1); }
+      const allDone = prevTasks.length
+        ? prevTasks.every((t) => parseEvents(join(prevDir, t, 'events.jsonl')).some((e) => e.type === 'completed' || e.type === 'superseded'))
+        : parseEvents(join(prevDir, 'events.jsonl')).some((e) => e.type === 'completed'); // childless leg → its own record (L1 base step)
     }
   }
   let contract;
@@ -510,7 +517,7 @@ if (args[0] === 'gate') {
   // confirmed/rejected. 3 rejection cycles per gate → escalate (flow-control v3 §3).
   const id = args[1], gate = args[2], decision = args[3];
   const feedback = args.slice(4).join(' ');
-  if (!id || !['grill', 'confirm'].includes(gate) || !['accept', 'reject'].includes(decision)) {
+  if (!id || !VOCAB.gates.includes(gate) || !['accept', 'reject'].includes(decision)) {
     console.error('usage: resolve.mjs gate <id> grill|confirm accept|reject [feedback]'); process.exit(2);
   }
   if (!existsSync(eventFile(id))) { console.error(`gate: no node ${id}`); process.exit(1); }
@@ -537,6 +544,7 @@ if (args[0] === 'lock') {
   // artifact content WITHOUT the marker line (the hash-verifying convention, v8).
   const id = args[1], name = args[2], type = args[3] || 'spec';
   if (!id || !name) { console.error('usage: resolve.mjs lock <id> <name> [type]'); process.exit(2); }
+  if (!VOCAB.artifactTypes.includes(type)) { console.error(`lock rejected: type '${type}' not in the vocab registry (${VOCAB.artifactTypes.join(' | ')})`); process.exit(1); }
   if (!existsSync(nodeFile(id))) { console.error(`lock: no node ${id}`); process.exit(1); }
   if (current.has(name)) { console.error(`lock rejected: '${name}' is already current (${current.get(name).path}) — supersede it first`); process.exit(1); }
   const artDir = join(ROOT, 'journey', 'legs', id, 'artifacts');

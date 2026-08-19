@@ -18,7 +18,8 @@ import { join } from 'node:path';
 
 const ROOT = process.cwd();
 const ROUNDS = join(ROOT, 'journey', 'legs');
-const CONFIG = JSON.parse(readFileSync(join(ROOT, 'rules', 'check', 'rules.json'), 'utf8'));  // the registry (resource-registry spec)
+const CONFIG = JSON.parse(readFileSync(join(ROOT, 'rules', 'check', 'rules.json'), 'utf8'));  // the rule registry (resource-registry spec)
+const VOCAB = JSON.parse(readFileSync(join(ROOT, 'rules', 'schema', 'vocab.json'), 'utf8'));  // the vocab registry (resource-registry spec — instance #2)
 
 function walk(dir, acc = []) {
   for (const entry of readdirSync(dir)) {
@@ -83,7 +84,7 @@ const RULES = {
   },
   'event-schema': {
     check: (params) => {
-      const TYPES = ['created','activated','extended','evidence','artifact-locked','completed','failed','superseded','submitted','confirmed','rejected','gate-revised','transferred','deferred'];
+      const TYPES = VOCAB.eventTypes; // vocab registry — the single source of truth
       const out = [];
       const legacy = params.legacyProse === true;
       for (const f of eventFiles) {
@@ -211,6 +212,17 @@ const RULES = {
           out.push({ message: `${id}: gate-revised but closed without transferred/deferred (F-AC16)` });
         for (const t of transferredTargets) if (!allIds.has(t) && !allIds.has('journey/legs/' + t))
           out.push({ message: `${id}: transferred target '${t}' does not exist (F-AC16)` });
+      }
+      return out;
+    },
+  },
+  'vocab-integrity': {
+    // resource-registry spec: the vocab registry must exist and carry the schema vocabulary.
+    check: () => {
+      const out = [];
+      const required = ['eventTypes', 'statuses', 'gates', 'artifactTypes'];
+      for (const k of required) {
+        if (!Array.isArray(VOCAB[k]) || !VOCAB[k].length) out.push({ message: `vocab registry: '${k}' missing or empty (rules/schema/vocab.json)` });
       }
       return out;
     },

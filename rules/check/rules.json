@@ -116,6 +116,15 @@
       "definition": "every rule id in the registry has an implementation in the validators; every registry file exists"
     },
     {
+      "id": "vocab-integrity",
+      "category": "check",
+      "kind": "rule",
+      "enabled": true,
+      "severity": "error",
+      "params": {},
+      "definition": "the vocab registry (rules/schema/vocab.json) exists and carries the schema vocabulary — event types, statuses, gates, artifact types (resource-registry spec instance #2)"
+    },
+    {
       "id": "closure-integrity",
       "category": "check",
       "kind": "rule",
