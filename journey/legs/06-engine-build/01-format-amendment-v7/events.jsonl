@@ -5,3 +5,4 @@
 {"at":"2026-08-19","type":"submitted","gate":"confirm","note":"lock + supersede + implementation complete"}
 {"at":"2026-08-19","type":"confirmed","gate":"confirm","note":"user: lock it"}
 {"at":"2026-08-19","type":"completed","note":"journey-format-spec-v7: derived leg status (frontmost-ready table, no leg-root events), leg gate = aggregate, closure-task pattern, read discipline, journey/leg renaming; v6 superseded; validator/rules implementation pending this event"}
+{"at":"2026-08-19","type":"superseded","successor":{"name":"journey-format-spec","path":"journey/legs/06-engine-build/03-format-amendment-v8/artifacts/journey-format-spec-v8.md"},"note":"journey-format-spec-v7.md superseded by journey-format-spec-v8.md — flat task group (leg/prefix-name, no level dirs)"}

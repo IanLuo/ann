@@ -1,1 +1,7 @@
 {"at":"2026-08-19","type":"created","note":"spawned per user decision (2026-08-19): the 00/ level dir is meaningless structure that misleads LLMs — flatten to leg/prefix-name; do it before the engine build bakes the shape. Migration (21 tasks lifted, ids updated, compat symlinks) executed first; this task legitimizes it. Amendment node per change-protocol."}
+{"at":"2026-08-19","type":"submitted","gate":"grill","note":"user grilling (2026-08-19): flat task group — one shape, no level dirs, migration sanctioned; the misleading-structure rationale reviewed"}
+{"at":"2026-08-19","type":"confirmed","gate":"grill","note":"grill passed"}
+{"at":"2026-08-19","type":"artifact-locked","artifact":{"name":"journey-format-spec","path":"journey/legs/06-engine-build/03-format-amendment-v8/artifacts/journey-format-spec-v8.md","lockSha":"6fe3c1e"},"note":"journey-format-spec-v8.md specs-locked — flat task group in force (leg/prefix-name, no level dirs)"}
+{"at":"2026-08-19","type":"submitted","gate":"confirm","note":"lock + supersede + re-point complete"}
+{"at":"2026-08-19","type":"confirmed","gate":"confirm","note":"user: lock it"}
+{"at":"2026-08-19","type":"completed","note":"journey-format-spec-v8: flat task group — tasks directly under the leg, no level dirs; L4-L6 migration recorded; v7 superseded; compat 00→. symlinks keep history resolving"}

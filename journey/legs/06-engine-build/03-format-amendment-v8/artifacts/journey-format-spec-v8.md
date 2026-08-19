@@ -1,4 +1,4 @@
-<!-- draft — lock pending (specs ritual stamps sha at lock) -->
+<!-- specs:locked:6fe3c1e 2026-08-19 type=spec -->
 
 ## Link contract
 - **upstream** (this doc relies on): journey/legs/01-goal/artifacts/design.md,02-grilling/01-spec-rework/artifacts/requirements-spec.md,05-engine/17-format-amendment-v6/artifacts/tree-format-spec-v6.md
