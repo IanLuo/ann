@@ -281,12 +281,13 @@ if (args[0] === 'confirm') {
   if (!id) { console.error('usage: resolve.mjs confirm <node-id>'); process.exit(2); }
   const dir = join(ROOT, 'journey', 'legs', id);
   const node = JSON.parse(readFileSync(join(dir, 'node.json'), 'utf8'));
+  const contract = (node.contract && node.contract.contract) || node.contract || {};
   const evs = parseEvents(join(dir, 'events.jsonl'));
   const status = statusOf(evs);
   console.log(`NODE: ${id}  [${status}]`);
-  console.log(`\nINTENT: ${node.contract && node.contract.intent}`);
+  console.log(`\nINTENT: ${contract.intent}`);
   console.log(`\nWHAT TO CHECK — acceptance criteria (every one must be met + evidenced):`);
-  (node.contract && node.contract.acceptanceCriteria || []).forEach((ac, i) => console.log(`  ${i + 1}. ${ac}`));
+  (contract.acceptanceCriteria || []).forEach((ac, i) => console.log(`  ${i + 1}. ${ac}`));
   // FIXED TEMPLATE — every section always renders; empty is an explicit state, never hidden.
   console.log(`\nARTIFACT(S):`);
   const lockedEvs = evs.filter((e) => e.type === 'artifact-locked');
