@@ -1,0 +1,1 @@
+{"at":"2026-08-18","type":"created","note":"spawned per user decision (2026-08-18 design discussion): round finishedness must DERIVE from its tasks — the finish/transfer decision is made on the task, each task confirms at its end; the round's event list shrinks to structure; closure lives on tasks. Amendment node per change-protocol."}

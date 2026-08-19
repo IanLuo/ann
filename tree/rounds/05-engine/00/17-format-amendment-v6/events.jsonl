@@ -1,2 +1,0 @@
-{"at":"2026-08-18","type":"created","note":"spawned per user directive: closure needs several events (transfer to new task/round, deferred), not just confirmed — the transfer must be structured and checkable"}
-{"at":"2026-08-18","type":"artifact-locked","note":"tree-format-spec-v6.md specs-locked — closure events in force (logical name: tree-format-spec)"}

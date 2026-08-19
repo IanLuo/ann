@@ -1,0 +1,25 @@
+{
+  "id": "06-engine-build/00/01-format-amendment-v7",
+  "contract": {
+    "intent": "Amend journey-format-spec (formerly tree-format-spec) v6 to v7 — DERIVED LEG STATUS: leg roots carry no status/decision events (no events at all — existence is structural, activity is task states); a leg's status is derived from its tasks (all done → done; else frontmost-ready child); the leg gate for spawning the next leg is the derived aggregate, not a completed event; closure-by-transfer is recorded on a task (closure-task pattern), never the leg root. Produces a COMPLETE superseding artifact.",
+    "acceptanceCriteria": [
+      "journey-format-spec-v7.md artifact exists — complete doc = v6 + derived leg status (§12) + leg-root discipline (§3/§4) + F-AC17",
+      "Store renamed: journey/legs/ (formerly tree/rounds/) with tree→journey + rounds→legs compat symlinks; scripts/docs re-pointed; logical name renamed tree-format-spec → journey-format-spec",
+      "Leg roots carry NO events (created/activated dropped too — existence = directory + node.json, activity = task states); events.jsonl absent on leg roots",
+      "Read discipline: agents never read events.jsonl directly — state comes from the resolver/validators only (--journey/--status/--check/--specs/--branch); events.jsonl is machine-parse-only (format §6)",
+      "Inertness: resolver derives leg status from tasks, IGNORING leg-root events; validators skip leg roots for gate/closure rules (F-AC17); grandfathered L1/L5/L6 root events can never affect derived state",
+      "Leg status derivation defined: all children done → done; else status of the frontmost-ready child; a childless leg = queued, never done",
+      "Round gate redefined: next leg spawns when all previous-leg tasks are done (derived check — no completed event required)",
+      "Closure-by-transfer: gate-revised/transferred/deferred recorded on a TASK (closure task, sibling-correction), never the leg root",
+      "v7 locked (type=spec); v6 superseded; L5's v6-era leg-root closure record grandfathered (no hot migration)",
+      "Validator/rules registry updated: leg-gate rule = derived aggregate; new leg-root-discipline rule"
+    ],
+    "targetAreas": ["artifacts/journey-format-spec-v7.md", "rules/check/rules.json"],
+    "requiredInputs": [
+      "17-format-amendment-v6/artifacts/tree-format-spec-v6.md (locked @ 1a52771)",
+      "User decisions (2026-08-18 design discussion): (1) the finish/transfer decision is made on the task, each task confirms at its end, so the leg's finishedness is derived from its tasks — not asserted on the leg node; (2) store renamed tree → journey, unit round → leg"
+    ],
+    "expectedOutputs": ["journey-format-spec-v7.md (locked, complete)"]
+  },
+  "createdAt": "2026-08-18"
+}

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * resolve.mjs — the derived logical-name resolver (tree-format-spec v3 §4, F-AC13 seed).
+ * resolve.mjs — the derived logical-name resolver (journey-format-spec §5, F-AC13 seed).
  *
  * The FIRST engine component, built pre-engine as a plain Node script (no deps),
  * used by the bootstrap itself. Implements:
@@ -20,7 +20,7 @@ import { readFileSync, existsSync, readdirSync, statSync, appendFileSync } from 
 import { join, dirname, basename } from 'node:path';
 
 const ROOT = process.cwd();
-const ROUNDS = join(ROOT, 'tree', 'rounds');
+const ROUNDS = join(ROOT, 'journey', 'legs');
 
 function walk(dir, acc = []) {
   for (const entry of readdirSync(dir)) {
@@ -127,7 +127,7 @@ function statusOf(events) {
 function allStatuses() {
   const out = [];
   for (const file of walk(ROUNDS)) {
-    const id = file.replace(new RegExp('^' + ROOT + '/tree/rounds/'), '').replace(/\/events\.jsonl$/, '');
+    const id = file.replace(new RegExp('^' + ROOT + '/journey/legs/'), '').replace(/\/events\.jsonl$/, '');
     const evs = parseEvents(file);
     // artifact currency: superseded annotates completed (format v3) — show BOTH facts
     const superseded = evs.some((e) => e.type === 'superseded');
@@ -168,7 +168,7 @@ const COMMANDS = [
   { name: '--status', args: '[filter]', desc: 'every node\'s derived status (+ artifact-superseded marker)' },
   { name: '--journey', args: '', desc: 'the forest look-back: where we are + what\'s ahead' },
   { name: 'journey|--journey', args: '<id>', desc: 'one node\'s full event walk' },
-  { name: '--tree', args: '<id>', desc: 'a node + every descendant\'s events, one walk' },
+  { name: '--branch', args: '<id>', desc: 'a node + every descendant\'s events, one walk' },
   { name: '--specs', args: '', desc: 'the locked contract stack (name · type · @sha · path · upstreams)' },
   { name: 'confirm', args: '<id>', desc: 'a node\'s gate card: intent · ACs · artifacts · evidence · gates' },
   { name: 'append', args: '<id> \'<json>\'', desc: 'single-writer append: validates schema, appends, gate-checks' },
@@ -180,7 +180,7 @@ const current = resolve();
 const problems = check(current);
 
 function nodeJourney(id) {
-  const file = join(ROOT, 'tree', 'rounds', id, 'events.jsonl');
+  const file = join(ROOT, 'journey', 'legs', id, 'events.jsonl');
   const evs = parseEvents(file);
   console.log(`JOURNEY: ${id}`);
   console.log(`---------`);
@@ -201,17 +201,17 @@ function nodeJourney(id) {
   console.log(`STATUS: ${statusOf(evs)}${evs.some((e) => e.type === 'superseded') ? ' · artifact superseded' : ''}`);
 }
 
-if (args.includes('--tree')) {
+if (args.includes('--branch')) {
   // SUBTREE JOURNEY: a node + every descendant's events, one walk.
-  const root = args[1] || args[args.indexOf('--tree') + 1];
-  if (!root) { console.error('usage: resolve.mjs --tree <node-id>'); process.exit(2); }
-  const base = join(ROOT, 'tree', 'rounds', root);
+  const root = args[1] || args[args.indexOf('--branch') + 1];
+  if (!root) { console.error('usage: resolve.mjs --branch <node-id>'); process.exit(2); }
+  const base = join(ROOT, 'journey', 'legs', root);
   const files = [];
   const scan = (dir) => { for (const e of readdirSync(dir)) { const p = join(dir, e); if (statSync(p).isDirectory()) scan(p); else if (e === 'events.jsonl') files.push(p); } };
   scan(base);
   files.sort();
   for (const f of files) {
-    const id = f.replace(new RegExp('^' + ROOT + '/tree/rounds/'), '').replace(/\/events\.jsonl$/, '');
+    const id = f.replace(new RegExp('^' + ROOT + '/journey/legs/'), '').replace(/\/events\.jsonl$/, '');
     const evs = parseEvents(f);
     console.log(`\n▸ ${id}  [${statusOf(evs)}${evs.some((e) => e.type === 'superseded') ? ' · artifact superseded' : ''}]`);
     for (const ev of evs) {
@@ -236,7 +236,7 @@ if (args[0] === 'confirm') {
   // Usage: node scripts/resolve.mjs confirm <node-id>
   const id = args[1];
   if (!id) { console.error('usage: resolve.mjs confirm <node-id>'); process.exit(2); }
-  const dir = join(ROOT, 'tree', 'rounds', id);
+  const dir = join(ROOT, 'journey', 'legs', id);
   const node = JSON.parse(readFileSync(join(dir, 'node.json'), 'utf8'));
   const evs = parseEvents(join(dir, 'events.jsonl'));
   const status = statusOf(evs);
@@ -284,7 +284,7 @@ if (args.includes('--journey')) {
   const currentRound = rounds.find((r) => { const root = all.find((n) => n.id === r); return root && (root.status === 'active' || (root.status === 'queued' && r === rounds[rounds.length - 1])); });
   if (currentRound) {
     const root = all.find((n) => n.id === currentRound);
-    console.log(`active round: ${currentRound} (${root.status})`);
+    console.log(`active leg: ${currentRound} (${root.status})`);
     const ready = all.filter((n) => n.id.startsWith(currentRound + '/') && (n.status === 'queued' || n.status === 'active'))
                      .sort((a, b) => a.id.localeCompare(b.id));
     if (ready.length) { console.log(`frontmost-ready: ${ready[0].id} (${ready[0].status})`); ready.slice(1).forEach((t) => console.log(`  also ready: ${t.id}`)); }
@@ -310,7 +310,7 @@ if (args.includes('--gantt')) {
   // GANTT from the journey: per-node span = first event date → completed/last event date.
   const rows = [];
   for (const f of walk(ROUNDS)) {
-    const id = f.replace(new RegExp('^' + ROOT + '/tree/rounds/'), '').replace(/\/events\.jsonl$/, '');
+    const id = f.replace(new RegExp('^' + ROOT + '/journey/legs/'), '').replace(/\/events\.jsonl$/, '');
     const evs = parseEvents(f);
     if (!evs.length) continue;
     const dates = evs.map((e) => e.at).filter(Boolean).sort();
@@ -365,7 +365,7 @@ if (args[0] === '--help' || args.includes('--help')) {
     console.log(`${c.name} ${c.args}\n  ${c.desc}\n  serves: ${c.serves}`);
     process.exit(0);
   }
-  console.log('resolve.mjs — the pre-engine CLI (all state derived from tree/ + rules/, no LLM, no server)');
+  console.log('resolve.mjs — the pre-engine CLI (all state derived from journey/ + rules/, no LLM, no server)');
   console.log('');
   for (const c of COMMANDS) console.log(`  ${(c.name + ' ' + c.args).padEnd(26)} ${c.desc}${c.serves ? '  ·  serves: ' + c.serves : ''}`);
   console.log('\nvalidate.mjs — the rule registry report: run it, --rules, or one rule id');
@@ -407,7 +407,7 @@ if (args[0] === 'append') {
   const id = args[1];
   const raw = args.slice(2).join(' ');
   if (!id || !raw) { console.error('usage: resolve.mjs append <node-id> \'{"at":...,"type":...,...}\''); process.exit(2); }
-  const file = join(ROOT, 'tree', 'rounds', id, 'events.jsonl');
+  const file = join(ROOT, 'journey', 'legs', id, 'events.jsonl');
   const ev = JSON.parse(raw);
   const TYPES = ['created','activated','extended','evidence','artifact-locked','completed','failed','superseded','submitted','confirmed','rejected','gate-revised','transferred','deferred'];
   if (!ev.at || !ev.type || !TYPES.includes(ev.type)) {
@@ -426,7 +426,7 @@ if (args.includes('--check')) {
   // Deterministic gate validation: every completed node needs confirmed(gate=confirm).
   const gateGaps = [];
   for (const file of walk(ROUNDS)) {
-    const id = file.replace(new RegExp('^' + ROOT + '/tree/rounds/'), '').replace(/\/events\.jsonl$/, '');
+    const id = file.replace(new RegExp('^' + ROOT + '/journey/legs/'), '').replace(/\/events\.jsonl$/, '');
     for (const p of gateProblems(id, parseEvents(file))) gateGaps.push(p);
   }
   for (const g of gateGaps) console.error(g);

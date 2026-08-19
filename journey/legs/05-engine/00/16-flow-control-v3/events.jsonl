@@ -1,0 +1,6 @@
+{"at":"2026-08-18","type":"created","note":"spawned per user directive: we have no mechanism to close a task/round by shifting scope — spec closure-by-transfer first, then apply it (R5 closes, build moves to R6)"}
+{"at":"2026-08-18","type":"artifact-locked","note":"flow-control-spec-v3.md specs-locked — closure-by-transfer in force (logical name: flow-control-spec)"}
+{"at":"2026-08-18","type":"submitted","gate":"grill","note":"retrospective: user confirm-all (2026-08-18)"}
+{"at":"2026-08-18","type":"confirmed","gate":"grill","note":"retrospective: user confirm-all (2026-08-18)"}
+{"at":"2026-08-18","type":"completed","note":"flow-control-spec-v3: closure-by-transfer in force — look-back → gate unmet + remaining work → human decision → gate re-scope (amendment record) → ACs transfer verbatim → close (completed + gate-confirm) → next carries the goal; same mechanism at task level; v2 superseded"}
+{"at":"2026-08-18","type":"confirmed","gate":"confirm","note":"retrospective: user confirm-all (2026-08-18)"}

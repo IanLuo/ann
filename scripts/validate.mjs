@@ -3,7 +3,7 @@
  * validate.mjs — the configurable event-validation system (S4 validators seed).
  *
  * Rules registry (code) + config (scripts/validation.config.json): enable/disable,
- * severity override, params. Runs the ACTIVE rules against the tree, prints a grouped
+ * severity override, params. Runs the ACTIVE rules against the journey, prints a grouped
  * report, exits by worst severity (error=1, warning=0).
  *
  * Usage:
@@ -17,7 +17,7 @@ import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
 const ROOT = process.cwd();
-const ROUNDS = join(ROOT, 'tree', 'rounds');
+const ROUNDS = join(ROOT, 'journey', 'legs');
 const CONFIG = JSON.parse(readFileSync(join(ROOT, 'rules', 'check', 'rules.json'), 'utf8'));  // the registry (resource-registry spec)
 
 function walk(dir, acc = []) {
@@ -155,7 +155,7 @@ const RULES = {
         const rel = nodeId(nf);
         if (rel.split('/').length > maxDepth) out.push({ message: `${rel}: depth ${rel.split('/').length} > ${maxDepth}` });
         const full = rel.replace(/\//g, '/');
-        if (full.length + 'tree/rounds/'.length > maxChars) out.push({ message: `${rel}: path length over ${maxChars}` });
+        if (full.length + 'journey/legs/'.length > maxChars) out.push({ message: `${rel}: path length over ${maxChars}` });
       }
       return out;
     },
@@ -206,7 +206,7 @@ const RULES = {
         });
         if (revised >= 0 && completed > revised && !closureOk)
           out.push({ message: `${id}: gate-revised but closed without transferred/deferred (F-AC16)` });
-        for (const t of transferredTargets) if (!allIds.has(t) && !allIds.has('tree/rounds/' + t))
+        for (const t of transferredTargets) if (!allIds.has(t) && !allIds.has('journey/legs/' + t))
           out.push({ message: `${id}: transferred target '${t}' does not exist (F-AC16)` });
       }
       return out;

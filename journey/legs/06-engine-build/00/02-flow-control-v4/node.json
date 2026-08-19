@@ -1,0 +1,22 @@
+{
+  "id": "06-engine-build/00/02-flow-control-v4",
+  "contract": {
+    "intent": "Amend flow-control-spec v3 to v4 — CLOSURE ON A TASK, ROUND COMPLETION DERIVED: the leg root has no gates/events of its own; closure-by-transfer is executed as a closure task (sibling-correction) that records gate-revised + transferred/deferred and passes its own GATE①/GATE②; a leg derives done when all its tasks are done. Produces a COMPLETE superseding artifact.",
+    "acceptanceCriteria": [
+      "flow-control-spec-v4.md artifact exists — complete doc = v3 + task-level closure recording + derived leg completion",
+      "Round advance: next leg spawns when all previous-leg tasks are done (derived — format v7 §12); leg roots write no events",
+      "Closure-by-transfer: executed as a closure task — gate-revised + transferred (scope verbatim) recorded on the task, gated by its own GATE①/GATE②",
+      "Round roots carry no gates; every step's gates live on its tasks",
+      "v4 locked (type=spec); v3 superseded; L5's v3-era leg-root closure record grandfathered (format v7 §12)",
+      "Implementation slices S1/S5 reference v4 for lifecycle/advance"
+    ],
+    "targetAreas": ["artifacts/flow-control-spec-v4.md"],
+    "requiredInputs": [
+      "16-flow-control-v3/artifacts/flow-control-spec-v3.md (locked @ 7ddc09b)",
+      "User decision (2026-08-18 design discussion): the decision of finish, like transfer, is made on the task, not on the node; each task confirms at its end",
+      "01-format-amendment-v7/artifacts/journey-format-spec-v7.md (drafted — derived leg status; coordinate locking)"
+    ],
+    "expectedOutputs": ["flow-control-spec-v4.md (locked, complete)"]
+  },
+  "createdAt": "2026-08-18"
+}
