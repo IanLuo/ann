@@ -175,7 +175,7 @@ describe('Store — leg gate (v8 §12/§13)', () => {
     const s = new Store(root);
     expect(s.legGateMet('02-next').met).toBe(true); // predecessor (01-goal) tasks all done
     writeNode('01-goal/02-b', {}, [ev('created')]);
-    expect(s.legGateMet('02-next').met).toBe(false); // 02-b unfinished
+    expect(new Store(root).legGateMet('02-next').met).toBe(false); // 02-b unfinished (fresh snapshot)
   });
 
   it('a childless predecessor uses its own record (L1 base step)', () => {
@@ -183,7 +183,7 @@ describe('Store — leg gate (v8 §12/§13)', () => {
     const s = new Store(root);
     expect(s.legGateMet('02-next').met).toBe(true);
     writeNode('01-goal', {}, [ev('created')]);
-    expect(s.legGateMet('02-next').met).toBe(false);
+    expect(new Store(root).legGateMet('02-next').met).toBe(false);
   });
 });
 
