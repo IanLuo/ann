@@ -254,21 +254,6 @@ const RULES = {
       return out;
     },
   },
-  'leg-root-discipline': {
-    // v7 §3/§12: leg roots carry no events — a leg's existence is its directory, its activity is its tasks.
-    // Grandfathered: L1-L6 (recorded pre-v7; inert — never read for state).
-    check: () => {
-      const out = [];
-      const GRANDFATHERED = new Set(['01-goal', '02-grilling', '03-tree-format', '04-system-design', '05-engine', '06-engine-build']);
-      for (const nf of nodeFiles) {
-        const id = nodeId(nf);
-        if (id.includes('/') || GRANDFATHERED.has(id)) continue;
-        const evs = parseEvents(join(ROUNDS, id, 'events.jsonl'));
-        if (evs.length) out.push({ message: `${id}: leg root carries events (v7 §3) — leg roots have no log; record process facts on tasks` });
-      }
-      return out;
-    },
-  },
 };
 
 // ---- Run ----

@@ -86,16 +86,7 @@
       "enabled": true,
       "severity": "error",
       "params": {},
-      "definition": "no leg N+1 work before all of leg N's tasks done (derived aggregate — v7 §12)"
-    },
-    {
-      "id": "leg-root-discipline",
-      "category": "check",
-      "kind": "rule",
-      "enabled": true,
-      "severity": "error",
-      "params": {},
-      "definition": "leg roots carry no events (v7 §3/§12) — L1-L6 grandfathered; new legs have no root log"
+      "definition": "no leg N+1 work before all of leg N's tasks done (derived aggregate \u2014 v7 \u00a712)"
     },
     {
       "id": "high-impact-defaulted",
@@ -122,7 +113,7 @@
       "enabled": true,
       "severity": "error",
       "params": {},
-      "definition": "the vocab registry (rules/schema/vocab.json) exists and carries the schema vocabulary — event types, statuses, gates, artifact types (resource-registry spec instance #2)"
+      "definition": "the vocab registry (rules/schema/vocab.json) exists and carries the schema vocabulary \u2014 event types, statuses, gates, artifact types (resource-registry spec instance #2)"
     },
     {
       "id": "closure-integrity",

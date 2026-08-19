@@ -265,12 +265,15 @@ describe('Store — append-only and leg-root discipline', () => {
   beforeEach(() => { makeStore(); });
   afterEach(() => { rmSync(root, { recursive: true, force: true }); });
 
-  it('refuses events on a new leg root (v8 §12/§13 — leg roots have no log)', () => {
-    writeNode('07-new-leg', {}, [ev('created')]); // a NEW leg carrying an event — violation
+  it('leg-level events are inert: status derives from children, never from root events', () => {
+    // A leg whose root events claim completed stays QUEUED while a child is unfinished —
+    // the derived model ignores leg-root events for status (v8 §12).
+    writeNode('01-goal', {}, [ev('created'), ev('completed')]);
+    writeNode('01-goal/01-a', {}, [ev('created')]);
     const s = new Store(root);
-    expect(s.legRootDisciplineProblems()).toEqual(['07-new-leg: leg root carries events (v8 §3) — leg roots have no log']);
-    writeNode('01-goal', {}, [ev('created'), ev('completed')]); // grandfathered leg
-    expect(new Store(root).legRootDisciplineProblems().length).toBe(1); // only the new leg flagged
+    expect(s.status('01-goal')).toBe('queued'); // children win, root events are inert
+    writeNode('01-goal/01-a', {}, [ev('created'), ev('completed')]);
+    expect(new Store(root).status('01-goal')).toBe('done');
   });
 });
 

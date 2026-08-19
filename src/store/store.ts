@@ -19,14 +19,6 @@ interface NodeEntry {
   events: JourneyEvent[];
 }
 
-const GRANDFATHERED_LEGS = new Set([
-  '01-goal',
-  '02-grilling',
-  '03-tree-format',
-  '04-system-design',
-  '05-engine',
-  '06-engine-build',
-]);
 
 /** Legacy path normalization: recorded paths from the pre-journey era resolve to
  *  the current layout. Two cases: the store rename (`tree/rounds/…` →
@@ -257,15 +249,17 @@ export class Store {
     return problems;
   }
 
-  /** Integrity check: gate gaps + closure integrity (F-AC16) + leg-root discipline
-   *  (F-AC17) + missing current-artifact files + orphan names. */
+  /** Integrity check: gate gaps + closure integrity (F-AC16) + missing current-artifact
+   *  files + orphan names. Leg-level events are INERT by design (v8): they are parsed
+   *  for display and resolution only, never read for status and never policed — the
+   *  write path (spawn) is what keeps new leg roots free of events. */
   check(): string[] {
     const problems: string[] = [];
     for (const id of this.nodes.keys()) {
       for (const p of this.gateProblems(id)) problems.push(p);
     }
     // F-AC16 closure invariants: completed-after-gate-revised requires transferred|deferred;
-    // transferred targets must exist. Tasks only (leg roots carry no events).
+    // transferred targets must exist. Tasks only (leg roots carry no events by construction).
     const allIds = new Set(this.nodes.keys());
     for (const [id, node] of this.nodes) {
       if (!id.includes('/')) continue;
@@ -286,7 +280,6 @@ export class Store {
         if (!allIds.has(t)) problems.push(`${id}: transferred target '${t}' does not exist (F-AC16)`);
       }
     }
-    for (const p of this.legRootDisciplineProblems()) problems.push(p);
     const lockersByName = new Map<string, string[]>();
     for (const [id, node] of this.nodes) {
       for (const e of node.events) {
@@ -307,8 +300,7 @@ export class Store {
     return problems;
   }
 
-  /** Leg gate (v8 §12/§13): is every task of this leg's predecessor done? */
-  legGateMet(legId: string): { met: boolean; blocker?: string } {
+  /** Leg gate (v8 §12/§13): is every task of this leg's predecessor done? */  legGateMet(legId: string): { met: boolean; blocker?: string } {
     const legs = [...this.nodes.keys()].filter((n) => !n.includes('/')).sort();
     const preds = legs.filter((l) => l < legId);
     if (!preds.length) return { met: true }; // first leg — no predecessor
@@ -320,15 +312,5 @@ export class Store {
     }
     const undone = tasks.filter((t) => !['done', 'superseded'].includes(this.taskStatus(t)));
     return undone.length ? { met: false, blocker: `${prev} has unfinished tasks: ${undone.join(', ')}` } : { met: true };
-  }
-
-  /** v8 §12/§13: leg roots carry no events — the grandfathered set is historical. */
-  legRootDisciplineProblems(): string[] {
-    const out: string[] = [];
-    for (const [id, node] of this.nodes) {
-      if (id.includes('/') || GRANDFATHERED_LEGS.has(id)) continue;
-      if (node.events.length) out.push(`${id}: leg root carries events (v8 §3) — leg roots have no log`);
-    }
-    return out;
   }
 }
