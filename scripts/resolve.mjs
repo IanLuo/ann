@@ -660,7 +660,21 @@ if (args.includes('--check')) {
     else console.log(`  [hash] ${n.msg}`);
   }
   const total = errors;
-  console.log(total === 0 ? `OK — ${current.size} current artifacts, all gates confirmed.` : `${total} problem(s).`);
+  console.log(total === 0 ? `OK — ${current.size} current artifacts, no gate gaps.` : `${total} problem(s).`);
+  // Journey state line — where we are, not just that nothing broke.
+  const st = allStatuses();
+  const legs = [...new Set(st.map((n) => n.id.split('/')[0]))].sort();
+  const states = legs.map((l) => `${l} ${st.find((n) => n.id === l)?.status ?? '?'}`).join(' · ');
+  let line = `State: ${states}`;
+  const active = legs.find((l) => (st.find((n) => n.id === l)?.status ?? '').startsWith('active')) ?? (legs.length && !(st.find((n) => n.id === legs[legs.length - 1])?.status ?? '').startsWith('done') ? legs[legs.length - 1] : undefined);
+  if (active) {
+    const tasks = st.filter((n) => n.id.startsWith(active + '/'));
+    const doneN = tasks.filter((n) => n.status.startsWith('done')).length;
+    const ready = tasks.filter((n) => n.status === 'queued' || n.status === 'active').sort((a, b) => a.id.localeCompare(b.id));
+    line += ` · ${active} in progress (${doneN}/${tasks.length} tasks done)`;
+    if (ready.length) line += ` — frontmost-ready: ${ready[0].id} (${ready[0].status}, grill pending)`;
+  }
+  console.log(line);
   process.exit(total === 0 ? 0 : 1);
 }
 

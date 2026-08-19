@@ -155,7 +155,20 @@ function cmdCheck() {
     else if (n.sev === 'warn') console.log(`  [hash-warn] ${n.msg}`);
     else console.log(`  [hash] ${n.msg}`);
   }
-  console.log(errors === 0 ? `OK — ${currents.size} current artifacts, all gates confirmed.` : `${errors} problem(s).`);
+  // Journey state line — the check says WHERE we are, not just that nothing broke.
+  const legs = store.ids().filter((i) => !i.includes('/')).sort();
+  const states = legs.map((l) => `${l} ${store.status(l)}`).join(' · ');
+  const active = legs.find((l) => store.status(l) === 'active') ?? (legs.length && !store.status(legs[legs.length - 1]).startsWith('done') ? legs[legs.length - 1] : undefined);
+  let state = `State: ${states}`;
+  if (active) {
+    const tasks = store.tasksOf(active);
+    const doneN = tasks.filter((t) => store.status(t).startsWith('done')).length;
+    const ready = tasks.filter((t) => ['queued', 'active'].includes(store.status(t)));
+    state += ` · ${active} in progress (${doneN}/${tasks.length} tasks done)`;
+    if (ready.length) state += ` — frontmost-ready: ${ready[0]} (${store.status(ready[0])}, grill pending)`;
+  }
+  console.log(errors === 0 ? `OK — ${currents.size} current artifacts, no gate gaps.` : `${errors} problem(s).`);
+  console.log(state);
   process.exit(errors === 0 ? 0 : 1);
 }
 
