@@ -7,8 +7,8 @@ Ann is built and managed with its own journey-of-legs model (design §21 — dog
 - `journey/legs/` is the **TABLE**: a chain of legs — the project's forward progress. One store per project.
 - **A leg (formerly round) = one step of work = an epic**, gated: a leg closes only when its goal is met (artifacts locked, ACs verified) → next leg begins. Legs are sequential; done legs never change.
 - **Leg status is derived from its tasks** (format v7): all tasks done → leg done; leg roots carry **no events** — existence is structural, activity is task states, and closure-by-transfer is recorded on a closure task, never the leg root.
-- **Inside a leg:** the leg root + `00/` = the leg's task group (independent tasks, may run in parallel; order by prefix). Tasks can decompose further (level dirs).
-- Full contract: **`journey/legs/06-engine-build/00/01-format-amendment-v7/artifacts/journey-format-spec-v7.md`** (locked @ bee8e89; supersedes v6).
+- **Inside a leg:** the leg root + the task group — tasks live **directly under the leg dir** (`<NN>-<name>/`), independent, may run in parallel, order by prefix. Sub-steps nest inside a task's own dir (flat shape, v8).
+- Full contract: **`journey/legs/06-engine-build/03-format-amendment-v8/artifacts/journey-format-spec-v8.md`** (lock pending; supersedes v7).
 
 ## Layout
 
@@ -19,7 +19,7 @@ journey/
       node.json                   immutable creation record (leg root = epic contract + gate)
       description.md              searchable card (the AI-facing surface)
       artifacts/                  the leg's gate evidence
-      <NN>-<level>/<NN>-<task>/   depth-grouped nodes (00/ = the task group)
+      <NN>-<task>/               a task = one unit of work (independent, parallel)
 ```
 
 Leg roots have **no `events.jsonl`** (v7). Tasks carry the process log.
@@ -30,7 +30,7 @@ Leg roots have **no `events.jsonl`** (v7). Tasks carry the process log.
 - **Nodes immutable.** `node.json` written once, never rewritten. Corrections = new nodes (sibling-correction: same level, higher prefix — never nested children).
 - **Process = append-only events** on tasks. `events.jsonl`: `created · activated · evidence · artifact-locked · completed · failed · superseded · submitted · confirmed · rejected · gate-revised · transferred · deferred`. Status = tail of the log; appending is the only write op.
 - **Leg gate:** leg N+1 spawns only when all of leg N's tasks are `done` (derived aggregate).
-- **Parallel group:** independent siblings in `00/` may run in parallel; the leg completes only when all tasks complete.
+- **Parallel group:** independent task siblings under the leg may run in parallel; the leg completes only when all tasks complete.
 - **Artifact gate:** a node may not spawn children until its own output artifact exists.
 - **Searchable cards:** `rg <term> journey/legs/**/description.md`.
 - **Pruning:** completed/superseded subtrees may be pruned (`rm -r`); git is the archive; nodes referenced by live `requiredInputs` are never pruned.
@@ -46,7 +46,7 @@ journey/legs/
   03-tree-format   (done — L3: format v2 locked; superseded through v6)
   04-system-design (done — L4: ann-system-design locked)
   05-engine        (done — L5: spec round complete — 9 contracts locked; closure-by-transfer: build gate moved to L6)
-  06-engine-build  (active — L6: build per ann-system-design v3 S1–S9; amendment tasks 00/01-02 (format v7 + flow-control v4) spawned)
+  06-engine-build  (active — L6: build per ann-system-design v3 S1–S9; amendment tasks 01-format-amendment-v7, 02-flow-control-v4, 03-format-amendment-v8)
 ```
 
 ## Pre-engine tooling

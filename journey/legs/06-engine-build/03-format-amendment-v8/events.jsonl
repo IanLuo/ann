@@ -1,0 +1,1 @@
+{"at":"2026-08-19","type":"created","note":"spawned per user decision (2026-08-19): the 00/ level dir is meaningless structure that misleads LLMs — flatten to leg/prefix-name; do it before the engine build bakes the shape. Migration (21 tasks lifted, ids updated, compat symlinks) executed first; this task legitimizes it. Amendment node per change-protocol."}

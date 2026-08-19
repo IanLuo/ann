@@ -1,0 +1,20 @@
+{
+  "id": "06-engine-build/03-format-amendment-v8",
+  "contract": {
+    "intent": "Amend journey-format-spec v7 to v8 — FLAT TASK GROUP: tasks live directly under the leg (`leg/<NN>-<name>/`), no level dirs; the `00/` group is removed (sanctioned migration of L4–L6, done 2026-08-19); the spec stops implying `01/`/`02/` level groups exist; `00 → .` compat symlinks keep historical paths resolving. Rationale: the meaningless `00/` segment misleads LLMs (phantom structure, dual shapes). Produces a COMPLETE superseding artifact.",
+    "acceptanceCriteria": [
+      "journey-format-spec-v8.md artifact exists — complete doc = v7 + flat task shape (§1/§8) + migration note (§13)",
+      "Tasks are flat: leg/prefix-name; no level dirs; a task's sub-steps nest inside its own dir",
+      "L4–L6 migrated (21 tasks lifted, node.json ids updated, 00→. compat symlinks committed, walk() symlink-safe, children filter depth === 2)",
+      "Spec no longer implies level dirs (00/, 01/, …) — only the task group and nesting inside a task",
+      "v8 locked (type=spec); v7 superseded; referrers re-pointed (AGENTS.md, README)"
+    ],
+    "targetAreas": ["artifacts/journey-format-spec-v8.md"],
+    "requiredInputs": [
+      "06-engine-build/01-format-amendment-v7/artifacts/journey-format-spec-v7.md (locked @ bee8e89)",
+      "User decision (2026-08-19): the 00/ level dir is meaningless structure that can mislead LLMs — flatten to leg/prefix-name before the engine build bakes the shape"
+    ],
+    "expectedOutputs": ["journey-format-spec-v8.md (locked, complete)"]
+  },
+  "createdAt": "2026-08-19"
+}
