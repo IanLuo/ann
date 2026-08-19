@@ -184,6 +184,42 @@ describe('Store — check() integrity', () => {
     expect(new Store(root).check()).toEqual([]);
   });
 
+  it('flags a closure without transferred/deferred after gate-revised (F-AC16)', () => {
+    writeNode('01-goal/01-a', {}, [
+      ev('created'),
+      ev('submitted', { gate: 'grill' }), ev('confirmed', { gate: 'grill' }),
+      ev('gate-revised', { gate: { old: 'x', new: 'y' } }),
+      ev('submitted', { gate: 'confirm' }), ev('confirmed', { gate: 'confirm' }),
+      ev('completed'),
+    ]);
+    const s = new Store(root);
+    expect(s.check().some((p) => p.includes('F-AC16'))).toBe(true);
+    // with the transferred event, the closure is clean
+    writeNode('01-goal/01-a', {}, [
+      ev('created'),
+      ev('submitted', { gate: 'grill' }), ev('confirmed', { gate: 'grill' }),
+      ev('gate-revised', { gate: { old: 'x', new: 'y' } }),
+      ev('transferred', { target: '02-next' }),
+      ev('submitted', { gate: 'confirm' }), ev('confirmed', { gate: 'confirm' }),
+      ev('completed'),
+    ]);
+    writeNode('02-next', {}, [ev('created')]);
+    expect(new Store(root).check().some((p) => p.includes('F-AC16'))).toBe(false);
+  });
+
+  it('flags a transferred target that does not exist (F-AC16)', () => {
+    writeNode('01-goal/01-a', {}, [
+      ev('created'),
+      ev('submitted', { gate: 'grill' }), ev('confirmed', { gate: 'grill' }),
+      ev('gate-revised', { gate: { old: 'x', new: 'y' } }),
+      ev('transferred', { target: '99-missing' }),
+      ev('submitted', { gate: 'confirm' }), ev('confirmed', { gate: 'confirm' }),
+      ev('completed'),
+    ]);
+    const s = new Store(root);
+    expect(s.check().some((p) => p.includes('does not exist (F-AC16)'))).toBe(true);
+  });
+
   it('flags a MISSING current artifact file (resolution fail-closed)', () => {
     writeNode('01-goal/01-a', {}, [ev('created'), ev('artifact-locked', { artifact: { name: 'spec', path: 'journey/legs/01-goal/01-a/artifacts/does-not-exist.md', lockSha: 'a' } })]);
     const s = new Store(root);

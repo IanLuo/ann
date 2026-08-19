@@ -257,12 +257,36 @@ export class Store {
     return problems;
   }
 
-  /** Integrity check: gate gaps + missing current-artifact files + orphan names. */
+  /** Integrity check: gate gaps + closure integrity (F-AC16) + leg-root discipline
+   *  (F-AC17) + missing current-artifact files + orphan names. */
   check(): string[] {
     const problems: string[] = [];
     for (const id of this.nodes.keys()) {
       for (const p of this.gateProblems(id)) problems.push(p);
     }
+    // F-AC16 closure invariants: completed-after-gate-revised requires transferred|deferred;
+    // transferred targets must exist. Tasks only (leg roots carry no events).
+    const allIds = new Set(this.nodes.keys());
+    for (const [id, node] of this.nodes) {
+      if (!id.includes('/')) continue;
+      let revised = -1,
+        completed = -1,
+        closureOk = false;
+      const targets: string[] = [];
+      node.events.forEach((e, i) => {
+        if (e.type === 'gate-revised') revised = i;
+        if (e.type === 'completed') completed = i;
+        if (e.type === 'transferred' || e.type === 'deferred') closureOk = true;
+        if (e.type === 'transferred' && e.target) targets.push(e.target);
+      });
+      if (revised >= 0 && completed > revised && !closureOk) {
+        problems.push(`${id}: gate-revised but closed without transferred/deferred (F-AC16)`);
+      }
+      for (const t of targets) {
+        if (!allIds.has(t)) problems.push(`${id}: transferred target '${t}' does not exist (F-AC16)`);
+      }
+    }
+    for (const p of this.legRootDisciplineProblems()) problems.push(p);
     const lockersByName = new Map<string, string[]>();
     for (const [id, node] of this.nodes) {
       for (const e of node.events) {
