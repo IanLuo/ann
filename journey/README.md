@@ -61,4 +61,4 @@ journey/legs/
 
 ## Migration note (2026-08-19)
 
-The store was renamed `tree/rounds/` → `journey/legs/` (unit: round → leg; logical name: tree-format-spec → journey-format-spec). Compatibility symlinks are committed so historical references resolve: `tree → journey` and `journey/rounds → journey/legs`. They can be dropped once no live mechanism reads old paths.
+The store was renamed `tree/rounds/` → `journey/legs/` (unit: round → leg; logical name: tree-format-spec → journey-format-spec). **The compat symlinks (`tree → journey`, `journey/rounds → journey/legs`) were removed the same day** — legacy recorded paths (`tree/rounds/…`, e.g. the design artifact's structured event) normalize to the current layout in the resolver (`legacyPath`), so the store is exactly one folder: `journey/` containing `legs/`. Historical references in locked docs may still cite old paths — they are history, not resolution inputs.

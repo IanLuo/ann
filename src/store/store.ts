@@ -28,6 +28,12 @@ const GRANDFATHERED_LEGS = new Set([
   '06-engine-build',
 ]);
 
+/** Legacy path normalization: recorded paths from the pre-journey era
+ *  (`tree/rounds/…`) resolve to the current layout (`journey/legs/…`).
+ *  The one load-bearing case is the design artifact's structured event; the
+ *  symlink compat layer was removed in favor of this single code normalizer. */
+export const legacyPath = (p: string): string => p.replace(/^tree\/rounds\//, 'journey/legs/');
+
 /**
  * The tree store (S1) — reads/writes legs, nodes, events, artifacts per
  * journey-format-spec v8. Builds the in-memory tree; owns the single
@@ -154,7 +160,7 @@ export class Store {
       : String(e?.note ?? '').match(/([\w.-]+\.md)/)?.[1] ?? '';
     return {
       name,
-      path: a?.path ?? `${producer}/artifacts/${filename}`,
+      path: legacyPath(a?.path ?? `${producer}/artifacts/${filename}`),
       sha: a?.lockSha ?? '',
       producer,
     };
@@ -257,7 +263,7 @@ export class Store {
           if (!lockersByName.has(nm)) lockersByName.set(nm, []);
           lockersByName.get(nm)!.push(id);
           const path = e.artifact.path;
-          if (path && !existsSync(join(this.root, path))) problems.push(`MISSING: ${nm} → ${path}`);
+          if (path && !existsSync(join(this.root, legacyPath(path)))) problems.push(`MISSING: ${nm} → ${path}`);
         }
       }
     }

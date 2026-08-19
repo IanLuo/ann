@@ -70,7 +70,7 @@ function collect() {
         const name = artifact.name
           || (ev.note.match(/logical name:\s*([\w.-]+)/) || [])[1]
           || logicalNameFromFile(filename);
-        const path = artifact.path || producer + '/artifacts/' + filename;
+        const path = (artifact.path || producer + '/artifacts/' + filename).replace(/^tree\/rounds\//, 'journey/legs/');
         const sha = artifact.lockSha || (ev.note.match(/@\s*([0-9a-f]{7,})/) || [])[1] || '';
         locked.push({ name, path, sha, producer });
       } else if (ev.type === 'superseded') {
@@ -102,7 +102,7 @@ function resolve() {
 function check(current) {
   const problems = [];
   for (const [name, l] of current) {
-    const full = join(ROOT, l.path);
+    const full = join(ROOT, l.path.replace(/^tree\/rounds\//, 'journey/legs/'));
     if (!existsSync(full)) problems.push(`MISSING: ${name} → ${l.path}`);
   }
   const { locked, superseded } = collect();

@@ -34,7 +34,7 @@ import {
 import { join, basename, dirname } from 'node:path';
 import { execSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { Store } from './store/store.js';
+import { Store, legacyPath } from './store/store.js';
 import { VOCAB } from './store/vocab.js';
 
 const ROOT = process.cwd();
@@ -113,7 +113,7 @@ function cmdCheck() {
   for (const id of store.ids()) {
     for (const l of lockShaOf(id)) {
       const cur = store.current(l.name);
-      if (cur?.producer === id && cur.path === l.path) currents.set(l.name, l);
+      if (cur?.producer === id && legacyPath(l.path) === cur.path) currents.set(l.name, l);
     }
   }
   for (const [name, l] of currents) {
