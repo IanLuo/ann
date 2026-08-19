@@ -54,7 +54,7 @@ journey/legs/
 - `scripts/resolve.mjs` — the derived logical-name resolver + journey/status/gate CLI + **the bookkeeper** (`--journey` · `--status` · `--check` · `--specs` · `--branch` · `confirm` · `append` · `spawn` · `gate` · `lock` · `supersede` · `card`). Built pre-engine in plain Node; the first engine component (S1 seed), used by the bootstrap itself.
 - **Bookkeeper discipline:** every store mutation goes through a command, never a hand edit. `spawn` validates shape (v8 flat), name discipline, artifact gate, leg gate, prefix uniqueness; `gate` records human decisions (3-reject bound); `lock` stamps the marker + hash-verifying `artifact-locked` (one current per name); `supersede` records the forward pointer; `card` regenerates `description.md` (the only rewritable file).
 - **Integrity (v8):** `--check` verifies every current artifact against its lock — marker-stripped blob vs the recorded sha (new locks: hard error; legacy commit-style records: drift warnings; working-tree tampering: hard error).
-- `scripts/validate.mjs` — the rule registry report (rules/check/rules.json); runs the active rules.
+- `scripts/validate.mjs` — the rule registry report (rules/check/rules.json); runs the active rules. Both scripts consume the **vocab registry** (`rules/schema/vocab.json` — event types, statuses, gates, artifact types; resource-registry spec instance #2); no layer hardcodes vocabulary.
 
 ## Migration note (2026-08-19)
 

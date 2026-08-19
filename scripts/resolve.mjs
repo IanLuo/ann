@@ -229,7 +229,8 @@ function nodeJourney(id) {
     if (ev.feedback) console.log(`      feedback: ${ev.feedback}`);
   });
   console.log(`---------`);
-  console.log(`STATUS: ${statusOf(evs)}${evs.some((e) => e.type === 'superseded') ? ' · artifact superseded' : ''}`);
+  const st = id.includes('/') ? statusOf(evs) : (legStatus(id, allStatuses().map((n) => ({ id: n.id, status: n.status.replace(' · artifact superseded', '') }))) || statusOf(evs));
+  console.log(`STATUS: ${st}${evs.some((e) => e.type === 'superseded') ? ' · artifact superseded' : ''}`);
 }
 
 if (args.includes('--branch')) {
@@ -244,7 +245,8 @@ if (args.includes('--branch')) {
   for (const f of files) {
     const id = f.replace(new RegExp('^' + ROOT + '/journey/legs/'), '').replace(/\/events\.jsonl$/, '');
     const evs = parseEvents(f);
-    console.log(`\n▸ ${id}  [${statusOf(evs)}${evs.some((e) => e.type === 'superseded') ? ' · artifact superseded' : ''}]`);
+    const st = id.includes('/') ? statusOf(evs) : (legStatus(id, allStatuses().map((n) => ({ id: n.id, status: n.status.replace(' · artifact superseded', '') }))) || statusOf(evs));
+    console.log(`\n▸ ${id}  [${st}${evs.some((e) => e.type === 'superseded') ? ' · artifact superseded' : ''}]`);
     for (const ev of evs) {
       const gate = ev.gate && typeof ev.gate === 'object' ? ` gate: ${ev.gate.old || '?'} → ${ev.gate.new || '?'}` : ev.gate ? ` (gate=${ev.gate})` : '';
       const extra = ev.type === 'transferred' ? ` → ${ev.target || ''}` : '';
