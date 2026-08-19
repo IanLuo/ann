@@ -2,3 +2,4 @@
 {"at":"2026-08-19","type":"submitted","gate":"grill","note":"bookkeeper submission (agent)"}
 {"at":"2026-08-19","type":"confirmed","gate":"grill","note":"accepted (agent)"}
 {"at":"2026-08-19","type":"evidence","note":"checkpoint 03c81a1: first implementation chunk — src/store (Store + vocab registry + 20 vitest tests, typecheck clean); project scaffold (package.json/tsconfig/vitest/.gitignore). Remaining ACs: absorb scripts/resolve.mjs+validate.mjs into the store CLI; broaden F-AC test coverage; GATE② pending."}
+{"at":"2026-08-19","type":"evidence","note":"src/cli.ts landed: store-backed engine CLI (read+manage surface) — journey/status byte-identical to the pre-engine scripts on the real journey, check/specs/locate/branch data-parity verified; append/spawn/gate go through store.appendEvent (single writer)"}

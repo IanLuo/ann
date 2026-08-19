@@ -2,12 +2,13 @@
   "name": "ann",
   "version": "0.1.0",
   "type": "module",
-  "description": "Ann — the journey-of-legs engine (tree store, planner kernel, validators). Pre-engine bootstrap lives in scripts/; the engine lives in src/.",
+  "description": "Ann \u2014 the journey-of-legs engine (tree store, planner kernel, validators). Pre-engine bootstrap lives in scripts/; the engine lives in src/.",
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "build": "tsc"
+    "build": "tsc",
+    "ann": "node dist/cli.js"
   },
   "devDependencies": {
     "@types/node": "^26.2.0",

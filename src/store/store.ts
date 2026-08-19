@@ -73,6 +73,21 @@ export class Store {
     return [...this.nodes.keys()];
   }
 
+  /** A leg's tasks = direct children (flat shape, v8 §13). */
+  tasksOf(legId: string): string[] {
+    return [...this.nodes.keys()]
+      .filter((n) => n.startsWith(legId + '/') && n.split('/').length === 2)
+      .sort();
+  }
+
+  contract(id: string): Record<string, unknown> | undefined {
+    try {
+      return JSON.parse(readFileSync(join(this.legs, id, 'node.json'), 'utf8')) as Record<string, unknown>;
+    } catch {
+      return undefined;
+    }
+  }
+
   events(id: string): JourneyEvent[] {
     return this.nodes.get(id)?.events ?? [];
   }
