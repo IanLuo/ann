@@ -127,22 +127,22 @@ describe('Store — appendEvent, the single writer (LB-3)', () => {
   afterEach(() => { rmSync(root, { recursive: true, force: true }); });
 
   it('rejects an unknown event type (vocab registry)', () => {
-    writeNode('01-goal', {}, [ev('created')]);
+    writeNode('01-goal/01-a', {}, [ev('created')]);
     const s = new Store(root);
-    expect(() => s.appendEvent('01-goal', ev('bogus-type'))).toThrow(/known type|vocab/);
+    expect(() => s.appendEvent('01-goal/01-a', ev('bogus-type'))).toThrow(/known type|vocab/);
   });
 
   it('rejects an event without at', () => {
-    writeNode('01-goal', {}, [ev('created')]);
+    writeNode('01-goal/01-a', {}, [ev('created')]);
     const s = new Store(root);
-    expect(() => s.appendEvent('01-goal', { type: 'extended' } as never)).toThrow(/at/);
+    expect(() => s.appendEvent('01-goal/01-a', { type: 'extended' } as never)).toThrow(/at/);
   });
 
-  it('appends a valid event', () => {
-    writeNode('01-goal', {}, [ev('created')]);
+  it('appends a valid event (tasks only — leg roots carry no events)', () => {
+    writeNode('01-goal/01-a', {}, [ev('created')]);
     const s = new Store(root);
-    s.appendEvent('01-goal', ev('extended'));
-    expect(s.events('01-goal').map((e) => e.type)).toEqual(['created', 'extended']);
+    s.appendEvent('01-goal/01-a', ev('extended'));
+    expect(s.events('01-goal/01-a').map((e) => e.type)).toEqual(['created', 'extended']);
   });
 
   it('enforces GATE-1: produced work requires confirmed(gate=grill) before it', () => {
@@ -246,18 +246,31 @@ describe('Store — spawn (creation record + created event through the single wr
   beforeEach(() => { makeStore(); });
   afterEach(() => { rmSync(root, { recursive: true, force: true }); });
 
-  it('writes node.json + the created event via appendEvent', () => {
+  it('writes node.json + the created event via appendEvent (tasks)', () => {
     const s = new Store(root);
-    s.spawn('01-goal', { contract: { intent: 'x', acceptanceCriteria: ['a'] } });
-    expect(existsSync(join(root, 'journey', 'legs', '01-goal', 'node.json'))).toBe(true);
-    expect(s.events('01-goal').map((e) => e.type)).toEqual(['created']);
-    expect(s.status('01-goal')).toBe('queued');
+    s.spawn('01-goal/01-a', { contract: { intent: 'x', acceptanceCriteria: ['a'] } });
+    expect(existsSync(join(root, 'journey', 'legs', '01-goal', '01-a', 'node.json'))).toBe(true);
+    expect(s.events('01-goal/01-a').map((e) => e.type)).toEqual(['created']);
+    expect(s.status('01-goal/01-a')).toBe('queued');
+  });
+
+  it('spawning a leg writes NO events at all (v8 §13 — leg roots have no log)', () => {
+    const s = new Store(root);
+    s.spawn('07-new-leg', { contract: { intent: 'x', acceptanceCriteria: ['a'] } });
+    expect(existsSync(join(root, 'journey', 'legs', '07-new-leg', 'events.jsonl'))).toBe(false);
+    expect(s.events('07-new-leg')).toEqual([]);
+  });
+
+  it('appendEvent refuses events on leg roots (write path = the enforcement)', () => {
+    const s = new Store(root);
+    s.spawn('07-new-leg', { contract: { intent: 'x', acceptanceCriteria: ['a'] } });
+    expect(() => s.appendEvent('07-new-leg', ev('completed'))).toThrow(/leg roots carry no events/);
   });
 
   it('rejects a re-spawn (immutable id)', () => {
     const s = new Store(root);
-    s.spawn('01-goal', { contract: { intent: 'x', acceptanceCriteria: ['a'] } });
-    expect(() => new Store(root).spawn('01-goal', {})).toThrow();
+    s.spawn('01-goal/01-a', { contract: { intent: 'x', acceptanceCriteria: ['a'] } });
+    expect(() => new Store(root).spawn('01-goal/01-a', {})).toThrow();
   });
 });
 

@@ -194,6 +194,9 @@ export class Store {
    * gate-check the prospective log, append only when clean — fail-closed.
    */
   appendEvent(id: string, event: JourneyEvent): void {
+    if (!id.includes('/')) {
+      throw new Error(`append rejected: leg roots carry no events (v8 §3) — record process facts on tasks`);
+    }
     if (!event.at || !event.type || !VOCAB.eventTypes.includes(event.type)) {
       throw new Error(`append rejected: bad schema (at + known type required, got ${event.type})`);
     }
@@ -207,7 +210,8 @@ export class Store {
   }
 
   /** Spawn a node: write the immutable creation record, then the `created` event
-   *  through appendEvent (every event write flows through the single writer). */
+   *  through appendEvent (every event write flows through the single writer).
+   *  Leg roots get NO events at all (v8 §13) — only node.json + the card. */
   spawn(id: string, contract: unknown, who = 'agent'): void {
     if (this.nodes.has(id)) throw new Error(`spawn rejected: ${id} already exists (node.json immutable — no re-spawn)`);
     const dir = join(this.legs, id);
@@ -217,7 +221,9 @@ export class Store {
       JSON.stringify({ id, contract, createdAt: new Date().toISOString().slice(0, 10) }, null, 2) + '\n',
     );
     this.nodes.set(id, { id, events: [] });
-    this.appendEvent(id, { at: new Date().toISOString().slice(0, 10), type: 'created', note: `spawned by bookkeeper (${who})` });
+    if (id.includes('/')) {
+      this.appendEvent(id, { at: new Date().toISOString().slice(0, 10), type: 'created', note: `spawned by bookkeeper (${who})` });
+    }
   }
 
   /** GATE-1/GATE-2 (F-AC15): tasks only — leg roots carry no events (v8). */

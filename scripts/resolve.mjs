@@ -447,6 +447,16 @@ if (args.includes('--specs')) {
   process.exit(0);
 }
 
+// ---- WRITE COMMANDS ARE READ-ONLY HERE ----
+// v8/LB-3: the single writer is the Store (src/store). scripts/resolve.mjs is the
+// zero-build READ bootstrap; mutations go through the engine CLI (npm run ann).
+if (['append', 'spawn', 'gate', 'lock', 'supersede', 'card'].includes(args[0])) {
+  console.error('scripts/resolve.mjs is the READ-ONLY bootstrap (zero-build). Writes go through the store (single writer, LB-3):');
+  console.error(`  npm run build          # once (or after src/ changes)`);
+  console.error(`  npm run ann ${args.join(' ')}`);
+  process.exit(1);
+}
+
 if (args[0] === 'append') {
   // Single-writer append (architecture LB-3), scripted: validate schema, append,
   // then gate-check the node. Usage: node scripts/resolve.mjs append <node-id> '<json>'
