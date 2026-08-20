@@ -293,7 +293,8 @@ function cmdGate(id: string, gate: string, decision: string, feedback: string) {
     console.error('usage: ann gate <id> grill|confirm accept|reject [feedback]');
     process.exit(2);
   }
-  if (!store.events(id).length) { console.error(`gate: no node ${id}`); process.exit(1); }
+  if (!store.contract(id)) { console.error(`gate: no node ${id}`); process.exit(1); }
+  if (!id.includes('/')) { console.error(`gate rejected: leg roots carry no gates (flow-control v4 §3 — gates live on tasks)`); process.exit(1); }
   // flow-control v4 §3: gates are SEQUENTIAL — GATE② (confirm) requires GATE① (grill) confirmed first.
   if (gate === 'confirm' && !store.events(id).some((e) => e.type === 'confirmed' && e.gate === 'grill')) {
     console.error(`gate rejected: confirm gate requires a confirmed(gate=grill) first (flow-control v4 §3 — gates are sequential)`);
@@ -361,31 +362,34 @@ function cmdCard(id: string) {
 }
 
 // ---- DISPATCH ----
+// Naming: reads have NO marker; WRITES end in `!` (the mutator convention — Scheme/Ruby/Nix:
+// `set!`, `push!`). A bare write name refuses with a hint — the `!` is a guarantee, not advice.
 const COMMANDS: Array<{ name: string; args: string; desc: string }> = [
-  { name: '(no args)', args: '', desc: 'name → current-path map' },
   { name: '<name>', args: '', desc: 'current path for one logical name' },
-  { name: '--journey', args: '', desc: 'the look-back: where we are + what\'s ahead' },
-  { name: '--status', args: '[filter]', desc: 'every node\'s derived status (+ superseded marker)' },
-  { name: '--check', args: '', desc: 'integrity + gates + hashes + the journey state line' },
-  { name: '--specs', args: '', desc: 'the locked contract stack (name · type · @sha · path)' },
-  { name: '--branch', args: '<id>', desc: 'a node + every descendant\'s events, one walk' },
-  { name: 'journey', args: '<id>', desc: 'one node\'s full event walk' },
+  { name: 'journey', args: '[id]', desc: 'the look-back (no id) · one node\'s walk (with id) · alias --journey' },
+  { name: 'status', args: '[filter]', desc: 'every node\'s derived status (+ superseded marker) · alias --status' },
+  { name: 'check', args: '', desc: 'integrity + gates + hashes + the journey state line · alias --check' },
+  { name: 'specs', args: '', desc: 'the locked contract stack (name · type · @sha · path) · alias --specs' },
+  { name: 'branch', args: '<id>', desc: 'a node + every descendant\'s events, one walk · alias --branch' },
   { name: 'confirm', args: '<id>', desc: 'a node\'s gate card: intent · ACs · artifacts · gates' },
-  { name: 'append', args: '<id> \'<json>\'', desc: 'single-writer append (store.appendEvent, LB-3)' },
-  { name: 'spawn', args: '<id> \'<contract-json>\'', desc: 'create a node — shape/name/parent/gates validated; legs get NO events (v8)' },
-  { name: 'gate', args: '<id> grill|confirm accept|reject [feedback]', desc: 'record a human gate decision (submit + decide; 3-reject bound)' },
-  { name: 'lock', args: '<id> <name> [type]', desc: 'stamp the lock marker + artifact-locked (hash-verifying sha)' },
-  { name: 'supersede', args: '<id> <name> <path> [note]', desc: 'record a superseded event with a forward pointer' },
-  { name: 'card', args: '<id>', desc: 'regenerate description.md (the only rewritable file)' },
+  { name: 'commands', args: '', desc: 'this table as markdown (the derived doc) · alias --commands' },
+  { name: 'help', args: '', desc: 'usage · alias --help / -h' },
+  { name: 'append!', args: '<id> \'<json>\'', desc: 'WRITE — single-writer append (store.appendEvent, LB-3)' },
+  { name: 'spawn!', args: '<id> \'<contract-json>\'', desc: 'WRITE — create a node; legs get NO events (v8); gates validated' },
+  { name: 'gate!', args: '<id> grill|confirm accept|reject [feedback]', desc: 'WRITE — human gate decision (submit + decide; 3-reject bound)' },
+  { name: 'lock!', args: '<id> <name> [type]', desc: 'WRITE — stamp lock marker + artifact-locked (hash-verifying sha)' },
+  { name: 'supersede!', args: '<id> <name> <path> [note]', desc: 'WRITE — superseded event with a forward pointer' },
+  { name: 'card!', args: '<id>', desc: 'WRITE — regenerate description.md (the only rewritable file)' },
 ];
 
 const command = args[0];
 try {
   if (command === '--help' || command === '-h') {
-    console.log('ann — the journey CLI (read + manage). Reads + writes; state via commands only (read discipline).');
-    for (const c of COMMANDS) console.log(`  ${c.name.padEnd(10)} ${c.args.padEnd(44)} ${c.desc}`);
+    console.log('ann — the journey CLI (read + manage). State via commands only (read discipline).');
+    console.log('Naming: reads have NO marker · WRITES end in `!` (the mutator convention — the `!` is a guarantee).');
+    for (const c of COMMANDS) console.log(`  ${c.name.padEnd(14)} ${c.args.padEnd(44)} ${c.desc}`);
     console.log('\nenv: RECORDED_BY=<name>  provenance on recorded events (default: agent)');
-    console.log('doc: npm run ann -- --commands   → the command table as markdown (the derived doc source)');
+    console.log('doc: npm run ann -- commands   → the command table as markdown (the derived doc source)');
     process.exit(0);
   }
   if (command === '--commands') {
@@ -397,43 +401,37 @@ try {
     console.log('\nEnv: `RECORDED_BY=<name>` — provenance on recorded events (default: agent).');
     process.exit(0);
   }
-  if (!command || command.startsWith('--')) {
-    if (command === '--journey') cmdJourney();
-    else if (command === '--status') cmdStatus();
-    else if (command === '--check') cmdCheck();
-    else if (command === '--specs') cmdSpecs();
-    else if (command === '--branch') cmdBranch(args[1] || '');
-    else if (command === '--help') console.log('ann — the journey CLI (read + manage). See the header comment for usage.');
-    else {
-      // no-arg map / <name> locate
-      if (!command) {
-        for (const id of store.ids().sort()) {
-          for (const l of lockShaOf(id)) {
-            if (store.current(l.name)?.producer === id) console.log(`${l.name.padEnd(28)} ${l.path}${l.sha ? '  @ ' + l.sha : ''}`);
-          }
-        }
-      } else {
-        const cur = store.current(command.replace(/^--/, ''));
-        if (!cur) { console.error(`ann: no current artifact for '${command}'`); process.exit(1); }
-        console.log(cur.path);
-        if (cur.sha) console.error(`  (locked @ ${cur.sha}, producer ${cur.producer})`);
-      }
-    }
-  } else if (command === 'journey') cmdJourneyOne(args[1]);
-  else if (command === 'confirm') cmdConfirm(args[1]);
-  else if (command === 'append') {
+  const WRITES = ['append', 'spawn', 'gate', 'lock', 'supersede', 'card'];
+  if (WRITES.includes(command)) {
+    console.error(`ann: writes are marked with '!' — did you mean '${command}!'? (mutator convention: reads have no marker, writes always end in !)`);
+    process.exit(1);
+  }
+  if (command === 'journey' || command === '--journey') {
+    if (args[1]) cmdJourneyOne(args[1]);
+    else cmdJourney();
+  } else if (command === 'status' || command === '--status') cmdStatus();
+  else if (command === 'check' || command === '--check') cmdCheck();
+  else if (command === 'specs' || command === '--specs') cmdSpecs();
+  else if (command === 'branch' || command === '--branch') cmdBranch(args[1] || '');
+  else if (command === 'commands' || command === '--commands') {
+    console.log('| Command | Args | What it does |');
+    console.log('|---|---|---|');
+    for (const c of COMMANDS) console.log(`| \`${c.name}\` | \`${c.args}\` | ${c.desc} |`);
+    console.log('\nEnv: `RECORDED_BY=<name>` — provenance on recorded events (default: agent).');
+  } else if (command === 'confirm') cmdConfirm(args[1]);
+  else if (command === 'append!') {
     const raw = args.slice(2).join(' ');
-    if (!args[1] || !raw) { console.error('usage: ann append <id> \'{"at":..,"type":..}\''); process.exit(2); }
+    if (!args[1] || !raw) { console.error('usage: ann append! <id> \'{"at":..,"type":..}\''); process.exit(2); }
     store.appendEvent(args[1], JSON.parse(raw));
     console.log(`appended → ${args[1]}`);
-  } else if (command === 'spawn') {
+  } else if (command === 'spawn!') {
     const raw = args.slice(2).join(' ');
-    if (!args[1] || !raw) { console.error('usage: ann spawn <id> \'<contract-json>\''); process.exit(2); }
+    if (!args[1] || !raw) { console.error('usage: ann spawn! <id> \'<contract-json>\''); process.exit(2); }
     cmdSpawn(args[1], raw);
-  } else if (command === 'gate') cmdGate(args[1], args[2], args[3], args.slice(4).join(' '));
-  else if (command === 'lock') cmdLock(args[1], args[2], args[3] || 'spec');
-  else if (command === 'supersede') cmdSupersede(args[1], args[2], args[3], args.slice(4).join(' '));
-  else if (command === 'card') cmdCard(args[1]);
+  } else if (command === 'gate!') cmdGate(args[1], args[2], args[3], args.slice(4).join(' '));
+  else if (command === 'lock!') cmdLock(args[1], args[2], args[3] || 'spec');
+  else if (command === 'supersede!') cmdSupersede(args[1], args[2], args[3], args.slice(4).join(' '));
+  else if (command === 'card!') cmdCard(args[1]);
   else {
     const cur = store.current(command);
     if (!cur) { console.error(`ann: no current artifact for '${command}'`); process.exit(1); }
