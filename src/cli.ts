@@ -384,7 +384,7 @@ const COMMANDS: Array<{ name: string; args: string; desc: string }> = [
 
 const command = args[0];
 try {
-  if (command === '--help' || command === '-h') {
+  if (command === '--help' || command === '-h' || command === 'help') {
     console.log('ann — the journey CLI (read + manage). State via commands only (read discipline).');
     console.log('Naming: reads have NO marker · WRITES end in `!` (the mutator convention — the `!` is a guarantee).');
     for (const c of COMMANDS) console.log(`  ${c.name.padEnd(14)} ${c.args.padEnd(44)} ${c.desc}`);
