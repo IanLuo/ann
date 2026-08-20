@@ -224,11 +224,13 @@ export class Store {
    *  Leg roots get NO events at all (v8 §13) — only node.json + the card. */
   spawn(id: string, contract: unknown, who = 'agent'): void {
     if (this.nodes.has(id)) throw new Error(`spawn rejected: ${id} already exists (node.json immutable — no re-spawn)`);
+    // normalize: accept the contract directly, or a wrapped {contract:{…}} (spawn-arg convenience)
+    const c = ((contract as { contract?: unknown })?.contract ?? contract) as Record<string, unknown>;
     const dir = join(this.legs, id);
     mkdirSync(join(dir, 'artifacts'), { recursive: true });
     writeFileSync(
       join(this.legs, id, 'node.json'),
-      JSON.stringify({ id, contract, createdAt: new Date().toISOString().slice(0, 10) }, null, 2) + '\n',
+      JSON.stringify({ id, contract: c, createdAt: new Date().toISOString().slice(0, 10) }, null, 2) + '\n',
     );
     this.nodes.set(id, { id, events: [] });
     if (id.includes('/')) {

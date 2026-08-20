@@ -234,7 +234,9 @@ function cmdJourneyOne(id: string) {
 function cmdConfirm(id: string) {
   const c = store.contract(id);
   if (!c) { console.error(`confirm: no node ${id}`); process.exit(1); }
-  const contract = (c.contract ?? {}) as Record<string, unknown>;
+  // defensively unwrap a legacy double-nested contract ({contract:{contract:{…}}})
+  const rawContract = (c.contract ?? {}) as Record<string, unknown>;
+  const contract = ((rawContract as { contract?: Record<string, unknown> }).contract ?? rawContract) as Record<string, unknown>;
   console.log(`GATE CARD: ${id}`);
   console.log(`intent: ${contract.intent ?? '(none)'}`);
   const acs = (contract.acceptanceCriteria ?? []) as string[];

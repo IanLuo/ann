@@ -1,28 +1,26 @@
 {
   "id": "06-engine-build/06-s3-context-assembler",
   "contract": {
-    "contract": {
-      "intent": "Context assembler (S3) — materializes per-node context packets (deterministic 6-layer, design §21.7), consumed by F5/F7 execution. Refuses unprovenanced facts, whole-tree packets, and LLM summarization overriding the deterministic skeleton.",
-      "acceptanceCriteria": [
-        "6-layer deterministic packet per node: path decisions, contract, resolved inputs (logical names), sibling status, binding state, open questions with provenance",
-        "Every fact carries a provenance label (derived-from / observation / inference / ask — resolution ladder)",
-        "No whole-tree packets: scope to the node needs",
-        "LLM summarization never overrides the deterministic skeleton",
-        "Unit tests (vitest)"
-      ],
-      "targetAreas": [
-        "src/engines/"
-      ],
-      "requiredInputs": [
-        "journey-format-spec",
-        "flow-control-spec",
-        "design"
-      ],
-      "expectedOutputs": [
-        "src/engines/ context assembler",
-        "unit tests"
-      ]
-    }
+    "intent": "Context assembler (S3) \u2014 materializes per-node context packets (deterministic 6-layer, design \u00a721.7), consumed by F5/F7 execution. Refuses unprovenanced facts, whole-tree packets, and LLM summarization overriding the deterministic skeleton.",
+    "acceptanceCriteria": [
+      "6-layer deterministic packet per node: path decisions, contract, resolved inputs (logical names), sibling status, binding state, open questions with provenance",
+      "Every fact carries a provenance label (derived-from / observation / inference / ask \u2014 resolution ladder)",
+      "No whole-tree packets: scope to the node needs",
+      "LLM summarization never overrides the deterministic skeleton",
+      "Unit tests (vitest)"
+    ],
+    "targetAreas": [
+      "src/engines/"
+    ],
+    "requiredInputs": [
+      "journey-format-spec",
+      "flow-control-spec",
+      "design"
+    ],
+    "expectedOutputs": [
+      "src/engines/ context assembler",
+      "unit tests"
+    ]
   },
   "createdAt": "2026-08-19"
 }

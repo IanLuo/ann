@@ -1,30 +1,28 @@
 {
   "id": "06-engine-build/12-s9-eval-harness",
   "contract": {
-    "contract": {
-      "intent": "Eval harness (S9) — fixture suite; measures K1-K5 on the fixtures (K1 derived-accuracy 100% / K2 locate at-most-2 / K3 advance at-most-1 / K4 correctness at-least-95% / K5 first-pass completion at-least-85%); regression goals (F16 + KPIs); the failure signal is armed (requirements-spec §5: K5 below target stops feature work). Refuses to count unverified ACs as passes.",
-      "acceptanceCriteria": [
-        "Fixture suite built (vitest — TS-3)",
-        "K1-K5 measured and reported on the fixtures",
-        "Dogfooding round-trip: the engine manages this journey (F-AC8)",
-        "Failure signal armed: K5 below target or advance friction = stop feature work (requirements-spec §5)",
-        "Never counts unverified ACs as passes",
-        "Report artifact: eval results (K1-K5)"
-      ],
-      "targetAreas": [
-        "src/evals/"
-      ],
-      "requiredInputs": [
-        "requirements-spec",
-        "functional-spec",
-        "journey-format-spec",
-        "ann-system-design"
-      ],
-      "expectedOutputs": [
-        "src/evals/ fixture suite + harness",
-        "eval results artifact (K1-K5)"
-      ]
-    }
+    "intent": "Eval harness (S9) \u2014 fixture suite; measures K1-K5 on the fixtures (K1 derived-accuracy 100% / K2 locate at-most-2 / K3 advance at-most-1 / K4 correctness at-least-95% / K5 first-pass completion at-least-85%); regression goals (F16 + KPIs); the failure signal is armed (requirements-spec \u00a75: K5 below target stops feature work). Refuses to count unverified ACs as passes.",
+    "acceptanceCriteria": [
+      "Fixture suite built (vitest \u2014 TS-3)",
+      "K1-K5 measured and reported on the fixtures",
+      "Dogfooding round-trip: the engine manages this journey (F-AC8)",
+      "Failure signal armed: K5 below target or advance friction = stop feature work (requirements-spec \u00a75)",
+      "Never counts unverified ACs as passes",
+      "Report artifact: eval results (K1-K5)"
+    ],
+    "targetAreas": [
+      "src/evals/"
+    ],
+    "requiredInputs": [
+      "requirements-spec",
+      "functional-spec",
+      "journey-format-spec",
+      "ann-system-design"
+    ],
+    "expectedOutputs": [
+      "src/evals/ fixture suite + harness",
+      "eval results artifact (K1-K5)"
+    ]
   },
   "createdAt": "2026-08-19"
 }
