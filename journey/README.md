@@ -53,7 +53,7 @@ journey/legs/
 
 ## Pre-engine tooling
 
-- `src/cli.ts` — the **engine CLI seed** (`npm run ann` / `node dist/cli.js`): the full read+manage surface backed by the Store (`--journey` · `--status` · `--check` · `--specs` · `--branch` · `journey` · `confirm` · `append` · `spawn` · `gate` · `lock` · `supersede` · `card`). Verified for data parity with the pre-engine scripts on the real journey (`--journey`/`--status` byte-identical; `--check`/`--specs`/`locate`/`--branch` same data).
+- `src/cli.ts` — the **engine CLI** (`npm run ann`): the full read+manage surface backed by the Store. **The command list is derived, not stored**: `npm run ann -- --commands` prints the markdown table (the doc source); `npm run ann -- --help` renders it too.
 - `scripts/resolve.mjs` — retired 2026-08-19 (the engine CLI `npm run ann` is the operating surface; the script is kept in git history only).
 
 - `scripts/resolve.mjs` — the derived logical-name resolver + journey/status/gate CLI + **the bookkeeper** (`--journey` · `--status` · `--check` · `--specs` · `--branch` · `confirm` · `append` · `spawn` · `gate` · `lock` · `supersede` · `card`). Built pre-engine in plain Node; the first engine component (S1 seed), used by the bootstrap itself.

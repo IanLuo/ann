@@ -356,8 +356,42 @@ function cmdCard(id: string) {
 }
 
 // ---- DISPATCH ----
+const COMMANDS: Array<{ name: string; args: string; desc: string }> = [
+  { name: '(no args)', args: '', desc: 'name → current-path map' },
+  { name: '<name>', args: '', desc: 'current path for one logical name' },
+  { name: '--journey', args: '', desc: 'the look-back: where we are + what\'s ahead' },
+  { name: '--status', args: '[filter]', desc: 'every node\'s derived status (+ superseded marker)' },
+  { name: '--check', args: '', desc: 'integrity + gates + hashes + the journey state line' },
+  { name: '--specs', args: '', desc: 'the locked contract stack (name · type · @sha · path)' },
+  { name: '--branch', args: '<id>', desc: 'a node + every descendant\'s events, one walk' },
+  { name: 'journey', args: '<id>', desc: 'one node\'s full event walk' },
+  { name: 'confirm', args: '<id>', desc: 'a node\'s gate card: intent · ACs · artifacts · gates' },
+  { name: 'append', args: '<id> \'<json>\'', desc: 'single-writer append (store.appendEvent, LB-3)' },
+  { name: 'spawn', args: '<id> \'<contract-json>\'', desc: 'create a node — shape/name/parent/gates validated; legs get NO events (v8)' },
+  { name: 'gate', args: '<id> grill|confirm accept|reject [feedback]', desc: 'record a human gate decision (submit + decide; 3-reject bound)' },
+  { name: 'lock', args: '<id> <name> [type]', desc: 'stamp the lock marker + artifact-locked (hash-verifying sha)' },
+  { name: 'supersede', args: '<id> <name> <path> [note]', desc: 'record a superseded event with a forward pointer' },
+  { name: 'card', args: '<id>', desc: 'regenerate description.md (the only rewritable file)' },
+];
+
 const command = args[0];
 try {
+  if (command === '--help' || command === '-h') {
+    console.log('ann — the journey CLI (read + manage). Reads + writes; state via commands only (read discipline).');
+    for (const c of COMMANDS) console.log(`  ${c.name.padEnd(10)} ${c.args.padEnd(44)} ${c.desc}`);
+    console.log('\nenv: RECORDED_BY=<name>  provenance on recorded events (default: agent)');
+    console.log('doc: npm run ann -- --commands   → the command table as markdown (the derived doc source)');
+    process.exit(0);
+  }
+  if (command === '--commands') {
+    // The derived command doc: markdown table from the registry — the source for
+    // AGENTS.md/README, never hand-maintained (the tree's derived-not-stored rule).
+    console.log('| Command | Args | What it does |');
+    console.log('|---|---|---|');
+    for (const c of COMMANDS) console.log(`| \`${c.name}\` | \`${c.args}\` | ${c.desc} |`);
+    console.log('\nEnv: `RECORDED_BY=<name>` — provenance on recorded events (default: agent).');
+    process.exit(0);
+  }
   if (!command || command.startsWith('--')) {
     if (command === '--journey') cmdJourney();
     else if (command === '--status') cmdStatus();
