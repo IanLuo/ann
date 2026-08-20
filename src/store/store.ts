@@ -30,6 +30,11 @@ export const legacyPath = (p: string): string =>
     .replace(/^tree\/rounds\//, 'journey/legs/')
     .replace(/^(journey\/legs\/[^/]+)\/00\//, '$1/');
 
+/** Logical name from a filename: strip .md and any -vN version suffix
+ *  (functional-spec-v3.md → functional-spec). The third fallback of the
+ *  resolver's collect() — notes may omit the explicit logical-name marker. */
+export const logicalNameFromFile = (f: string): string => f.replace(/\.md$/, '').replace(/-v\d+$/, '');
+
 /**
  * The tree store (S1) — reads/writes legs, nodes, events, artifacts per
  * journey-format-spec v8. Builds the in-memory tree; owns the single
@@ -144,12 +149,13 @@ export class Store {
 
   /**
    * Resolution (format §5): current(name) = the artifact-locked producer with that
-   * name that is not superseded. Never by timestamp; the log is the only order.
-   * Structured events preferred; legacy prose notes are parsed as a fallback.
+   * name whose producer is NOT superseded (producer-level — any superseded event
+   * excludes the producer from all its locks). Structured events preferred; legacy
+   * prose notes are parsed as a fallback.
    */
   current(name: string): { name: string; path: string; sha?: string; producer: string } | undefined {
     const lockers = this.lockers(name);
-    const superseded = this.supersededProducers(name);
+    const superseded = this.supersededProducers();
     const candidates = lockers.filter((p) => !superseded.has(p));
     if (!candidates.length) return undefined;
     const producer = candidates[candidates.length - 1];
@@ -160,7 +166,7 @@ export class Store {
       : String(e?.note ?? '').match(/([\w.-]+\.md)/)?.[1] ?? '';
     return {
       name,
-      path: legacyPath(a?.path ?? `${producer}/artifacts/${filename}`),
+      path: legacyPath(a?.path ?? `journey/legs/${producer}/artifacts/${filename}`),
       sha: a?.lockSha ?? '',
       producer,
     };
@@ -172,19 +178,23 @@ export class Store {
       for (const e of node.events) {
         if (e.type !== 'artifact-locked') continue;
         const a = e.artifact;
-        const nm = a?.name ?? String(e.note ?? '').match(/logical name:\s*([\w.-]+)/)?.[1] ?? '';
+        const filename = a?.path ? basename(a.path) : String(e.note ?? '').match(/([\w.-]+\.md)/)?.[1] ?? '';
+        const nm =
+          a?.name ??
+          String(e.note ?? '').match(/logical name:\s*([\w.-]+)/)?.[1] ??
+          logicalNameFromFile(filename);
         if (nm === name) out.push(id);
       }
     }
     return out;
   }
 
-  private supersededProducers(name: string): Set<string> {
+  /** Producer-level superseded set: any producer with a superseded event is out
+   *  for ALL its locks (format §5 — 'whose producer is not superseded'). */
+  private supersededProducers(): Set<string> {
     const out = new Set<string>();
     for (const [id, node] of this.nodes) {
-      for (const e of node.events) {
-        if (e.type === 'superseded' && e.successor?.name === name) out.add(id);
-      }
+      if (node.events.some((e) => e.type === 'superseded')) out.add(id);
     }
     return out;
   }
@@ -300,7 +310,7 @@ export class Store {
     }
     for (const [nm, producers] of lockersByName) {
       if (this.current(nm)) continue;
-      const allSuperseded = producers.every((p) => this.supersededProducers(nm).has(p));
+      const allSuperseded = producers.every((p) => this.supersededProducers().has(p));
       if (!allSuperseded) problems.push(`NO CURRENT: ${nm} (locked but never superseded and not current — orphan)`);
     }
     return problems;

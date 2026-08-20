@@ -53,9 +53,9 @@ design (model + invariants) → requirements-spec (requirements) → journey-for
 Session state lives in **the journey** — derived, never hand-maintained. Start every session with:
 
 ```bash
-node scripts/resolve.mjs --journey   # where we are + what's ahead (the look-back)
-node scripts/resolve.mjs --check     # integrity + gates
-node scripts/resolve.mjs --specs     # the contract stack
+npm run ann -- --journey   # where we are + what's ahead (the look-back)
+npm run ann -- --check     # integrity + gates + hashes + the journey state line
+npm run ann -- --specs     # the contract stack
 ```
 
 **Never read `events.jsonl` directly** — state comes exclusively from the scripts (`--journey`/`--status`/`--check`/`--specs`/`--branch`); the log is machine-parse-only and may hold inert legacy facts (v7 read discipline). **Never hand-edit `node.json`/`events.jsonl` either** — all mutations go through the engine CLI, the store's single writer (LB-3): `npm run ann spawn|gate|lock|supersede|card|append …` (build once: `npm run build`). `scripts/resolve.mjs` is READ-ONLY (refuses writes and points at the CLI). `--check` verifies artifact hashes and flags uncommitted tampering.

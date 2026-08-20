@@ -34,7 +34,7 @@ import {
 import { join, basename, dirname } from 'node:path';
 import { execSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { Store, legacyPath } from './store/store.js';
+import { Store, legacyPath, logicalNameFromFile } from './store/store.js';
 import { VOCAB } from './store/vocab.js';
 
 const ROOT = process.cwd();
@@ -48,8 +48,10 @@ const nodeFile = (id: string) => join(ROOT, 'journey', 'legs', id, 'node.json');
 const eventFile = (id: string) => join(ROOT, 'journey', 'legs', id, 'events.jsonl');
 const hasSuperseded = (id: string) => store.events(id).some((e) => e.type === 'superseded');
 const display = (id: string) => store.status(id) + (hasSuperseded(id) ? ' · artifact superseded' : '');
-const nameOf = (e: { artifact?: { name?: string }; note?: string }) =>
-  e.artifact?.name ?? String(e.note ?? '').match(/logical name:\s*([\w.-]+)/)?.[1] ?? '';
+const nameOf = (e: { artifact?: { name?: string }; note?: string; path?: string }) => {
+  const filename = e.path ?? String(e.note ?? '').match(/([\w.-]+\.md)/)?.[1] ?? '';
+  return e.artifact?.name ?? String(e.note ?? '').match(/logical name:\s*([\w.-]+)/)?.[1] ?? logicalNameFromFile(filename);
+};
 const lockShaOf = (id: string): { name: string; path: string; sha: string }[] => {
   const out: Array<{ name: string; path: string; sha: string }> = [];
   for (const e of store.events(id)) {
@@ -58,7 +60,8 @@ const lockShaOf = (id: string): { name: string; path: string; sha: string }[] =>
     const filename = a?.path ? basename(a.path) : String(e.note ?? '').match(/([\w.-]+\.md)/)?.[1] ?? '';
     out.push({
       name: nameOf(e),
-      path: a?.path ?? `${id}/artifacts/${filename}`,
+      // normalize legacy recorded paths (tree/rounds → journey/legs, /00/ → flat)
+      path: legacyPath(a?.path ?? `journey/legs/${id}/artifacts/${filename}`),
       sha: a?.lockSha ?? String(e.note ?? '').match(/@\s*([0-9a-f]{7,})/)?.[1] ?? '',
     });
   }

@@ -98,7 +98,13 @@ describe('Store — resolution current(name) (format §5)', () => {
     writeNode('01-goal/01-a', {}, [ev('created'), ev('artifact-locked', { note: 'spec-v3.md specs-locked (logical name: spec)' })]);
     const s = new Store(root);
     expect(s.current('spec')?.producer).toBe('01-goal/01-a');
-    expect(s.current('spec')?.path).toBe('01-goal/01-a/artifacts/spec-v3.md');
+    expect(s.current('spec')?.path).toBe('journey/legs/01-goal/01-a/artifacts/spec-v3.md');
+  });
+
+  it('derives the logical name from the filename when the note has no marker (third fallback)', () => {
+    writeNode('01-goal/01-a', {}, [ev('created'), ev('artifact-locked', { note: 'functional-spec-v3.md specs-locked — no marker here' })]);
+    const s = new Store(root);
+    expect(s.current('functional-spec')?.producer).toBe('01-goal/01-a');
   });
 
   it('normalizes legacy tree/rounds/ recorded paths to journey/legs/ (no symlinks needed)', () => {
