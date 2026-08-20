@@ -163,6 +163,27 @@ describe('Store — appendEvent, the single writer (LB-3)', () => {
     expect(() => s.appendEvent('01-goal/01-a', ev('completed'))).toThrow(/confirm/);
   });
 
+  it('a submitted without a decision at a gate derives blocked (v8 §3 — a gate cannot be skipped silently)', () => {
+    writeNode('01-goal/01-a', {}, [ev('created'), ev('submitted', { gate: 'grill' })]);
+    const s = new Store(root);
+    expect(s.status('01-goal/01-a')).toBe('blocked');
+    // the decision unblocks it
+    writeNode('01-goal/01-a', {}, [ev('created'), ev('submitted', { gate: 'grill' }), ev('confirmed', { gate: 'grill' })]);
+    expect(new Store(root).status('01-goal/01-a')).toBe('queued');
+  });
+
+  it('flags a confirm-gate before any confirmed grill (flow-control v4 §3 — gates are sequential)', () => {
+    writeNode('01-goal/01-a', {}, [ev('created'), ev('submitted', { gate: 'confirm' }), ev('confirmed', { gate: 'confirm' })]);
+    const s = new Store(root);
+    expect(s.check().some((p) => p.includes('GATE-SEQ'))).toBe(true);
+    writeNode('01-goal/01-a', {}, [
+      ev('created'),
+      ev('submitted', { gate: 'grill' }), ev('confirmed', { gate: 'grill' }),
+      ev('submitted', { gate: 'confirm' }), ev('confirmed', { gate: 'confirm' }),
+    ]);
+    expect(new Store(root).check().some((p) => p.includes('GATE-SEQ'))).toBe(false);
+  });
+
   it('the full honest sequence appends cleanly', () => {
     writeNode('01-goal/01-a', {}, [ev('created')]);
     const s = new Store(root);

@@ -294,6 +294,11 @@ function cmdGate(id: string, gate: string, decision: string, feedback: string) {
     process.exit(2);
   }
   if (!store.events(id).length) { console.error(`gate: no node ${id}`); process.exit(1); }
+  // flow-control v4 §3: gates are SEQUENTIAL — GATE② (confirm) requires GATE① (grill) confirmed first.
+  if (gate === 'confirm' && !store.events(id).some((e) => e.type === 'confirmed' && e.gate === 'grill')) {
+    console.error(`gate rejected: confirm gate requires a confirmed(gate=grill) first (flow-control v4 §3 — gates are sequential)`);
+    process.exit(1);
+  }
   const evs = store.events(id);
   const pending = evs.filter((e) => e.type === 'submitted' && e.gate === gate && !evs.slice(evs.indexOf(e) + 1).some((x) => x.type === 'confirmed' && x.gate === gate));
   if (!pending.length) store.appendEvent(id, { at: TODAY, type: 'submitted', gate, note: `bookkeeper submission (${WHO})` });

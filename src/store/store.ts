@@ -115,7 +115,8 @@ export class Store {
 
   private taskStatus(id: string): string {
     let status = 'queued';
-    for (const e of this.events(id)) {
+    const evs = this.events(id);
+    for (const e of evs) {
       switch (e.type) {
         case 'created':
           status = 'queued';
@@ -133,6 +134,15 @@ export class Store {
           if (status !== 'done' && status !== 'failed') status = 'superseded';
           break;
       }
+    }
+    // v8 §3: a submitted without a confirmed/rejected at that gate = blocked
+    // (waiting on human) — a gate cannot be skipped silently. Never overrides done/failed.
+    if (status !== 'done' && status !== 'failed') {
+      const pendingGate = evs.some((e) => {
+        if (e.type !== 'submitted' || typeof e.gate !== 'string') return false;
+        return !evs.slice(evs.indexOf(e) + 1).some((x) => (x.type === 'confirmed' || x.type === 'rejected') && x.gate === e.gate);
+      });
+      if (pendingGate) status = 'blocked';
     }
     return status;
   }
@@ -263,6 +273,14 @@ export class Store {
     }
     if (firstWork >= 0 && !retroGrill && (lastConfirm1 === -1 || lastConfirm1 > firstWork)) {
       problems.push(`GATE-1 GAP: ${id} — produced work (artifact-locked/completed) but no confirmed(gate=grill) before it`);
+    }
+    // flow-control v4 §3: gates are SEQUENTIAL — a confirm-gate with NO confirmed grill ever
+    // = GATE① skipped. (Recording order may be retrospective — the write path enforces strict
+    // order; the check only catches a truly missing grill.)
+    const confirmIdx = list.findIndex((e) => (e.type === 'submitted' || e.type === 'confirmed') && e.gate === 'confirm');
+    const grillIdx = list.findIndex((e) => e.type === 'confirmed' && e.gate === 'grill');
+    if (confirmIdx >= 0 && grillIdx === -1) {
+      problems.push(`GATE-SEQ GAP: ${id} — confirm gate recorded but no confirmed(gate=grill) ever (flow-control v4 §3)`);
     }
     return problems;
   }
