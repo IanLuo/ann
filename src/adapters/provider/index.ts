@@ -1,6 +1,6 @@
 import { OpenAICompatibleAdapter } from './http.js';
 import { loadProviderRegistry } from './registry.js';
-import { ProviderAdapter } from './types.js';
+import { Completion, CompletionOptions, ProviderAdapter } from './types.js';
 
 export * from './types.js';
 export { loadProviderRegistry, resolveSetting, resetProviderRegistryCache } from './registry.js';
@@ -21,4 +21,12 @@ export function getAdapter(provider?: string, logRoot: string = process.cwd()): 
     );
   }
   return new OpenAICompatibleAdapter(entry, reg.defaults, logRoot);
+}
+
+/** Facade — fulfills the frozen contract at the API level: provider selectable
+ *  per call (`complete(prompt, {provider?, model?, maxTokens})`). Resolves the
+ *  adapter by provider (default = registry default), routes, returns. */
+export async function complete(prompt: string, opts?: CompletionOptions, logRoot: string = process.cwd()): Promise<Completion> {
+  const adapter = getAdapter(opts?.provider, logRoot);
+  return adapter.complete(prompt, opts);
 }

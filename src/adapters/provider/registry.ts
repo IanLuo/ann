@@ -72,9 +72,24 @@ export function loadProviderRegistry(root: string = process.cwd()): ProviderRegi
     if (!p.id || !p.baseUrl || !p.defaultModel) {
       throw new Error(`provider registry misconfigured: entry '${p?.id ?? '(no id)'}' needs id, baseUrl, defaultModel`);
     }
+    // v1 transport = the OpenAI-compatible client (design TS-6). A registry entry
+    // for another kind would silently run through the wrong transport — refuse it.
+    if (p.kind !== 'http') {
+      throw new Error(`provider registry misconfigured: entry '${p.id}' kind '${p.kind}' is not supported in v1 (only 'http' — OpenAI-compatible, design TS-6). Refusing silently wrong transport.`);
+    }
   }
   if (!reg.defaultProvider || !reg.providers.some((p) => p.id === reg.defaultProvider)) {
     throw new Error(`provider registry misconfigured: defaultProvider '${reg.defaultProvider}' is not in providers[]`);
+  }
+  const d = reg.defaults;
+  if (!d || typeof d !== 'object') {
+    throw new Error('provider registry misconfigured: defaults (maxTokens/temperature/retries/backoffMs/backoffMaxMs/timeoutMs) are required');
+  }
+  for (const k of ['maxTokens', 'temperature', 'retries', 'backoffMs', 'backoffMaxMs', 'timeoutMs']) {
+    const v = (d as unknown as Record<string, unknown>)[k];
+    if (typeof v !== 'number' || Number.isNaN(v)) {
+      throw new Error(`provider registry misconfigured: defaults.${k} must be a number — a silent NaN would corrupt retry/backoff`);
+    }
   }
   cached = reg;
   return reg;

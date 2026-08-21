@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtempSync, rmSync, readFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { OpenAICompatibleAdapter } from '../http.js';
-import { getAdapter, loadProviderRegistry, resolveSetting, resetProviderRegistryCache } from '../index.js';
+import { getAdapter, loadProviderRegistry, resolveSetting, resetProviderRegistryCache, complete } from '../index.js';
 import type { ProviderDefaults, ProviderEntry } from '../index.js';
 
 const entry = (over: Partial<ProviderEntry> = {}): ProviderEntry => ({
@@ -172,6 +172,70 @@ describe('registry + adapter resolution (resource-registry spec, category adapte
 
   it('unknown provider → fail-closed with the unknown id named', () => {
     expect(() => getAdapter('no-such-provider')).toThrow(/no-such-provider/);
+  });
+
+  it('fails loudly on an unsupported provider kind — no silent wrong transport', () => {
+    const regRoot = join(root, 'reg1');
+    mkdirSync(join(regRoot, 'rules', 'adapter'), { recursive: true });
+    writeFileSync(
+      join(regRoot, 'rules', 'adapter', 'provider.json'),
+      JSON.stringify({
+        registry: 'x',
+        defaultProvider: 'a',
+        providers: [{ id: 'a', kind: 'anthropic-native', protocol: 'x', baseUrl: 'https://x', defaultModel: 'm' }],
+        defaults: { maxTokens: 100, temperature: 0.7, retries: 3, backoffMs: 500, backoffMaxMs: 8000, timeoutMs: 60000 },
+      }),
+    );
+    expect(() => loadProviderRegistry(regRoot)).toThrow(/kind 'anthropic-native'/);
+  });
+
+  it('fails loudly on missing defaults — no silent NaN retry/backoff math', () => {
+    const regRoot = join(root, 'reg2');
+    mkdirSync(join(regRoot, 'rules', 'adapter'), { recursive: true });
+    writeFileSync(
+      join(regRoot, 'rules', 'adapter', 'provider.json'),
+      JSON.stringify({
+        registry: 'x',
+        defaultProvider: 'a',
+        providers: [{ id: 'a', kind: 'http', protocol: 'x', baseUrl: 'https://x', defaultModel: 'm' }],
+        defaults: { maxTokens: 100 },
+      }),
+    );
+    expect(() => loadProviderRegistry(regRoot)).toThrow(/must be a number/);
+  });
+
+  it('facade complete() routes by provider to the right endpoint (frozen contract, per call)', async () => {
+    // a fixture registry in a temp root (logRoot doubles as the registry root)
+    const regRoot = join(root, 'reg3');
+    mkdirSync(join(regRoot, 'rules', 'adapter'), { recursive: true });
+    writeFileSync(
+      join(regRoot, 'rules', 'adapter', 'provider.json'),
+      JSON.stringify({
+        registry: 'x',
+        defaultProvider: 'openai-compatible',
+        providers: [{ id: 'openai-compatible', kind: 'http', protocol: 'x', baseUrl: 'https://fixture.test/v1', defaultModel: 'm' }],
+        defaults: { maxTokens: 100, temperature: 0.7, retries: 3, backoffMs: 500, backoffMaxMs: 8000, timeoutMs: 60000 },
+      }),
+    );
+    fetchMock.mockResolvedValue(jsonResponse({ choices: [{ message: { content: 'ok' } }] }));
+    const c = await complete('hi', { provider: 'openai-compatible' }, regRoot);
+    expect(c.ok).toBe(true);
+    const [url] = fetchMock.mock.calls[0] as [string];
+    expect(url).toBe('https://fixture.test/v1/chat/completions');
+  });
+
+  it('refuses a per-call provider mismatch — never silently wrong (frozen contract)', async () => {
+    const adapter = new OpenAICompatibleAdapter(entry(), defaults, root);
+    const c = await adapter.complete('p', { provider: 'other-provider' });
+    expect(c).toEqual({ ok: false, error: { code: 'invalid-config', blocker: expect.stringContaining('other-provider') } });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('accepts opts.provider when it matches the bound provider', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ choices: [{ message: { content: 'ok' } }] }));
+    const adapter = new OpenAICompatibleAdapter(entry(), defaults, root);
+    const c = await adapter.complete('p', { provider: 'test' });
+    expect(c.ok).toBe(true);
   });
 });
 

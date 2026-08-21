@@ -42,6 +42,18 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
   }
 
   async complete(prompt: string, opts?: CompletionOptions): Promise<Completion> {
+    // Frozen contract: provider selectable per call. An adapter is bound to one
+    // provider entry — a mismatched request must fail closed, never silently
+    // use the wrong provider. Route via the facade (index.complete) to switch.
+    if (opts?.provider && opts.provider !== this.entry.id) {
+      return {
+        ok: false,
+        error: {
+          code: 'invalid-config',
+          blocker: `adapter is bound to provider '${this.entry.id}' but the call requested '${opts.provider}' — route via the facade (complete) which resolves by provider (never silently wrong)`,
+        },
+      };
+    }
     const model = opts?.model ?? this.model;
     const maxTokens = opts?.maxTokens ?? this.defaults.maxTokens;
     const started = Date.now();
