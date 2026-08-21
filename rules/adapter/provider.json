@@ -1,0 +1,26 @@
+{
+  "registry": "adapter-provider",
+  "version": 1,
+  "category": "adapter",
+  "kind": "registry",
+  "definition": "LLM provider + model registry — the single source of truth for provider/model lists + defaults (F17; resource-registry spec, category adapter: one registry per class, consumers read, config manages, no layer duplicates). Per-task model selection (task grain) overrides the provider default. Values may be literals or 'env:NAME || literal-fallback'.",
+  "defaultProvider": "openai-compatible",
+  "providers": [
+    {
+      "id": "openai-compatible",
+      "kind": "http",
+      "protocol": "OpenAI-compatible chat/completions (design TS-6)",
+      "baseUrl": "env:ANN_LLM_BASE_URL || https://api.openai.com/v1",
+      "apiKey": "env:ANN_LLM_API_KEY",
+      "defaultModel": "env:ANN_LLM_MODEL || gpt-4o-mini"
+    }
+  ],
+  "defaults": {
+    "maxTokens": 2048,
+    "temperature": 0.7,
+    "retries": 3,
+    "backoffMs": 500,
+    "backoffMaxMs": 8000,
+    "timeoutMs": 60000
+  }
+}

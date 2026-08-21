@@ -101,7 +101,9 @@ function cmdJourney() {
 }
 
 function cmdStatus() {
-  const filter = args.find((a) => !a.startsWith('--'));
+  // filter = the id argument (args[1]...), never the command word itself — bare
+  // `ann status` with no filter prints every node (fix: silent-empty status).
+  const filter = args.slice(1).find((a) => !a.startsWith('--'));
   for (const id of store.ids().sort()) {
     if (!filter || id.includes(filter)) console.log(`${id.padEnd(58)} ${display(id)}`);
   }
