@@ -1,0 +1,38 @@
+{
+  "id": "06-engine-build/13-format-amendment-v9",
+  "contract": {
+    "intent": "Amend the artifact model (journey-format-spec v8 -> v9): every task gets a lockable artifact = file ref (link into docs/) + commit clues + conclusion; one-time hot-fix migration moves all artifact content out of the tree into docs/ (categorized by type) leaving symlinks; resolves the flow-control 6/7 contradiction and the artifact gate for code tasks. Future tasks gate on traceable commit clues in code.",
+    "acceptanceCriteria": [
+      "Hot fix: 27 artifact files moved to docs/ (categorized), symlinks at old paths, --check still clean (all paths + shas resolve) — append-only preserved, zero event rewrites",
+      "journey-format-spec v9 (complete superseding version): artifact = link + commit clues + conclusion; guidance table (not constraints); every-task-concludes rule; artifact gate satisfiable by record docs",
+      "flow-control v5 (complete superseding): 6/7 contradiction resolved; implementation artifact = commit-record doc (refs + commits + tests); task code well-committed and described presupposition",
+      "vocab registry: artifact types extended (record + vision + validation), version bump",
+      "validator gate in code: future tasks' artifact records carry traceable commit clues (link resolves + commit exists); one-time migration exempt",
+      "v9 locked at sha; v8 superseded with forward pointer; referrers re-pointed (flow-control, change-protocol, ann-system-design, architecture, AGENTS.md)",
+      "unit tests for the gate; full suite green; typecheck clean"
+    ],
+    "targetAreas": [
+      "docs/",
+      "journey/legs/06-engine-build/03-format-amendment-v8",
+      "journey/legs/06-engine-build/02-flow-control-v4",
+      "rules/schema/vocab.json",
+      "src/cli.ts",
+      "src/store"
+    ],
+    "requiredInputs": [
+      "journey-format-spec",
+      "flow-control-spec",
+      "resource-registry-spec",
+      "change-protocol",
+      "design"
+    ],
+    "expectedOutputs": [
+      "docs/ (categorized artifacts + symlinks)",
+      "journey-format-spec-v9.md",
+      "flow-control-spec-v5.md",
+      "vocab update",
+      "validator gate + tests"
+    ]
+  },
+  "createdAt": "2026-08-22"
+}
