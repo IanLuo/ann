@@ -511,6 +511,36 @@ const COMMANDS: Array<{ name: string; args: string; desc: string }> = [
 ];
 
 const command = args[0];
+/** Resolve a possibly-partial id: exact → last-segment → unique prefix; fail-closed
+ *  with NAMED candidates when ambiguous (never a silent pick). Reads only — writes
+ *  stay strict full-id (the `!` mutators take no shortcuts). */
+function resolveId(raw: string): string {
+  const ids = store.ids();
+  if (ids.includes(raw)) return raw;
+  const last = (i: string) => i.split('/').pop()!;
+  const byLast = ids.filter((i) => last(i) === raw);
+  if (byLast.length === 1) return byLast[0];
+  if (byLast.length > 1) {
+    console.error(`ann: ambiguous id '${raw}' — matches ${byLast.join(', ')}; use the full id`);
+    process.exit(1);
+  }
+  // partial last segment (e.g. '05-s2' → '05-s2-envision-grilling')
+  const byLastPrefix = ids.filter((i) => last(i).startsWith(raw));
+  if (byLastPrefix.length === 1) return byLastPrefix[0];
+  if (byLastPrefix.length > 1) {
+    console.error(`ann: ambiguous '${raw}' — matches ${byLastPrefix.join(', ')}; use more of the id`);
+    process.exit(1);
+  }
+  // full-id prefix (e.g. '06-engine-build/05')
+  const byPrefix = ids.filter((i) => i.startsWith(raw));
+  if (byPrefix.length === 1) return byPrefix[0];
+  if (byPrefix.length > 1) {
+    console.error(`ann: ambiguous prefix '${raw}' — matches ${byPrefix.join(', ')}; use more of the id`);
+    process.exit(1);
+  }
+  console.error(`ann: no node '${raw}'`);
+  process.exit(1);
+}
 try {
   if (command === '--help' || command === '-h' || command === 'help') {
     console.log('ann — the journey CLI (read + manage). State via commands only (read discipline).');
@@ -535,20 +565,20 @@ try {
     process.exit(1);
   }
   if (command === 'journey' || command === '--journey') {
-    if (args[1]) cmdJourneyOne(args[1]);
+    if (args[1]) cmdJourneyOne(resolveId(args[1]));
     else cmdJourney();
   } else if (command === 'status' || command === '--status') cmdStatus();
   else if (command === 'check' || command === '--check') cmdCheck();
   else if (command === 'specs' || command === '--specs') cmdSpecs();
-  else if (command === 'branch' || command === '--branch') cmdBranch(args[1] || '');
+  else if (command === 'branch' || command === '--branch') cmdBranch(resolveId(args[1] || ''));
   else if (command === 'commands' || command === '--commands') {
     console.log('| Command | Args | What it does |');
     console.log('|---|---|---|');
     for (const c of COMMANDS) console.log(`| \`${c.name}\` | \`${c.args}\` | ${c.desc} |`);
     console.log('\nEnv: `RECORDED_BY=<name>` — provenance on recorded events (default: agent).');
-  } else if (command === 'confirm') cmdConfirm(args[1]);
-  else if (command === 'detail' || command === '--detail') cmdDetail(args[1]);
-  else if (command === 'results' || command === '--results') cmdResults(args[1], args[2]);
+  } else if (command === 'confirm') cmdConfirm(resolveId(args[1]));
+  else if (command === 'detail' || command === '--detail') cmdDetail(resolveId(args[1]));
+  else if (command === 'results' || command === '--results') cmdResults(resolveId(args[1]), args[2]);
   else if (command === 'append!') {
     const raw = args.slice(2).join(' ');
     if (!args[1] || !raw) { console.error('usage: ann append! <id> \'{"at":..,"type":..}\''); process.exit(2); }
