@@ -16,11 +16,6 @@ import { join, dirname } from 'node:path';
  * Resolution order per setting: env → user config → keychain (secrets only) → registry fallback.
  */
 
-export interface ProjectEntry {
-  name: string;
-  path: string;
-}
-
 export interface UserConfig {
   provider?: string;
   model?: string;
@@ -28,8 +23,9 @@ export interface UserConfig {
   /** The API key — masked in every display; never logged. */
   apiKey?: string;
   maxTokens?: number;
-  /** Known projects — each has its OWN journey (ann is a multi-project tool). */
-  projects?: ProjectEntry[];
+  /** Known project PATHS — each has its OWN journey. Paths only, no names (a path is unambiguous). */
+  projects?: string[];
+  /** The last-used project path (fallback when cwd discovery finds none). */
   currentProject?: string;
 }
 
@@ -53,7 +49,7 @@ export function resetConfigCache(): void {
 }
 
 /** Save one config value — creates the file, chmod 600 (user-only), never echoed. */
-export function setConfig(key: keyof UserConfig, value: string | number | ProjectEntry[]): UserConfig {
+export function setConfig(key: keyof UserConfig, value: string | number | string[]): UserConfig {
   const cfg = { ...loadConfig(), [key]: value };
   const p = configPath();
   mkdirSync(dirname(p), { recursive: true });
@@ -76,35 +72,32 @@ export function maskedConfig(): Record<string, string | number> {
 
 export const configExists = (): boolean => existsSync(configPath());
 
-/* ---------------- project management (each project has its own journey) ---------------- */
+/* ---------------- project management (each project has its own journey) ----------------
+ * Projects are identified by PATH only — no names (a path is unambiguous). */
 
-export function listProjects(): ProjectEntry[] {
-  return loadConfig().projects ?? [];
+/** Known project paths. Legacy shape ({name, path}[]) is normalized on read. */
+export function listProjects(): string[] {
+  const p = loadConfig().projects ?? [];
+  return p.map((x) => (typeof x === 'string' ? x : (x as { path?: string }).path ?? '')).filter(Boolean);
 }
 
-export function findProject(name: string): ProjectEntry | undefined {
-  return listProjects().find((p) => p.name === name);
+export function getCurrentProject(): string | undefined {
+  return loadConfig().currentProject || undefined;
 }
 
-export function getCurrentProject(): ProjectEntry | undefined {
-  const name = loadConfig().currentProject;
-  return name ? findProject(name) : undefined;
-}
-
-/** Register (or update) a known project. */
-export function setProject(name: string, path: string): UserConfig {
-  const projects = [...listProjects().filter((p) => p.name !== name), { name, path }];
+/** Register (or update) a project path. */
+export function setProject(path: string): UserConfig {
+  const projects = [...listProjects().filter((p) => p !== path), path];
   return setConfig('projects', projects);
 }
 
-export function useProject(name: string): UserConfig {
-  if (!findProject(name)) throw new Error(`project '${name}' not found — add it first (ann project! add ${name} <path>)`);
-  return setConfig('currentProject', name);
+export function useProject(path: string): UserConfig {
+  return setConfig('currentProject', path);
 }
 
-export function removeProject(name: string): UserConfig {
-  const projects = listProjects().filter((p) => p.name !== name);
+export function removeProject(path: string): UserConfig {
+  const projects = listProjects().filter((p) => p !== path);
   setConfig('projects', projects);
-  if (loadConfig().currentProject === name) return setConfig('currentProject', '');
+  if (loadConfig().currentProject === path) return setConfig('currentProject', '');
   return loadConfig();
 }

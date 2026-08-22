@@ -12,7 +12,7 @@
  *   ann --check            → integrity + gates + artifact hashes
  *   ann --specs            → the locked contract stack
  *   ann --providers        → the adapter registry (providers · models · defaults · key state)
- *   ann project / project! add|use|remove <name> [path]  → multi-project (own journey each)
+ *   ann project / project! add|use|remove <path>  → multi-project by PATH (own journey each)
  *   ann config / config! set <key> <val>  → user config file (masked)
  *   ann cred! set|delete <svc> <acct> [secret]  → OS keychain (dev-only)
  *   ann --branch <id>      → a node + every descendant's events
@@ -53,7 +53,6 @@ import {
   configPath,
   configExists,
   listProjects,
-  findProject,
   getCurrentProject,
   setProject,
   useProject,
@@ -62,36 +61,46 @@ import {
 import { getVOCAB } from './store/vocab.js';
 
 // ── PROJECT RESOLUTION (before anything touches the store) ──────────────────────
-// ann manages MULTIPLE projects, each with its own journey. The root is resolved:
-//   1. `--project <name>` flag or ANN_PROJECT env → config.projects
-//   2. cwd discovery — walk up until a `journey/` dir is found (git-like)
-//   3. config.currentProject
+// ann manages MULTIPLE projects (each with its own journey), identified by PATH only.
+// The root is resolved:
+//   1. `--project <path>` flag or ANN_PROJECT env → that path (must be an ann project)
+//   2. cwd discovery — walk up until a `.ann/` (or legacy `journey/`) dir is found
+//   3. config.currentProject (a path)
 // `project`/`project!` commands run WITHOUT a project (they manage the registry) —
 // they never touch the store, so they work from any directory.
 const args = process.argv.slice(2);
+// Global --project <path> flag — extracted and STRIPPED so per-command parsing
+// (status filter, etc.) never sees it; works before OR after the command.
+let projectFlag: string | undefined;
+{
+  const flagIdx = args.indexOf('--project');
+  if (flagIdx >= 0 && args[flagIdx + 1]) {
+    projectFlag = args[flagIdx + 1];
+    args.splice(flagIdx, 2);
+  }
+}
 const isProjectCmd = args[0] === 'project' || args[0] === 'project!';
 
+const isProjectRoot = (dir: string): boolean => existsSync(join(dir, '.ann')) || existsSync(join(dir, 'journey'));
+
 function resolveProjectRoot(argv: string[]): string {
-  const flagIdx = argv.indexOf('--project');
-  const explicit = flagIdx >= 0 && argv[flagIdx + 1] ? argv[flagIdx + 1] : process.env.ANN_PROJECT;
+  const explicit = projectFlag ? resolve(projectFlag) : process.env.ANN_PROJECT ? resolve(process.env.ANN_PROJECT) : undefined;
   if (explicit) {
-    const p = findProject(explicit);
-    if (p) return p.path;
-    console.error(`ann: project '${explicit}' not found — ann project (list) / project! add <name> <path>`);
+    if (isProjectRoot(explicit)) return explicit;
+    console.error(`ann: '${explicit}' is not an ann project (no .ann/ or journey/). Run from a project or: ann project! add <path>`);
     process.exit(1);
   }
   // cwd discovery: walk up looking for .ann/ (v12 marker) — legacy journey/ accepted
   let dir = process.cwd();
   for (;;) {
-    if (existsSync(join(dir, '.ann'))) return dir;
-    if (existsSync(join(dir, 'journey'))) return dir; // pre-v12 projects
+    if (isProjectRoot(dir)) return dir;
     const parent = dirname(dir);
     if (parent === dir) break;
     dir = parent;
   }
   const cur = getCurrentProject();
-  if (cur) return cur.path;
-  console.error('ann: no project found — run from a project (a dir containing journey/), or register one: ann project! add <name> <path>');
+  if (cur && isProjectRoot(cur)) return cur;
+  console.error('ann: no project found — run from a project (a dir containing .ann/), or register one: ann project! add <path>');
   process.exit(1);
 }
 
@@ -309,36 +318,37 @@ function cmdProviders() {
 
 function cmdProject() {
   const cur = getCurrentProject();
-  console.log(`CURRENT PROJECT: ${cur ? `${cur.name} → ${cur.path}` : '(none — config.currentProject unset)'}`);
+  console.log(`CURRENT PROJECT: ${cur && isProjectRoot(cur) ? cur : cur ? `${cur} (missing/stale)` : '(none — config.currentProject unset)'}`);
   console.log(`cwd: ${process.cwd()}`);
   const projects = listProjects();
   if (!projects.length) console.log('  (no projects registered)');
-  for (const p of projects) console.log(`  ${p.name}: ${p.path}`);
-  console.log('  add:    ann project! add <name> <path>');
-  console.log('  use:    ann project! use <name>   (or --project <name> / ANN_PROJECT per-call)');
-  console.log('  remove: ann project! remove <name>');
+  for (const p of projects) console.log(`  ${p}${isProjectRoot(p) ? '' : '  (missing/stale)'}`);
+  console.log('  add:    ann project! add <path>');
+  console.log('  use:    ann project! use <path>   (or --project <path> / ANN_PROJECT per-call)');
+  console.log('  remove: ann project! remove <path>');
 }
 
-function cmdProjectSet(op: string, name: string | undefined, path: string | undefined) {
+function cmdProjectSet(op: string, path: string | undefined) {
   if (op === 'add') {
-    if (!name || !path) { console.error('usage: ann project! add <name> <path>'); process.exit(2); }
+    if (!path) { console.error('usage: ann project! add <path>'); process.exit(2); }
     const abs = resolve(path);
-    if (!existsSync(join(abs, '.ann')) && !existsSync(join(abs, 'journey'))) {
+    if (!isProjectRoot(abs)) {
       console.error(`project! add: ${abs} has no .ann/ — not an ann project (or init it first)`);
       process.exit(1);
     }
-    setProject(name, abs);
-    console.log(`project: added ${name} → ${abs}`);
+    setProject(abs);
+    console.log(`project: added ${abs}`);
   } else if (op === 'use') {
-    if (!name) { console.error('usage: ann project! use <name>'); process.exit(2); }
-    useProject(name);
-    console.log(`project: current = ${name} → ${findProject(name)?.path}`);
+    if (!path) { console.error('usage: ann project! use <path>'); process.exit(2); }
+    const abs = resolve(path);
+    useProject(abs);
+    console.log(`project: current = ${abs}`);
   } else if (op === 'remove') {
-    if (!name) { console.error('usage: ann project! remove <name>'); process.exit(2); }
-    removeProject(name);
-    console.log(`project: removed ${name}`);
+    if (!path) { console.error('usage: ann project! remove <path>'); process.exit(2); }
+    removeProject(resolve(path));
+    console.log(`project: removed ${resolve(path)}`);
   } else {
-    console.error('usage: ann project! add|use|remove …');
+    console.error('usage: ann project! add|use|remove <path>');
     process.exit(2);
   }
 }
@@ -680,7 +690,7 @@ const COMMANDS: Array<{ name: string; args: string; desc: string }> = [
   { name: 'config', args: '', desc: 'the user config file (~/.ann/config.json; apiKey masked) · alias --config' },
   { name: 'config!', args: 'set <key> <value>', desc: 'WRITE — save a config value (provider|model|baseUrl|apiKey|maxTokens); chmod 600, outside the repo; apiKey never echoed' },
   { name: 'project', args: '', desc: 'show the current project + known projects · alias --project' },
-  { name: 'project!', args: 'add|use|remove <name> [path]', desc: 'WRITE — manage projects (each has its OWN journey); add <name> <path> registers a project' },
+  { name: 'project!', args: 'add|use|remove <path>', desc: 'WRITE — manage projects by PATH (each has its OWN journey); add <path> registers one' },
   { name: 'cred!', args: 'set|delete <service> <account> [secret]', desc: 'WRITE — OS keychain (macOS, DEV-ONLY local CLI): save/remove a secret via stdin; production = server-side env (12-factor)' },
   { name: 'branch', args: '<id>', desc: 'a node + every descendant\'s events, one walk · alias --branch' },
   { name: 'confirm', args: '<id>', desc: 'a node\'s gate card: intent · ACs · artifacts · gates' },
@@ -760,7 +770,7 @@ try {
   else if (command === 'config' || command === '--config') cmdConfig();
   else if (command === 'config!') cmdConfigSet(args[2], args[3]);
   else if (command === 'project') cmdProject();
-  else if (command === 'project!') cmdProjectSet(args[1], args[2], args[3]);
+  else if (command === 'project!') cmdProjectSet(args[1], args[2]);
   else if (command === 'cred!') cmdCred(args[1], args[2], args[3], args[4]);
   else if (command === 'branch' || command === '--branch') cmdBranch(resolveId(args[1] || ''));
   else if (command === 'commands' || command === '--commands') {

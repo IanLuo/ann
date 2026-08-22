@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, readFileSync, existsSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { loadConfig, setConfig, maskedConfig, configPath, resetConfigCache, listProjects, findProject, getCurrentProject, setProject, useProject, removeProject } from '../config.js';
+import { loadConfig, setConfig, maskedConfig, configPath, resetConfigCache, listProjects, getCurrentProject, setProject, useProject, removeProject } from '../config.js';
 import { resolveSetting } from '../registry.js';
 import { resolveSecret } from '../credentials.js';
 import type { KeychainExec } from '../credentials.js';
@@ -90,31 +90,32 @@ describe('secret chain: env > config > keychain', () => {
   });
 });
 
-describe('project registry (each project has its own journey)', () => {
-  it('add / find / use / remove a project', () => {
+describe('project registry (paths only — each project has its own journey)', () => {
+  it('add / use / remove a project by path', () => {
     withConfig('p.json');
     expect(listProjects()).toEqual([]);
-    setProject('alpha', '/projects/alpha');
-    setProject('beta', '/projects/beta');
-    expect(listProjects().map((p) => p.name)).toEqual(['alpha', 'beta']);
-    expect(findProject('alpha')).toEqual({ name: 'alpha', path: '/projects/alpha' });
+    setProject('/projects/alpha');
+    setProject('/projects/beta');
+    expect(listProjects()).toEqual(['/projects/alpha', '/projects/beta']);
     expect(getCurrentProject()).toBeUndefined();
-    useProject('beta');
-    expect(getCurrentProject()).toEqual({ name: 'beta', path: '/projects/beta' });
-    removeProject('beta');
-    expect(findProject('beta')).toBeUndefined();
+    useProject('/projects/beta');
+    expect(getCurrentProject()).toBe('/projects/beta');
+    removeProject('/projects/beta');
+    expect(listProjects()).toEqual(['/projects/alpha']);
     expect(getCurrentProject()).toBeUndefined(); // removing the current clears it
   });
 
-  it('useProject fails closed on an unknown project', () => {
+  it('setProject is idempotent (no duplicate paths)', () => {
     withConfig('q.json');
-    expect(() => useProject('nope')).toThrow(/not found/);
+    setProject('/projects/alpha');
+    setProject('/projects/alpha');
+    expect(listProjects()).toEqual(['/projects/alpha']);
   });
 
-  it('setProject replaces an existing entry (name is the key)', () => {
+  it('normalizes a legacy {name, path}[] shape on read', () => {
     withConfig('r.json');
-    setProject('alpha', '/first');
-    setProject('alpha', '/second');
-    expect(listProjects()).toEqual([{ name: 'alpha', path: '/second' }]);
+    const { writeFileSync } = require('node:fs');
+    writeFileSync(cfg('r.json'), JSON.stringify({ projects: [{ name: 'a', path: '/old/a' }, { name: 'b', path: '/old/b' }], currentProject: 'a' }));
+    expect(listProjects()).toEqual(['/old/a', '/old/b']);
   });
 });
