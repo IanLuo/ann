@@ -25,24 +25,8 @@ import { ProviderAdapter, CompletionSuccess, CompletionUsage, AdapterError } fro
  *    fail-closed (design §5).
  */
 
-export type SourceType =
-  | 'user input'
-  | 'local file'
-  | 'repo metadata'
-  | 'runtime/tool output'
-  | 'documentation'
-  | 'web source'
-  | 'prior plan'
-  | 'inference'
-  | 'observation'
-  | 'external system';
-
-export interface GroundingInput {
-  /** Stable id the model cites as `basis`. */
-  label: string;
-  text: string;
-  sourceType: SourceType;
-}
+export { SourceType, GroundingInput, GrillQuestion } from './shared.js';
+import { GroundingInput, GrillQuestion, SourceType, isRawQuestion, buildQuestion, renderContext, renderConstraints, unquote } from './shared.js';
 
 export interface GrillingRequest {
   /** The idea to grill — the step's intent/goal text (never empty). */
@@ -63,15 +47,6 @@ export interface ValidationPoint {
    *  otherwise the sourceType of its primary cited input. */
   sourceType: SourceType;
   confidence: 'high' | 'medium' | 'low';
-}
-
-export interface GrillQuestion {
-  id: string;
-  question: string;
-  reason: string;
-  impact: 'high' | 'medium' | 'low';
-  options?: string[];
-  default?: string;
 }
 
 export interface GrillingArtifact {
@@ -162,30 +137,12 @@ Every requirement line ends with its ground in brackets, e.g. "[ground: context 
 
 /* ------------------------------------------------------------------ */
 
-const unquote = (s: string): string => s.trim().replace(/^```(?:json)?\s*/i, '').replace(/```$/, '');
-
-function renderContext(ctx: GroundingInput[] | undefined): string {
-  if (!ctx || ctx.length === 0) return '(none provided)';
-  return ctx.map((c) => `- ${c.label} [${c.sourceType}]: ${c.text}`).join('\n');
-}
-
-function renderConstraints(c: string[] | undefined): string {
-  return c && c.length > 0 ? c.map((x, i) => `${i + 1}. ${x}`).join('\n') : '(none declared)';
-}
 
 interface RawValidationPoint {
   verdict: 'ok' | 'concern' | 'blocking';
   claim: string;
   basis: string[];
   confidence: 'high' | 'medium' | 'low';
-}
-
-interface RawGrillQuestion {
-  question: string;
-  reason: string;
-  impact: 'high' | 'medium' | 'low';
-  options?: string[];
-  default?: string;
 }
 
 const isRawPoint = (p: unknown): p is RawValidationPoint => {
@@ -196,15 +153,6 @@ const isRawPoint = (p: unknown): p is RawValidationPoint => {
     (o.confidence === 'high' || o.confidence === 'medium' || o.confidence === 'low') &&
     Array.isArray(o.basis) &&
     o.basis.every((b) => typeof b === 'string')
-  );
-};
-
-const isRawQuestion = (q: unknown): q is RawGrillQuestion => {
-  const o = q as Record<string, unknown>;
-  return (
-    typeof o?.question === 'string' &&
-    typeof o?.reason === 'string' &&
-    (o.impact === 'high' || o.impact === 'medium' || o.impact === 'low')
   );
 };
 
@@ -262,7 +210,7 @@ export class DefaultGrillingEngine implements GrillingEngine {
       // Refuse fake precision (no silent inference): an ungrounded, low-confidence
       // assertion is a question in disguise — demote it rather than assert it.
       if (basis.length === 0 && raw.confidence === 'low') {
-        const q = this.question(`q${++idCounter}`, raw.claim, 'raised by the grill as an ungrounded, low-confidence claim', 'medium', seenText);
+        const q = buildQuestion(`q${++idCounter}`, raw.claim, 'raised by the grill as an ungrounded, low-confidence claim', 'medium', seenText);
         if (q) questions.push(q);
         continue;
       }
@@ -271,7 +219,7 @@ export class DefaultGrillingEngine implements GrillingEngine {
 
     for (const raw of o.questions) {
       if (!isRawQuestion(raw)) continue;
-      const q = this.question(`q${++idCounter}`, raw.question, raw.reason, raw.impact, seenText, raw.options, raw.default);
+      const q = buildQuestion(`q${++idCounter}`, raw.question, raw.reason, raw.impact, seenText, raw.options, raw.default);
       if (q) questions.push(q);
     }
 
@@ -297,27 +245,4 @@ export class DefaultGrillingEngine implements GrillingEngine {
     return { ok: true, prd: text, usage: completion.usage };
   }
 
-  /** Build a question with dedupe on normalized text (batch-ask, deduped per flow-control v4 §4).
-   *  Returns null when the text duplicates an earlier question in the batch. */
-  private question(
-    id: string,
-    text: string,
-    reason: string,
-    impact: 'high' | 'medium' | 'low',
-    seen: Set<string>,
-    options?: string[],
-    def?: string,
-  ): GrillQuestion | null {
-    const key = text.trim().toLowerCase();
-    if (seen.has(key)) return null;
-    seen.add(key);
-    return {
-      id,
-      question: text.trim(),
-      reason,
-      impact,
-      ...(options && options.length > 0 ? { options } : {}),
-      ...(def !== undefined ? { default: def } : {}),
-    };
-  }
 }
