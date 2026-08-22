@@ -1,4 +1,5 @@
 import { readdirSync, readFileSync, appendFileSync, existsSync, statSync, lstatSync, mkdirSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { join, basename } from 'node:path';
 import { VOCAB } from './vocab.js';
 
@@ -195,6 +196,37 @@ export class Store {
     );
   }
 
+  /** Commit traceability (format v10 §9/§14): every structured evidence.commits[].sha
+   *  must resolve in git (`git cat-file -t`), every refs[] path must exist (repo-relative).
+   *  git = the archive (format: git is the archive and source of truth). Never silent. */
+  private commitTraceabilityProblems(): string[] {
+    const problems: string[] = [];
+    const repoRoot = process.cwd();
+    for (const [id, node] of this.nodes) {
+      for (const e of node.events) {
+        if (e.type !== 'evidence') continue;
+        for (const c of Array.isArray(e.commits) ? e.commits : []) {
+          const sha = (c as { sha?: unknown })?.sha;
+          if (typeof sha !== 'string' || !sha.trim()) {
+            problems.push(`F-AC18: ${id} — evidence.commits[] entry without a sha (format v10 §9)`);
+            continue;
+          }
+          try {
+            execFileSync('git', ['cat-file', '-t', sha.trim()], { stdio: 'pipe' });
+          } catch {
+            problems.push(`F-AC18: ${id} — commit ${sha.trim()} does not resolve in git (traceability, format v10 §9)`);
+          }
+        }
+        for (const ref of Array.isArray(e.refs) ? e.refs : []) {
+          if (typeof ref !== 'string' || !existsSync(join(repoRoot, ref))) {
+            problems.push(`F-AC18: ${id} — ref '${String(ref)}' does not exist (traceability, format v10 §9)`);
+          }
+        }
+      }
+    }
+    return problems;
+  }
+
   private lockers(name: string): string[] {
     const out: string[] = [];
     for (const [id, node] of this.nodes) {
@@ -343,6 +375,9 @@ export class Store {
         problems.push(`F-AC18: ${id} — completed without an artifact-locked record or structured commit evidence (v10: document artifact or evidence.commits[] required)`);
       }
     }
+    // F-AC18 traceability (format v10 §9/§14): structured commits[] must RESOLVE in
+    // git and refs[] paths must exist. Machine-truth — never prose-parsed (NFR-COM-1).
+    problems.push(...this.commitTraceabilityProblems());
     const lockersByName = new Map<string, string[]>();
     for (const [id, node] of this.nodes) {
       for (const e of node.events) {

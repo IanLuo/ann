@@ -427,3 +427,38 @@ describe('Store — current() resolves by logical name (multi-artifact producers
     expect(s.current('a-spec')?.path).toBe('journey/legs/06-engine-build/13-amendment/artifacts/a.md');
   });
 });
+
+describe('Store — commit traceability (format v10 §9)', () => {
+  beforeEach(() => { makeStore(); });
+  afterEach(() => { rmSync(root, { recursive: true, force: true }); });
+
+  it('flags an evidence.commits[] sha that does not resolve in git', () => {
+    writeNode('06-engine-build/09-code', {}, [
+      ev('evidence', { commits: [{ sha: 'deadbeef00000000000000000000000000000000' }] }),
+    ]);
+    const problems = new Store(root).check();
+    expect(problems.some((p) => p.includes('deadbeef00000000000000000000000000000000') && p.includes('does not resolve'))).toBe(true);
+  });
+
+  it('passes a commits[] sha that DOES resolve in git (real repo commit)', () => {
+    writeNode('06-engine-build/10-code', {}, [
+      ev('evidence', { commits: [{ sha: '8e94c58' }], refs: ['src/adapters/provider/'] }),
+    ]);
+    const problems = new Store(root).check();
+    expect(problems.some((p) => p.includes('does not resolve') || p.includes('does not exist'))).toBe(false);
+  });
+
+  it('flags a refs[] path that does not exist', () => {
+    writeNode('06-engine-build/11-code', {}, [
+      ev('evidence', { commits: [{ sha: '8e94c58' }], refs: ['src/definitely-not-a-real-dir/'] }),
+    ]);
+    const problems = new Store(root).check();
+    expect(problems.some((p) => p.includes('src/definitely-not-a-real-dir/') && p.includes('does not exist'))).toBe(true);
+  });
+
+  it('ignores evidence without commits[]/refs[] (prose-only never checked — NFR-COM-1)', () => {
+    writeNode('06-engine-build/12-code', {}, [ev('evidence', { note: 'checkpoint — prose mentions a commit' })]);
+    const problems = new Store(root).check();
+    expect(problems.some((p) => p.includes('does not resolve') || p.includes('does not exist'))).toBe(false);
+  });
+});
