@@ -11,3 +11,4 @@
 {"at":"2026-08-22","type":"submitted","gate":"confirm","note":"bookkeeper submission (agent)"}
 {"at":"2026-08-22","type":"confirmed","gate":"confirm","note":"accepted (agent)"}
 {"at":"2026-08-21","type":"completed","note":"artifact-model amendment complete: hot-fix migration (27 files -> docs/, symlinks, append-only preserved) · journey-format-spec v9 + flow-control-spec v5 locked (v8/v4 superseded) · vocab record/vision/validation · F-AC18 gate + tests · current() multi-artifact bug fixed · task 05 record doc dogfood. Suite 67 pass, check 10 current artifacts no gaps."}
+{"at":"2026-08-22","type":"evidence","note":"recorded interpretation (v9 4/15): a code-task record doc is CONTENT — it lives in docs/records/ (15), and the task artifacts/ holds a symlink to it, exactly like document artifacts; 4s artifacts/ row reads the artifact as a record doc, not the content location. Implemented this way in the dogfood (docs/records/s2-record.md + symlink)."}

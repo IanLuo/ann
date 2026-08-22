@@ -1,15 +1,43 @@
 {
   "registry": "vocab",
-  "version": 1,
+  "version": 2,
   "category": "schema",
   "kind": "registry",
   "definition": "the schema vocabulary — the single source of truth for event types, statuses, gates, and artifact types (resource-registry spec: one registry per class, no layer duplicates). Machine-readable form of journey-format-spec v8 §3. Consumers read; never hardcode.",
   "eventTypes": [
-    "created", "activated", "extended", "evidence", "artifact-locked",
-    "completed", "failed", "superseded", "submitted", "confirmed", "rejected",
-    "gate-revised", "transferred", "deferred"
+    "created",
+    "activated",
+    "extended",
+    "evidence",
+    "artifact-locked",
+    "completed",
+    "failed",
+    "superseded",
+    "submitted",
+    "confirmed",
+    "rejected",
+    "gate-revised",
+    "transferred",
+    "deferred"
   ],
-  "statuses": ["queued", "active", "blocked", "done", "failed", "superseded"],
-  "gates": ["grill", "confirm"],
-  "artifactTypes": ["spec", "system-design", "architecture", "record", "vision", "validation"]
+  "statuses": [
+    "queued",
+    "active",
+    "blocked",
+    "done",
+    "failed",
+    "superseded"
+  ],
+  "gates": [
+    "grill",
+    "confirm"
+  ],
+  "artifactTypes": [
+    "spec",
+    "system-design",
+    "architecture",
+    "record",
+    "vision",
+    "validation"
+  ]
 }
