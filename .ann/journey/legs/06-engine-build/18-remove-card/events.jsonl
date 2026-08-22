@@ -2,3 +2,6 @@
 {"at":"2026-08-22","type":"submitted","gate":"grill","note":"bookkeeper submission (ian)"}
 {"at":"2026-08-22","type":"confirmed","gate":"grill","note":"accepted (ian)"}
 {"at":"2026-08-22","type":"artifact-locked","artifact":{"name":"journey-format-spec","path":"journey/legs/06-engine-build/18-remove-card/artifacts/journey-format-spec.md","lockSha":"699615a"},"note":"journey-format-spec.md specs-locked via bookkeeper (agent)"}
+{"at":"2026-08-22","type":"submitted","gate":"confirm","note":"bookkeeper submission (agent)"}
+{"at":"2026-08-22","type":"confirmed","gate":"confirm","note":"accepted (agent)"}
+{"at":"2026-08-22","type":"completed","note":"card removal complete: 44 description.md files deleted; card! command removed (COMMANDS/dispatch/cmdCard/WRITES/header); spawn no longer writes cards; format v13 @ 699615a locked (v12 superseded) — 4 drops the regenerable file, 6 replaced by the derived-commands + deferred-search note, 7 drops grep-able cards, 9 drops missing-card rule; AGENTS.md mutation list minus card!. Store untouched (never read the card). 117 tests green, check 2 documented problems. Search command deferred."}
