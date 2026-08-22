@@ -43,7 +43,7 @@ design (model + invariants) → requirements-spec (requirements) → journey-for
 | requirements change: the amendment path (change → amendment node → complete superseding artifact → superseded event → referrer re-pointing); locked artifacts never edited | `journey/legs/05-engine/03-change-protocol-amendment/artifacts/requirements-change-protocol-v2.md` (locked @ be67673) |
 | functional spec (F1–F17, F-ACs): what the engine must do | `journey/legs/05-engine/06-functional-spec/artifacts/functional-spec.md` (locked @ 9e60cd8) |
 | technique: components & ownership (S1–S9), frozen interfaces, failure modes (fail-closed), scale | `journey/legs/05-engine/15-system-design-stack/artifacts/ann-system-design-v3.md` (locked @ 2b0a30f) |
-| architecture: load-bearing decisions, layers & ownership (single-writer store, web-UI target, per-task models, two-log trace), repo layout, cross-cutting conventions | `journey/legs/05-engine/07-architecture/artifacts/architecture.md` (locked @ fcfa661) |
+| architecture: load-bearing decisions, layers & ownership (single-writer store, **web-UI target — DECIDED (2026-08-22): local-first client-server, packaged together; the client (browser) supports local AND remote servers, the server runs locally by default and owns the engine + journey; credentials stay server-side**), per-task models, two-log trace), repo layout, cross-cutting conventions | `journey/legs/05-engine/07-architecture/artifacts/architecture.md` (locked @ fcfa661) |
 | resource registry: rules/check/rules.json, validator rule definitions | `journey/legs/05-engine/14-resource-registry-spec/artifacts/resource-registry-spec.md` (locked @ 9c3705e) |
 
 ---
