@@ -1,0 +1,1 @@
+../../../../../docs/records/s2-record.md
