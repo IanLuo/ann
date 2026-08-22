@@ -11,9 +11,12 @@
  *   ann --status [filter]  → every node's derived status
  *   ann --check            → integrity + gates + artifact hashes
  *   ann --specs            → the locked contract stack
+ *   ann --providers        → the adapter registry (providers · models · defaults)
  *   ann --branch <id>      → a node + every descendant's events
  *   ann journey <id>       → one node's full event walk
- *   ann confirm <id>       → a node's gate card
+ *   ann confirm <id>       → a node's gate card (intent · ACs · gates · results)
+ *   ann detail <id>        → full derived detail (contract · gates · artifacts · blockers)
+ *   ann results <id> [n]   → results by kind; drill (doc/commit/ref/evidence/link)
  *   ann append <id> '{"at":..,"type":..}'   → single-writer append (LB-3)
  *   ann spawn <id> '<contract-json>'        → create a node (validated)
  *   ann gate <id> grill|confirm accept|reject [feedback]
