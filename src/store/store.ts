@@ -316,6 +316,20 @@ export class Store {
         if (!allIds.has(t)) problems.push(`${id}: transferred target '${t}' does not exist (F-AC16)`);
       }
     }
+    // F-AC18 (v9): every task SPAWNED under v9 that completes must have locked an
+    // artifact (document / commit-record doc / reason doc — format v9 §14).
+    // Grandfathered: tasks spawned before the v9 migration (createdAt < cutoff) are
+    // exempt — the one-time hot fix, never a live rule on history.
+    const V9_CUTOFF = '2026-08-21';
+    for (const [id, node] of this.nodes) {
+      if (!id.includes('/')) continue;
+      if (!node.events.some((e) => e.type === 'completed')) continue;
+      if (node.events.some((e) => e.type === 'artifact-locked')) continue;
+      const createdAt = (this.contract(id) as { createdAt?: string } | undefined)?.createdAt ?? '';
+      if (createdAt >= V9_CUTOFF) {
+        problems.push(`F-AC18: ${id} — completed without an artifact-locked record (v9 every-task-concludes: document / commit-record / reason doc required)`);
+      }
+    }
     const lockersByName = new Map<string, string[]>();
     for (const [id, node] of this.nodes) {
       for (const e of node.events) {

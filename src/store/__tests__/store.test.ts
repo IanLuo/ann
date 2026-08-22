@@ -346,3 +346,40 @@ describe('VOCAB — the registry is the source of truth', () => {
     expect(VOCAB.artifactTypes).toContain('spec');
   });
 });
+
+describe('Store — F-AC18 artifact gate (format v9 §14)', () => {
+  beforeEach(() => { makeStore(); });
+  afterEach(() => { rmSync(root, { recursive: true, force: true }); });
+
+  const writeV9Node = (id: string, createdAt: string, events: Array<Record<string, unknown>>) => {
+    mkdirSync(nodeDir(id), { recursive: true });
+    writeFileSync(join(nodeDir(id), 'node.json'), JSON.stringify({ id, contract: {}, createdAt }));
+    writeFileSync(join(nodeDir(id), 'events.jsonl'), events.map((e) => JSON.stringify(e)).join('\n') + '\n');
+  };
+
+  it('flags a v9-spawned task completed without an artifact-locked record', () => {
+    writeV9Node('06-engine-build/05-new-task', '2026-08-21', [
+      ev('created'), ev('confirmed', { gate: 'grill' }), ev('confirmed', { gate: 'confirm' }), ev('completed'),
+    ]);
+    expect(new Store(root).check().some((p) => p.includes('F-AC18'))).toBe(true);
+  });
+
+  it('grandfathers a pre-v9 task (createdAt before the cutoff)', () => {
+    writeV9Node('06-engine-build/04-old-task', '2026-08-19', [
+      ev('created'), ev('confirmed', { gate: 'grill' }), ev('confirmed', { gate: 'confirm' }), ev('completed'),
+    ]);
+    expect(new Store(root).check().some((p) => p.includes('F-AC18'))).toBe(false);
+  });
+
+  it('a v9 task WITH an artifact-locked record passes F-AC18', () => {
+    const id = '06-engine-build/06-new-task';
+    mkdirSync(join(nodeDir(id), 'artifacts'), { recursive: true });
+    writeFileSync(join(nodeDir(id), 'artifacts', 'record.md'), '# record\n');
+    writeV9Node(id, '2026-08-21', [
+      ev('created'), ev('confirmed', { gate: 'grill' }),
+      ev('artifact-locked', { artifact: { name: 'record', path: 'journey/legs/06-engine-build/06-new-task/artifacts/record.md', lockSha: 'abc1234' } }),
+      ev('confirmed', { gate: 'confirm' }), ev('completed'),
+    ]);
+    expect(new Store(root).check().some((p) => p.includes('F-AC18'))).toBe(false);
+  });
+});

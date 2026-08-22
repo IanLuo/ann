@@ -170,7 +170,7 @@ function cmdCheck() {
     const doneN = tasks.filter((t) => store.status(t).startsWith('done')).length;
     const ready = tasks.filter((t) => ['queued', 'active'].includes(store.status(t)));
     state += ` · ${active} in progress (${doneN}/${tasks.length} tasks done)`;
-    if (ready.length) state += ` — frontmost-ready: ${ready[0]} (${store.status(ready[0])}, grill pending)`;
+    if (ready.length) state += ` — frontmost-ready: ${ready[0]} (${store.status(ready[0])})`;
   }
   console.log(errors === 0 ? `OK — ${currents.size} current artifacts, no gate gaps.` : `${errors} problem(s).`);
   console.log(state);

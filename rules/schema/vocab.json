@@ -11,5 +11,5 @@
   ],
   "statuses": ["queued", "active", "blocked", "done", "failed", "superseded"],
   "gates": ["grill", "confirm"],
-  "artifactTypes": ["spec", "system-design", "architecture"]
+  "artifactTypes": ["spec", "system-design", "architecture", "record", "vision", "validation"]
 }
