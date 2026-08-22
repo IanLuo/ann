@@ -9,11 +9,11 @@ import { getVOCAB } from '../vocab.js';
 let root: string;
 function makeStore() {
   root = mkdtempSync(join(tmpdir(), 'ann-store-'));
-  mkdirSync(join(root, 'journey', 'legs'), { recursive: true });
+  mkdirSync(join(root, '.ann', 'journey', 'legs'), { recursive: true });
   return root;
 }
-function legDir(leg: string) { return join(root, 'journey', 'legs', leg); }
-function nodeDir(id: string) { return join(root, 'journey', 'legs', id); }
+function legDir(leg: string) { return join(root, '.ann', 'journey', 'legs', leg); }
+function nodeDir(id: string) { return join(root, '.ann', 'journey', 'legs', id); }
 function writeNode(id: string, contract: unknown, events: Array<Record<string, unknown>>) {
   mkdirSync(nodeDir(id), { recursive: true });
   writeFileSync(join(nodeDir(id), 'node.json'), JSON.stringify({ id, contract, createdAt: '2026-08-19' }));
@@ -98,7 +98,7 @@ describe('Store — resolution current(name) (format §5)', () => {
     writeNode('01-goal/01-a', {}, [ev('created'), ev('artifact-locked', { note: 'spec-v3.md specs-locked (logical name: spec)' })]);
     const s = new Store(root);
     expect(s.current('spec')?.producer).toBe('01-goal/01-a');
-    expect(s.current('spec')?.path).toBe('journey/legs/01-goal/01-a/artifacts/spec-v3.md');
+    expect(s.current('spec')?.path).toBe('.ann/journey/legs/01-goal/01-a/artifacts/spec-v3.md');
   });
 
   it('derives the logical name from the filename when the note has no marker (third fallback)', () => {
@@ -107,23 +107,23 @@ describe('Store — resolution current(name) (format §5)', () => {
     expect(s.current('functional-spec')?.producer).toBe('01-goal/01-a');
   });
 
-  it('normalizes legacy tree/rounds/ recorded paths to journey/legs/ (no symlinks needed)', () => {
-    const legacy = join(root, 'journey', 'legs', '01-goal');
+  it('normalizes legacy tree/rounds/ recorded paths to .ann/journey/legs/ (no symlinks needed)', () => {
+    const legacy = join(root, '.ann', 'journey', 'legs', '01-goal');
     mkdirSync(join(legacy, 'artifacts'), { recursive: true });
     writeFileSync(join(legacy, 'artifacts', 'design.md'), 'body');
     writeNode('01-goal', {}, [ev('created'), ev('artifact-locked', { artifact: { name: 'design', path: 'tree/rounds/01-goal/artifacts/design.md', lockSha: 'a' } })]);
     const s = new Store(root);
-    expect(s.current('design')?.path).toBe('journey/legs/01-goal/artifacts/design.md');
+    expect(s.current('design')?.path).toBe('.ann/journey/legs/01-goal/artifacts/design.md');
     expect(s.check()).toEqual([]); // no MISSING — the legacy path resolves
   });
 
   it('normalizes legacy /00/ recorded paths (the flatten, v8)', () => {
-    const dir = join(root, 'journey', 'legs', '01-goal', '01-a');
+    const dir = join(root, '.ann', 'journey', 'legs', '01-goal', '01-a');
     mkdirSync(join(dir, 'artifacts'), { recursive: true });
     writeFileSync(join(dir, 'artifacts', 'spec.md'), 'body');
     writeNode('01-goal/01-a', {}, [ev('created'), ev('submitted', { gate: 'grill' }), ev('confirmed', { gate: 'grill' }), ev('artifact-locked', { artifact: { name: 'spec', path: 'journey/legs/01-goal/00/01-a/artifacts/spec.md', lockSha: 'a' } })]);
     const s = new Store(root);
-    expect(s.current('spec')?.path).toBe('journey/legs/01-goal/01-a/artifacts/spec.md');
+    expect(s.current('spec')?.path).toBe('.ann/journey/legs/01-goal/01-a/artifacts/spec.md');
     expect(s.check()).toEqual([]); // no MISSING — the /00/ path resolves
   });
 });
@@ -276,7 +276,7 @@ describe('Store — spawn (creation record + created event through the single wr
   it('writes node.json + the created event via appendEvent (tasks)', () => {
     const s = new Store(root);
     s.spawn('01-goal/01-a', { contract: { intent: 'x', acceptanceCriteria: ['a'] } });
-    expect(existsSync(join(root, 'journey', 'legs', '01-goal', '01-a', 'node.json'))).toBe(true);
+    expect(existsSync(join(root, '.ann', 'journey', 'legs', '01-goal', '01-a', 'node.json'))).toBe(true);
     expect(s.events('01-goal/01-a').map((e) => e.type)).toEqual(['created']);
     expect(s.status('01-goal/01-a')).toBe('queued');
   });
@@ -284,7 +284,7 @@ describe('Store — spawn (creation record + created event through the single wr
   it('spawning a leg writes NO events at all (v8 §13 — leg roots have no log)', () => {
     const s = new Store(root);
     s.spawn('07-new-leg', { contract: { intent: 'x', acceptanceCriteria: ['a'] } });
-    expect(existsSync(join(root, 'journey', 'legs', '07-new-leg', 'events.jsonl'))).toBe(false);
+    expect(existsSync(join(root, '.ann', 'journey', 'legs', '07-new-leg', 'events.jsonl'))).toBe(false);
     expect(s.events('07-new-leg')).toEqual([]);
   });
 
@@ -423,8 +423,8 @@ describe('Store — current() resolves by logical name (multi-artifact producers
       ev('artifact-locked', { artifact: { name: 'b-spec', path: 'journey/legs/06-engine-build/13-amendment/artifacts/b.md', lockSha: '2222222' } }),
     ]);
     const s = new Store(root);
-    expect(s.current('b-spec')?.path).toBe('journey/legs/06-engine-build/13-amendment/artifacts/b.md');
-    expect(s.current('a-spec')?.path).toBe('journey/legs/06-engine-build/13-amendment/artifacts/a.md');
+    expect(s.current('b-spec')?.path).toBe('.ann/journey/legs/06-engine-build/13-amendment/artifacts/b.md');
+    expect(s.current('a-spec')?.path).toBe('.ann/journey/legs/06-engine-build/13-amendment/artifacts/a.md');
   });
 });
 
@@ -490,7 +490,7 @@ describe('Store — detail() (the full task/leg card)', () => {
     expect(d.gates.grill).toMatchObject({ state: 'confirmed' });
     expect(d.gates.confirm.state).toBe('submitted'); // awaiting decision
     expect(d.artifacts).toEqual([
-      expect.objectContaining({ name: 'thing-spec', sha: 'abc1234', role: 'current', path: 'journey/legs/06-engine-build/05-s2/artifacts/spec.md' }),
+      expect.objectContaining({ name: 'thing-spec', sha: 'abc1234', role: 'current', path: '.ann/journey/legs/06-engine-build/05-s2/artifacts/spec.md' }),
     ]);
     expect(d.blockers).toEqual(['submitted (gate=confirm) awaiting decision']);
     expect(d.events.length).toBe(5);

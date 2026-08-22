@@ -80,10 +80,11 @@ function resolveProjectRoot(argv: string[]): string {
     console.error(`ann: project '${explicit}' not found — ann project (list) / project! add <name> <path>`);
     process.exit(1);
   }
-  // cwd discovery: walk up looking for journey/ (git-like)
+  // cwd discovery: walk up looking for .ann/ (v12 marker) — legacy journey/ accepted
   let dir = process.cwd();
   for (;;) {
-    if (existsSync(join(dir, 'journey'))) return dir;
+    if (existsSync(join(dir, '.ann'))) return dir;
+    if (existsSync(join(dir, 'journey'))) return dir; // pre-v12 projects
     const parent = dirname(dir);
     if (parent === dir) break;
     dir = parent;
@@ -111,8 +112,9 @@ const store = new Proxy({} as Store, {
 });
 
 const blobSha = (c: string): string => createHash('sha1').update('blob ' + Buffer.byteLength(c) + '\n' + c).digest('hex');
-const nodeFile = (id: string) => join(ROOT, 'journey', 'legs', id, 'node.json');
-const eventFile = (id: string) => join(ROOT, 'journey', 'legs', id, 'events.jsonl');
+const legsRoot = join(ROOT, '.ann', 'journey', 'legs'); // v12 layout: all ann files under .ann/
+const nodeFile = (id: string) => join(legsRoot, id, 'node.json');
+const eventFile = (id: string) => join(legsRoot, id, 'events.jsonl');
 const hasSuperseded = (id: string) => store.events(id).some((e) => e.type === 'superseded');
 const display = (id: string) => store.status(id) + (hasSuperseded(id) ? ' · artifact superseded' : '');
 const nameOf = (e: { artifact?: { name?: string }; note?: string; path?: string }) => {
@@ -321,8 +323,8 @@ function cmdProjectSet(op: string, name: string | undefined, path: string | unde
   if (op === 'add') {
     if (!name || !path) { console.error('usage: ann project! add <name> <path>'); process.exit(2); }
     const abs = resolve(path);
-    if (!existsSync(join(abs, 'journey'))) {
-      console.error(`project! add: ${abs} has no journey/ — not an ann project (or init it first)`);
+    if (!existsSync(join(abs, '.ann')) && !existsSync(join(abs, 'journey'))) {
+      console.error(`project! add: ${abs} has no .ann/ — not an ann project (or init it first)`);
       process.exit(1);
     }
     setProject(name, abs);
@@ -585,7 +587,7 @@ function cmdSpawn(id: string, raw: string) {
     process.exit(1);
   }
   store.spawn(id, contract, WHO);
-  const dir = join(ROOT, 'journey', 'legs', id);
+  const dir = join(legsRoot, id);
   const intent = ((contract as { contract?: { intent?: string } }).contract?.intent) || '';
   const terms = (intent.match(/[A-Za-z][A-Za-z0-9-]{3,}/g) || []).slice(0, 8).join(', ');
   writeFileSync(join(dir, 'description.md'), `# ${last}\n\n- id: \`${id}\` · status: queued · type: ${segs.length > 1 ? 'task' : 'leg'}\n- summary: ${intent.split('\n')[0]}\n- search terms: ${terms}\n`);
@@ -630,7 +632,7 @@ function cmdLock(id: string, name: string, type: string) {
     console.error(`lock rejected: '${name}' is already current (${store.current(name)!.path}) — supersede it first`);
     process.exit(1);
   }
-  const artDir = join(ROOT, 'journey', 'legs', id, 'artifacts');
+  const artDir = join(legsRoot, id, 'artifacts');
   const candidates = existsSync(artDir) ? readdirSync(artDir).filter((f) => f.endsWith('.md')) : [];
   const file = existsSync(join(artDir, name + '.md')) ? join(artDir, name + '.md') : candidates.length === 1 ? join(artDir, candidates[0]) : null;
   if (!file) { console.error(`lock: no artifacts/${name}.md; candidates: ${candidates.join(', ') || '(none)'}`); process.exit(1); }
@@ -661,7 +663,7 @@ function cmdCard(id: string) {
   const artifacts = lockShaOf(id).map((l) => `- ${l.name}: ${l.path}`).join('\n') || '(none yet)';
   const kids = store.tasksOf(id).length ? store.tasksOf(id).map((k) => `- ${k}`).join('\n') : '(none)';
   const body = `# ${last}\n\n- id: \`${id}\` · status: ${display(id)} · type: ${id.split('/').length === 1 ? 'leg' : 'task'}\n- summary: ${intent.split('\n')[0]}\n- search terms: ${terms}\n\n## artifacts\n${artifacts}\n\n## children\n${kids}\n`;
-  writeFileSync(join(ROOT, 'journey', 'legs', id, 'description.md'), body);
+  writeFileSync(join(legsRoot, id, 'description.md'), body);
   console.log(`card regenerated → ${id}`);
 }
 

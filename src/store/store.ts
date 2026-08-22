@@ -65,7 +65,8 @@ export interface ResultItem {
 export const legacyPath = (p: string): string =>
   p
     .replace(/^tree\/rounds\//, 'journey/legs/')
-    .replace(/^(journey\/legs\/[^/]+)\/00\//, '$1/');
+    .replace(/^(journey\/legs\/[^/]+)\/00\//, '$1/')
+    .replace(/^journey\//, '.ann/journey/'); // v12: the canonical on-disk root is .ann/journey/
 
 /** Logical name from a filename: strip .md and any -vN version suffix
  *  (functional-spec-v3.md → functional-spec). The third fallback of the
@@ -85,7 +86,7 @@ export class Store {
 
   constructor(root: string) {
     this.root = root;
-    this.legs = join(root, 'journey', 'legs');
+    this.legs = join(root, '.ann', 'journey', 'legs'); // v12 layout: all ann files under .ann/
     this.load();
   }
 

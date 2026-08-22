@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 
 /**
@@ -14,14 +14,10 @@ export interface Vocab {
 }
 
 export function loadVocab(root: string): Vocab {
-  try {
-    const raw = readFileSync(join(root, 'rules', 'schema', 'vocab.json'), 'utf8');
-    return JSON.parse(raw) as Vocab;
-  } catch {
-    throw new Error(
-      'vocab registry missing/invalid: rules/schema/vocab.json — the single source of truth for schema vocabulary (resource-registry spec)',
-    );
-  }
+  const rel = join(root, '.ann', 'rules', 'schema', 'vocab.json');
+  const legacy = join(root, 'rules', 'schema', 'vocab.json');
+  const file = readFileSync(existsSync(rel) ? rel : legacy, 'utf8'); // v12: .ann/rules (legacy rules/ accepted)
+  return JSON.parse(file) as Vocab;
 }
 
 /** Module-level vocab, loaded from the repo root (process.cwd()). */

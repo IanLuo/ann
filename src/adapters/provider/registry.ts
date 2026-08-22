@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { loadConfig } from './config.js';
 import type { UserConfig } from './config.js';
@@ -64,8 +64,10 @@ let cached: ProviderRegistry | null = null;
 export function loadProviderRegistry(root: string = process.cwd()): ProviderRegistry {
   if (cached) return cached;
   let raw: string;
+  const rel = join(root, '.ann', 'rules', 'adapter', 'provider.json');
+  const legacy = join(root, 'rules', 'adapter', 'provider.json');
   try {
-    raw = readFileSync(join(root, 'rules', 'adapter', 'provider.json'), 'utf8');
+    raw = readFileSync(existsSync(rel) ? rel : legacy, 'utf8'); // v12: .ann/rules (legacy rules/ accepted)
   } catch {
     throw new Error(
       'provider registry missing: rules/adapter/provider.json — the single source of truth for LLM providers (resource-registry spec, category adapter)',

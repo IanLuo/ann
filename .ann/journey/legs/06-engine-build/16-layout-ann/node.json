@@ -1,0 +1,35 @@
+{
+  "id": "06-engine-build/16-layout-ann",
+  "contract": {
+    "intent": "Amend the project layout: all ann-owned files in a project live under <project>/.ann/ (journey/ + docs/ + rules/) — subtle, machine-owned, no hand-edits; root-level journey/docs/rules become compat symlinks so recorded paths + relative artifact links keep resolving; recognition marker = .ann/ (legacy journey/ accepted). journey-format-spec v11 -> v12 + architecture v1 -> v2 (repo tree).",
+    "acceptanceCriteria": [
+      "journey-format-spec v12 (complete superseding): 1 layout under .ann/; 4 ownership paths; 15 migration note (v12 sanctioned migration); recognition marker .ann/",
+      "architecture v2 (complete superseding): rung 3 repo tree under .ann/ + decision note",
+      "code: store legs = .ann/journey/legs; legacyPath normalizes ^journey/ -> .ann/journey/; vocab + provider registry load from .ann/rules/; cli recognition .ann/ (legacy journey/ accepted)",
+      "migration: git mv journey/docs/rules -> .ann/; root symlinks journey/docs/rules -> .ann/*; all recorded artifact paths + 27 relative artifact links still resolve (--check clean, zero event rewrites)",
+      "tests updated (store fixtures .ann/journey/legs, provider .ann/rules); suite green; typecheck clean",
+      "v12 + architecture v2 locked; v11 + architecture v1 superseded; AGENTS.md re-pointed"
+    ],
+    "targetAreas": [
+      "docs/specs/journey-format-spec-v11.md",
+      "docs/architecture/architecture.md",
+      "src/store",
+      "src/adapters/provider",
+      "src/cli.ts",
+      "src/**/__tests__",
+      "AGENTS.md"
+    ],
+    "requiredInputs": [
+      "journey-format-spec",
+      "design",
+      "architecture"
+    ],
+    "expectedOutputs": [
+      "journey-format-spec-v12.md",
+      "architecture-v2.md",
+      ".ann/ layout + symlinks",
+      "code + tests"
+    ]
+  },
+  "createdAt": "2026-08-22"
+}

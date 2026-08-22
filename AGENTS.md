@@ -16,7 +16,7 @@ No engine code exists yet — nothing to verify. Commands will be added once the
 
 ## Hot invariants
 
-- **The product is the journey, not a plan artifact.** A living chain of gated legs (formerly rounds): sequential gated legs, parallel task groups, human gates at each step end, journey-as-memory. Markdown is presentation; the source of truth is the leg/node structure per design v3 (`journey/legs/01-goal/artifacts/design.md` §2/§4).
+- **The product is the journey, not a plan artifact.** A living chain of gated legs (formerly rounds): sequential gated legs, parallel task groups, human gates at each step end, journey-as-memory. Markdown is presentation; the source of truth is the leg/node structure per design v3 (`.ann/journey/legs/01-goal/artifacts/design.md` §2/§4).
 - **Prove the flow before framework cleverness.** The MVP = the L6 engine build (ann-system-design v3 components, S1–S9); defer plugins, multi-UI, bindings beyond GitHub until the core flow works.
 - **Context must carry provenance.** Facts from inference must be labeled as inference. Source provenance must be tracked (design v3 §6). Untrusted context must not override system policy (design v3 §4).
 - **Repair loops require a route reason, max iteration count, checkpoint, and fallback.** No unbounded loops (design v3 §4 — bounded loops; flow-control-spec).
@@ -26,7 +26,7 @@ No engine code exists yet — nothing to verify. Commands will be added once the
 
 ## Architecture elevator
 
-No code layer yet — the architecture exists as a locked contract stack. The core concept is the **table of legs** (model spec §2, formerly "table of rounds"): sequential, gated legs (epics) — design → requirements → format → technique → engine; parallel task groups inside a leg; every step self-aware with a materialized context packet; human gates at each step end (grilling + confirm-result); resolution ladder (derive → probe → infer → ask → block); journey-as-memory. Invariants and the contract stack are in `journey/legs/01-goal/artifacts/design.md` (model, locked) and the contracts it points to.
+No code layer yet — the architecture exists as a locked contract stack. The core concept is the **table of legs** (model spec §2, formerly "table of rounds"): sequential, gated legs (epics) — design → requirements → format → technique → engine; parallel task groups inside a leg; every step self-aware with a materialized context packet; human gates at each step end (grilling + confirm-result); resolution ladder (derive → probe → infer → ask → block); journey-as-memory. Invariants and the contract stack are in `.ann/journey/legs/01-goal/artifacts/design.md` (model, locked) and the contracts it points to.
 
 ```
 design (model + invariants) → requirements-spec (requirements) → journey-format-spec (data) → flow-control-spec (workflow) → ann-system-design (technique)
@@ -36,15 +36,15 @@ design (model + invariants) → requirements-spec (requirements) → journey-for
 
 | When you need… | Read… |
 |---|---|
-| model semantics + invariants (legs, gates, resolution ladder, provenance, fail-closed, complete artifacts, open decisions) | `journey/legs/01-goal/artifacts/design.md` (locked @ 257cb79) |
-| requirements (fresh spec v3): self-similarity invariant, configurable step chain, AC-1–7, K1–K5 + failure signal, NFRs, assumptions, data, recovery, security, verification | `journey/legs/05-engine/05-requirements-amendment/artifacts/requirements-spec-v3.md` (locked @ 80eeaae) |
-| the journey format contract (engine data contract): table of legs (epics, sequential gates), parallel task groups, immutable `node.json`, append-only `events.jsonl` (tasks only), derived leg status, searchable `description.md`, per-node artifacts, depth policy, checkpoint/RPO, read discipline; **v11: task contract checklist (F-AC19 — a task is self-sufficient: intent · ACs · grounded inputs, enforced at spawn + check)** | `journey/legs/06-engine-build/15-format-amendment-v11/artifacts/journey-format-spec.md` (locked @ 4b4c8c3) |
-| flow control: lifecycle, human gates, rejection/rework, resolution ladder, per-work-type flows, closure task; **v6: implementation artifact = structured commit evidence** | `journey/legs/06-engine-build/14-format-amendment-v10/artifacts/flow-control-spec.md` (locked @ 5898f89) |
-| requirements change: the amendment path (change → amendment node → complete superseding artifact → superseded event → referrer re-pointing); locked artifacts never edited | `journey/legs/05-engine/03-change-protocol-amendment/artifacts/requirements-change-protocol-v2.md` (locked @ be67673) |
-| functional spec (F1–F17, F-ACs): what the engine must do | `journey/legs/05-engine/06-functional-spec/artifacts/functional-spec.md` (locked @ 9e60cd8) |
-| technique: components & ownership (S1–S9), frozen interfaces, failure modes (fail-closed), scale | `journey/legs/05-engine/15-system-design-stack/artifacts/ann-system-design-v3.md` (locked @ 2b0a30f) |
-| architecture: load-bearing decisions, layers & ownership (single-writer store, **web-UI target — DECIDED (2026-08-22): local-first client-server, packaged together; the client (browser) supports local AND remote servers, the server runs locally by default and owns the engine + journey; credentials stay server-side**), per-task models, two-log trace), repo layout, cross-cutting conventions | `journey/legs/05-engine/07-architecture/artifacts/architecture.md` (locked @ fcfa661) |
-| resource registry: rules/check/rules.json, validator rule definitions | `journey/legs/05-engine/14-resource-registry-spec/artifacts/resource-registry-spec.md` (locked @ 9c3705e) |
+| model semantics + invariants (legs, gates, resolution ladder, provenance, fail-closed, complete artifacts, open decisions) | `.ann/journey/legs/01-goal/artifacts/design.md` (locked @ 257cb79) |
+| requirements (fresh spec v3): self-similarity invariant, configurable step chain, AC-1–7, K1–K5 + failure signal, NFRs, assumptions, data, recovery, security, verification | `.ann/journey/legs/05-engine/05-requirements-amendment/artifacts/requirements-spec-v3.md` (locked @ 80eeaae) |
+| the journey format contract (engine data contract): table of legs (epics, sequential gates), parallel task groups, immutable `node.json`, append-only `events.jsonl` (tasks only), derived leg status, searchable `description.md`, per-node artifacts, depth policy, checkpoint/RPO, read discipline; **v11: task contract checklist (F-AC19 — a task is self-sufficient: intent · ACs · grounded inputs, enforced at spawn + check)** | `.ann/journey/legs/06-engine-build/15-format-amendment-v11/artifacts/journey-format-spec.md` (locked @ 4b4c8c3) |
+| flow control: lifecycle, human gates, rejection/rework, resolution ladder, per-work-type flows, closure task; **v6: implementation artifact = structured commit evidence** | `.ann/journey/legs/06-engine-build/14-format-amendment-v10/artifacts/flow-control-spec.md` (locked @ 5898f89) |
+| requirements change: the amendment path (change → amendment node → complete superseding artifact → superseded event → referrer re-pointing); locked artifacts never edited | `.ann/journey/legs/05-engine/03-change-protocol-amendment/artifacts/requirements-change-protocol-v2.md` (locked @ be67673) |
+| functional spec (F1–F17, F-ACs): what the engine must do | `.ann/journey/legs/05-engine/06-functional-spec/artifacts/functional-spec.md` (locked @ 9e60cd8) |
+| technique: components & ownership (S1–S9), frozen interfaces, failure modes (fail-closed), scale | `.ann/journey/legs/05-engine/15-system-design-stack/artifacts/ann-system-design-v3.md` (locked @ 2b0a30f) |
+| architecture: load-bearing decisions, layers & ownership (single-writer store, **web-UI target — DECIDED (2026-08-22): local-first client-server, packaged together; the client (browser) supports local AND remote servers, the server runs locally by default and owns the engine + journey; credentials stay server-side**), per-task models, two-log trace), repo layout, cross-cutting conventions | `.ann/journey/legs/05-engine/07-architecture/artifacts/architecture.md` (locked @ fcfa661) |
+| resource registry: rules/check/rules.json, validator rule definitions | `.ann/journey/legs/05-engine/14-resource-registry-spec/artifacts/resource-registry-spec.md` (locked @ 9c3705e) |
 
 ---
 
