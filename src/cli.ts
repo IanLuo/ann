@@ -267,8 +267,8 @@ function cmdSpawn(id: string, raw: string) {
   if (segs.length > 1) {
     const parent = segs.slice(0, -1).join('/');
     if (!existsSync(nodeFile(parent))) { console.error(`spawn rejected: parent ${parent} does not exist`); process.exit(1); }
-    if (parent.split('/').length >= 2 && !store.events(parent).some((e) => e.type === 'artifact-locked')) {
-      console.error(`spawn rejected: artifact gate — parent task ${parent} has no artifact-locked event`);
+    if (parent.split('/').length >= 2 && !store.parentConcluded(parent)) {
+      console.error(`spawn rejected: artifact gate — parent task ${parent} has no artifact-locked or commit-evidence (format v10 §4)`);
       process.exit(1);
     }
     const sibs = store.tasksOf(parent).map((t) => t.split('/').pop()!);

@@ -382,6 +382,30 @@ describe('Store — F-AC18 artifact gate (format v9 §14)', () => {
     ]);
     expect(new Store(root).check().some((p) => p.includes('F-AC18'))).toBe(false);
   });
+
+  it('a v9 task with STRUCTURED commit evidence (no artifact-locked) passes F-AC18 (v10)', () => {
+    writeV9Node('06-engine-build/07-code-task', '2026-08-21', [
+      ev('created'), ev('confirmed', { gate: 'grill' }),
+      ev('evidence', { commits: [{ sha: '8e94c58', note: 'step 1' }], refs: ['src/adapters/provider/'] }),
+      ev('confirmed', { gate: 'confirm' }), ev('completed'),
+    ]);
+    expect(new Store(root).check().some((p) => p.includes('F-AC18'))).toBe(false);
+  });
+
+  it('parentConcluded: true for a locked artifact OR commit evidence, false for neither (v10 gate)', () => {
+    const a = '06-engine-build/08a';
+    const b = '06-engine-build/08b';
+    const c = '06-engine-build/08c';
+    mkdirSync(join(nodeDir(a), 'artifacts'), { recursive: true });
+    writeFileSync(join(nodeDir(a), 'artifacts', 'x.md'), '# x\n');
+    writeNode(a, {}, [ev('artifact-locked', { artifact: { name: 'x', path: 'journey/legs/06-engine-build/08a/artifacts/x.md', lockSha: 'abc' } })]);
+    writeNode(b, {}, [ev('evidence', { commits: [{ sha: 'abc1234' }] })]);
+    writeNode(c, {}, [ev('evidence', { note: 'no commits here' })]);
+    const s = new Store(root);
+    expect(s.parentConcluded(a)).toBe(true); // artifact-locked
+    expect(s.parentConcluded(b)).toBe(true); // commit evidence
+    expect(s.parentConcluded(c)).toBe(false); // prose only — never counts (NFR-COM-1)
+  });
 });
 
 describe('Store — current() resolves by logical name (multi-artifact producers, v9)', () => {

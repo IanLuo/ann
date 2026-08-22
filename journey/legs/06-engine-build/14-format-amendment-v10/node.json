@@ -1,0 +1,33 @@
+{
+  "id": "06-engine-build/14-format-amendment-v10",
+  "contract": {
+    "intent": "Amend journey-format-spec v9 -> v10: commit clues become STRUCTURED events (evidence gains commits[] + refs[] — machine-truth, no prose parsing); the implementation record doc is deprecated (task 05 s2-record grandfathered, task-local); docs/ holds only the shared contract stack (specs / system-designs / architecture — no records/ catch-all); task-local outputs (goal, conformance-report) return to their tasks; F-AC18 accepts commit evidence. Align flow-control v5 -> v6.",
+    "acceptanceCriteria": [
+      "journey-format-spec v10 (complete superseding): evidence event gains structured commits[{sha,note?}] + refs[]; code-task artifact = commit evidence in events; record doc deprecated (grandfathered); docs/ = specs/system-designs/architecture only; F-AC18 = artifact-locked OR commit-evidence",
+      "flow-control v6 (complete superseding): 6/7 aligned to commit-evidence (implementation artifact = structured commit evidence)",
+      "Migration: goal.md + conformance-report.md return to their tasks (real files, events unchanged, blob shas valid); s2-record content moves into task 05 artifacts/; docs/records/ removed; --check clean",
+      "Store: F-AC18 accepts commit-evidence (evidence with commits[]); artifact gate accepts commit-evidence; unit tests",
+      "v10 + v6 locked at sha; v9 + v5 superseded with forward pointers; AGENTS.md re-pointed",
+      "full suite green; typecheck clean"
+    ],
+    "targetAreas": [
+      "docs/",
+      "src/store",
+      "src/cli.ts",
+      "src/store/__tests__",
+      "AGENTS.md"
+    ],
+    "requiredInputs": [
+      "journey-format-spec",
+      "flow-control-spec",
+      "design"
+    ],
+    "expectedOutputs": [
+      "journey-format-spec-v10.md",
+      "flow-control-spec-v6.md",
+      "migration (3 files home)",
+      "store gate + tests"
+    ]
+  },
+  "createdAt": "2026-08-22"
+}
