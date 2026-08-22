@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync, appendFileSync, existsSync, statSync, lstatSync, mkdirSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join, basename } from 'node:path';
-import { VOCAB } from './vocab.js';
+import { getVOCAB } from './vocab.js';
 
 export interface JourneyEvent {
   at: string;
@@ -450,7 +450,7 @@ export class Store {
     if (!id.includes('/')) {
       throw new Error(`append rejected: leg roots carry no events (v8 §3) — record process facts on tasks`);
     }
-    if (!event.at || !event.type || !VOCAB.eventTypes.includes(event.type)) {
+    if (!event.at || !event.type || !getVOCAB().eventTypes.includes(event.type)) {
       throw new Error(`append rejected: bad schema (at + known type required, got ${event.type})`);
     }
     const node = this.nodes.get(id);

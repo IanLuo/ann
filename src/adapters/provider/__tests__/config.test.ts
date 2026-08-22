@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, readFileSync, existsSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { loadConfig, setConfig, maskedConfig, configPath, resetConfigCache } from '../config.js';
+import { loadConfig, setConfig, maskedConfig, configPath, resetConfigCache, listProjects, findProject, getCurrentProject, setProject, useProject, removeProject } from '../config.js';
 import { resolveSetting } from '../registry.js';
 import { resolveSecret } from '../credentials.js';
 import type { KeychainExec } from '../credentials.js';
@@ -87,5 +87,34 @@ describe('secret chain: env > config > keychain', () => {
     setConfig('apiKey', 'sk-from-config');
     process.env.ANN_LLM_API_KEY = 'sk-from-env';
     expect(resolveSecret('env:ANN_LLM_API_KEY || keychain:ann/llm-api-key', noKeychain, 'darwin')).toEqual({ value: 'sk-from-env', source: 'env' });
+  });
+});
+
+describe('project registry (each project has its own journey)', () => {
+  it('add / find / use / remove a project', () => {
+    withConfig('p.json');
+    expect(listProjects()).toEqual([]);
+    setProject('alpha', '/projects/alpha');
+    setProject('beta', '/projects/beta');
+    expect(listProjects().map((p) => p.name)).toEqual(['alpha', 'beta']);
+    expect(findProject('alpha')).toEqual({ name: 'alpha', path: '/projects/alpha' });
+    expect(getCurrentProject()).toBeUndefined();
+    useProject('beta');
+    expect(getCurrentProject()).toEqual({ name: 'beta', path: '/projects/beta' });
+    removeProject('beta');
+    expect(findProject('beta')).toBeUndefined();
+    expect(getCurrentProject()).toBeUndefined(); // removing the current clears it
+  });
+
+  it('useProject fails closed on an unknown project', () => {
+    withConfig('q.json');
+    expect(() => useProject('nope')).toThrow(/not found/);
+  });
+
+  it('setProject replaces an existing entry (name is the key)', () => {
+    withConfig('r.json');
+    setProject('alpha', '/first');
+    setProject('alpha', '/second');
+    expect(listProjects()).toEqual([{ name: 'alpha', path: '/second' }]);
   });
 });

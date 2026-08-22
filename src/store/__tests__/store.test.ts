@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from 'node:
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store } from '../store.js';
-import { VOCAB } from '../vocab.js';
+import { getVOCAB } from '../vocab.js';
 
 // Fixture helper: a disposable journey store in a temp dir.
 let root: string;
@@ -341,9 +341,9 @@ describe('Store — leg gate (v8 §12/§13)', () => {
 
 describe('VOCAB — the registry is the source of truth', () => {
   it('carries the schema vocabulary', () => {
-    expect(VOCAB.eventTypes).toContain('artifact-locked');
-    expect(VOCAB.gates).toEqual(['grill', 'confirm']);
-    expect(VOCAB.artifactTypes).toContain('spec');
+    expect(getVOCAB().eventTypes).toContain('artifact-locked');
+    expect(getVOCAB().gates).toEqual(['grill', 'confirm']);
+    expect(getVOCAB().artifactTypes).toContain('spec');
   });
 });
 

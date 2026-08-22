@@ -25,4 +25,8 @@ export function loadVocab(root: string): Vocab {
 }
 
 /** Module-level vocab, loaded from the repo root (process.cwd()). */
-export const VOCAB = loadVocab(process.cwd());
+/** Lazy-load the vocab registry at first use — the CLI resolves the PROJECT ROOT and
+ *  chdirs BEFORE any store/vocab access, so running `ann project …` from outside a
+ *  project must not crash on load (process.cwd() is only valid once chdir'd). */
+let cached: Vocab | undefined;
+export const getVOCAB = (): Vocab => (cached ??= loadVocab(process.cwd()));

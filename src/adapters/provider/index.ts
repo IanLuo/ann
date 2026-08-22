@@ -9,8 +9,8 @@ export { writeOpLog } from './oplog.js';
 export type { OpLogEntry } from './oplog.js';
 export { resolveSecret, addKeychainSecret, deleteKeychainSecret } from './credentials.js';
 export type { SecretResolution } from './credentials.js';
-export { loadConfig, setConfig, maskedConfig, configPath, configExists, resetConfigCache } from './config.js';
-export type { UserConfig } from './config.js';
+export { loadConfig, setConfig, maskedConfig, configPath, configExists, resetConfigCache, listProjects, findProject, getCurrentProject, setProject, useProject, removeProject } from './config.js';
+export type { UserConfig, ProjectEntry } from './config.js';
 
 /** Resolve the adapter for a provider id (default = the registry default, F17).
  *  Unknown provider → fail-closed with the unknown id NAMED — never a silent
