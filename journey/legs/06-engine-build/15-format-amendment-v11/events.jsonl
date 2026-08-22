@@ -1,0 +1,4 @@
+{"at":"2026-08-22","type":"created","note":"spawned by bookkeeper (agent)"}
+{"at":"2026-08-22","type":"submitted","gate":"grill","note":"bookkeeper submission (ian)"}
+{"at":"2026-08-22","type":"confirmed","gate":"grill","note":"accepted (ian)"}
+{"at":"2026-08-22","type":"artifact-locked","artifact":{"name":"journey-format-spec","path":"journey/legs/06-engine-build/15-format-amendment-v11/artifacts/journey-format-spec.md","lockSha":"4b4c8c3"},"note":"journey-format-spec.md specs-locked via bookkeeper (agent)"}

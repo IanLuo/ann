@@ -525,3 +525,59 @@ describe('Store — detail() (the full task/leg card)', () => {
     ]);
   });
 });
+
+describe('Store — F-AC19 contract checklist (format v11 §2/§7)', () => {
+  beforeEach(() => { makeStore(); });
+  afterEach(() => { rmSync(root, { recursive: true, force: true }); });
+
+  const currentArtifact = () => {
+    // a current artifact 'x-spec' so requiredInputs can resolve
+    const id = '01-goal/00-spec';
+    mkdirSync(join(nodeDir(id), 'artifacts'), { recursive: true });
+    writeFileSync(join(nodeDir(id), 'artifacts', 'x.md'), '# x\n');
+    writeNode(id, {}, [ev('artifact-locked', { artifact: { name: 'x-spec', path: 'journey/legs/01-goal/00-spec/artifacts/x.md', lockSha: 'aaa' } })]);
+  };
+
+  it('contractProblems: a self-sufficient contract passes', () => {
+    currentArtifact();
+    const s = new Store(root);
+    expect(s.contractProblems({ intent: 'Do the thing', acceptanceCriteria: ['AC1'], requiredInputs: ['x-spec'] })).toEqual([]);
+  });
+
+  it('contractProblems: flags missing intent / empty ACs / unresolvable input by name', () => {
+    currentArtifact();
+    const s = new Store(root);
+    expect(s.contractProblems({ acceptanceCriteria: ['AC1'] })).toEqual([expect.stringContaining('intent')]);
+    expect(s.contractProblems({ intent: 'x', acceptanceCriteria: [] })).toEqual([expect.stringContaining('acceptanceCriteria')]);
+    expect(s.contractProblems({ intent: 'x', acceptanceCriteria: ['AC1'], requiredInputs: ['no-such-artifact'] })).toEqual([
+      expect.stringContaining("requiredInput 'no-such-artifact' does not resolve"),
+    ]);
+  });
+
+  it('check() flags a v9+ task with an unresolvable input (F-AC19)', () => {
+    currentArtifact();
+    mkdirSync(join(nodeDir('06-engine-build/16-bad'), 'artifacts'), { recursive: true });
+    writeFileSync(join(nodeDir('06-engine-build/16-bad'), 'node.json'), JSON.stringify({ id: '06-engine-build/16-bad', contract: { intent: 'x', acceptanceCriteria: ['AC1'], requiredInputs: ['no-such-artifact'] }, createdAt: '2026-08-22' }));
+    writeFileSync(join(nodeDir('06-engine-build/16-bad'), 'events.jsonl'), '');
+    const problems = new Store(root).check();
+    expect(problems.some((p) => p.includes('F-AC19') && p.includes('16-bad'))).toBe(true);
+  });
+
+  it('check() grandfathers a pre-v9 task with an unresolvable input', () => {
+    currentArtifact();
+    mkdirSync(join(nodeDir('06-engine-build/17-old'), 'artifacts'), { recursive: true });
+    writeFileSync(join(nodeDir('06-engine-build/17-old'), 'node.json'), JSON.stringify({ id: '06-engine-build/17-old', contract: { intent: 'x', acceptanceCriteria: ['AC1'], requiredInputs: ['legacy-path.md'] }, createdAt: '2026-08-19' }));
+    writeFileSync(join(nodeDir('06-engine-build/17-old'), 'events.jsonl'), '');
+    const problems = new Store(root).check();
+    expect(problems.some((p) => p.includes('F-AC19'))).toBe(false);
+  });
+
+  it('check() passes a v9+ task with a self-sufficient contract', () => {
+    currentArtifact();
+    mkdirSync(join(nodeDir('06-engine-build/18-good'), 'artifacts'), { recursive: true });
+    writeFileSync(join(nodeDir('06-engine-build/18-good'), 'node.json'), JSON.stringify({ id: '06-engine-build/18-good', contract: { intent: 'x', acceptanceCriteria: ['AC1'], requiredInputs: ['x-spec'] }, createdAt: '2026-08-22' }));
+    writeFileSync(join(nodeDir('06-engine-build/18-good'), 'events.jsonl'), '');
+    const problems = new Store(root).check();
+    expect(problems.some((p) => p.includes('F-AC19'))).toBe(false);
+  });
+});

@@ -328,6 +328,16 @@ function cmdSpawn(id: string, raw: string) {
   }
   let contract: unknown;
   try { contract = JSON.parse(raw); } catch (e) { console.error(`spawn rejected: bad contract JSON (${(e as Error).message})`); process.exit(1); }
+  // F-AC19 (v11) — the task contract checklist: a task must be self-sufficient when
+  // a fresh agent reads only its contract + resolvable inputs. Defining a task
+  // means following the checklist; a non-compliant contract cannot be spawned.
+  const c = ((contract as { contract?: unknown })?.contract ?? contract) as Record<string, unknown>;
+  const checklist = store.contractProblems(c);
+  if (checklist.length) {
+    console.error(`spawn rejected (F-AC19 contract checklist, format v11 §2):`);
+    for (const p of checklist) console.error(`  - ${p}`);
+    process.exit(1);
+  }
   store.spawn(id, contract, WHO);
   const dir = join(ROOT, 'journey', 'legs', id);
   const intent = ((contract as { contract?: { intent?: string } }).contract?.intent) || '';

@@ -212,6 +212,37 @@ export class Store {
     };
   }
 
+  /** Unwrap a node contract (defensive: legacy double-nested {contract:{contract:{…}}}). */
+  private contractOf(id: string): Record<string, unknown> {
+    const raw = this.contract(id) as { contract?: unknown } | undefined;
+    const rawContract = (raw?.contract ?? {}) as Record<string, unknown>;
+    return ((rawContract as { contract?: Record<string, unknown> }).contract ?? rawContract) as Record<string, unknown>;
+  }
+
+  /** F-AC19 (format v11 §2/§7) — the task contract checklist. PURE: usable at
+   *  spawn (hard reject) and in check(). A contract fails when it is not
+   *  self-sufficient: no intent, no acceptance criteria, or an input that does
+   *  not resolve via current(). Returns named problems (empty = passes). */
+  contractProblems(contract: unknown): string[] {
+    const problems: string[] = [];
+    const c = contract as Record<string, unknown> | null | undefined;
+    if (!c || typeof c !== 'object') return ['contract missing'];
+    if (typeof c.intent !== 'string' || !c.intent.trim()) problems.push('intent missing/empty (what does the task do?)');
+    const acs = c.acceptanceCriteria;
+    if (!Array.isArray(acs) || acs.length === 0 || !acs.every((a) => typeof a === 'string' && a.trim())) {
+      problems.push('acceptanceCriteria missing/empty (when is the task done?)');
+    }
+    const req = Array.isArray(c.requiredInputs) ? c.requiredInputs : [];
+    for (const r of req) {
+      if (typeof r !== 'string' || !r.trim()) {
+        problems.push('requiredInputs entry is not a string');
+        continue;
+      }
+      if (!this.current(r.trim())) problems.push(`requiredInput '${r}' does not resolve via current() (use the artifact's logical name)`);
+    }
+    return problems;
+  }
+
   /** Artifact gate (v10, format §4/§14): a parent may spawn children only after it
    *  has CONCLUDED — a locked artifact OR structured commit evidence
    *  (evidence.commits[] non-empty). Machine-truth; never prose-parsed. */
@@ -239,9 +270,7 @@ export class Store {
       return { state: last.type as DetailGate['state'], at: last.at };
     };
     // unwrap the contract (defensive: legacy double-nested {contract:{contract:{…}}})
-    const raw = this.contract(id) as { contract?: unknown } | undefined;
-    const rawContract = (raw?.contract ?? {}) as Record<string, unknown>;
-    const contract = ((rawContract as { contract?: Record<string, unknown> }).contract ?? rawContract) as Record<string, unknown>;
+    const contract = this.contractOf(id);
     // artifacts: every lock with its derived role (current / superseded / historical)
     const artifacts: ArtifactRef[] = [];
     for (const e of evs) {
@@ -457,6 +486,14 @@ export class Store {
     // F-AC18 traceability (format v10 §9/§14): structured commits[] must RESOLVE in
     // git and refs[] paths must exist. Machine-truth — never prose-parsed (NFR-COM-1).
     problems.push(...this.commitTraceabilityProblems());
+    // F-AC19 (v11) — contract self-sufficiency (the §2 checklist): v9+ nodes only
+    // (pre-v9 contracts grandfathered, same cutoff as F-AC18).
+    for (const id of this.nodes.keys()) {
+      if (!id.includes('/')) continue;
+      const createdAt = (this.contract(id) as { createdAt?: string } | undefined)?.createdAt ?? '';
+      if (createdAt < V9_CUTOFF) continue;
+      for (const p of this.contractProblems(this.contractOf(id))) problems.push(`F-AC19: ${id} — ${p}`);
+    }
     const lockersByName = new Map<string, string[]>();
     for (const [id, node] of this.nodes) {
       for (const e of node.events) {

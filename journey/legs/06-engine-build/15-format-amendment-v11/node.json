@@ -1,0 +1,32 @@
+{
+  "id": "06-engine-build/15-format-amendment-v11",
+  "contract": {
+    "intent": "Amend journey-format-spec v10 -> v11: the TASK CONTRACT CHECKLIST — a task is self-sufficient when a fresh agent reads only its node.json contract + resolvable inputs and can execute without guessing. Checklist (1-3 enforced, 4-7 guidance): 1) intent non-empty 2) acceptanceCriteria non-empty, each non-empty 3) requiredInputs = logical names resolving via current() 4) targetAreas when files 5) expectedOutputs describing the conclusion (doc artifact or commit evidence) 6) openQuestions for known unknowns 7) work type determinable. Enforce F-AC19 at spawn (reject) + check (v9+ nodes).",
+    "acceptanceCriteria": [
+      "journey-format-spec v11 (complete superseding): 2 gains the Task Contract Checklist (1-7, REQUIRED/SHOULD); 7 gains F-AC19",
+      "F-AC19 code: intent non-empty; acceptanceCriteria non-empty (each non-empty); every requiredInput resolves via current() (logical name, never path/guess)",
+      "spawn! rejects a non-compliant contract with named failures (task definers must follow the checklist)",
+      "check() flags F-AC19 violations for v9+ nodes (grandfathered pre-v9, same cutoff as F-AC18)",
+      "unit tests: good contract passes; missing intent / empty ACs / unresolvable input flagged; spawn rejection",
+      "v11 locked; v10 superseded; AGENTS.md re-pointed; suite green; check clean except documented legacy slips (task 13 input names)"
+    ],
+    "targetAreas": [
+      "docs/specs/journey-format-spec-v10.md",
+      "src/store",
+      "src/cli.ts",
+      "src/store/__tests__",
+      "AGENTS.md"
+    ],
+    "requiredInputs": [
+      "journey-format-spec",
+      "flow-control-spec",
+      "design"
+    ],
+    "expectedOutputs": [
+      "journey-format-spec-v11.md",
+      "F-AC19 validator + spawn enforcement",
+      "unit tests"
+    ]
+  },
+  "createdAt": "2026-08-22"
+}
