@@ -266,6 +266,13 @@ export class Store {
    *  commits, then refs, then evidence. Machine-derived; never prose-parsed. */
   results(id: string): ResultItem[] {
     const out: ResultItem[] = [];
+    const seen = new Set<string>();
+    const push = (it: ResultItem) => {
+      const key = `${it.kind}:${it.sha ?? it.path ?? it.url ?? it.note ?? ''}`;
+      if (seen.has(key)) return; // dedupe repeated refs/commits cited by multiple evidence events
+      seen.add(key);
+      out.push(it);
+    };
     const evs = this.events(id);
     // docs — locked artifacts (with role)
     for (const e of evs) {
@@ -277,15 +284,14 @@ export class Store {
       const path = legacyPath(a?.path ?? `journey/legs/${id}/artifacts/${filename}`);
       const cur = this.current(nm);
       const role = cur?.producer === id ? 'current' : cur ? 'superseded' : 'historical';
-      out.push({ kind: 'doc', label: `${nm} @ ${a?.lockSha ?? '(no sha)'} [${role}]`, path, sha: a?.lockSha, at: e.at });
-    }
+      out.push({ kind: 'doc', label: `${nm} @ ${a?.lockSha ?? '(no sha)'} [${role}]`, path, sha: a?.lockSha, at: e.at });    }
     // commits — structured evidence.commits[]
     for (const e of evs) {
       if (e.type !== 'evidence') continue;
       for (const c of Array.isArray(e.commits) ? e.commits : []) {
         const sha = (c as { sha?: unknown })?.sha;
         if (typeof sha !== 'string' || !sha) continue;
-        out.push({ kind: 'commit', label: `${sha} — ${String((c as { note?: unknown })?.note ?? '')}`, sha, note: String((c as { note?: unknown })?.note ?? ''), at: e.at });
+        push({ kind: 'commit', label: `${sha} — ${String((c as { note?: unknown })?.note ?? '')}`, sha, note: String((c as { note?: unknown })?.note ?? ''), at: e.at });
       }
     }
     // refs — structured evidence.refs[] (+ external links)
@@ -293,8 +299,8 @@ export class Store {
       if (e.type !== 'evidence') continue;
       for (const r of Array.isArray(e.refs) ? e.refs : []) {
         if (typeof r !== 'string' || !r) continue;
-        if (/^https?:\/\//.test(r)) out.push({ kind: 'link', label: r, url: r, at: e.at });
-        else out.push({ kind: 'ref', label: r, path: r, at: e.at });
+        if (/^https?:\/\//.test(r)) push({ kind: 'link', label: r, url: r, at: e.at });
+        else push({ kind: 'ref', label: r, path: r, at: e.at });
       }
     }
     // evidence events without structured commits/refs (informational)
@@ -302,8 +308,7 @@ export class Store {
       if (e.type !== 'evidence') continue;
       const hasStructured = (Array.isArray(e.commits) && e.commits.length > 0) || (Array.isArray(e.refs) && e.refs.length > 0);
       if (hasStructured) continue;
-      out.push({ kind: 'evidence', label: (e.note ?? '').slice(0, 90) + ((e.note?.length ?? 0) > 90 ? '…' : ''), note: e.note, at: e.at });
-    }
+      out.push({ kind: 'evidence', label: (e.note ?? '').slice(0, 90) + ((e.note?.length ?? 0) > 90 ? '…' : ''), note: e.note, at: e.at });    }
     return out;
   }
 

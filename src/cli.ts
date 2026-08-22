@@ -253,6 +253,13 @@ function cmdConfirm(id: string) {
       console.log(`  ${e.type} (gate=${g}) ${e.at}`);
     }
   }
+  // The gate card presents the task's RESULTS with the gate — at GATE② (confirm-result)
+  // these ARE what the human confirms: outputs (docs) + evidence (commits/refs).
+  console.log('RESULTS:');
+  const items = store.results(id);
+  if (!items.length) console.log('  (no results yet)');
+  items.forEach((it, i) => console.log(`  ${String(i + 1).padStart(2)}. [${it.kind.padEnd(8)}] ${it.label}`));
+  if (items.length) console.log('  → drill: ann results <id> <n>');
   console.log('\n→ verify each AC against the artifact + evidence, then confirm or reject + reason.');
 }
 
