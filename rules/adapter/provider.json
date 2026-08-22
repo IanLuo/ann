@@ -11,7 +11,7 @@
       "kind": "http",
       "protocol": "OpenAI-compatible chat/completions (design TS-6)",
       "baseUrl": "env:ANN_LLM_BASE_URL || https://api.openai.com/v1",
-      "apiKey": "env:ANN_LLM_API_KEY",
+      "apiKey": "keychain:ann/llm-api-key || env:ANN_LLM_API_KEY",
       "defaultModel": "env:ANN_LLM_MODEL || gpt-4o-mini"
     }
   ],

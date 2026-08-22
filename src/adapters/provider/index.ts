@@ -7,6 +7,8 @@ export { loadProviderRegistry, resolveSetting, resetProviderRegistryCache } from
 export type { ProviderDefaults, ProviderEntry, ProviderRegistry } from './registry.js';
 export { writeOpLog } from './oplog.js';
 export type { OpLogEntry } from './oplog.js';
+export { resolveSecret, addKeychainSecret, deleteKeychainSecret } from './credentials.js';
+export type { SecretResolution } from './credentials.js';
 
 /** Resolve the adapter for a provider id (default = the registry default, F17).
  *  Unknown provider → fail-closed with the unknown id NAMED — never a silent

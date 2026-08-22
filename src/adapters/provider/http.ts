@@ -1,4 +1,5 @@
 import { writeOpLog } from './oplog.js';
+import { resolveSecret } from './credentials.js';
 import { ProviderDefaults, ProviderEntry, resolveSetting } from './registry.js';
 import { AdapterError, Completion, CompletionOptions, ProviderAdapter } from './types.js';
 
@@ -33,7 +34,9 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
       throw new Error(`provider '${entry.id}': baseUrl unresolved — set the env var or fix rules/adapter/provider.json`);
     }
     this.baseUrl = base.replace(/\/+$/, '');
-    this.apiKey = entry.apiKey ? resolveSetting(entry.apiKey) : undefined;
+    // the API key is a SECRET — resolved via the safe chain (keychain → env),
+    // never logged, never written to the op-log, never printed.
+    this.apiKey = entry.apiKey ? resolveSecret(entry.apiKey).value : undefined;
     const model = resolveSetting(entry.defaultModel);
     if (!model) {
       throw new Error(`provider '${entry.id}': defaultModel unresolved — set the env var or fix rules/adapter/provider.json`);

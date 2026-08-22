@@ -11,7 +11,8 @@
  *   ann --status [filter]  → every node's derived status
  *   ann --check            → integrity + gates + artifact hashes
  *   ann --specs            → the locked contract stack
- *   ann --providers        → the adapter registry (providers · models · defaults)
+ *   ann --providers        → the adapter registry (providers · models · defaults · key state)
+ *   ann cred! set|delete <svc> <acct> [secret]  → OS keychain secrets (stdin, masked)
  *   ann --branch <id>      → a node + every descendant's events
  *   ann journey <id>       → one node's full event walk
  *   ann confirm <id>       → a node's gate card (intent · ACs · gates · results)
@@ -38,7 +39,7 @@ import { join, basename, dirname } from 'node:path';
 import { execSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { Store, legacyPath, logicalNameFromFile } from './store/store.js';
-import { loadProviderRegistry, resolveSetting } from './adapters/provider/index.js';
+import { loadProviderRegistry, resolveSetting, resolveSecret, addKeychainSecret, deleteKeychainSecret } from './adapters/provider/index.js';
 import { VOCAB } from './store/vocab.js';
 
 const ROOT = process.cwd();
@@ -225,8 +226,8 @@ function cmdProviders() {
       const baseEnv = p.baseUrl.startsWith('env:') ? p.baseUrl.slice(4).split('||')[0].trim() : undefined;
       const baseFromEnv = baseEnv ? !!process.env[baseEnv] : false;
       console.log(`  baseUrl:    ${base ?? '(unresolved — env unset, no fallback)'}${baseFromEnv ? ' (from env)' : baseEnv ? ' (fallback)' : ''}`);
-      const key = p.apiKey ? resolveSetting(p.apiKey) : undefined;
-      console.log(`  apiKey:     ${key ? 'SET (masked)' : p.apiKey ? 'unset (env not set)' : '(none configured)'}`);
+      const key = p.apiKey ? resolveSecret(p.apiKey) : { source: 'none' as const };
+      console.log(`  apiKey:     ${key.source === 'keychain' ? 'SET (keychain, masked)' : key.source === 'env' ? 'SET (env, masked)' : key.source === 'literal' ? 'SET (literal, masked — move it to the keychain)' : p.apiKey ? `unset — try: ann cred! set <service> <account>` : '(none configured)'}`);
       const model = resolveSetting(p.defaultModel);
       const modelEnv = p.defaultModel.startsWith('env:') ? p.defaultModel.slice(4).split('||')[0].trim() : undefined;
       const modelFromEnv = modelEnv ? !!process.env[modelEnv] : false;
@@ -237,6 +238,24 @@ function cmdProviders() {
   } catch (e) {
     console.error((e as Error).message);
     process.exit(1);
+  }
+}
+
+function cmdCred(op: string, service: string, account: string, secret: string | undefined) {
+  if ((op !== 'set' && op !== 'delete') || !service || !account) {
+    console.error('usage: ann cred! set|delete <service> <account> [secret]');
+    console.error('  secret: pass as arg OR pipe via stdin (echo -n "..." | ann cred! set ...) — stdin never hits argv/ps');
+    process.exit(2);
+  }
+  if (op === 'set') {
+    let value = secret;
+    if (value === undefined) value = readFileSync(0, 'utf8').trim(); // stdin — never argv
+    if (!value) { console.error('cred!: empty secret — pass as arg or pipe via stdin'); process.exit(1); }
+    addKeychainSecret(service, account, value);
+    console.log(`cred!: saved ${service}/${account} to the OS keychain (masked, never logged)`);
+  } else {
+    deleteKeychainSecret(service, account);
+    console.log(`cred!: deleted ${service}/${account} from the OS keychain`);
   }
 }
 
@@ -531,6 +550,7 @@ const COMMANDS: Array<{ name: string; args: string; desc: string }> = [
   { name: 'check', args: '', desc: 'integrity + gates + hashes + the journey state line · alias --check' },
   { name: 'specs', args: '', desc: 'the locked contract stack (name · type · @sha · path) · alias --specs' },
   { name: 'providers', args: '', desc: 'the adapter registry: providers, models, defaults (env-resolved, api key masked) · alias --providers' },
+  { name: 'cred!', args: 'set|delete <service> <account> [secret]', desc: 'WRITE — OS keychain (macOS): save/remove a secret; pipe the value via stdin (never argv/ps); api key stays masked' },
   { name: 'branch', args: '<id>', desc: 'a node + every descendant\'s events, one walk · alias --branch' },
   { name: 'confirm', args: '<id>', desc: 'a node\'s gate card: intent · ACs · artifacts · gates' },
   { name: 'detail', args: '<id>', desc: 'a node\'s full derived detail: contract · gate states · artifacts (current/superseded) · blockers · events tail' },
@@ -594,7 +614,7 @@ try {
     console.log('\nEnv: `RECORDED_BY=<name>` — provenance on recorded events (default: agent).');
     process.exit(0);
   }
-  const WRITES = ['append', 'spawn', 'gate', 'lock', 'supersede', 'card'];
+  const WRITES = ['append', 'spawn', 'gate', 'lock', 'supersede', 'card', 'cred'];
   if (WRITES.includes(command)) {
     console.error(`ann: writes are marked with '!' — did you mean '${command}!'? (mutator convention: reads have no marker, writes always end in !)`);
     process.exit(1);
@@ -606,6 +626,7 @@ try {
   else if (command === 'check' || command === '--check') cmdCheck();
   else if (command === 'specs' || command === '--specs') cmdSpecs();
   else if (command === 'providers' || command === '--providers') cmdProviders();
+  else if (command === 'cred!') cmdCred(args[1], args[2], args[3], args[4]);
   else if (command === 'branch' || command === '--branch') cmdBranch(resolveId(args[1] || ''));
   else if (command === 'commands' || command === '--commands') {
     console.log('| Command | Args | What it does |');
