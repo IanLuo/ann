@@ -462,3 +462,66 @@ describe('Store — commit traceability (format v10 §9)', () => {
     expect(problems.some((p) => p.includes('does not resolve') || p.includes('does not exist'))).toBe(false);
   });
 });
+
+describe('Store — detail() (the full task/leg card)', () => {
+  beforeEach(() => { makeStore(); });
+  afterEach(() => { rmSync(root, { recursive: true, force: true }); });
+
+  it('derives contract, gate states, artifact roles, and blockers for a task', () => {
+    const id = '06-engine-build/05-s2';
+    mkdirSync(join(nodeDir(id), 'artifacts'), { recursive: true });
+    writeFileSync(join(nodeDir(id), 'artifacts', 'spec.md'), '# spec\n');
+    writeNode(
+      id,
+      { intent: 'Build the thing', acceptanceCriteria: ['AC-A', 'AC-B'], targetAreas: ['src/'] },
+      [
+        ev('created'),
+        ev('submitted', { gate: 'grill' }), ev('confirmed', { gate: 'grill' }),
+        ev('submitted', { gate: 'confirm' }), // pending — human hasn't decided
+        ev('artifact-locked', { artifact: { name: 'thing-spec', path: 'journey/legs/06-engine-build/05-s2/artifacts/spec.md', lockSha: 'abc1234' } }),
+      ],
+    );
+    const d = new Store(root).detail(id);
+    expect(d.isLeg).toBe(false);
+    expect(d.status).toBe('blocked'); // pending confirm gate
+    if (!d.contract) throw new Error('contract missing');
+    expect(d.contract.intent).toBe('Build the thing');
+    expect(d.contract.acceptanceCriteria).toEqual(['AC-A', 'AC-B']);
+    expect(d.gates.grill).toMatchObject({ state: 'confirmed' });
+    expect(d.gates.confirm.state).toBe('submitted'); // awaiting decision
+    expect(d.artifacts).toEqual([
+      expect.objectContaining({ name: 'thing-spec', sha: 'abc1234', role: 'current', path: 'journey/legs/06-engine-build/05-s2/artifacts/spec.md' }),
+    ]);
+    expect(d.blockers).toEqual(['submitted (gate=confirm) awaiting decision']);
+    expect(d.events.length).toBe(5);
+  });
+
+  it('marks an artifact superseded when another producer holds current', () => {
+    writeNode('01-goal/01-a', {}, [
+      ev('created'),
+      ev('artifact-locked', { artifact: { name: 'x-spec', path: 'journey/legs/01-goal/01-a/artifacts/x.md', lockSha: '111' } }),
+      ev('superseded', { successor: { name: 'x-spec', path: 'journey/legs/01-goal/01-b/artifacts/x2.md' } }),
+    ]);
+    writeNode('01-goal/01-b', {}, [
+      ev('created'),
+      ev('artifact-locked', { artifact: { name: 'x-spec', path: 'journey/legs/01-goal/01-b/artifacts/x2.md', lockSha: '222' } }),
+    ]);
+    const s = new Store(root);
+    const d1 = s.detail('01-goal/01-a');
+    const d2 = s.detail('01-goal/01-b');
+    expect(d1.artifacts[0].role).toBe('superseded');
+    expect(d2.artifacts[0].role).toBe('current');
+  });
+
+  it('lists a leg\'s tasks with statuses', () => {
+    writeNode('06-engine-build', {}, []);
+    writeNode('06-engine-build/01-a', {}, [ev('created'), ev('completed')]);
+    writeNode('06-engine-build/02-b', {}, [ev('created')]);
+    const d = new Store(root).detail('06-engine-build');
+    expect(d.isLeg).toBe(true);
+    expect(d.tasks).toEqual([
+      { id: '06-engine-build/01-a', status: 'done' },
+      { id: '06-engine-build/02-b', status: 'queued' },
+    ]);
+  });
+});

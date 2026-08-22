@@ -20,6 +20,32 @@ interface NodeEntry {
   events: JourneyEvent[];
 }
 
+/** Detail card types — `Store.detail()` derives; the CLI renders (ann detail <id>). */
+export interface DetailGate {
+  state: 'none' | 'submitted' | 'confirmed' | 'rejected';
+  at?: string;
+}
+
+export interface ArtifactRef {
+  name: string;
+  path: string;
+  sha: string;
+  role: 'current' | 'superseded' | 'historical';
+}
+
+export interface TaskDetail {
+  id: string;
+  isLeg: boolean;
+  status: string;
+  superseded: boolean;
+  contract: Record<string, unknown> | undefined;
+  gates: { grill: DetailGate; confirm: DetailGate };
+  artifacts: ArtifactRef[];
+  events: JourneyEvent[];
+  blockers: string[];
+  tasks?: Array<{ id: string; status: string }>;
+}
+
 
 /** Legacy path normalization: recorded paths from the pre-journey era resolve to
  *  the current layout. Two cases: the store rename (`tree/rounds/…` →
@@ -194,6 +220,59 @@ export class Store {
       this.events(parent).some((e) => e.type === 'artifact-locked') ||
       this.events(parent).some((e) => e.type === 'evidence' && Array.isArray(e.commits) && e.commits.length > 0)
     );
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* detail() — the full task/leg card (drives `ann detail <id>`).      */
+  /* The store DERIVES; the CLI renders.                                */
+  /* ---------------------------------------------------------------- */
+
+  /** Full derived detail for one node — contract, gate states, artifacts (with
+   *  current/superseded roles), event tail, blockers, leg tasks. */
+  detail(id: string): TaskDetail {
+    const evs = this.events(id);
+    const gate = (name: string): DetailGate => {
+      const last = [...evs]
+        .reverse()
+        .find((e) => ['submitted', 'confirmed', 'rejected'].includes(e.type) && e.gate === name);
+      if (!last) return { state: 'none' };
+      return { state: last.type as DetailGate['state'], at: last.at };
+    };
+    // unwrap the contract (defensive: legacy double-nested {contract:{contract:{…}}})
+    const raw = this.contract(id) as { contract?: unknown } | undefined;
+    const rawContract = (raw?.contract ?? {}) as Record<string, unknown>;
+    const contract = ((rawContract as { contract?: Record<string, unknown> }).contract ?? rawContract) as Record<string, unknown>;
+    // artifacts: every lock with its derived role (current / superseded / historical)
+    const artifacts: ArtifactRef[] = [];
+    for (const e of evs) {
+      if (e.type !== 'artifact-locked') continue;
+      const a = e.artifact;
+      const nm = a?.name ?? String(e.note ?? '').match(/logical name:\s*([\w.-]+)/)?.[1] ?? '';
+      if (!nm) continue;
+      const filename = a?.path ? basename(a.path) : String(e.note ?? '').match(/([\w.-]+\.md)/)?.[1] ?? '';
+      const path = legacyPath(a?.path ?? `journey/legs/${id}/artifacts/${filename}`);
+      const cur = this.current(nm);
+      const role: ArtifactRef['role'] = cur?.producer === id ? 'current' : cur ? 'superseded' : 'historical';
+      artifacts.push({ name: nm, path, sha: a?.lockSha ?? '', role });
+    }
+    const blockers = evs
+      .filter(
+        (e) => e.type === 'submitted' && !evs.slice(evs.indexOf(e) + 1).some((x) => ['confirmed', 'rejected'].includes(x.type) && x.gate === e.gate),
+      )
+      .map((b) => `submitted (gate=${typeof b.gate === 'string' ? b.gate : '?'}) awaiting decision`);
+    const detail: TaskDetail = {
+      id,
+      isLeg: !id.includes('/'),
+      status: this.status(id),
+      superseded: this.supersededProducers().has(id),
+      contract,
+      gates: { grill: gate('grill'), confirm: gate('confirm') },
+      artifacts,
+      events: evs,
+      blockers,
+    };
+    if (detail.isLeg) detail.tasks = this.tasksOf(id).map((t) => ({ id: t, status: this.status(t) }));
+    return detail;
   }
 
   /** Commit traceability (format v10 §9/§14): every structured evidence.commits[].sha

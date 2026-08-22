@@ -256,6 +256,52 @@ function cmdConfirm(id: string) {
   console.log('\n→ verify each AC against the artifact + evidence, then confirm or reject + reason.');
 }
 
+function cmdDetail(id: string) {
+  const d = store.detail(id);
+  if (!d.contract) { console.error(`detail: no node ${id}`); process.exit(1); }
+  const kind = d.isLeg ? 'LEG' : 'TASK';
+  console.log(`${kind}: ${d.id}`);
+  console.log(`status: ${d.status}${d.superseded ? ' · superseded producer' : ''}`);
+  console.log('---');
+  console.log('CONTRACT');
+  console.log(`  intent: ${String(d.contract.intent ?? '(none)')}`);
+  const acs = (d.contract.acceptanceCriteria ?? []) as string[];
+  acs.forEach((a, i) => console.log(`  AC-${i + 1}: ${a}`));
+  for (const k of ['targetAreas', 'requiredInputs', 'expectedOutputs']) {
+    const v = (d.contract[k] ?? []) as string[];
+    if (v.length) console.log(`  ${k}: ${v.join(' · ')}`);
+  }
+  const oq = (d.contract.openQuestions ?? []) as Array<{ id?: string; question?: string; blocking?: boolean }>;
+  if (oq.length) { console.log('  openQuestions:'); oq.forEach((q) => console.log(`    - ${q.id ?? ''}${q.blocking ? ' [blocking]' : ''}: ${q.question ?? ''}`)); }
+  console.log('---');
+  console.log('GATES (derived)');
+  const gateLine = (g: { state: string; at?: string }) => `GATE ${g.state === 'confirmed' ? '✓' : g.state === 'rejected' ? '✗' : g.state === 'submitted' ? '…' : '·'} ${g.state}${g.at ? ` (${g.at})` : ''}`;
+  console.log(`  ${gateLine(d.gates.grill)} — grilling (entry)`);
+  console.log(`  ${gateLine(d.gates.confirm)} — confirm-result (exit)`);
+  console.log('---');
+  console.log('ARTIFACTS');
+  if (!d.artifacts.length) console.log('  (none locked)');
+  for (const a of d.artifacts) console.log(`  - ${a.name} @ ${a.sha || '(no sha)'} [${a.role}]
+      ${a.path}`);
+  console.log('---');
+  console.log('EVENTS');
+  console.log(`  ${d.events.length} event(s) — full walk: ann branch ${d.id}`);
+  for (const e of d.events.slice(-5)) {
+    const g = typeof e.gate === 'string' ? ` (gate=${e.gate})` : '';
+    console.log(`  ${e.at || ''}  ${e.type}${g}`);
+  }
+  if (d.tasks) {
+    console.log('---');
+    console.log('TASKS');
+    for (const t of d.tasks) console.log(`  ${t.id}  ${t.status}`);
+  }
+  if (d.blockers.length) {
+    console.log('---');
+    console.log('BLOCKED — waiting on human:');
+    for (const b of d.blockers) console.log(`  ${b}`);
+  }
+}
+
 // ---- THE SINGLE WRITE SURFACE (bookkeeper) ----
 function cmdSpawn(id: string, raw: string) {
   const segs = id.split('/');
@@ -374,6 +420,7 @@ const COMMANDS: Array<{ name: string; args: string; desc: string }> = [
   { name: 'specs', args: '', desc: 'the locked contract stack (name · type · @sha · path) · alias --specs' },
   { name: 'branch', args: '<id>', desc: 'a node + every descendant\'s events, one walk · alias --branch' },
   { name: 'confirm', args: '<id>', desc: 'a node\'s gate card: intent · ACs · artifacts · gates' },
+  { name: 'detail', args: '<id>', desc: 'a node\'s full derived detail: contract · gate states · artifacts (current/superseded) · blockers · events tail' },
   { name: 'commands', args: '', desc: 'this table as markdown (the derived doc) · alias --commands' },
   { name: 'help', args: '', desc: 'usage · alias --help / -h' },
   { name: 'append!', args: '<id> \'<json>\'', desc: 'WRITE — single-writer append (store.appendEvent, LB-3)' },
@@ -421,6 +468,7 @@ try {
     for (const c of COMMANDS) console.log(`| \`${c.name}\` | \`${c.args}\` | ${c.desc} |`);
     console.log('\nEnv: `RECORDED_BY=<name>` — provenance on recorded events (default: agent).');
   } else if (command === 'confirm') cmdConfirm(args[1]);
+  else if (command === 'detail' || command === '--detail') cmdDetail(args[1]);
   else if (command === 'append!') {
     const raw = args.slice(2).join(' ');
     if (!args[1] || !raw) { console.error('usage: ann append! <id> \'{"at":..,"type":..}\''); process.exit(2); }
