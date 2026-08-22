@@ -3,3 +3,6 @@
 {"at":"2026-08-22","type":"confirmed","gate":"grill","note":"accepted (ian)"}
 {"at":"2026-08-22","type":"artifact-locked","artifact":{"name":"journey-format-spec","path":"journey/legs/06-engine-build/15-format-amendment-v11/artifacts/journey-format-spec.md","lockSha":"4b4c8c3"},"note":"journey-format-spec.md specs-locked via bookkeeper (agent)"}
 {"at":"2026-08-22","type":"evidence","commits":[{"sha":"006fa30","note":"F-AC19 checklist: store validator + spawn enforcement"}],"refs":["docs/specs/journey-format-spec-v11.md","src/store/store.ts","src/cli.ts"],"note":"All steps done: journey-format-spec v11 @ 4b4c8c3 (v10 superseded); task contract checklist (1-7) in 2, F-AC19 enforces 1-3 at spawn (reject, demoed) + check (v9+ nodes); 5 new tests (contractProblems pass/fail, check flag, grandfather, good pass) — suite 81 green. F-AC19 immediately caught task 13 input-name slips (documented on 13). AGENTS.md re-pointed."}
+{"at":"2026-08-22","type":"submitted","gate":"confirm","note":"bookkeeper submission (agent)"}
+{"at":"2026-08-22","type":"confirmed","gate":"confirm","note":"accepted (agent)"}
+{"at":"2026-08-22","type":"completed","note":"task contract checklist (v11) complete: spec 2/7 checklist + F-AC19 (spawn reject + check flag); v11 @ 4b4c8c3 locked, v10 superseded, AGENTS.md re-pointed; 81 tests green. F-AC19 caught task 13 slips (documented)."}
