@@ -35,6 +35,7 @@ import { join, basename, dirname } from 'node:path';
 import { execSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { Store, legacyPath, logicalNameFromFile } from './store/store.js';
+import { loadProviderRegistry, resolveSetting } from './adapters/provider/index.js';
 import { VOCAB } from './store/vocab.js';
 
 const ROOT = process.cwd();
@@ -204,6 +205,36 @@ function cmdSpecs() {
     }
   }
   console.log(rows.join('\n'));
+}
+
+function cmdProviders() {
+  // the adapter registry (resource-registry spec, category adapter) — env-resolved,
+  // api key MASKED (never printed).
+  try {
+    const reg = loadProviderRegistry(ROOT);
+    console.log('PROVIDER REGISTRY (rules/adapter/provider.json)');
+    console.log(`defaultProvider: ${reg.defaultProvider}`);
+    console.log('---');
+    for (const p of reg.providers) {
+      console.log(`provider: ${p.id}  [${p.kind}]`);
+      console.log(`  protocol:   ${p.protocol}`);
+      const base = resolveSetting(p.baseUrl);
+      const baseEnv = p.baseUrl.startsWith('env:') ? p.baseUrl.slice(4).split('||')[0].trim() : undefined;
+      const baseFromEnv = baseEnv ? !!process.env[baseEnv] : false;
+      console.log(`  baseUrl:    ${base ?? '(unresolved — env unset, no fallback)'}${baseFromEnv ? ' (from env)' : baseEnv ? ' (fallback)' : ''}`);
+      const key = p.apiKey ? resolveSetting(p.apiKey) : undefined;
+      console.log(`  apiKey:     ${key ? 'SET (masked)' : p.apiKey ? 'unset (env not set)' : '(none configured)'}`);
+      const model = resolveSetting(p.defaultModel);
+      const modelEnv = p.defaultModel.startsWith('env:') ? p.defaultModel.slice(4).split('||')[0].trim() : undefined;
+      const modelFromEnv = modelEnv ? !!process.env[modelEnv] : false;
+      console.log(`  defaultModel: ${model ?? '(unresolved)'}${modelFromEnv ? ' (from env)' : modelEnv ? ' (fallback)' : ''}`);
+    }
+    console.log('---');
+    console.log(`defaults: maxTokens=${reg.defaults.maxTokens} · temperature=${reg.defaults.temperature} · retries=${reg.defaults.retries} · backoff=${reg.defaults.backoffMs}ms→${reg.defaults.backoffMaxMs}ms · timeout=${reg.defaults.timeoutMs}ms`);
+  } catch (e) {
+    console.error((e as Error).message);
+    process.exit(1);
+  }
 }
 
 function cmdBranch(rootId: string) {
@@ -496,6 +527,7 @@ const COMMANDS: Array<{ name: string; args: string; desc: string }> = [
   { name: 'status', args: '[filter]', desc: 'every node\'s derived status (+ superseded marker) · alias --status' },
   { name: 'check', args: '', desc: 'integrity + gates + hashes + the journey state line · alias --check' },
   { name: 'specs', args: '', desc: 'the locked contract stack (name · type · @sha · path) · alias --specs' },
+  { name: 'providers', args: '', desc: 'the adapter registry: providers, models, defaults (env-resolved, api key masked) · alias --providers' },
   { name: 'branch', args: '<id>', desc: 'a node + every descendant\'s events, one walk · alias --branch' },
   { name: 'confirm', args: '<id>', desc: 'a node\'s gate card: intent · ACs · artifacts · gates' },
   { name: 'detail', args: '<id>', desc: 'a node\'s full derived detail: contract · gate states · artifacts (current/superseded) · blockers · events tail' },
@@ -570,6 +602,7 @@ try {
   } else if (command === 'status' || command === '--status') cmdStatus();
   else if (command === 'check' || command === '--check') cmdCheck();
   else if (command === 'specs' || command === '--specs') cmdSpecs();
+  else if (command === 'providers' || command === '--providers') cmdProviders();
   else if (command === 'branch' || command === '--branch') cmdBranch(resolveId(args[1] || ''));
   else if (command === 'commands' || command === '--commands') {
     console.log('| Command | Args | What it does |');
