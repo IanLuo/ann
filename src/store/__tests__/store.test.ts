@@ -618,3 +618,32 @@ describe('Store — supersession is PER-NAME (format §3/§5; multi-artifact pro
     expect(s.current('x-spec')?.producer).toBe('01-goal/02-legacy');
   });
 });
+
+describe('Store — results() (type-aware result gathering, format v10)', () => {
+  beforeEach(() => { makeStore(); });
+  afterEach(() => { rmSync(root, { recursive: true, force: true }); });
+
+  it('gathers docs, commits, refs, links, and evidence from the log, in order', () => {
+    const id = '06-engine-build/05-s2';
+    mkdirSync(join(nodeDir(id), 'artifacts'), { recursive: true });
+    writeFileSync(join(nodeDir(id), 'artifacts', 'spec.md'), '# spec\n');
+    writeNode(id, {}, [
+      ev('created'),
+      ev('artifact-locked', { artifact: { name: 'thing-spec', path: 'journey/legs/06-engine-build/05-s2/artifacts/spec.md', lockSha: 'abc1234' } }),
+      ev('evidence', { commits: [{ sha: '8e94c58', note: 'step 1' }], refs: ['src/adapters/provider/', 'https://example.com/ext'] }),
+      ev('evidence', { note: 'checkpoint — prose only' }),
+    ]);
+    const items = new Store(root).results(id);
+    expect(items.map((i) => i.kind)).toEqual(['doc', 'commit', 'ref', 'link', 'evidence']);
+    expect(items[0]).toMatchObject({ kind: 'doc', label: expect.stringContaining('thing-spec @ abc1234 [current]') });
+    expect(items[1]).toMatchObject({ kind: 'commit', sha: '8e94c58' });
+    expect(items[2]).toMatchObject({ kind: 'ref', path: 'src/adapters/provider/' });
+    expect(items[3]).toMatchObject({ kind: 'link', url: 'https://example.com/ext' });
+    expect(items[4]).toMatchObject({ kind: 'evidence', note: expect.stringContaining('prose only') });
+  });
+
+  it('returns an empty list for a node with no results', () => {
+    writeNode('06-engine-build/05-empty', {}, [ev('created')]);
+    expect(new Store(root).results('06-engine-build/05-empty')).toEqual([]);
+  });
+});

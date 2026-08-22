@@ -302,6 +302,67 @@ function cmdDetail(id: string) {
   }
 }
 
+function cmdResults(id: string, index: string | undefined) {
+  const items = store.results(id);
+  if (!store.contract(id)) { console.error(`results: no node ${id}`); process.exit(1); }
+  const kind = id.includes('/') ? 'TASK' : 'LEG';
+  if (index === undefined) {
+    console.log(`RESULTS: ${id} (${kind})`);
+    if (!items.length) { console.log('  (no results yet)'); return; }
+    items.forEach((it, i) => console.log(`  ${String(i + 1).padStart(2)}. [${it.kind.padEnd(8)}] ${it.label}`));
+    console.log(`\n  drill: ann results ${id} <n>`);
+    return;
+  }
+  const n = Number(index);
+  const it = items[n - 1];
+  if (!it) { console.error(`results: no item ${index} (1..${items.length})`); process.exit(1); }
+  console.log(`${String(it.kind).toUpperCase()}: ${it.label}`);
+  if (it.at) console.log(`  at: ${it.at}`);
+  switch (it.kind) {
+    case 'doc': {
+      const full = join(ROOT, it.path!);
+      if (!existsSync(full)) { console.error(`  (file missing: ${it.path})`); break; }
+      console.log(`  path: ${it.path}`);
+      console.log('---');
+      console.log(readFileSync(full, 'utf8'));
+      break;
+    }
+    case 'commit': {
+      try {
+        console.log(execSync(`git show -s --format='%H%n%an <%ae> %ad%n%n%s%n%n%b' ${it.sha}`, { encoding: 'utf8' }).trim());
+        console.log('---');
+        console.log(execSync(`git show --stat --format= ${it.sha}`, { encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 }).trim().slice(0, 2000));
+      } catch {
+        console.error(`  (commit ${it.sha} not resolvable in git)`);
+      }
+      break;
+    }
+    case 'ref': {
+      const full = join(ROOT, it.path!);
+      if (!existsSync(full)) { console.error(`  (ref missing: ${it.path})`); break; }
+      const st = statSync(full);
+      if (st.isDirectory()) {
+        console.log(`  dir: ${it.path}/`);
+        for (const f of readdirSync(full).slice(0, 30)) console.log(`    - ${f}`);
+      } else {
+        console.log(`  file: ${it.path}`);
+        console.log('---');
+        console.log(readFileSync(full, 'utf8').split('\n').slice(0, 60).join('\n'));
+      }
+      break;
+    }
+    case 'evidence': {
+      const ev = store.events(id).find((e) => e.type === 'evidence' && e.note === it.note);
+      console.log('---');
+      console.log(JSON.stringify(ev ?? { note: it.note }, null, 2));
+      break;
+    }
+    case 'link':
+      console.log(`  url: ${it.url}`);
+      break;
+  }
+}
+
 // ---- THE SINGLE WRITE SURFACE (bookkeeper) ----
 function cmdSpawn(id: string, raw: string) {
   const segs = id.split('/');
@@ -431,6 +492,7 @@ const COMMANDS: Array<{ name: string; args: string; desc: string }> = [
   { name: 'branch', args: '<id>', desc: 'a node + every descendant\'s events, one walk · alias --branch' },
   { name: 'confirm', args: '<id>', desc: 'a node\'s gate card: intent · ACs · artifacts · gates' },
   { name: 'detail', args: '<id>', desc: 'a node\'s full derived detail: contract · gate states · artifacts (current/superseded) · blockers · events tail' },
+  { name: 'results', args: '<id> [n]', desc: 'a task\'s results by kind (doc/commit/ref/evidence/link); with n, drill into one (doc=content, commit=git show, ref=file/dir, evidence=event) · alias --results' },
   { name: 'commands', args: '', desc: 'this table as markdown (the derived doc) · alias --commands' },
   { name: 'help', args: '', desc: 'usage · alias --help / -h' },
   { name: 'append!', args: '<id> \'<json>\'', desc: 'WRITE — single-writer append (store.appendEvent, LB-3)' },
@@ -479,6 +541,7 @@ try {
     console.log('\nEnv: `RECORDED_BY=<name>` — provenance on recorded events (default: agent).');
   } else if (command === 'confirm') cmdConfirm(args[1]);
   else if (command === 'detail' || command === '--detail') cmdDetail(args[1]);
+  else if (command === 'results' || command === '--results') cmdResults(args[1], args[2]);
   else if (command === 'append!') {
     const raw = args.slice(2).join(' ');
     if (!args[1] || !raw) { console.error('usage: ann append! <id> \'{"at":..,"type":..}\''); process.exit(2); }

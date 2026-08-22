@@ -46,6 +46,16 @@ export interface TaskDetail {
   tasks?: Array<{ id: string; status: string }>;
 }
 
+export interface ResultItem {
+  kind: 'doc' | 'commit' | 'ref' | 'evidence' | 'link';
+  label: string;
+  path?: string;
+  sha?: string;
+  note?: string;
+  url?: string;
+  at?: string;
+}
+
 
 /** Legacy path normalization: recorded paths from the pre-journey era resolve to
  *  the current layout. Two cases: the store rename (`tree/rounds/…` →
@@ -244,6 +254,57 @@ export class Store {
       if (!this.current(r.trim())) problems.push(`requiredInput '${r}' does not resolve via current() (use the artifact's logical name)`);
     }
     return problems;
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* results() — a task's result items (drives `ann results <id> [n]`). */
+  /* Result kinds: doc (locked artifact) · commit · ref · evidence · link. */
+  /* ---------------------------------------------------------------- */
+
+  /** Gather a task's results from its log — one item per artifact lock, per structured
+   *  commit, per ref, per evidence event (format v10 §3/§14). Order: docs, then
+   *  commits, then refs, then evidence. Machine-derived; never prose-parsed. */
+  results(id: string): ResultItem[] {
+    const out: ResultItem[] = [];
+    const evs = this.events(id);
+    // docs — locked artifacts (with role)
+    for (const e of evs) {
+      if (e.type !== 'artifact-locked') continue;
+      const a = e.artifact;
+      const nm = a?.name ?? String(e.note ?? '').match(/logical name:\s*([\w.-]+)/)?.[1] ?? '';
+      if (!nm) continue;
+      const filename = a?.path ? basename(a.path) : String(e.note ?? '').match(/([\w.-]+\.md)/)?.[1] ?? '';
+      const path = legacyPath(a?.path ?? `journey/legs/${id}/artifacts/${filename}`);
+      const cur = this.current(nm);
+      const role = cur?.producer === id ? 'current' : cur ? 'superseded' : 'historical';
+      out.push({ kind: 'doc', label: `${nm} @ ${a?.lockSha ?? '(no sha)'} [${role}]`, path, sha: a?.lockSha, at: e.at });
+    }
+    // commits — structured evidence.commits[]
+    for (const e of evs) {
+      if (e.type !== 'evidence') continue;
+      for (const c of Array.isArray(e.commits) ? e.commits : []) {
+        const sha = (c as { sha?: unknown })?.sha;
+        if (typeof sha !== 'string' || !sha) continue;
+        out.push({ kind: 'commit', label: `${sha} — ${String((c as { note?: unknown })?.note ?? '')}`, sha, note: String((c as { note?: unknown })?.note ?? ''), at: e.at });
+      }
+    }
+    // refs — structured evidence.refs[] (+ external links)
+    for (const e of evs) {
+      if (e.type !== 'evidence') continue;
+      for (const r of Array.isArray(e.refs) ? e.refs : []) {
+        if (typeof r !== 'string' || !r) continue;
+        if (/^https?:\/\//.test(r)) out.push({ kind: 'link', label: r, url: r, at: e.at });
+        else out.push({ kind: 'ref', label: r, path: r, at: e.at });
+      }
+    }
+    // evidence events without structured commits/refs (informational)
+    for (const e of evs) {
+      if (e.type !== 'evidence') continue;
+      const hasStructured = (Array.isArray(e.commits) && e.commits.length > 0) || (Array.isArray(e.refs) && e.refs.length > 0);
+      if (hasStructured) continue;
+      out.push({ kind: 'evidence', label: (e.note ?? '').slice(0, 90) + ((e.note?.length ?? 0) > 90 ? '…' : ''), note: e.note, at: e.at });
+    }
+    return out;
   }
 
   /** Artifact gate (v10, format §4/§14): a parent may spawn children only after it
