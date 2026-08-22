@@ -1,0 +1,4 @@
+{"at":"2026-08-22","type":"created","note":"spawned by bookkeeper (agent)"}
+{"at":"2026-08-22","type":"submitted","gate":"grill","note":"bookkeeper submission (ian)"}
+{"at":"2026-08-22","type":"confirmed","gate":"grill","note":"accepted (ian)"}
+{"at":"2026-08-22","type":"artifact-locked","artifact":{"name":"resource-registry","path":"journey/legs/06-engine-build/17-resource-registry-v2/artifacts/resource-registry.md","lockSha":"4f95b5a"},"note":"resource-registry.md specs-locked via bookkeeper (agent)"}

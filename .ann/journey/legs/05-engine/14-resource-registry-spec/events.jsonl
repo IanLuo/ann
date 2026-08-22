@@ -4,3 +4,4 @@
 {"at":"2026-08-18","type":"submitted","gate":"grill","note":"retrospective: user confirm-all"}
 {"at":"2026-08-18","type":"confirmed","gate":"grill","note":"retrospective: user confirm-all"}
 {"at":"2026-08-18","type":"confirmed","gate":"confirm","note":"retrospective: user confirm-all"}
+{"at":"2026-08-22","type":"superseded","successor":{"name":"resource-registry","path":"journey/legs/06-engine-build/17-resource-registry-v2/artifacts/resource-registry.md"},"note":"v1 superseded by v2 (user-config instance)"}

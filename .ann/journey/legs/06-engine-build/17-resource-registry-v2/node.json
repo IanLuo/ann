@@ -1,0 +1,24 @@
+{
+  "id": "06-engine-build/17-resource-registry-v2",
+  "contract": {
+    "intent": "Amend resource-registry-spec v1 -> v2: add the USER-CONFIG instance (per-user ~/.ann/config.json contract) — credentials + provider overrides + PATH-ONLY project registry, resolution order, security, versioning. One registry per class; the user config is the per-user instance of the pattern.",
+    "acceptanceCriteria": [
+      "resource-registry-spec v2 (complete superseding): 4 instances gains user-config row; 8 NEW the user-config instance (schema, path-only projects, resolution order env > config > keychain > fallback, security chmod 600 + masked apiKey, versioning, legacy {name,path} normalization)",
+      "v2 locked at sha; v1 superseded with forward pointer; AGENTS.md re-pointed if it cites resource-registry",
+      "suite green; typecheck clean"
+    ],
+    "targetAreas": [
+      "docs/specs/resource-registry-spec-v1.md",
+      "AGENTS.md"
+    ],
+    "requiredInputs": [
+      "resource-registry",
+      "design",
+      "architecture"
+    ],
+    "expectedOutputs": [
+      "resource-registry-spec-v2.md"
+    ]
+  },
+  "createdAt": "2026-08-22"
+}
