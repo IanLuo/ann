@@ -12,7 +12,8 @@
  *   ann --check            → integrity + gates + artifact hashes
  *   ann --specs            → the locked contract stack
  *   ann --providers        → the adapter registry (providers · models · defaults · key state)
- *   ann cred! set|delete <svc> <acct> [secret]  → OS keychain secrets (stdin, masked)
+ *   ann config / config! set <key> <val>  → user config file (masked)
+ *   ann cred! set|delete <svc> <acct> [secret]  → OS keychain (dev-only)
  *   ann --branch <id>      → a node + every descendant's events
  *   ann journey <id>       → one node's full event walk
  *   ann confirm <id>       → a node's gate card (intent · ACs · gates · results)
