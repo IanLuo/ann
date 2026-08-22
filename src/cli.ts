@@ -675,7 +675,7 @@ const COMMANDS: Array<{ name: string; args: string; desc: string }> = [
   { name: 'check', args: '', desc: 'integrity + gates + hashes + the journey state line · alias --check' },
   { name: 'specs', args: '', desc: 'the locked contract stack (name · type · @sha · path) · alias --specs' },
   { name: 'providers', args: '', desc: 'the adapter registry: providers, models, defaults (env-resolved, api key masked) · alias --providers' },
-  { name: 'config', args: '', desc: 'the user config file (~/.config/ann/config.json; apiKey masked) · alias --config' },
+  { name: 'config', args: '', desc: 'the user config file (~/.ann/config.json; apiKey masked) · alias --config' },
   { name: 'config!', args: 'set <key> <value>', desc: 'WRITE — save a config value (provider|model|baseUrl|apiKey|maxTokens); chmod 600, outside the repo; apiKey never echoed' },
   { name: 'project', args: '', desc: 'show the current project + known projects · alias --project' },
   { name: 'project!', args: 'add|use|remove <name> [path]', desc: 'WRITE — manage projects (each has its OWN journey); add <name> <path> registers a project' },

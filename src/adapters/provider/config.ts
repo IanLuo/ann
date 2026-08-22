@@ -5,7 +5,7 @@ import { join, dirname } from 'node:path';
 /**
  * The USER CONFIG FILE — the local app's settings, including (optionally) the secret.
  *
- * Location: `~/.config/ann/config.json` (override with `ANN_CONFIG` — used by tests
+ * Location: `~/.ann/config.json` (override with `ANN_CONFIG` — used by tests
  * and packaging). It is OUTSIDE the repo (never committed) and chmod 600 (user-only).
  *
  * Trust model (local-first): the same as ~/.aws/credentials / ~/.env — plaintext at
@@ -33,7 +33,7 @@ export interface UserConfig {
   currentProject?: string;
 }
 
-export const configPath = (): string => process.env.ANN_CONFIG || join(homedir(), '.config', 'ann', 'config.json');
+export const configPath = (): string => process.env.ANN_CONFIG || join(homedir(), '.ann', 'config.json');
 
 let cached: UserConfig | undefined;
 

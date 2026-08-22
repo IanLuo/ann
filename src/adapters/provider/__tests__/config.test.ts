@@ -23,7 +23,7 @@ const withConfig = (name: string) => {
   resetConfigCache();
 };
 
-describe('user config file (~/.config/ann/config.json equivalent)', () => {
+describe('user config file (~/.ann/config.json equivalent)', () => {
   it('loads an existing config file', () => {
     withConfig('a.json');
     const { writeFileSync } = require('node:fs');
