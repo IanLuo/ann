@@ -383,3 +383,23 @@ describe('Store — F-AC18 artifact gate (format v9 §14)', () => {
     expect(new Store(root).check().some((p) => p.includes('F-AC18'))).toBe(false);
   });
 });
+
+describe('Store — current() resolves by logical name (multi-artifact producers, v9)', () => {
+  beforeEach(() => { makeStore(); });
+  afterEach(() => { rmSync(root, { recursive: true, force: true }); });
+
+  it('a producer locking two artifacts resolves each by its own name', () => {
+    const id = '06-engine-build/13-amendment';
+    mkdirSync(join(nodeDir(id), 'artifacts'), { recursive: true });
+    writeFileSync(join(nodeDir(id), 'artifacts', 'a.md'), '# a\n');
+    writeFileSync(join(nodeDir(id), 'artifacts', 'b.md'), '# b\n');
+    writeNode(id, {}, [
+      ev('created'),
+      ev('artifact-locked', { artifact: { name: 'a-spec', path: 'journey/legs/06-engine-build/13-amendment/artifacts/a.md', lockSha: '1111111' } }),
+      ev('artifact-locked', { artifact: { name: 'b-spec', path: 'journey/legs/06-engine-build/13-amendment/artifacts/b.md', lockSha: '2222222' } }),
+    ]);
+    const s = new Store(root);
+    expect(s.current('b-spec')?.path).toBe('journey/legs/06-engine-build/13-amendment/artifacts/b.md');
+    expect(s.current('a-spec')?.path).toBe('journey/legs/06-engine-build/13-amendment/artifacts/a.md');
+  });
+});

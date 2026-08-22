@@ -169,7 +169,10 @@ export class Store {
     const candidates = lockers.filter((p) => !superseded.has(p));
     if (!candidates.length) return undefined;
     const producer = candidates[candidates.length - 1];
-    const e = this.events(producer).find((x) => x.type === 'artifact-locked');
+    // A producer may lock MULTIPLE artifacts (e.g. an amendment task that supersedes
+    // two specs) — match by logical name, never just the first artifact-locked event.
+    const byName = this.events(producer).find((x) => x.type === 'artifact-locked' && x.artifact?.name === name);
+    const e = byName ?? this.events(producer).find((x) => x.type === 'artifact-locked');
     const a = e?.artifact;
     const filename = a?.path
       ? basename(a.path)

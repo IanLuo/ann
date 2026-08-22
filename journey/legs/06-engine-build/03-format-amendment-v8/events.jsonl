@@ -5,3 +5,4 @@
 {"at":"2026-08-19","type":"submitted","gate":"confirm","note":"lock + supersede + re-point complete"}
 {"at":"2026-08-19","type":"confirmed","gate":"confirm","note":"user: lock it"}
 {"at":"2026-08-19","type":"completed","note":"journey-format-spec-v8: flat task group — tasks directly under the leg, no level dirs; L4-L6 migration recorded; v7 superseded; compat 00→. symlinks keep history resolving"}
+{"at":"2026-08-22","type":"superseded","successor":{"name":"journey-format-spec","path":"journey/legs/06-engine-build/13-format-amendment-v9/artifacts/journey-format-spec.md"},"note":"v8 superseded by v9 (artifact model: link + commit clues + conclusion)"}

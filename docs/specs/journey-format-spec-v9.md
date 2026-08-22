@@ -1,4 +1,4 @@
-<!-- draft journey-format-spec v9 2026-08-21 type=spec -->
+<!-- specs:locked:3c04f99 2026-08-22 type=spec -->
 
 ## Link contract
 - **upstream** (this doc relies on): journey/legs/01-goal/artifacts/design.md,02-grilling/01-spec-rework/artifacts/requirements-spec.md,05-engine/17-format-amendment-v6/artifacts/tree-format-spec-v6.md

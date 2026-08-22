@@ -1,4 +1,4 @@
-<!-- draft flow-control-spec v5 2026-08-21 type=spec -->
+<!-- specs:locked:3865cfb 2026-08-22 type=spec -->
 
 ## Link contract
 - **upstream** (this doc relies on): journey/legs/01-goal/artifacts/design.md,02-grilling/01-spec-rework/artifacts/requirements-spec.md,journey-format-spec v9

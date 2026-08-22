@@ -5,3 +5,4 @@
 {"at":"2026-08-19","type":"submitted","gate":"confirm","note":"lock + supersede + implementation complete"}
 {"at":"2026-08-19","type":"confirmed","gate":"confirm","note":"user: lock it"}
 {"at":"2026-08-19","type":"completed","note":"flow-control-spec-v4: closure-by-transfer executed as a closure task (gate-revised + transferred/deferred, own GATE1/GATE2); leg completion = derived aggregate; leg roots carry no gates; v3 superseded; validator/rules implementation pending this event"}
+{"at":"2026-08-22","type":"superseded","successor":{"name":"flow-control-spec","path":"journey/legs/06-engine-build/13-format-amendment-v9/artifacts/flow-control-spec.md"},"note":"v4 superseded by v5 (artifact completion rule: 6/7 contradiction resolved)"}
