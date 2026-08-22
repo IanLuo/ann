@@ -186,13 +186,16 @@ export class Store {
 
   /**
    * Resolution (format §5): current(name) = the artifact-locked producer with that
-   * name whose producer is NOT superseded (producer-level — any superseded event
-   * excludes the producer from all its locks). Structured events preferred; legacy
-   * prose notes are parsed as a fallback.
+   * name whose lock of THIS artifact is not superseded — supersession is PER-NAME:
+   * a superseded event's successor.name is the artifact it supersedes (format §3),
+   * so a multi-artifact producer keeps its other locks current. Legacy prose
+   * superseded events (no successor.name) fall back to producer-level — every such
+   * producer locked exactly one artifact. Structured events preferred; legacy prose
+   * notes are parsed as a fallback.
    */
   current(name: string): { name: string; path: string; sha?: string; producer: string } | undefined {
     const lockers = this.lockers(name);
-    const superseded = this.supersededProducers();
+    const superseded = this.supersededLocks(name);
     const candidates = lockers.filter((p) => !superseded.has(p));
     if (!candidates.length) return undefined;
     const producer = candidates[candidates.length - 1];
@@ -293,7 +296,7 @@ export class Store {
       id,
       isLeg: !id.includes('/'),
       status: this.status(id),
-      superseded: this.supersededProducers().has(id),
+      superseded: this.events(id).some((e) => e.type === 'superseded'),
       contract,
       gates: { grill: gate('grill'), confirm: gate('confirm') },
       artifacts,
@@ -352,12 +355,23 @@ export class Store {
     return out;
   }
 
-  /** Producer-level superseded set: any producer with a superseded event is out
-   *  for ALL its locks (format §5 — 'whose producer is not superseded'). */
-  private supersededProducers(): Set<string> {
+  /** Per-name superseded locks (format §3/§5): a superseded event's successor.name is
+   *  THE artifact it supersedes — a multi-artifact producer's other locks stay current.
+   *  Legacy prose superseded events (no structured successor) fall back to
+   *  producer-level: every legacy producer locked exactly one artifact, so the two
+   *  semantics coincide there. */
+  private supersededLocks(name: string): Set<string> {
     const out = new Set<string>();
     for (const [id, node] of this.nodes) {
-      if (node.events.some((e) => e.type === 'superseded')) out.add(id);
+      for (const e of node.events) {
+        if (e.type !== 'superseded') continue;
+        const n = (e.successor as { name?: unknown } | undefined)?.name;
+        if (typeof n === 'string') {
+          if (n === name) out.add(id);
+        } else {
+          out.add(id); // legacy prose supersession — producer-level (single-lock era)
+        }
+      }
     }
     return out;
   }
@@ -508,7 +522,7 @@ export class Store {
     }
     for (const [nm, producers] of lockersByName) {
       if (this.current(nm)) continue;
-      const allSuperseded = producers.every((p) => this.supersededProducers().has(p));
+      const allSuperseded = producers.every((p) => this.supersededLocks(nm).has(p));
       if (!allSuperseded) problems.push(`NO CURRENT: ${nm} (locked but never superseded and not current — orphan)`);
     }
     return problems;

@@ -581,3 +581,40 @@ describe('Store — F-AC19 contract checklist (format v11 §2/§7)', () => {
     expect(problems.some((p) => p.includes('F-AC19'))).toBe(false);
   });
 });
+
+describe('Store — supersession is PER-NAME (format §3/§5; multi-artifact producers)', () => {
+  beforeEach(() => { makeStore(); });
+  afterEach(() => { rmSync(root, { recursive: true, force: true }); });
+
+  it('superseding one of a producer\'s locks keeps its other lock current', () => {
+    // P1 locks A and B; A is superseded (structured successor.name=A); P2 locks A.
+    writeNode('01-goal/01-p1', {}, [
+      ev('created'),
+      ev('artifact-locked', { artifact: { name: 'a-spec', path: 'journey/legs/01-goal/01-p1/artifacts/a.md', lockSha: '111' } }),
+      ev('artifact-locked', { artifact: { name: 'b-spec', path: 'journey/legs/01-goal/01-p1/artifacts/b.md', lockSha: '222' } }),
+      ev('superseded', { successor: { name: 'a-spec', path: 'journey/legs/01-goal/02-p2/artifacts/a2.md' } }),
+    ]);
+    writeNode('01-goal/02-p2', {}, [
+      ev('created'),
+      ev('artifact-locked', { artifact: { name: 'a-spec', path: 'journey/legs/01-goal/02-p2/artifacts/a2.md', lockSha: '333' } }),
+    ]);
+    const s = new Store(root);
+    expect(s.current('a-spec')?.producer).toBe('01-goal/02-p2'); // superseded → P2
+    expect(s.current('b-spec')?.producer).toBe('01-goal/01-p1'); // NOT excluded — still P1
+    expect(s.check().some((p) => p.includes('NO CURRENT'))).toBe(false);
+  });
+
+  it('legacy prose supersession (no successor.name) still excludes the producer', () => {
+    writeNode('01-goal/01-legacy', {}, [
+      ev('created'),
+      ev('artifact-locked', { artifact: { name: 'x-spec', path: 'journey/legs/01-goal/01-legacy/artifacts/x.md', lockSha: '111' } }),
+      ev('superseded', { note: 'artifacts/x.md (v1) superseded by successor artifact' }),
+    ]);
+    writeNode('01-goal/02-legacy', {}, [
+      ev('created'),
+      ev('artifact-locked', { artifact: { name: 'x-spec', path: 'journey/legs/01-goal/02-legacy/artifacts/x2.md', lockSha: '222' } }),
+    ]);
+    const s = new Store(root);
+    expect(s.current('x-spec')?.producer).toBe('01-goal/02-legacy');
+  });
+});
