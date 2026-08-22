@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Store } from '../store.js';
+import { Store, JourneyEvent } from '../store.js';
 import { getVOCAB } from '../vocab.js';
 
 // Fixture helper: a disposable journey store in a temp dir.
@@ -581,6 +581,51 @@ describe('Store — F-AC19 contract checklist (format v11 §2/§7)', () => {
     expect(problems.some((p) => p.includes('F-AC19'))).toBe(false);
   });
 });
+
+describe('Store — strict event schema (format v12 §3: unknown fields + shapes rejected)', () => {
+  beforeEach(() => { makeStore(); });
+  afterEach(() => { rmSync(root, { recursive: true, force: true }); });
+
+  const s = () => new Store(root);
+  const expectReject = (id: string, event: JourneyEvent, re: RegExp) => {
+    expect(() => s().appendEvent(id, event)).toThrow(re);
+  };
+
+  it('rejects an unknown top-level field on any event type', () => {
+    writeNode('06-engine-build/20-a', {}, [ev('created')]);
+    expectReject('06-engine-build/20-a', { at: '2026-08-22', type: 'evidence', note: 'x', totallyUnknown: 1 }, /unknown field/);
+  });
+
+  it('rejects a malformed artifact (not {name, path, lockSha?})', () => {
+    writeNode('06-engine-build/20-b', {}, [ev('created')]);
+    expectReject('06-engine-build/20-b', { at: '2026-08-22', type: 'artifact-locked', artifact: 'garbage' } as unknown as JourneyEvent, /artifact.*must be/);
+    expectReject('06-engine-build/20-b', { at: '2026-08-22', type: 'artifact-locked', artifact: { name: 'x' } } as unknown as JourneyEvent, /artifact.*must be/); // path missing
+  });
+
+  it('rejects a malformed successor and a gate outside the vocab', () => {
+    writeNode('06-engine-build/20-c', {}, [ev('created')]);
+    expectReject('06-engine-build/20-c', { at: '2026-08-22', type: 'superseded', successor: { name: 'x' } } as unknown as JourneyEvent, /successor.*must be/);
+    expectReject('06-engine-build/20-c', { at: '2026-08-22', type: 'confirmed', gate: 'not-a-gate' } as unknown as JourneyEvent, /gate must be/);
+  });
+
+  it('rejects malformed commits/refs on evidence', () => {
+    writeNode('06-engine-build/20-d', {}, [ev('created')]);
+    expectReject('06-engine-build/20-d', { at: '2026-08-22', type: 'evidence', commits: [{ noSha: true }] } as unknown as JourneyEvent, /commits must be/);
+    expectReject('06-engine-build/20-d', { at: '2026-08-22', type: 'evidence', refs: [42] } as unknown as JourneyEvent, /refs must be/);
+  });
+
+  it('accepts the valid shapes the engine itself writes (dogfood)', () => {
+    writeNode('06-engine-build/20-e', {}, [ev('created')]);
+    const s2 = s();
+    s2.appendEvent('06-engine-build/20-e', { at: '2026-08-22', type: 'confirmed', gate: 'grill', note: 'ok' }); // GATE-1 first
+    s2.appendEvent('06-engine-build/20-e', { at: '2026-08-22', type: 'evidence', commits: [{ sha: 'abc1234', note: 'step' }], refs: ['src/x'], note: 'ok' });
+    s2.appendEvent('06-engine-build/20-e', { at: '2026-08-22', type: 'artifact-locked', artifact: { name: 'x', path: 'journey/legs/06-engine-build/20-e/artifacts/x.md', lockSha: 'abc' }, note: 'ok' });
+    expect(s2.events('06-engine-build/20-e').length).toBe(4); // created + 3 valid
+  });
+});
+
+  beforeEach(() => { makeStore(); });
+  afterEach(() => { rmSync(root, { recursive: true, force: true }); });
 
 describe('Store — supersession is PER-NAME (format §3/§5; multi-artifact producers)', () => {
   beforeEach(() => { makeStore(); });

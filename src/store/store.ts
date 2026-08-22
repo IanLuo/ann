@@ -454,6 +454,7 @@ export class Store {
     if (!event.at || !event.type || !getVOCAB().eventTypes.includes(event.type)) {
       throw new Error(`append rejected: bad schema (at + known type required, got ${event.type})`);
     }
+    this.validateEventShape(event); // strict schema (format v12 §3): unknown fields + shapes rejected
     const node = this.nodes.get(id);
     if (!node) throw new Error(`append rejected: no node ${id}`);
     const prospective = [...node.events, event];
@@ -461,6 +462,72 @@ export class Store {
     if (gaps.length) throw new Error(gaps.join('\n'));
     appendFileSync(join(this.legs, id, 'events.jsonl'), JSON.stringify(event) + '\n');
     node.events = prospective;
+  }
+
+  /** STRICT SCHEMA (format v12 §3): the allowed top-level fields per event type and
+   *  the structured field shapes. Unknown fields or malformed shapes are REJECTED at
+   *  the single writer — fail-closed, never let garbage into the log. Legacy prose
+   *  events (no structured artifact/successor) remain valid HISTORY; this guards new writes. */
+  private validateEventShape(e: JourneyEvent): void {
+    const allowed: Record<string, string[]> = {
+      created: ['at', 'type', 'note'],
+      activated: ['at', 'type', 'note'],
+      extended: ['at', 'type', 'note'],
+      evidence: ['at', 'type', 'note', 'commits', 'refs'],
+      'artifact-locked': ['at', 'type', 'note', 'artifact'],
+      completed: ['at', 'type', 'note'],
+      failed: ['at', 'type', 'note'],
+      superseded: ['at', 'type', 'note', 'successor'],
+      submitted: ['at', 'type', 'note', 'gate'],
+      confirmed: ['at', 'type', 'note', 'gate'],
+      rejected: ['at', 'type', 'note', 'gate', 'feedback'],
+      'gate-revised': ['at', 'type', 'note', 'gate'],
+      transferred: ['at', 'type', 'note', 'target', 'scope'],
+      deferred: ['at', 'type', 'note', 'reason'],
+    };
+    const unknown = Object.keys(e).filter((k) => !(allowed[e.type] ?? []).includes(k));
+    if (unknown.length) throw new Error(`append rejected: unknown field(s) '${unknown.join(', ')}' on ${e.type} (strict schema, format v12 §3)`);
+    if (e.type === 'submitted' || e.type === 'confirmed' || e.type === 'rejected') {
+      if (typeof e.gate !== 'string' || !getVOCAB().gates.includes(e.gate)) {
+        throw new Error(`append rejected: ${e.type}.gate must be one of ${getVOCAB().gates.join('|')}`);
+      }
+      if (e.type === 'rejected' && e.feedback !== undefined && typeof e.feedback !== 'string') {
+        throw new Error('append rejected: rejected.feedback must be a string');
+      }
+    }
+    if (e.type === 'gate-revised') {
+      const g = e.gate as { old?: unknown; new?: unknown } | undefined;
+      if (!g || typeof g !== 'object' || typeof g.old !== 'string' || typeof g.new !== 'string') {
+        throw new Error('append rejected: gate-revised.gate must be {old, new}');
+      }
+    }
+    if (e.type === 'artifact-locked' && e.artifact !== undefined) {
+      const a = e.artifact as { name?: unknown; path?: unknown; lockSha?: unknown };
+      if (!a || typeof a !== 'object' || typeof a.name !== 'string' || !a.name || typeof a.path !== 'string' || !a.path) {
+        throw new Error('append rejected: artifact-locked.artifact must be {name, path, lockSha?}');
+      }
+      if (a.lockSha !== undefined && typeof a.lockSha !== 'string') throw new Error('append rejected: artifact.lockSha must be a string');
+    }
+    if (e.type === 'superseded' && e.successor !== undefined) {
+      const s = e.successor as { name?: unknown; path?: unknown };
+      if (!s || typeof s !== 'object' || typeof s.name !== 'string' || !s.name || typeof s.path !== 'string' || !s.path) {
+        throw new Error('append rejected: superseded.successor must be {name, path}');
+      }
+    }
+    if (e.type === 'evidence') {
+      if (e.commits !== undefined && (!Array.isArray(e.commits) || !e.commits.every((c) => typeof (c as { sha?: unknown })?.sha === 'string' && (c as { sha: string }).sha))) {
+        throw new Error('append rejected: evidence.commits must be [{sha, note?}, …]');
+      }
+      if (e.refs !== undefined && (!Array.isArray(e.refs) || !e.refs.every((r) => typeof r === 'string'))) {
+        throw new Error('append rejected: evidence.refs must be [path, …]');
+      }
+    }
+    if (e.type === 'transferred' && (typeof e.target !== 'string' || typeof e.scope !== 'string')) {
+      throw new Error('append rejected: transferred.target and .scope must be strings');
+    }
+    if (e.type === 'deferred' && typeof e.reason !== 'string') {
+      throw new Error('append rejected: deferred.reason must be a string');
+    }
   }
 
   /** Spawn a node: write the immutable creation record, then the `created` event
