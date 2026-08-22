@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { loadConfig } from './config.js';
 
 /**
  * Secret resolution — where the adapter's API keys come from.
@@ -29,7 +30,7 @@ export const keychainExec: KeychainExec = (args, input) =>
 
 export interface SecretResolution {
   value?: string;
-  source: 'keychain' | 'env' | 'literal' | 'none';
+  source: 'keychain' | 'env' | 'config' | 'literal' | 'none';
 }
 
 /** Resolve a secret spec — first resolvable source wins. Value is returned in memory
@@ -49,6 +50,9 @@ export function resolveSecret(spec: string, exec: KeychainExec = keychainExec, p
     } else if (part.startsWith('env:')) {
       const v = process.env[part.slice(4).trim()];
       if (v) return { value: v, source: 'env' };
+      // env unset → the user config file (local app; chmod 600, masked everywhere)
+      const cfg = loadConfig().apiKey;
+      if (cfg) return { value: cfg, source: 'config' };
     } else if (part) {
       return { value: part, source: 'literal' };
     }

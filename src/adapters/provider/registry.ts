@@ -1,5 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { loadConfig } from './config.js';
+import type { UserConfig } from './config.js';
 
 /**
  * The provider registry (resource-registry spec, category `adapter`): the single
@@ -36,20 +38,25 @@ export interface ProviderRegistry {
   defaults: ProviderDefaults;
 }
 
-/** Resolve a setting that may be 'env:NAME' or 'env:NAME || literal-fallback'.
- *  A bare literal passes through. Returns undefined only when no env var is set
- *  and no fallback exists. */
-export function resolveSetting(spec: string): string | undefined {
+/** Resolve a setting that may be 'env:NAME || literal-fallback'. Resolution:
+ *  env (the NAME, deployment override) → user config (configKey, the local app's
+ *  settings file) → the literal fallback. Returns undefined only when none exist. */
+export function resolveSetting(spec: string, configKey?: keyof UserConfig): string | undefined {
   if (!spec.startsWith('env:')) return spec;
+  const fallbacks: string[] = [];
   for (const part of spec.slice(4).split('||').map((p) => p.trim())) {
     if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(part)) {
       const v = process.env[part];
-      if (v !== undefined && v !== '') return v;
+      if (v !== undefined && v !== '') return v; // env wins (deployment override)
     } else {
-      return part; // literal fallback
+      fallbacks.push(part);
     }
   }
-  return undefined;
+  if (configKey) {
+    const v = loadConfig()[configKey];
+    if (v !== undefined && v !== '') return String(v); // user config file
+  }
+  return fallbacks[0];
 }
 
 let cached: ProviderRegistry | null = null;

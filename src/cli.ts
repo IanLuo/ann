@@ -39,7 +39,7 @@ import { join, basename, dirname } from 'node:path';
 import { execSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { Store, legacyPath, logicalNameFromFile } from './store/store.js';
-import { loadProviderRegistry, resolveSetting, resolveSecret, addKeychainSecret, deleteKeychainSecret } from './adapters/provider/index.js';
+import { loadProviderRegistry, resolveSetting, resolveSecret, addKeychainSecret, deleteKeychainSecret, loadConfig, setConfig, maskedConfig, configPath, configExists } from './adapters/provider/index.js';
 import { VOCAB } from './store/vocab.js';
 
 const ROOT = process.cwd();
@@ -222,16 +222,18 @@ function cmdProviders() {
     for (const p of reg.providers) {
       console.log(`provider: ${p.id}  [${p.kind}]`);
       console.log(`  protocol:   ${p.protocol}`);
-      const base = resolveSetting(p.baseUrl);
+      const base = resolveSetting(p.baseUrl, 'baseUrl');
       const baseEnv = p.baseUrl.startsWith('env:') ? p.baseUrl.slice(4).split('||')[0].trim() : undefined;
       const baseFromEnv = baseEnv ? !!process.env[baseEnv] : false;
-      console.log(`  baseUrl:    ${base ?? '(unresolved — env unset, no fallback)'}${baseFromEnv ? ' (from env)' : baseEnv ? ' (fallback)' : ''}`);
+      const baseFromConfig = !baseFromEnv && !!loadConfig().baseUrl;
+      console.log(`  baseUrl:    ${base ?? '(unresolved — env unset, no fallback)'}${baseFromEnv ? ' (from env)' : baseFromConfig ? ' (from config file)' : baseEnv ? ' (fallback)' : ''}`);
       const key = p.apiKey ? resolveSecret(p.apiKey) : { source: 'none' as const };
-      console.log(`  apiKey:     ${key.source === 'keychain' ? 'SET (keychain, masked)' : key.source === 'env' ? 'SET (env, masked)' : key.source === 'literal' ? 'SET (literal, masked — move it to the keychain)' : p.apiKey ? `unset — try: ann cred! set <service> <account>` : '(none configured)'}`);
-      const model = resolveSetting(p.defaultModel);
+      console.log(`  apiKey:     ${key.source === 'keychain' ? 'SET (keychain, masked)' : key.source === 'env' ? 'SET (env, masked)' : key.source === 'config' ? 'SET (config file, masked)' : key.source === 'literal' ? 'SET (literal, masked — move it to the config file or keychain)' : p.apiKey ? `unset — try: ann config! set apiKey <value>` : '(none configured)'}`);
+      const model = resolveSetting(p.defaultModel, 'model');
       const modelEnv = p.defaultModel.startsWith('env:') ? p.defaultModel.slice(4).split('||')[0].trim() : undefined;
       const modelFromEnv = modelEnv ? !!process.env[modelEnv] : false;
-      console.log(`  defaultModel: ${model ?? '(unresolved)'}${modelFromEnv ? ' (from env)' : modelEnv ? ' (fallback)' : ''}`);
+      const modelFromConfig = !modelFromEnv && !!loadConfig().model;
+      console.log(`  defaultModel: ${model ?? '(unresolved)'}${modelFromEnv ? ' (from env)' : modelFromConfig ? ' (from config file)' : modelEnv ? ' (fallback)' : ''}`);
     }
     console.log('---');
     console.log(`defaults: maxTokens=${reg.defaults.maxTokens} · temperature=${reg.defaults.temperature} · retries=${reg.defaults.retries} · backoff=${reg.defaults.backoffMs}ms→${reg.defaults.backoffMaxMs}ms · timeout=${reg.defaults.timeoutMs}ms`);
@@ -239,6 +241,31 @@ function cmdProviders() {
     console.error((e as Error).message);
     process.exit(1);
   }
+}
+
+function cmdConfig() {
+  console.log(`CONFIG FILE: ${configPath()}${configExists() ? '' : ' (not created yet)'}`);
+  console.log('  outside the repo · chmod 600 (user-only) · apiKey masked · resolution: env > config > keychain/fallback');
+  const entries = Object.entries(maskedConfig());
+  if (!entries.length) console.log('  (empty — defaults apply)');
+  for (const [k, v] of entries) console.log(`  ${k}: ${v}`);
+  console.log('  set: ann config! set <key> <value>  (keys: provider · model · baseUrl · apiKey · maxTokens)');
+}
+
+function cmdConfigSet(key: string, value: string | undefined) {
+  const keys = ['provider', 'model', 'baseUrl', 'apiKey', 'maxTokens'];
+  if (!keys.includes(key) || value === undefined || value === '') {
+    console.error(`usage: ann config! set <key> <value>  (keys: ${keys.join(' · ')})`);
+    process.exit(2);
+  }
+  let v: string | number = value;
+  if (key === 'maxTokens') {
+    const n = Number(value);
+    if (Number.isNaN(n)) { console.error('config!: maxTokens must be a number'); process.exit(1); }
+    v = n;
+  }
+  setConfig(key as 'provider' | 'model' | 'baseUrl' | 'apiKey' | 'maxTokens', v);
+  console.log(`config: saved ${key} → ${configPath()}${key === 'apiKey' ? ' (masked, never echoed)' : ` = ${value}`}`);
 }
 
 function cmdCred(op: string, service: string, account: string, secret: string | undefined) {
@@ -550,6 +577,8 @@ const COMMANDS: Array<{ name: string; args: string; desc: string }> = [
   { name: 'check', args: '', desc: 'integrity + gates + hashes + the journey state line · alias --check' },
   { name: 'specs', args: '', desc: 'the locked contract stack (name · type · @sha · path) · alias --specs' },
   { name: 'providers', args: '', desc: 'the adapter registry: providers, models, defaults (env-resolved, api key masked) · alias --providers' },
+  { name: 'config', args: '', desc: 'the user config file (~/.config/ann/config.json; apiKey masked) · alias --config' },
+  { name: 'config!', args: 'set <key> <value>', desc: 'WRITE — save a config value (provider|model|baseUrl|apiKey|maxTokens); chmod 600, outside the repo; apiKey never echoed' },
   { name: 'cred!', args: 'set|delete <service> <account> [secret]', desc: 'WRITE — OS keychain (macOS, DEV-ONLY local CLI): save/remove a secret via stdin; production = server-side env (12-factor)' },
   { name: 'branch', args: '<id>', desc: 'a node + every descendant\'s events, one walk · alias --branch' },
   { name: 'confirm', args: '<id>', desc: 'a node\'s gate card: intent · ACs · artifacts · gates' },
@@ -626,6 +655,8 @@ try {
   else if (command === 'check' || command === '--check') cmdCheck();
   else if (command === 'specs' || command === '--specs') cmdSpecs();
   else if (command === 'providers' || command === '--providers') cmdProviders();
+  else if (command === 'config' || command === '--config') cmdConfig();
+  else if (command === 'config!') cmdConfigSet(args[2], args[3]);
   else if (command === 'cred!') cmdCred(args[1], args[2], args[3], args[4]);
   else if (command === 'branch' || command === '--branch') cmdBranch(resolveId(args[1] || ''));
   else if (command === 'commands' || command === '--commands') {

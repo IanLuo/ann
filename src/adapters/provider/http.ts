@@ -29,7 +29,7 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
     private readonly defaults: ProviderDefaults,
     private readonly logRoot: string = process.cwd(),
   ) {
-    const base = resolveSetting(entry.baseUrl);
+    const base = resolveSetting(entry.baseUrl, 'baseUrl');
     if (!base) {
       throw new Error(`provider '${entry.id}': baseUrl unresolved — set the env var or fix rules/adapter/provider.json`);
     }
@@ -37,7 +37,7 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
     // the API key is a SECRET — resolved via the safe chain (keychain → env),
     // never logged, never written to the op-log, never printed.
     this.apiKey = entry.apiKey ? resolveSecret(entry.apiKey).value : undefined;
-    const model = resolveSetting(entry.defaultModel);
+    const model = resolveSetting(entry.defaultModel, 'model');
     if (!model) {
       throw new Error(`provider '${entry.id}': defaultModel unresolved — set the env var or fix rules/adapter/provider.json`);
     }
