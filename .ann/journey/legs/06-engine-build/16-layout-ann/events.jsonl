@@ -1,3 +1,5 @@
 {"at":"2026-08-22","type":"created","note":"spawned by bookkeeper (agent)"}
 {"at":"2026-08-22","type":"submitted","gate":"grill","note":"bookkeeper submission (ian)"}
 {"at":"2026-08-22","type":"confirmed","gate":"grill","note":"accepted (ian)"}
+{"at":"2026-08-22","type":"artifact-locked","artifact":{"name":"journey-format-spec","path":"journey/legs/06-engine-build/16-layout-ann/artifacts/journey-format-spec.md","lockSha":"60ee008"},"note":"journey-format-spec.md specs-locked via bookkeeper (agent)"}
+{"at":"2026-08-22","type":"artifact-locked","artifact":{"name":"architecture","path":"journey/legs/06-engine-build/16-layout-ann/artifacts/architecture.md","lockSha":"e6d07ed"},"note":"architecture.md specs-locked via bookkeeper (agent)"}

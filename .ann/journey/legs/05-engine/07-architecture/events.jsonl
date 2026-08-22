@@ -4,3 +4,4 @@
 {"at":"2026-08-17","type":"confirmed","gate":"confirm","note":"user confirmed via gate2-confirmation report (confirm-all)"}
 {"at":"2026-08-17","type":"submitted","gate":"grill","note":"retrospective: user confirm-all (2026-08-17)"}
 {"at":"2026-08-17","type":"confirmed","gate":"grill","note":"retrospective: user confirm-all (2026-08-17)"}
+{"at":"2026-08-22","type":"superseded","successor":{"name":"architecture","path":"journey/legs/06-engine-build/16-layout-ann/artifacts/architecture.md"},"note":"v1 superseded by v2 (.ann/ layout + product-form decision)"}

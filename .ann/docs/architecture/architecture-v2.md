@@ -1,4 +1,4 @@
-<!-- draft architecture v2 2026-08-22 type=architecture -->
+<!-- specs:locked:e6d07ed 2026-08-22 type=architecture -->
 
 ## Link contract
 - **upstream** (this doc relies on): 05-engine/00/06-functional-spec/artifacts/functional-spec.md,04-system-design/00/02-system-design-doc/artifacts/ann-system-design.md
