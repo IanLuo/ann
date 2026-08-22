@@ -1,0 +1,29 @@
+{
+  "id": "06-engine-build/18-remove-card",
+  "contract": {
+    "intent": "Remove the description.md card + card! command: nothing reads the card (verified — write-only since v4, no consumer materialized; the derived commands detail/status/results supersede it). journey-format-spec v12 -> v13 drops 4 (the regenerable file), 6 (the card section), 9 (missing-card rule), 7 (grep-able cards AC). Search command DEFERRED (build later, not now).",
+    "acceptanceCriteria": [
+      "journey-format-spec v13 (complete superseding): 4 drops the description.md row; 6 replaced by a derived-commands note; 9 drops missing-description invalid; 7 drops grep-able cards; read discipline = commands only",
+      "all description.md files deleted from the journey",
+      "card! command removed (COMMANDS table, dispatch, cmdCard, WRITES, header); spawn no longer writes description.md",
+      "store untouched (it never read the card); suite green; typecheck clean",
+      "v13 locked at sha; v12 superseded; AGENTS.md re-pointed (no card! in the mutation list)"
+    ],
+    "targetAreas": [
+      "docs/specs/journey-format-spec-v12.md",
+      "src/cli.ts",
+      "AGENTS.md",
+      ".ann/journey"
+    ],
+    "requiredInputs": [
+      "journey-format-spec",
+      "design"
+    ],
+    "expectedOutputs": [
+      "journey-format-spec-v13.md",
+      "cards deleted",
+      "card! removed"
+    ]
+  },
+  "createdAt": "2026-08-22"
+}

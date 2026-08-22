@@ -25,7 +25,6 @@
  *   ann gate <id> grill|confirm accept|reject [feedback]
  *   ann lock <id> <name> [type]             → stamp marker + artifact-locked
  *   ann supersede <id> <name> <path> [note]
- *   ann card <id>                           → regenerate description.md
  */
 import {
   readFileSync,
@@ -666,19 +665,6 @@ function cmdSupersede(id: string, name: string, path: string, note: string) {
   console.log(`superseded ${name} → ${path} on ${id}`);
 }
 
-function cmdCard(id: string) {
-  const c = store.contract(id);
-  if (!c) { console.error(`card: no node ${id}`); process.exit(2); }
-  const last = id.split('/').pop()!;
-  const intent = ((c.contract ?? {}) as { intent?: string }).intent || '';
-  const terms = (intent.match(/[A-Za-z][A-Za-z0-9-]{3,}/g) || []).slice(0, 8).join(', ');
-  const artifacts = lockShaOf(id).map((l) => `- ${l.name}: ${l.path}`).join('\n') || '(none yet)';
-  const kids = store.tasksOf(id).length ? store.tasksOf(id).map((k) => `- ${k}`).join('\n') : '(none)';
-  const body = `# ${last}\n\n- id: \`${id}\` · status: ${display(id)} · type: ${id.split('/').length === 1 ? 'leg' : 'task'}\n- summary: ${intent.split('\n')[0]}\n- search terms: ${terms}\n\n## artifacts\n${artifacts}\n\n## children\n${kids}\n`;
-  writeFileSync(join(legsRoot, id, 'description.md'), body);
-  console.log(`card regenerated → ${id}`);
-}
-
 // ---- DISPATCH ----
 // Naming: reads have NO marker; WRITES end in `!` (the mutator convention — Scheme/Ruby/Nix:
 // `set!`, `push!`). A bare write name refuses with a hint — the `!` is a guarantee, not advice.
@@ -705,7 +691,6 @@ const COMMANDS: Array<{ name: string; args: string; desc: string }> = [
   { name: 'gate!', args: '<id> grill|confirm accept|reject [feedback]', desc: 'WRITE — human gate decision (submit + decide; 3-reject bound)' },
   { name: 'lock!', args: '<id> <name> [type]', desc: 'WRITE — stamp lock marker + artifact-locked (hash-verifying sha)' },
   { name: 'supersede!', args: '<id> <name> <path> [note]', desc: 'WRITE — superseded event with a forward pointer' },
-  { name: 'card!', args: '<id>', desc: 'WRITE — regenerate description.md (the only rewritable file)' },
 ];
 
 const command = args[0];
@@ -757,7 +742,7 @@ try {
     console.log('\nEnv: `RECORDED_BY=<name>` — provenance on recorded events (default: agent).');
     process.exit(0);
   }
-  const WRITES = ['append', 'spawn', 'gate', 'lock', 'supersede', 'card', 'cred'];
+  const WRITES = ['append', 'spawn', 'gate', 'lock', 'supersede', 'cred'];
   if (WRITES.includes(command)) {
     console.error(`ann: writes are marked with '!' — did you mean '${command}!'? (mutator convention: reads have no marker, writes always end in !)`);
     process.exit(1);
@@ -795,7 +780,6 @@ try {
   } else if (command === 'gate!') cmdGate(args[1], args[2], args[3], args.slice(4).join(' '));
   else if (command === 'lock!') cmdLock(args[1], args[2], args[3] || 'spec');
   else if (command === 'supersede!') cmdSupersede(args[1], args[2], args[3], args.slice(4).join(' '));
-  else if (command === 'card!') cmdCard(args[1]);
   else {
     const cur = store.current(command);
     if (!cur) { console.error(`ann: no current artifact for '${command}'`); process.exit(1); }
