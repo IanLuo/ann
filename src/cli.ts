@@ -598,7 +598,9 @@ function cmdSpawn(id: string, raw: string) {
   }
   store.spawn(id, contract, WHO);
   const dir = join(legsRoot, id);
-  const intent = ((contract as { contract?: { intent?: string } }).contract?.intent) || '';
+  // unwrap the contract exactly like store.spawn (both {contract:{…}} and direct forms)
+  const cw = (contract as { contract?: Record<string, unknown> }).contract ?? (contract as Record<string, unknown>);
+  const intent = String(cw?.intent ?? '');
   const terms = (intent.match(/[A-Za-z][A-Za-z0-9-]{3,}/g) || []).slice(0, 8).join(', ');
   writeFileSync(join(dir, 'description.md'), `# ${last}\n\n- id: \`${id}\` · status: queued · type: ${segs.length > 1 ? 'task' : 'leg'}\n- summary: ${intent.split('\n')[0]}\n- search terms: ${terms}\n`);
   console.log(`spawned ${id} (${segs.length > 1 ? 'task' : 'leg'})`);
