@@ -3,3 +3,6 @@
 {"at":"2026-08-22","type":"confirmed","gate":"grill","note":"accepted (ian)"}
 {"at":"2026-08-22","type":"artifact-locked","artifact":{"name":"journey-format-spec","path":"journey/legs/06-engine-build/16-layout-ann/artifacts/journey-format-spec.md","lockSha":"60ee008"},"note":"journey-format-spec.md specs-locked via bookkeeper (agent)"}
 {"at":"2026-08-22","type":"artifact-locked","artifact":{"name":"architecture","path":"journey/legs/06-engine-build/16-layout-ann/artifacts/architecture.md","lockSha":"e6d07ed"},"note":"architecture.md specs-locked via bookkeeper (agent)"}
+{"at":"2026-08-22","type":"submitted","gate":"confirm","note":"bookkeeper submission (agent)"}
+{"at":"2026-08-22","type":"confirmed","gate":"confirm","note":"accepted (agent)"}
+{"at":"2026-08-22","type":"completed","note":".ann/ layout complete: journey/docs/rules moved under .ann/ + root compat symlinks (recorded paths + relative links resolve, zero event rewrites); code updated (store legs, legacyPath ^journey/ -> .ann/journey/, loaders .ann/rules, recognition .ann/ w/ legacy journey/); format v12 @ 60ee008 + architecture v2 @ e6d07ed locked (v11/v1 superseded); AGENTS.md re-pointed; 112 tests green, check 2 problems (documented task-13 slips)."}
