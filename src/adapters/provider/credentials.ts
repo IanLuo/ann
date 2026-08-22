@@ -1,17 +1,24 @@
 import { execFileSync } from 'node:child_process';
 
 /**
- * Secret resolution — SAFE credential storage for the adapter's API keys.
+ * Secret resolution — where the adapter's API keys come from.
+ *
+ * The PRODUCT is a web app: credentials are SERVER-SIDE, environment-injected
+ * (12-factor — the deployment platform / secrets manager sets the env at runtime;
+ * the browser client never holds the key, the adapter runs server-side and reads
+ * its env). The macOS Keychain is a DEV-ONLY convenience for the local CLI — it is
+ * NOT a valid credential store for a web app (no keychain on a server, and the
+ * client must never see the key).
  *
  * Sources (tried in spec order, ' || ' separated):
- *   - `keychain:SERVICE/ACCOUNT` — macOS Keychain (encrypted at rest; read via
+ *   - `env:NAME` — the product path: server-side env (platform/secrets-manager injected).
+ *   - `keychain:SERVICE/ACCOUNT` — macOS Keychain (dev-only, local CLI; read via
  *     `security find-generic-password -s SERVICE -a ACCOUNT -w`; macOS only).
- *   - `env:NAME` — environment variable.
  *   - a bare literal (discouraged — a literal key in the registry is a secret at rest).
  *
  * The resolved value is NEVER printed, logged, or written to the op-log; `ann providers`
- * shows only the SOURCE state (set/masked). Writes go through `ann cred!` →
- * `security add-generic-password` (password via stdin, never argv).
+ * shows only the SOURCE state (set/masked). `ann cred!` writes to the keychain
+ * (dev-only); production credentials are set via the server environment.
  */
 
 export type KeychainExec = (args: string[], input?: string) => string;
