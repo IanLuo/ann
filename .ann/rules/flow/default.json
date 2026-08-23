@@ -1,0 +1,9 @@
+{
+  "registry": "flow",
+  "version": 1,
+  "category": "flow",
+  "kind": "registry",
+  "definition": "the project's step-chain flow config — DATA, not code (requirements-spec AC-3, flow-control-spec v6 §7). The engine reads this file and never overrides it; a task may override with its own contract.flow chain (still chain-validated).",
+  "template": "idea → validate → envision → detailed specs → continue",
+  "chain": ["validate", "envision", "spec"]
+}
