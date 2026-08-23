@@ -19,15 +19,13 @@
       "definition": "completed requires a confirmed(gate=confirm) recorded (position-insensitive)"
     },
     {
-      "id": "event-schema",
+      "id": "closure-integrity",
       "category": "check",
       "kind": "rule",
       "enabled": true,
       "severity": "error",
-      "params": {
-        "legacyProse": true
-      },
-      "definition": "every event line valid JSON with a known type; artifact-locked/superseded carry structured fields (legacy prose tolerated)"
+      "params": {},
+      "definition": "completed-after-gate-revised requires transferred|deferred; transferred targets must exist (F-AC16)"
     },
     {
       "id": "one-current-per-name",
@@ -48,13 +46,24 @@
       "definition": "every current artifact's file exists on disk"
     },
     {
-      "id": "card-present",
+      "id": "event-schema",
       "category": "check",
       "kind": "rule",
       "enabled": true,
-      "severity": "warning",
+      "severity": "error",
+      "params": {
+        "legacyProse": true
+      },
+      "definition": "every event line valid JSON with a known type; artifact-locked/superseded carry structured fields (legacy prose tolerated)"
+    },
+    {
+      "id": "round-gate",
+      "category": "check",
+      "kind": "rule",
+      "enabled": true,
+      "severity": "error",
       "params": {},
-      "definition": "every node has description.md"
+      "definition": "no leg N+1 work before all of leg N's tasks done (derived aggregate — v7 §12)"
     },
     {
       "id": "depth-budget",
@@ -80,13 +89,49 @@
       "definition": "path segments kebab-case, <= 24 chars (legacy tolerated)"
     },
     {
-      "id": "round-gate",
+      "id": "vocab-integrity",
       "category": "check",
       "kind": "rule",
       "enabled": true,
       "severity": "error",
       "params": {},
-      "definition": "no leg N+1 work before all of leg N's tasks done (derived aggregate \u2014 v7 \u00a712)"
+      "definition": "the vocab registry (rules/schema/vocab.json) exists and carries the schema vocabulary"
+    },
+    {
+      "id": "registry-integrity",
+      "category": "check",
+      "kind": "rule",
+      "enabled": true,
+      "severity": "error",
+      "params": {},
+      "definition": "every rule module has a unique id — self-contained modules ARE the registry (rules/check/rules.json is derived)"
+    },
+    {
+      "id": "distance-to-goal",
+      "category": "check",
+      "kind": "rule",
+      "enabled": true,
+      "severity": "warning",
+      "params": {},
+      "definition": "the set of not-done nodes from the active front to the goal (never a scalar count)"
+    },
+    {
+      "id": "redaction",
+      "category": "check",
+      "kind": "rule",
+      "enabled": true,
+      "severity": "error",
+      "params": {},
+      "definition": "no artifact/evidence content contains the configured apiKey (secrets never leak into the tree)"
+    },
+    {
+      "id": "artifact-hash-integrity",
+      "category": "check",
+      "kind": "rule",
+      "enabled": true,
+      "severity": "error",
+      "params": {},
+      "definition": "marker-stripped blob vs recorded lockSha — fail-closed on new locks"
     },
     {
       "id": "high-impact-defaulted",
@@ -96,33 +141,6 @@
       "severity": "warning",
       "params": {},
       "definition": "a blocking (high-impact) openQuestion resolved on a completed node must carry resolution provenance (discussed|defaulted|inferred); defaulted/inferred without explicit user decision = flagged (the tech-stack lesson)"
-    },
-    {
-      "id": "registry-integrity",
-      "category": "check",
-      "kind": "rule",
-      "enabled": true,
-      "severity": "error",
-      "params": {},
-      "definition": "every rule id in the registry has an implementation in the validators; every registry file exists"
-    },
-    {
-      "id": "vocab-integrity",
-      "category": "check",
-      "kind": "rule",
-      "enabled": true,
-      "severity": "error",
-      "params": {},
-      "definition": "the vocab registry (rules/schema/vocab.json) exists and carries the schema vocabulary \u2014 event types, statuses, gates, artifact types (resource-registry spec instance #2)"
-    },
-    {
-      "id": "closure-integrity",
-      "category": "check",
-      "kind": "rule",
-      "enabled": true,
-      "severity": "error",
-      "params": {},
-      "definition": "completed-after-gate-revised requires transferred|deferred; transferred targets must exist (F-AC16)"
     }
   ]
 }

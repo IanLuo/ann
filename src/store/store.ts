@@ -473,7 +473,7 @@ export class Store {
       created: ['at', 'type', 'note'],
       activated: ['at', 'type', 'note'],
       extended: ['at', 'type', 'note'],
-      evidence: ['at', 'type', 'note', 'commits', 'refs'],
+      evidence: ['at', 'type', 'note', 'commits', 'refs', 'answers'],
       'artifact-locked': ['at', 'type', 'note', 'artifact'],
       completed: ['at', 'type', 'note'],
       failed: ['at', 'type', 'note'],
@@ -520,6 +520,10 @@ export class Store {
       }
       if (e.refs !== undefined && (!Array.isArray(e.refs) || !e.refs.every((r) => typeof r === 'string'))) {
         throw new Error('append rejected: evidence.refs must be [path, …]');
+      }
+      // answer-recording primitive (high-impact-defaulted): answers [{id, answer, provenance?}]
+      if (e.answers !== undefined && (!Array.isArray(e.answers) || !e.answers.every((a) => typeof (a as { id?: unknown })?.id === 'string' && typeof (a as { answer?: unknown })?.answer === 'string'))) {
+        throw new Error('append rejected: evidence.answers must be [{id, answer, provenance?}, …]');
       }
     }
     if (e.type === 'transferred' && (typeof e.target !== 'string' || typeof e.scope !== 'string')) {

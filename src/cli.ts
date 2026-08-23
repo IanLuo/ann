@@ -59,6 +59,7 @@ import {
 } from './adapters/provider/index.js';
 import { getVOCAB } from './store/vocab.js';
 import { assemblePacket } from './engines/context.js';
+import { runValidators, RULES, derivedRegistry } from './engines/validators/index.js';
 
 // ── PROJECT RESOLUTION (before anything touches the store) ──────────────────────
 // ann manages MULTIPLE projects (each with its own journey), identified by PATH only.
@@ -189,6 +190,13 @@ function cmdStatus() {
 
 function cmdCheck() {
   const problems = store.check();
+  const warns: string[] = [];
+  // S4 validators: the self-contained rule modules (registry-derived) — run whole-store
+  for (const f of runValidators(store)) {
+    const line = `[${f.severity}] ${f.code}${f.nodeId ? ` ${f.nodeId}` : ''} — ${f.detail}`;
+    if (f.severity === 'error') problems.push(line);
+    else warns.push(line);
+  }
   for (const p of problems) console.error(p);
   // Artifact integrity: marker-stripped blob vs recorded lock sha.
   const notes: Array<{ sev: 'error' | 'warn' | 'ok' | 'info'; msg: string }> = [];
@@ -232,6 +240,7 @@ function cmdCheck() {
       notes.push({ sev: 'error', msg: `${name}: uncommitted modification on disk (${l.path})` });
     }
   }
+  for (const w of warns) console.log(`  [rule-warn] ${w}`);
   const errors = problems.length + notes.filter((n) => n.sev === 'error').length;
   for (const n of notes) {
     if (n.sev === 'error') console.error(`  [hash] ${n.msg}`);
@@ -374,6 +383,21 @@ function cmdPacket(id: string) {
   console.log('bindingState:');
   if (!p.bindingState.links.length) console.log('  (none)');
   for (const l of p.bindingState.links) console.log(`  ${l.url}`);
+}
+
+function cmdValidate(id: string | undefined) {
+  const nodeId = id ? resolveId(id) : undefined;
+  const findings = runValidators(store, nodeId);
+  if (!findings.length) { console.log('VALIDATE: clean (0 findings)'); return; }
+  for (const f of findings) console.log(`  [${f.severity}] ${f.code}${f.nodeId ? ` ${f.nodeId}` : ''} — ${f.detail}`);
+  console.log(`${findings.length} finding(s)`);
+}
+
+function cmdRules() {
+  const reg = derivedRegistry();
+  console.log('DERIVED CHECK-RULES REGISTRY (source: self-contained rule modules — never hand-maintained)');
+  for (const r of reg.rules) console.log(`  ${r.id.padEnd(24)} [${r.severity.padEnd(7)}] ${r.definition}`);
+  console.log(`\n  ${reg.rules.length} rules — regenerate rules/check/rules.json from this`);
 }
 
 function cmdConfig() {
@@ -709,6 +733,8 @@ const COMMANDS: Array<{ name: string; args: string; desc: string }> = [
   { name: 'detail', args: '<id>', desc: 'a node\'s full derived detail: contract · gate states · artifacts (current/superseded) · blockers · events tail' },
   { name: 'results', args: '<id> [n]', desc: 'a task\'s results by kind (doc/commit/ref/evidence/link); with n, drill into one (doc=content, commit=git show, ref=file/dir, evidence=event) · alias --results' },
   { name: 'packet', args: '<id>', desc: 'the node\'s deterministic context packet (context-packet-spec; derived on demand, never saved) · alias --packet' },
+  { name: 'validate', args: '[id]', desc: 'run the enabled validator rules (all nodes, or one node) — rule-id\'d deterministic findings · alias --validate' },
+  { name: 'rules', args: '', desc: 'the DERIVED check-rules registry (self-contained rule modules are the source) · alias --rules' },
   { name: 'commands', args: '', desc: 'this table as markdown (the derived doc) · alias --commands' },
   { name: 'help', args: '', desc: 'usage · alias --help / -h' },
   { name: 'append!', args: '<id> \'<json>\'', desc: 'WRITE — single-writer append (store.appendEvent, LB-3)' },
@@ -794,6 +820,8 @@ try {
   else if (command === 'detail' || command === '--detail') cmdDetail(resolveId(args[1]));
   else if (command === 'results' || command === '--results') cmdResults(resolveId(args[1]), args[2]);
   else if (command === 'packet' || command === '--packet') cmdPacket(resolveId(args[1]));
+  else if (command === 'validate' || command === '--validate') cmdValidate(args[1]);
+  else if (command === 'rules' || command === '--rules') cmdRules();
   else if (command === 'append!') {
     const raw = args.slice(2).join(' ');
     if (!args[1] || !raw) { console.error('usage: ann append! <id> \'{"at":..,"type":..}\''); process.exit(2); }
