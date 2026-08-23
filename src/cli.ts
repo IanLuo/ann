@@ -58,6 +58,7 @@ import {
   removeProject,
 } from './adapters/provider/index.js';
 import { getVOCAB } from './store/vocab.js';
+import { assemblePacket } from './engines/context.js';
 
 // ── PROJECT RESOLUTION (before anything touches the store) ──────────────────────
 // ann manages MULTIPLE projects (each with its own journey), identified by PATH only.
@@ -350,6 +351,29 @@ function cmdProjectSet(op: string, path: string | undefined) {
     console.error('usage: ann project! add|use|remove <path>');
     process.exit(2);
   }
+}
+
+function cmdPacket(id: string) {
+  const p = assemblePacket(store, id);
+  console.log(`PACKET: ${id} (${p.pathDecisions.isLeg ? 'leg' : 'task'} · depth ${p.pathDecisions.depth})`);
+  console.log(`readiness: ${p.readiness.ready ? 'ready' : 'BLOCKED'}` + (p.readiness.blockers.length ? `
+  blockers: ${p.readiness.blockers.join('; ')}` : ''));
+  console.log('---');
+  console.log('dependencies:');
+  if (!p.dependencies.length) console.log('  (none declared)');
+  for (const d of p.dependencies) console.log(`  ${d.name} [${d.status}]${d.status === 'resolved' ? ` → ${d.path} @ ${d.sha} (${(d.excerpt ?? '').length} chars excerpt)` : ` — blocker: ${d.blocker}`}`);
+  console.log('---');
+  console.log('siblings:');
+  for (const s of p.siblingStatus.siblings) console.log(`  ${s.id}  ${s.status}`);
+  for (const c of p.siblingStatus.children) console.log(`  ↳ ${c.id}  ${c.status}`);
+  console.log('---');
+  console.log('openQuestions:');
+  if (!p.openQuestions.length) console.log('  (none)');
+  for (const q of p.openQuestions) console.log(`  ${q.id} [${q.impact}] ${q.question}${q.default ? ` (default: ${q.default})` : ''}`);
+  console.log('---');
+  console.log('bindingState:');
+  if (!p.bindingState.links.length) console.log('  (none)');
+  for (const l of p.bindingState.links) console.log(`  ${l.url}`);
 }
 
 function cmdConfig() {
@@ -684,6 +708,7 @@ const COMMANDS: Array<{ name: string; args: string; desc: string }> = [
   { name: 'confirm', args: '<id>', desc: 'a node\'s gate card: intent · ACs · artifacts · gates' },
   { name: 'detail', args: '<id>', desc: 'a node\'s full derived detail: contract · gate states · artifacts (current/superseded) · blockers · events tail' },
   { name: 'results', args: '<id> [n]', desc: 'a task\'s results by kind (doc/commit/ref/evidence/link); with n, drill into one (doc=content, commit=git show, ref=file/dir, evidence=event) · alias --results' },
+  { name: 'packet', args: '<id>', desc: 'the node\'s deterministic context packet (context-packet-spec; derived on demand, never saved) · alias --packet' },
   { name: 'commands', args: '', desc: 'this table as markdown (the derived doc) · alias --commands' },
   { name: 'help', args: '', desc: 'usage · alias --help / -h' },
   { name: 'append!', args: '<id> \'<json>\'', desc: 'WRITE — single-writer append (store.appendEvent, LB-3)' },
@@ -768,6 +793,7 @@ try {
   } else if (command === 'confirm') cmdConfirm(resolveId(args[1]));
   else if (command === 'detail' || command === '--detail') cmdDetail(resolveId(args[1]));
   else if (command === 'results' || command === '--results') cmdResults(resolveId(args[1]), args[2]);
+  else if (command === 'packet' || command === '--packet') cmdPacket(resolveId(args[1]));
   else if (command === 'append!') {
     const raw = args.slice(2).join(' ');
     if (!args[1] || !raw) { console.error('usage: ann append! <id> \'{"at":..,"type":..}\''); process.exit(2); }
