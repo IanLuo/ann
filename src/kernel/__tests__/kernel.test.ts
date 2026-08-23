@@ -10,6 +10,7 @@ import { ValidateStep } from '../steps/validate-step.js';
 import { EnvisionStep } from '../steps/envision-step.js';
 import { SpecStep } from '../steps/spec-step.js';
 import { createExecutorSet } from '../executor.js';
+import { ScriptedInteractor } from '../interact.js';
 import { BUILTIN_CHAIN, loadProjectFlow, resolveFlow, validateChain } from '../flow.js';
 import { assemblePacket } from '../../engines/context.js';
 
@@ -73,7 +74,7 @@ const registry = (): StepRegistry => {
   r.register(new SpecStep());
   return r;
 };
-const kernel = (store: Store, adapter: ProviderAdapter) => new PlannerKernel(store, registry(), adapter);
+const kernel = (store: Store, adapter: ProviderAdapter, interactor?: ScriptedInteractor) => new PlannerKernel(store, registry(), adapter, interactor);
 
 /** A well-formed task contract: intent + ACs + a resolvable input. */
 const taskContract = (extra: Record<string, unknown> = {}) => ({
@@ -175,7 +176,7 @@ describe('PlannerKernel — execute (flow chain through the step registry)', () 
     currentSpecArtifact();
     writeNode('01-leg/01-a', taskContract(), [ev('created'), ev('confirmed', { gate: 'grill' })]);
     const { adapter, calls } = fakeAdapter([ok(GRILL_JSON), ok(VISION_JSON), ok('# Detailed spec\n\nAC-1: …')]);
-    const k = kernel(new Store(root), adapter);
+    const k = kernel(new Store(root), adapter, new ScriptedInteractor([], [], 'solid'));
     const r = await k.execute('01-leg/01-a');
 
     expect(r.ok).toBe(true);
@@ -187,9 +188,10 @@ describe('PlannerKernel — execute (flow chain through the step registry)', () 
     expect(calls.length).toBe(3);
     expect(calls[2].prompt).toContain('A vision summary.');
     // the two-log trace at the emission point: evidence events recorded during execution
+    // (validate's round-1 grill, envision, spec — one evidence per task-fact call)
     const evidence = new Store(root).events('01-leg/01-a').filter((e) => e.type === 'evidence');
     expect(evidence.length).toBe(3);
-    expect(evidence[0].note).toContain('validate (grilling)');
+    expect(evidence[0].note).toContain('llm operation — task fact');
   });
 
   it('per-task flow override (contract.flow) is respected and chain-validated', async () => {
@@ -224,19 +226,30 @@ describe('PlannerKernel — execute (flow chain through the step registry)', () 
   it('a step rule failure stops the chain (co-located verify, R3-D5)', async () => {
     currentSpecArtifact();
     writeNode('01-leg/01-a', taskContract(), [ev('created')]);
-    // an EMPTY grill — the grilling-artifact rule must fail it
+    // an EMPTY grill — the session cannot inform a gate; the idea-validation-doc rule must fail it
     const { adapter } = fakeAdapter([ok(JSON.stringify({ summary: 'empty', validation: [], questions: [] }))]);
-    const k = kernel(new Store(root), adapter);
+    const k = kernel(new Store(root), adapter, new ScriptedInteractor([], [], 'solid'));
     const r = await k.execute('01-leg/01-a');
     expect(r.ok).toBe(false);
     expect(r.failedAt).toBe('validate');
-    expect(r.outcomes[0].ruleFindings.some((f) => f.code === 'grilling-artifact')).toBe(true);
+    expect(r.outcomes[0].ruleFindings.some((f) => f.code === 'idea-validation-doc')).toBe(true);
+  });
+
+  it('the interactive validate step fails closed without an interactor (S8 seam)', async () => {
+    currentSpecArtifact();
+    writeNode('01-leg/01-a', taskContract(), [ev('created')]);
+    const { adapter } = fakeAdapter([ok(GRILL_JSON)]);
+    const k = kernel(new Store(root), adapter); // NO interactor
+    const r = await k.execute('01-leg/01-a');
+    expect(r.ok).toBe(false);
+    expect(r.failedAt).toBe('validate');
+    expect(r.outcomes[0].result.blocker).toContain('no interactor');
   });
 
   it('adapter failure passes through fail-closed (never fabricated)', async () => {
     currentSpecArtifact();
     writeNode('01-leg/01-a', taskContract(), [ev('created')]);
-    const k = kernel(new Store(root), fakeAdapter([fail('provider down')]).adapter);
+    const k = kernel(new Store(root), fakeAdapter([fail('provider down')]).adapter, new ScriptedInteractor([], [], 'solid'));
     const r = await k.execute('01-leg/01-a');
     expect(r.ok).toBe(false);
     expect(r.failedAt).toBe('validate');

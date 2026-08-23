@@ -95,6 +95,8 @@ export class PlannerKernel {
     private readonly registry: StepRegistry,
     /** The frozen ProviderAdapter — the ONLY way steps reach an LLM (AC-4). Tests substitute a mock. */
     private readonly adapter: ProviderAdapter,
+    /** The human channel (S8 seam) — interactive steps (idea validation) fail closed without one. */
+    private readonly interactor?: import('./interact.js').Interactor,
   ) {
     this.root = store.root;
   }
@@ -252,6 +254,7 @@ export class PlannerKernel {
         adapter: this.adapter,
         taskModel: this.taskModel(taskId),
         providerId,
+        interactor: this.interactor,
         recordEvidence: (ev: EvidenceRecord) => this.recordEvidence(taskId, ev),
       }),
       store: this.store,

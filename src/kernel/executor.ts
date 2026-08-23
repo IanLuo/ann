@@ -1,5 +1,6 @@
-import { ProviderAdapter, CompletionOptions } from '../adapters/provider/index.js';
+import { ProviderAdapter, Completion, CompletionOptions } from '../adapters/provider/index.js';
 import { EvidenceRecord } from './step.js';
+import { Interactor } from './interact.js';
 
 /**
  * The executor protocols (S5 planner kernel — grill round 3, R3-D2, confirmed):
@@ -49,13 +50,36 @@ export interface UnbuiltExecutor {
 export interface ExecutorSet {
   /** The implemented executor — wraps the frozen ProviderAdapter (F17). */
   llm?: LlmExecutor;
+  /** The HUMAN channel (flow-finalization 2026-08-23: the interactive idea-validation
+   *  step talks to the user through this; S8 wires the real talk/UI adapter). */
+  interact?: Interactor;
   tool?: UnbuiltExecutor;
   command?: UnbuiltExecutor;
   request?: UnbuiltExecutor;
 }
 
+/** Shim: the frozen ProviderAdapter interface backed by an injected llm executor —
+ *  lets the S2 engines' honesty layer run unchanged behind the executor protocol
+ *  (wrap engines, never rewrite — R3-D6). The llm executor's evidence emission
+ *  fires when the call is a task fact (the engine output IS one). */
+export const adapterFromExecutor = (llm: LlmExecutor | undefined): ProviderAdapter => ({
+  async complete(prompt: string, opts?: { model?: string; maxTokens?: number }): Promise<Completion> {
+    if (!llm) {
+      return { ok: false, error: { code: 'provider-unavailable', blocker: 'no llm executor injected (v1: every flow needs the llm executor)' } };
+    }
+    const r = await llm.complete(prompt, {
+      ...(opts?.model ? { model: opts.model } : {}),
+      ...(opts?.maxTokens !== undefined ? { maxTokens: opts.maxTokens } : {}),
+      evidence: true,
+      evidenceNote: 'llm operation — task fact (emitted at the executor, R3-D2)',
+    });
+    return r.ok ? { ok: true, text: r.result, usage: r.usage } : { ok: false as const, error: { code: r.error.code as 'provider-unavailable' | 'bad-response' | 'invalid-config', blocker: r.error.blocker } };
+  },
+});
+
 /** Build the v1 executor set: llm wired to the provider adapter + the kernel's
- *  evidence hook; tool/command/request present as explicit unbuilt guards. */
+ *  evidence hook; interact when a human channel is provided; tool/command/request
+ *  present as explicit unbuilt guards. */
 export function createExecutorSet(opts: {
   adapter: ProviderAdapter;
   /** Evidence emission hook — wired by the kernel to the store's single writer. */
@@ -64,8 +88,10 @@ export function createExecutorSet(opts: {
   taskModel?: string;
   /** Provider id from the adapter registry (for provenance; default = registry default). */
   providerId?: string;
+  /** The human channel (S8 seam) — interactive steps fail closed without one. */
+  interactor?: Interactor;
 }): ExecutorSet {
-  const { adapter, recordEvidence, taskModel, providerId } = opts;
+  const { adapter, recordEvidence, taskModel, providerId, interactor } = opts;
   const llm: LlmExecutor = {
     async complete(prompt: string, callOpts?: LlmCallOptions): Promise<ExecutorResult<string>> {
       const completion = await adapter.complete(prompt, {
@@ -88,5 +114,5 @@ export function createExecutorSet(opts: {
     unbuilt: true,
     why: `executor '${name}' is protocol-declared but UNBUILT in v1 (R3-D6) — no consumers; build it when a step needs it`,
   });
-  return { llm, tool: unbuilt('tool'), command: unbuilt('command'), request: unbuilt('request') };
+  return { llm, ...(interactor ? { interact: interactor } : {}), tool: unbuilt('tool'), command: unbuilt('command'), request: unbuilt('request') };
 }

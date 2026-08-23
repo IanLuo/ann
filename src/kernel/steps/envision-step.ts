@@ -1,7 +1,7 @@
 import { Step, StepContext, StepResult } from '../step.js';
 import { RuleModule } from '../../engines/validators/types.js';
 import { DefaultEnvisionEngine, VisionArtifact } from '../../engines/envision.js';
-import { adapterFromExecutor } from './validate-step.js';
+import { adapterFromExecutor } from '../executor.js';
 
 /**
  * The 'envision' step (envision wrapper — R3-D6: no rewrite). Runs the F8 envision
@@ -36,7 +36,7 @@ export class EnvisionStep implements Step {
   readonly rules: RuleModule[] = [envisionArtifactRule];
 
   async execute(ctx: StepContext): Promise<StepResult> {
-    const engine = new DefaultEnvisionEngine(adapterFromExecutor(ctx.executors), { model: ctx.model });
+    const engine = new DefaultEnvisionEngine(adapterFromExecutor(ctx.executors.llm), { model: ctx.model });
     const r = await engine.envision({
       idea: ctx.packet.nodeContract.intent ?? ctx.packet.pathDecisions.nodeId,
       context: ctx.packet.dependencies
