@@ -393,11 +393,21 @@ function cmdValidate(id: string | undefined) {
   console.log(`${findings.length} finding(s)`);
 }
 
-function cmdRules() {
+function cmdRules(write: boolean) {
   const reg = derivedRegistry();
+  if (write) {
+    // REVIEW GAP FIX: the registry is DERIVED from the modules — this is the single
+    // regen path (no throwaway scripts); rules/check/rules.json is never hand-maintained.
+    const out = JSON.stringify(reg, null, 2) + '\n';
+    const p = join(ROOT, 'rules', 'check', 'rules.json');
+    mkdirSync(dirname(p), { recursive: true });
+    writeFileSync(p, out);
+    console.log(`rules --write: regenerated ${p} (${reg.rules.length} rules) from the rule modules`);
+    return;
+  }
   console.log('DERIVED CHECK-RULES REGISTRY (source: self-contained rule modules — never hand-maintained)');
   for (const r of reg.rules) console.log(`  ${r.id.padEnd(24)} [${r.severity.padEnd(7)}] ${r.definition}`);
-  console.log(`\n  ${reg.rules.length} rules — regenerate rules/check/rules.json from this`);
+  console.log(`\n  ${reg.rules.length} rules — 'ann rules --write' regenerates rules/check/rules.json from this`);
 }
 
 function cmdConfig() {
@@ -734,7 +744,7 @@ const COMMANDS: Array<{ name: string; args: string; desc: string }> = [
   { name: 'results', args: '<id> [n]', desc: 'a task\'s results by kind (doc/commit/ref/evidence/link); with n, drill into one (doc=content, commit=git show, ref=file/dir, evidence=event) · alias --results' },
   { name: 'packet', args: '<id>', desc: 'the node\'s deterministic context packet (context-packet-spec; derived on demand, never saved) · alias --packet' },
   { name: 'validate', args: '[id]', desc: 'run the enabled validator rules (all nodes, or one node) — rule-id\'d deterministic findings · alias --validate' },
-  { name: 'rules', args: '', desc: 'the DERIVED check-rules registry (self-contained rule modules are the source) · alias --rules' },
+  { name: 'rules', args: '[--write]', desc: 'the DERIVED check-rules registry (self-contained rule modules are the source) · alias --rules; --write regenerates rules/check/rules.json' },
   { name: 'commands', args: '', desc: 'this table as markdown (the derived doc) · alias --commands' },
   { name: 'help', args: '', desc: 'usage · alias --help / -h' },
   { name: 'append!', args: '<id> \'<json>\'', desc: 'WRITE — single-writer append (store.appendEvent, LB-3)' },
@@ -821,7 +831,7 @@ try {
   else if (command === 'results' || command === '--results') cmdResults(resolveId(args[1]), args[2]);
   else if (command === 'packet' || command === '--packet') cmdPacket(resolveId(args[1]));
   else if (command === 'validate' || command === '--validate') cmdValidate(args[1]);
-  else if (command === 'rules' || command === '--rules') cmdRules();
+  else if (command === 'rules' || command === '--rules') cmdRules(args[1] === '--write');
   else if (command === 'append!') {
     const raw = args.slice(2).join(' ');
     if (!args[1] || !raw) { console.error('usage: ann append! <id> \'{"at":..,"type":..}\''); process.exit(2); }
