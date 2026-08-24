@@ -7,29 +7,34 @@ import { Store } from '../store/store.js';
 /**
  * Flow config (S5 planner kernel — R3-D4, requirements-spec AC-3, flow-control v6 §7):
  *
- *   project default chain (DATA, not code) + PER-TASK override (contract.flow).
+ *   project chains (DATA, not code) keyed by WORK TYPE + per-task override.
  *
- * - `rules/flow/default.json` holds the project's step chain (a registry file,
- *   resource-registry spec). The engine READS it and code NEVER overrides project
- *   config (AC-4). No project file → the built-in default product template applies
- *   (idea → validate → envision → detailed specs → continue — functional-spec F3).
- * - A task's contract may declare its own flow (`contract.flow: ["validate", "spec"]`)
- *   — an override, still chain-validated: every step id must exist in the registry
- *   and each step's declared inputs must be produced earlier (a resolved packet
- *   dependency by logical name, or an earlier step's id in the chain) or resolvable.
+ * - `rules/flow/default.json` holds the project's chains (a registry file,
+ *   resource-registry spec): `chains` maps a work type to its step sequence.
+ *   A task's `contract.workType` selects its chain; `default` applies otherwise.
+ *   An EMPTY chain = the task runs the LIFECYCLE ONLY (execution tasks — the
+ *   runner does the work; no content steps), per flow-control v6 §7.
+ * - A task's `contract.flow` overrides everything (still chain-validated).
+ * - The engine READS project data; code never overrides it (AC-4). No project
+ *   file → the built-in default product template applies (functional-spec F3).
  */
 
 /** The built-in default product template (functional-spec §2: idea → validate →
- *  envision → spec → continue; idea = the task contract, continue = the kernel advance). */
+ *  envision → spec → continue; idea = the task contract, continue = the advance). */
 export const BUILTIN_CHAIN: string[] = ['validate', 'envision', 'spec'];
 
 export interface FlowConfig {
-  /** The resolved chain of step ids (project default or per-task override). */
+  /** The resolved chain of step ids for this task. Empty = lifecycle only. */
   chain: string[];
-  /** Where the chain came from — 'project-config' | 'task-override' | 'builtin'. */
-  source: 'project-config' | 'task-override' | 'builtin';
+  /** Where the chain came from. */
+  source: 'project-config' | 'work-type' | 'task-override' | 'builtin';
+  /** The selecting work type (source 'work-type'). */
+  workType?: string;
   /** The template description (from the project file, when present). */
   template?: string;
+  /** Fail-closed note (e.g. unknown workType fell back to default) — the kernel
+   *  refuses to execute on a problem, never silently proceeds. */
+  problem?: string;
 }
 
 export interface ChainProblem {
@@ -38,37 +43,67 @@ export interface ChainProblem {
   problem: string;
 }
 
-/** Load the PROJECT's flow config (data, not code). Returns undefined when the
- *  project has no rules/flow/default.json — the caller falls back to the builtin. */
-export function loadProjectFlow(root: string): { chain: string[]; template?: string } | undefined {
+interface ProjectFlow {
+  chains: Record<string, string[]>;
+  template?: string;
+}
+
+/** Load the PROJECT's flow config (data, not code). v2: `chains` keyed by work
+ *  type; legacy `chain` (single) accepted as the `default` chain. */
+export function loadProjectFlow(root: string): ProjectFlow | undefined {
   const rel = join(root, '.ann', 'rules', 'flow', 'default.json');
   const legacy = join(root, 'rules', 'flow', 'default.json');
   const file = existsSync(rel) ? rel : legacy; // v12: .ann/rules (legacy rules/ accepted)
   if (!existsSync(file)) return undefined;
   try {
-    const raw = JSON.parse(readFileSync(file, 'utf8')) as { chain?: unknown; template?: unknown };
-    if (!Array.isArray(raw.chain) || !raw.chain.every((c) => typeof c === 'string' && c.length)) {
-      throw new Error('flow config: chain must be a non-empty array of step ids');
+    const raw = JSON.parse(readFileSync(file, 'utf8')) as { chains?: unknown; chain?: unknown; template?: unknown };
+    if (raw.chains !== undefined) {
+      if (typeof raw.chains !== 'object' || raw.chains === null || Array.isArray(raw.chains)) throw new Error('chains must be an object of workType → step-id array');
+      const chains: Record<string, string[]> = {};
+      for (const [workType, seq] of Object.entries(raw.chains as Record<string, unknown>)) {
+        if (!Array.isArray(seq) || !seq.every((s) => typeof s === 'string')) {
+          throw new Error(`chains.${workType} must be an array of step ids (empty = lifecycle only)`);
+        }
+        chains[workType] = seq as string[];
+      }
+      return { chains, ...(typeof raw.template === 'string' ? { template: raw.template } : {}) };
     }
-    return { chain: raw.chain as string[], ...(typeof raw.template === 'string' ? { template: raw.template } : {}) };
+    if (Array.isArray(raw.chain) && raw.chain.every((c) => typeof c === 'string')) {
+      return { chains: { default: raw.chain as string[] }, ...(typeof raw.template === 'string' ? { template: raw.template } : {}) };
+    }
+    throw new Error('flow config must define chains (workType → step ids) or a legacy chain array');
   } catch (e) {
     throw new Error(`flow config: rules/flow/default.json is invalid — ${(e as Error).message} (fail-closed: never silently fall back)`);
   }
 }
 
-/** Resolve the chain for a task: contract.flow override → project config → builtin.
- *  The override lives on the task's contract (node.json — derived read via the store);
- *  the context-packet schema is locked and does NOT carry flow, so the kernel reads
- *  the contract directly (never writes). */
+/** Resolve the chain for a task: contract.flow override → workType chain →
+ *  project default → builtin. An unknown workType is a NAMED problem, never a
+ *  silent fallback. */
 export function resolveFlow(store: Store, taskId: string, root: string): FlowConfig {
-  const contract = store.contract(taskId) as { contract?: Record<string, unknown> } | undefined;
-  const raw = (contract?.contract ?? {}) as Record<string, unknown>;
-  const c = ((raw as { contract?: Record<string, unknown> }).contract ?? raw) as Record<string, unknown>; // normalize wrapped {contract:{…}}
+  const c = store.contractOf(taskId);
+  // 1 — per-task override (data, highest)
   const declared = c.flow as unknown;
-  const taskChain = Array.isArray(declared) && declared.every((s) => typeof s === 'string') ? (declared as string[]) : undefined;
-  if (taskChain && taskChain.length) return { chain: taskChain, source: 'task-override' };
+  if (Array.isArray(declared) && declared.every((s) => typeof s === 'string')) {
+    return { chain: declared as string[], source: 'task-override' };
+  }
+  // 2 — project config (data, never overridden by code)
   const project = loadProjectFlow(root);
-  if (project) return { chain: project.chain, source: 'project-config', template: project.template };
+  if (project) {
+    const workType = typeof c.workType === 'string' ? c.workType : undefined;
+    if (workType) {
+      const chain = project.chains[workType];
+      if (chain) return { chain, source: 'work-type', workType };
+      return {
+        chain: project.chains.default ?? [...BUILTIN_CHAIN],
+        source: 'work-type',
+        workType,
+        problem: `unknown workType '${workType}' (project chains: ${Object.keys(project.chains).join(', ') || 'none'}) — fell back to default; add it to rules/flow/default.json`,
+      };
+    }
+    return { chain: project.chains.default ?? [...BUILTIN_CHAIN], source: 'project-config', template: project.template };
+  }
+  // 3 — builtin product template
   return { chain: [...BUILTIN_CHAIN], source: 'builtin' };
 }
 

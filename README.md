@@ -34,6 +34,7 @@ State comes from commands only — never read `events.jsonl` directly; never han
 │                                                                            │
 │   READS:  journey · status · check · specs · providers · config · project  │
 │           detail · results · packet · validate · rules · branch · confirm  │
+│           chain · steps · next · flow   (kernel data — F3/F5 views)        │
 │   WRITES: spawn! · append! · gate! · lock! · supersede! · config! ·        │
 │           project! · cred!   (all through the store's single writer)       │
 │   cross-cutting: project resolution (--project/ANN_PROJECT/cwd-walk),      │
@@ -41,21 +42,21 @@ State comes from commands only — never read `events.jsonl` directly; never han
 └───────────────┬───────────────────────────────┬────────────────────────────┘
                 │ reads (store proxy)           │ composes prompts + calls
                 ▼                               ▼
-┌──────────────────────────────┐   ┌────────────────────────────────────────┐
-│  ENGINES — src/engines/      │   │  PROVIDER ADAPTER — src/adapters/provider/│
-│                              │   │                                        │
-│  grilling.ts  F4 idea exit   │──▶│  types.ts    frozen contract           │
-│   gate + PRD (takes adapter) │   │  registry.ts provider registry         │
-│  envision.ts F8 usage+look   │──▶│  http.ts     OpenAI-compatible client   │
-│   (takes adapter)            │   │   (bounded retry, fail-closed)          │
-│  shared.ts   honesty layer   │   │  credentials.ts keychain (dev)         │
-│                              │   │  config.ts   ~/.ann/config.json (600)  │
-│  context.ts  S3 packet:      │   │  oplog.ts    logs/provider.jsonl       │
-│   deps+readiness+siblings    │   │                                        │
-│  validators/ 15 rule modules │   │   resolution: env > config > keychain  │
-│   (self-contained, derived   │   │   > registry fallback                  │
-│    registry)                 │   │                                        │
-└───────────────┬──────────────┘   └────────────────────────────────────────┘
+┌────────────────────────────────────────┐  ┌──────────────────────────────────┐
+│  KERNEL — src/kernel/ (S5)             │  │  PROVIDER ADAPTER —              │
+│                                        │  │   src/adapters/provider/         │
+│  kernel.ts  orchestrator:             │  │                                  │
+│   frontmostReady · lookBack ·         │──▶│  types.ts    frozen contract     │
+│   materialize · validate · execute ·  │  │  registry.ts provider registry   │
+│   verify · commit · advance           │  │  http.ts     OpenAI-compatible    │
+│  step.ts    Step protocol             │  │              client (retry,       │
+│  registry.ts id → implementation      │  │              fail-closed)         │
+│  flow.ts    work-type chains (data)   │  │  credentials.ts keychain (dev)    │
+│  interact.ts human channel (S8 seam)  │  │  config.ts   ~/.ann/config.json   │
+│  steps/     validate (interactive     │  │  oplog.ts    logs/provider.jsonl  │
+│              idea validator) ·        │  │                                  │
+│             envision · spec (F9)      │  │                                  │
+└───────────────┬────────────────────────┘  └──────────────────────────────────┘
                 │ reads (derived views)
                 ▼
 ┌──────────────────────────────────────────────────────────────────────────┐

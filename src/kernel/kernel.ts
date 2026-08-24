@@ -5,7 +5,7 @@ import { ProviderAdapter } from '../adapters/provider/index.js';
 import { loadProviderRegistry } from '../adapters/provider/registry.js';
 import { StepRegistry } from './registry.js';
 import { createExecutorSet } from './executor.js';
-import { resolveFlow, validateChain, ChainProblem } from './flow.js';
+import { resolveFlow, validateChain, ChainProblem, FlowConfig } from './flow.js';
 import { EvidenceRecord, Step, StepContext, StepResult } from './step.js';
 
 /**
@@ -60,7 +60,7 @@ export interface StepOutcome {
 }
 
 export interface ExecuteResult {
-  flow: { chain: string[]; source: 'project-config' | 'task-override' | 'builtin' };
+  flow: FlowConfig;
   chainProblems: ChainProblem[];
   outcomes: StepOutcome[];
   /** The task's first failing step (chain stops there) — fail-closed, never silent. */
@@ -177,10 +177,7 @@ export class PlannerKernel {
       findings.push({ severity: 'error', code: 'gate-gap', detail: p, nodeId: taskId });
     }
     // contract self-sufficiency (F-AC19: ACs + grounded inputs declared at spawn)
-    const rawContract = this.store.contract(taskId) as { contract?: Record<string, unknown> } | undefined;
-    const raw = (rawContract?.contract ?? {}) as Record<string, unknown>;
-    const c = ((raw as { contract?: Record<string, unknown> }).contract ?? raw) as Record<string, unknown>;
-    for (const p of this.store.contractProblems(c)) {
+    for (const p of this.store.contractProblems(this.store.contractOf(taskId))) {
       findings.push({ severity: 'error', code: 'contract', detail: p, nodeId: taskId });
     }
     // packet readiness (inputs resolved + no blocking question unanswered)
@@ -239,33 +236,34 @@ export class PlannerKernel {
       };
     }
     const flow = resolveFlow(this.store, taskId, this.root);
+    if (flow.problem) {
+      return { flow, chainProblems: [{ at: taskId, problem: flow.problem }], outcomes: [], ok: false };
+    }
     const chainProblems = validateChain(this.registry, flow.chain, packet);
     if (chainProblems.length) {
       return { flow, chainProblems, outcomes: [], ok: false };
     }
 
+    // Once per execution — the executor set, model and provider are task-scoped.
+    const taskModel = this.taskModel(taskId);
     const providerId = this.providerId();
+    const recordEvidence = (ev: EvidenceRecord) => this.recordEvidence(taskId, ev);
+    const executors = createExecutorSet({ adapter: this.adapter, taskModel, providerId, interactor: this.interactor, recordEvidence });
     const outcomes: StepOutcome[] = [];
     const results: Record<string, StepResult> = {};
-    const stepCtx = (step: Step, resultsSoFar: Record<string, StepResult>): StepContext => ({
+    const stepCtx = (resultsSoFar: Record<string, StepResult>): StepContext => ({
       taskId,
       packet,
-      executors: createExecutorSet({
-        adapter: this.adapter,
-        taskModel: this.taskModel(taskId),
-        providerId,
-        interactor: this.interactor,
-        recordEvidence: (ev: EvidenceRecord) => this.recordEvidence(taskId, ev),
-      }),
+      executors,
       store: this.store,
-      model: this.taskModel(taskId),
+      model: taskModel,
       results: resultsSoFar,
-      recordEvidence: (ev: EvidenceRecord) => this.recordEvidence(taskId, ev),
+      recordEvidence,
     });
 
     for (const id of flow.chain) {
       const step = this.registry.get(id);
-      const ctx = stepCtx(step, { ...results });
+      const ctx = stepCtx({ ...results });
       let result: StepResult;
       try {
         result = await step.execute(ctx);
@@ -372,10 +370,9 @@ export class PlannerKernel {
   /* ── internals ─────────────────────────────────────────────────────────────── */
 
   /** Per-task model wiring (G2 seam, R3-D6): contract.model override → registry default. */
+  /** Per-task model wiring (G2 seam, R3-D6): contract.model override → registry default. */
   private taskModel(taskId: string): string | undefined {
-    const contract = this.store.contract(taskId) as { contract?: Record<string, unknown> } | undefined;
-    const raw = (contract?.contract ?? {}) as Record<string, unknown>;
-    const c = ((raw as { contract?: Record<string, unknown> }).contract ?? raw) as Record<string, unknown>;
+    const c = this.store.contractOf(taskId);
     return typeof c.model === 'string' ? c.model : undefined;
   }
 

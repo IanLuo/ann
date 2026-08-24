@@ -60,6 +60,10 @@ import {
 import { getVOCAB } from './store/vocab.js';
 import { assemblePacket } from './engines/context.js';
 import { runValidators, RULES, derivedRegistry } from './engines/validators/index.js';
+import { PlannerKernel } from './kernel/kernel.js';
+import { buildDefaultRegistry } from './kernel/steps/index.js';
+import { loadProjectFlow, resolveFlow, validateChain } from './kernel/flow.js';
+import { ProviderAdapter } from './adapters/provider/index.js';
 
 // ── PROJECT RESOLUTION (before anything touches the store) ──────────────────────
 // ann manages MULTIPLE projects (each with its own journey), identified by PATH only.
@@ -391,6 +395,75 @@ function cmdValidate(id: string | undefined) {
   if (!findings.length) { console.log('VALIDATE: clean (0 findings)'); return; }
   for (const f of findings) console.log(`  [${f.severity}] ${f.code}${f.nodeId ? ` ${f.nodeId}` : ''} — ${f.detail}`);
   console.log(`${findings.length} finding(s)`);
+}
+
+/** The kernel for READ commands — built once; the adapter is a never-called stub
+ *  (lookBack/flow resolution never touch an LLM; execution would, but these don't). */
+const readKernel = () => {
+  const stub: ProviderAdapter = {
+    complete: async () => ({ ok: false, error: { code: 'provider-unavailable', blocker: 'read command — no execution' } }),
+  };
+  return new PlannerKernel(store, buildDefaultRegistry(), stub);
+};
+
+/** F3 (view side) — the project's step-chain flow config, as data. */
+function cmdChain() {
+  const project = loadProjectFlow(ROOT);
+  console.log('FLOW CONFIG (rules/flow/default.json — DATA, never code)');
+  if (!project) {
+    console.log('  (no project flow file — the builtin product template applies)');
+    console.log(`  default: ${JSON.stringify(['validate', 'envision', 'spec'])}`);
+    return;
+  }
+  if (project.template) console.log(`  template: ${project.template}`);
+  for (const [workType, chain] of Object.entries(project.chains)) {
+    console.log(`  ${workType.padEnd(16)} ${chain.length ? chain.join(' → ') : '(lifecycle only — the runner does the work)'}`);
+  }
+  console.log('  selection: task contract.workType → chains[workType]; contract.flow overrides all');
+  console.log('  per-task resolution: ann flow <id> · registered steps: ann steps');
+}
+
+/** The step registry — the pluggable surface future steps implement against. */
+function cmdSteps() {
+  const reg = buildDefaultRegistry();
+  console.log('STEP REGISTRY (id · inputs · co-located rules — add a step to src/kernel/steps/ + reference it in flow data)');
+  for (const id of reg.ids()) {
+    const s = reg.get(id);
+    console.log(`  ${id.padEnd(14)} inputs: [${s.inputs.join(', ')}]  rules: [${s.rules.map((r) => r.id).join(', ')}]`);
+  }
+  console.log(`\n  ${reg.ids().length} steps — chains reference them by id; unregistered ids fail closed (chain validation)`);
+}
+
+/** F5 (pull side) — the run-next proposal, derived from events (never assumed). */
+function cmdNext() {
+  const lb = readKernel().lookBack();
+  console.log('NEXT (derived from events — the observer action)');
+  if (lb.activeLeg) console.log(`  active leg: ${lb.activeLeg} (${lb.activeLegStatus})`);
+  if (lb.frontmostReady) console.log(`  frontmost-ready: ${lb.frontmostReady.task} (${lb.frontmostReady.status})`);
+  for (const t of lb.alsoReady) console.log(`  also ready: ${t.task} (${t.status})`);
+  if (!lb.frontmostReady && lb.activeLeg && lb.activeLegStatus === 'done') {
+    console.log('  LEG GATE REVIEW: all spawned tasks done — verify the epic ACs before advancing');
+  }
+  for (const p of lb.pendingGates) console.log(`  WAITING ON YOU: ${p.task} — gate ${p.gate} submitted, undecided`);
+  const lg = lb.legGate;
+  console.log(`  leg gate: ${lg.met ? 'MET' : `UNMET — ${lg.blocker}`}`);
+  if (!lb.frontmostReady && !lb.pendingGates.length) console.log('  no ready action — resolve blocked tasks or close via a gated closure task');
+}
+
+/** A task's RESOLVED flow + chain validation — the data the kernel will execute. */
+function cmdFlow(id: string) {
+  const node = resolveId(id);
+  const flow = resolveFlow(store, node, ROOT);
+  const problems = validateChain(buildDefaultRegistry(), flow.chain, assemblePacket(store, node));
+  console.log(`FLOW for ${node}`);
+  console.log(`  chain: ${flow.chain.length ? flow.chain.join(' → ') : '(lifecycle only — no content steps)'}  [${flow.source}]${flow.workType ? ` workType=${flow.workType}` : ''}`);
+  if (flow.template) console.log(`  template: ${flow.template}`);
+  if (flow.problem) console.log(`  problem: ${flow.problem}`);
+  if (problems.length) {
+    for (const p of problems) console.log(`  chain-problem: ${p.at} — ${p.problem}`);
+  } else {
+    console.log('  chain validation: clean');
+  }
 }
 
 function cmdRules(write: boolean) {
@@ -745,6 +818,10 @@ const COMMANDS: Array<{ name: string; args: string; desc: string }> = [
   { name: 'packet', args: '<id>', desc: 'the node\'s deterministic context packet (context-packet-spec; derived on demand, never saved) · alias --packet' },
   { name: 'validate', args: '[id]', desc: 'run the enabled validator rules (all nodes, or one node) — rule-id\'d deterministic findings · alias --validate' },
   { name: 'rules', args: '[--write]', desc: 'the DERIVED check-rules registry (self-contained rule modules are the source) · alias --rules; --write regenerates rules/check/rules.json' },
+  { name: 'chain', args: '', desc: 'the project flow config as data (work-type chains, F3 view) · alias --chain' },
+  { name: 'steps', args: '', desc: 'the step registry — the pluggable surface future steps implement against · alias --steps' },
+  { name: 'next', args: '', desc: 'the run-next proposal (F5 pull): active leg, frontmost-ready, pending gates, leg gate — derived, never assumed · alias --next' },
+  { name: 'flow', args: '<id>', desc: 'a task\'s RESOLVED flow + chain validation (the data the kernel will execute) · alias --flow' },
   { name: 'commands', args: '', desc: 'this table as markdown (the derived doc) · alias --commands' },
   { name: 'help', args: '', desc: 'usage · alias --help / -h' },
   { name: 'append!', args: '<id> \'<json>\'', desc: 'WRITE — single-writer append (store.appendEvent, LB-3)' },
@@ -832,6 +909,10 @@ try {
   else if (command === 'packet' || command === '--packet') cmdPacket(resolveId(args[1]));
   else if (command === 'validate' || command === '--validate') cmdValidate(args[1]);
   else if (command === 'rules' || command === '--rules') cmdRules(args[1] === '--write');
+  else if (command === 'chain' || command === '--chain') cmdChain();
+  else if (command === 'steps' || command === '--steps') cmdSteps();
+  else if (command === 'next' || command === '--next') cmdNext();
+  else if (command === 'flow' || command === '--flow') cmdFlow(args[1]);
   else if (command === 'append!') {
     const raw = args.slice(2).join(' ');
     if (!args[1] || !raw) { console.error('usage: ann append! <id> \'{"at":..,"type":..}\''); process.exit(2); }

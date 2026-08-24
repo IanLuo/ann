@@ -1,9 +1,12 @@
 {
   "registry": "flow",
-  "version": 1,
+  "version": 2,
   "category": "flow",
   "kind": "registry",
-  "definition": "the project's step-chain flow config — DATA, not code (requirements-spec AC-3, flow-control-spec v6 §7). The engine reads this file and never overrides it; a task may override with its own contract.flow chain (still chain-validated).",
-  "template": "idea → validate → envision → detailed specs → continue",
-  "chain": ["validate", "envision", "spec"]
+  "definition": "the project's step-chain flow config — DATA, not code (requirements-spec AC-3, flow-control-spec v6 §7). chains maps a WORK TYPE to its step sequence; a task's contract.workType selects it, 'default' applies otherwise; an EMPTY chain = the task runs the lifecycle only (execution tasks — the runner does the work). A task's contract.flow overrides all. The engine reads this file and never overrides it.",
+  "template": "idea → validate → envision → detailed specs → continue (beginning build / planning); execution tasks run the lifecycle (work-type chains)",
+  "chains": {
+    "default": ["validate", "envision", "spec"],
+    "implementation": []
+  }
 }

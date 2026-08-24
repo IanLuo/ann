@@ -227,7 +227,9 @@ export class Store {
   }
 
   /** Unwrap a node contract (defensive: legacy double-nested {contract:{contract:{…}}}). */
-  private contractOf(id: string): Record<string, unknown> {
+  /** The task's CONTRACT (unwrapped from node.json's {id, contract, createdAt} wrapper) —
+   *  the single unwrap path for consumers (kernel, flow, validators). Derived read. */
+  contractOf(id: string): Record<string, unknown> {
     const raw = this.contract(id) as { contract?: unknown } | undefined;
     const rawContract = (raw?.contract ?? {}) as Record<string, unknown>;
     return ((rawContract as { contract?: Record<string, unknown> }).contract ?? rawContract) as Record<string, unknown>;

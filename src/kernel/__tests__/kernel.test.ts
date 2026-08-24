@@ -346,13 +346,51 @@ describe('Flow config — DATA, not code (AC-3/AC-4)', () => {
 
   it('project flow file is read (data), never overridden by code', () => {
     mkdirSync(join(root, '.ann', 'rules', 'flow'), { recursive: true });
-    writeFileSync(join(root, '.ann', 'rules', 'flow', 'default.json'), JSON.stringify({ chain: ['validate', 'spec'], template: 'idea → validate → spec → continue' }));
+    writeFileSync(join(root, '.ann', 'rules', 'flow', 'default.json'), JSON.stringify({ chains: { default: ['validate', 'spec'], implementation: [] }, template: 'idea → validate → spec → continue' }));
     writeNode('01-leg/01-a', taskContract(), [ev('created')]);
     const f = resolveFlow(new Store(root), '01-leg/01-a', root);
     expect(f.chain).toEqual(['validate', 'spec']);
     expect(f.source).toBe('project-config');
     expect(f.template).toContain('idea');
-    expect(loadProjectFlow(root)).toEqual({ chain: ['validate', 'spec'], template: 'idea → validate → spec → continue' });
+    expect(loadProjectFlow(root)).toEqual({ chains: { default: ['validate', 'spec'], implementation: [] }, template: 'idea → validate → spec → continue' });
+  });
+
+  it('work type selects the chain: implementation → lifecycle only (empty chain), planning → the beginning chain', () => {
+    mkdirSync(join(root, '.ann', 'rules', 'flow'), { recursive: true });
+    writeFileSync(join(root, '.ann', 'rules', 'flow', 'default.json'), JSON.stringify({ chains: { default: ['validate', 'envision', 'spec'], implementation: [] } }));
+    const store = new Store(root);
+    writeNode('01-leg/01-a', taskContract({ workType: 'implementation' }), [ev('created')]);
+    const impl = resolveFlow(store, '01-leg/01-a', root);
+    expect(impl.chain).toEqual([]); // lifecycle only — the runner does the work
+    expect(impl.source).toBe('work-type');
+    expect(impl.workType).toBe('implementation');
+    writeNode('01-leg/02-b', taskContract({ workType: 'planning' }), [ev('created')]);
+    const plan = resolveFlow(store, '01-leg/02-b', root);
+    expect(plan.chain).toEqual(['validate', 'envision', 'spec']);
+  });
+
+  it('an unknown workType is a NAMED problem (never a silent fallback) and the kernel refuses to execute', async () => {
+    mkdirSync(join(root, '.ann', 'rules', 'flow'), { recursive: true });
+    writeFileSync(join(root, '.ann', 'rules', 'flow', 'default.json'), JSON.stringify({ chains: { default: ['validate', 'envision', 'spec'] } }));
+    currentSpecArtifact();
+    writeNode('01-leg/01-a', taskContract({ workType: 'teleport' }), [ev('created')]);
+    const store = new Store(root);
+    const f = resolveFlow(store, '01-leg/01-a', root);
+    expect(f.problem).toContain("unknown workType 'teleport'");
+    expect(f.chain).toEqual(['validate', 'envision', 'spec']); // fell back, but NAMED
+    const k = kernel(store, fakeAdapter([]).adapter);
+    const r = await k.execute('01-leg/01-a');
+    expect(r.ok).toBe(false); // the kernel refuses — the problem is surfaced, never silently run
+    expect(r.chainProblems.some((p) => p.problem.includes("unknown workType 'teleport'"))).toBe(true);
+  });
+
+  it('per-task contract.flow override beats work type (data overrides data)', () => {
+    mkdirSync(join(root, '.ann', 'rules', 'flow'), { recursive: true });
+    writeFileSync(join(root, '.ann', 'rules', 'flow', 'default.json'), JSON.stringify({ chains: { default: ['validate', 'envision', 'spec'], implementation: [] } }));
+    writeNode('01-leg/01-a', taskContract({ workType: 'implementation', flow: ['envision'] }), [ev('created')]);
+    const f = resolveFlow(new Store(root), '01-leg/01-a', root);
+    expect(f.chain).toEqual(['envision']);
+    expect(f.source).toBe('task-override');
   });
 
   it('chain validation: every step registered + inputs produced earlier or resolvable', () => {
