@@ -5,3 +5,4 @@
 {"at":"2026-08-22","type":"submitted","gate":"confirm","note":"bookkeeper submission (agent)"}
 {"at":"2026-08-22","type":"confirmed","gate":"confirm","note":"accepted (agent)"}
 {"at":"2026-08-22","type":"completed","note":"resource-registry-spec v2 locked @ 4f95b5a (v1 superseded): user-config instance — ~/.ann/config.json contract (credentials, provider overrides, PATH-ONLY projects[], currentProject), resolution env > config > keychain > fallback, chmod 600 + masked apiKey, legacy {name,path} normalization. The config spec now KNOWS the path-only model."}
+{"at":"2026-08-26","type":"superseded","successor":{"name":"resource-registry","path":"journey/legs/06-engine-build/22-resource-registry-v3/artifacts/resource-registry.md"},"note":"resource-registry v2 superseded by v3 (schema + config categories, the vocab instance row, the reconciliation register, the amended user-config schema, and the listed data migrations)"}

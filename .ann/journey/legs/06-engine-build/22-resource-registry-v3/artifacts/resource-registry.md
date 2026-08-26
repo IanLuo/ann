@@ -1,0 +1,1 @@
+../../../../../docs/specs/resource-registry-spec-v3.md
