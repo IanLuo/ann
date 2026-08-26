@@ -1,0 +1,30 @@
+{
+  "id": "06-engine-build/19-core-design",
+  "contract": {
+    "intent": "Lock the core design contract — the L0-L3 layered redesign (store / commands / flow / abilities): defer-record mechanism (files are working state, events are acceptance), transcript replay, flows-as-data with the general config (conditional chains, verify fail cycles) — the re-implementation target that supersedes the accreted kernel/flow/commands layer.",
+    "acceptanceCriteria": [
+      "core-design-spec locked under the logical name core-design (shared contract-stack spec in docs/specs/, task-local symlink ref)",
+      "internally consistent and lock-verified: 13 review rounds, LOCK at v14 (review-13 lock gate passed — consistency grep clean, the attempt-boundary and verify-cycle fixes in §2)",
+      "the four recorded amendments spawned as sibling tasks (journey-format v14, architecture v3, resource-registry v3, flow-control deferrals)",
+      "the locked doc preserves section anchors and carries the amendment list (§8) for the re-implementation"
+    ],
+    "requiredInputs": [
+      "design",
+      "journey-format-spec",
+      "architecture",
+      "resource-registry",
+      "flow-control-spec",
+      "requirements-spec",
+      "functional-spec",
+      "context-packet-spec",
+      "ann-system-design"
+    ],
+    "expectedOutputs": [
+      "core-design-spec"
+    ],
+    "targetAreas": [
+      ".ann/docs/specs/"
+    ]
+  },
+  "createdAt": "2026-08-26"
+}

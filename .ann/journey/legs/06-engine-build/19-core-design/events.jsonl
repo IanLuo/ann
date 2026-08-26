@@ -1,0 +1,9 @@
+{"at":"2026-08-26","type":"created","note":"spawned by bookkeeper (agent)"}
+{"at":"2026-08-26","type":"submitted","gate":"grill","note":"bookkeeper submission (agent)"}
+{"at":"2026-08-26","type":"confirmed","gate":"grill","note":"accepted (agent)"}
+{"at":"2026-08-26","type":"evidence","note":"GATE1 accepted. The design was produced through 14 revisions and 13 review rounds (each executed by an independent reviewer against the actual locked contracts and the real Store — the mechanism findings were measured, not argued): review-7 found the first mechanism dead against the store; review-8 measured the defer-record replacement sound; review-11 LOCK AS-IS; the owner config decisions (general config, conditional chains, verify fail cycles) landed through reviews 12-13; review-13 lock gate passed (consistency grep clean, attempt-boundary + verify-cycle fixes in §2). The design record: .agents/artifacts/core-design-v14.md + design-review{,-v2..v13}.md (the review chain)."}
+{"at":"2026-08-26","type":"artifact-locked","artifact":{"name":"core-design","path":"journey/legs/06-engine-build/19-core-design/artifacts/core-design-spec.md","lockSha":"f7fb400"},"note":"core-design-spec.md specs-locked via bookkeeper (agent)"}
+{"at":"2026-08-26","type":"activated","note":"execution started — locking the core design contract"}
+{"at":"2026-08-26","type":"submitted","gate":"confirm","note":"bookkeeper submission (agent)"}
+{"at":"2026-08-26","type":"confirmed","gate":"confirm","note":"accepted (agent)"}
+{"at":"2026-08-26","type":"evidence","commits":[{"sha":"pending"}],"note":"core-design-spec locked @ f7fb400 — the re-implementation contract. The four recorded amendments are spawned as sibling tasks (20-23)."}
