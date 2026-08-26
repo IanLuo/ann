@@ -1,0 +1,24 @@
+{
+  "id": "06-engine-build/22-resource-registry-v3",
+  "contract": {
+    "intent": "Produce resource-registry v3 — the complete superseding artifact per core-design §8: the schema category (:36 — the vocab registry the gate names + artifact types stand on) + the vocab instance row (:51-57), the config category (:36 — the general config registry, ONE class two instances), the :63 code-literal-duplicates reconciliation (eventTypes/statuses enforcement; the builtin-defaults literal a second), reconciling architecture v2 :84. LISTED data changes owned: vocab.json (artifactTypes -> category + versioned), rules/decide/rules.json (enabled flags), rules/flow/default.json (chains -> entry[] with at/inputs/params/verdict/when + the validate -> idea-validate rename), rules/config/default.json (NEW), ~/.ann/config.json schema + ann config! set keys.",
+    "acceptanceCriteria": [
+      "resource-registry v3 is a COMPLETE superseding artifact, reusing the logical name resource-registry, preserving section anchors",
+      "superseded event on the v2 producer with successor",
+      "referrers re-pointed (AGENTS.md:48 — stale at v1, core-design)",
+      "the data migrations are listed (not executed — owned by the re-implementation)",
+      "check clean"
+    ],
+    "requiredInputs": [
+      "resource-registry",
+      "core-design"
+    ],
+    "expectedOutputs": [
+      "resource-registry"
+    ],
+    "targetAreas": [
+      ".ann/rules/"
+    ]
+  },
+  "createdAt": "2026-08-26"
+}

@@ -1,0 +1,23 @@
+{
+  "id": "06-engine-build/23-flow-control-records",
+  "contract": {
+    "intent": "Record the flow-control deferrals per core-design §8: three of four work-type parameterization columns (flow-control v6 §7) deferred (chain-effect served by propose-spawn intents; the rest is the runner, S6); the resolution-ladder rungs 2-4 (flow-control v6 §4 — derive/probe/infer/ask) deferred (v1 builds block only; enablement as registry data once a rung exists; ask is buildable via the interact ability but deferred with the rest); the activate redefinition note (v6:24 — the phase name now means write activated). A RECORD doc — no supersede, no text change to flow-control-spec.",
+    "acceptanceCriteria": [
+      "a record doc locked under the logical name flow-control-deferrals (type record, task-local real file)",
+      "the doc names each deferred section against flow-control-spec v6 with the reason + the re-implementation hand-off",
+      "no superseded event (no text change to flow-control-spec)",
+      "check clean"
+    ],
+    "requiredInputs": [
+      "flow-control-spec",
+      "core-design"
+    ],
+    "expectedOutputs": [
+      "flow-control-deferrals"
+    ],
+    "targetAreas": [
+      ".ann/journey/legs/06-engine-build/23-flow-control-records/artifacts/"
+    ]
+  },
+  "createdAt": "2026-08-26"
+}

@@ -1,0 +1,24 @@
+{
+  "id": "06-engine-build/20-journey-format-v14",
+  "contract": {
+    "intent": "Produce journey-format-spec v14 — the complete superseding artifact per core-design §2/§8: §2 node.json schema (workType/flow/model added; openQuestions stays a top-level sibling; REQUIRED set per v13:41), §3 event schema (the trace record — six kinds incl. frame-phase verify/skip; the gate2 confirmedSha on submitted; the NEW waiting event kind), §4 write-timing (defer-record: artifact-locked records at commit, not the moment it locks), §14/§15 (the -vN filename rule, ADDED). Preserve section anchors; back-reference v13; supersede! v13; re-point referrers (AGENTS.md, core-design, the amendment tasks).",
+    "acceptanceCriteria": [
+      "journey-format-spec v14 is a COMPLETE superseding artifact (never a delta), reusing the logical name journey-format-spec, preserving section anchors",
+      "superseded event on the v13 producer with successor {name: journey-format-spec, path}",
+      "referrers re-pointed: AGENTS.md:41 (currently v11 @ 4b4c8c3 — also stale), core-design-spec, the amendment tasks",
+      "store.spawn write + context.ts openQuestions read changes are owned (matching the v14 schema)",
+      "check clean: no GATE gaps, current(journey-format-spec) resolves to the v14 producer"
+    ],
+    "requiredInputs": [
+      "journey-format-spec",
+      "core-design"
+    ],
+    "expectedOutputs": [
+      "journey-format-spec"
+    ],
+    "targetAreas": [
+      ".ann/docs/specs/"
+    ]
+  },
+  "createdAt": "2026-08-26"
+}
