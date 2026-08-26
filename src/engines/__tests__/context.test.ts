@@ -71,6 +71,24 @@ describe('Context assembler (S3) — deterministic packet (context-packet-spec)'
     expect(p.openQuestions[0]).toMatchObject({ id: 'Q1', impact: 'high', provenance: 'declared at spawn', status: 'open', default: 'a' });
   });
 
+  it('reads openQuestions as a TOP-LEVEL sibling of contract (format v14 §2)', () => {
+    const id = '06-engine-build/13-task';
+    mkdirSync(nodeDir(id), { recursive: true });
+    writeFileSync(
+      join(nodeDir(id), 'node.json'),
+      JSON.stringify({
+        id,
+        contract: { intent: 'x', acceptanceCriteria: ['AC1'] },
+        openQuestions: [{ id: 'Q1', question: 'which way?', blocking: true, defaultIfUnanswered: 'a' }],
+        createdAt: '2026-08-27',
+      }),
+    );
+    writeFileSync(join(nodeDir(id), 'events.jsonl'), JSON.stringify(ev('created')) + '\n');
+    const p = assemblePacket(new Store(root), id);
+    expect(p.openQuestions[0]).toMatchObject({ id: 'Q1', impact: 'high', status: 'open', default: 'a' });
+    expect(p.readiness.blockers).toContain('blocking question unanswered: Q1');
+  });
+
   it('collects sibling statuses and children — statuses only, no content', () => {
     writeNode('06-engine-build', {}, []);
     writeNode('06-engine-build/01-a', {}, [ev('created'), ev('completed')]);

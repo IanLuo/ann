@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store, JourneyEvent } from '../store.js';
@@ -292,6 +292,16 @@ describe('Store — spawn (creation record + created event through the single wr
     const s = new Store(root);
     s.spawn('07-new-leg', { contract: { intent: 'x', acceptanceCriteria: ['a'] } });
     expect(() => s.appendEvent('07-new-leg', ev('completed'))).toThrow(/leg roots carry no events/);
+  });
+
+  it('writes openQuestions as a TOP-LEVEL sibling of contract (format v14 §2)', () => {
+    const s = new Store(root);
+    const oq = [{ id: 'Q1', question: 'which way?', blocking: true }];
+    s.spawn('01-goal/01-a', { contract: { intent: 'x', acceptanceCriteria: ['a'], openQuestions: oq } });
+    const node = JSON.parse(readFileSync(join(root, '.ann', 'journey', 'legs', '01-goal', '01-a', 'node.json'), 'utf8'));
+    expect(node.openQuestions).toEqual(oq);
+    expect(node.contract.openQuestions).toBeUndefined();
+    expect(Object.keys(node)).toEqual(['id', 'contract', 'openQuestions', 'createdAt']);
   });
 
   it('rejects a re-spawn (immutable id)', () => {

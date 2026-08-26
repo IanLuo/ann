@@ -85,10 +85,12 @@ function excerptOf(store: Store, path: string): string {
 export function assemblePacket(store: Store, nodeId: string): ContextPacket {
   const segs = nodeId.split('/');
   const isLeg = segs.length === 1;
-  const contract = store.contract(nodeId) as { contract?: Record<string, unknown> } | undefined;
+  const contract = store.contract(nodeId) as { contract?: Record<string, unknown>; openQuestions?: unknown } | undefined;
   const rawContract = (contract?.contract ?? {}) as Record<string, unknown>;
   const c = ((rawContract as { contract?: Record<string, unknown> }).contract ?? rawContract) as Record<string, unknown>;
-  const openQ = (c.openQuestions ?? []) as Array<{ id?: string; question?: string; blocking?: boolean; defaultIfUnanswered?: string }>;
+  // format v14 §2: openQuestions is a TOP-LEVEL SIBLING of contract (legacy nodes that
+  // carry it inside the contract still read — the fallback, never the written shape).
+  const openQ = ((contract?.openQuestions ?? c.openQuestions) ?? []) as Array<{ id?: string; question?: string; blocking?: boolean; defaultIfUnanswered?: string }>;
 
   // dependencies: requiredInputs × current(name) — provenance: derived-from
   const req = (Array.isArray(c.requiredInputs) ? c.requiredInputs : []) as string[];
