@@ -1,8 +1,8 @@
 import { DefaultGrillingEngine, GrillingRequest, ValidationPoint } from '../../../engines/grilling.js';
 import { AdapterError, CompletionUsage } from '../../../adapters/provider/index.js';
 import { GroundingInput, GrillQuestion } from '../../../engines/shared.js';
-import { LlmExecutor, adapterFromExecutor } from '../../executor.js';
-import { Interactor, InteractorAbort } from '../../interact.js';
+import { Abilities, InteractAbort } from '../../types.js';
+import { adapterFromAbility } from '../engine-adapter.js';
 
 /**
  * The interactive idea-validation session (flow-1 `validate` step — finalized
@@ -78,8 +78,7 @@ const isUnresolved = (a: string): boolean => UNRESOLVED_MARKERS.includes(a.trim(
 
 export class IdeaValidationSession {
   constructor(
-    private readonly llm: LlmExecutor,
-    private readonly interact: Interactor,
+    private readonly abilities: Abilities,
     private readonly options: { model?: string; maxTokens?: number } = {},
   ) {}
 
@@ -87,7 +86,7 @@ export class IdeaValidationSession {
     if (!opts.idea.trim()) {
       return { ok: false, error: { code: 'invalid-config', blocker: 'idea validation: idea must not be empty' } };
     }
-    const engine = new DefaultGrillingEngine(adapterFromExecutor(this.llm), { model: this.options.model, ...(this.options.maxTokens ? { maxTokens: this.options.maxTokens } : {}) });
+    const engine = new DefaultGrillingEngine(adapterFromAbility(this.abilities.llm, this.options.model), { model: this.options.model, ...(this.options.maxTokens ? { maxTokens: this.options.maxTokens } : {}) });
     const maxRounds = opts.maxRounds ?? DEFAULT_MAX_ROUNDS;
     const seen = new Set<string>(); // question dedupe across rounds (never ask twice)
     const pending: GrillQuestion[] = []; // asked and NOT resolved — accumulates across rounds
@@ -107,7 +106,8 @@ export class IdeaValidationSession {
 
       // 2 — present the read
       const read = this.renderRead(g.artifact, round);
-      await this.interact.present(`Idea validation — round ${round}`, read);
+      await this.abilities.interact.present(`── Idea validation — round ${round} ──
+${read}`);
 
       // 2b — batch-ask the open questions (deduped); answers fold as user input
       for (const q of g.artifact.questions) {
@@ -117,9 +117,9 @@ export class IdeaValidationSession {
         pending.push(q); // asked this round — stays pending until resolved
         let answer: string;
         try {
-          ({ answer } = await this.interact.askQuestion(q));
+          answer = await this.abilities.interact.ask(q.default ? `${q.question} (default: ${q.default})` : q.question);
         } catch (e) {
-          if (e instanceof InteractorAbort) return this.finish('reject', opts, context, resolved, researchLog, lastArtifact, pending, usage, round);
+          if (e instanceof InteractAbort) return this.finish('reject', opts, context, resolved, researchLog, lastArtifact, pending, usage, round);
           return { ok: false, error: { code: 'provider-unavailable', blocker: `idea validation: interactor failed — ${(e as Error).message}` } };
         }
         if (isUnresolved(answer)) continue; // still open → research topic below
@@ -133,9 +133,9 @@ export class IdeaValidationSession {
       if (openHigh.length) {
         const topics = openHigh.map((q) => q.question);
         try {
-          findings = await this.interact.collectResearch(topics);
+          findings = await this.abilities.interact.research(topics);
         } catch (e) {
-          if (e instanceof InteractorAbort) return this.finish('reject', opts, context, resolved, researchLog, lastArtifact, pending, usage, round);
+          if (e instanceof InteractAbort) return this.finish('reject', opts, context, resolved, researchLog, lastArtifact, pending, usage, round);
           return { ok: false, error: { code: 'provider-unavailable', blocker: `idea validation: research channel failed — ${(e as Error).message}` } };
         }
         for (const f of findings) {
@@ -178,14 +178,12 @@ export class IdeaValidationSession {
     const remaining: GrillQuestion[] = pending.filter((q) => !resolved.some((r) => r.question === q.question));
     let verdict: IdeaVerdict = recommendation;
     try {
-      await this.interact.present('Idea validation — final read', this.renderRead(artifact, rounds, true));
-      const d = await this.interact.collectDecision({
-        prompt: `Is the idea solid enough to proceed? (recommendation: ${recommendation})`,
-        options: ['solid', 'revise', 'reject'],
-      });
-      if (['solid', 'revise', 'reject'].includes(d.choice)) verdict = d.choice as IdeaVerdict;
+      await this.abilities.interact.present(`── Idea validation — final read ──
+${this.renderRead(artifact, rounds, true)}`);
+      const choice = await this.abilities.interact.decide(`Is the idea solid enough to proceed? (recommendation: ${recommendation})`, ['solid', 'revise', 'reject']);
+      if (['solid', 'revise', 'reject'].includes(choice)) verdict = choice as IdeaVerdict;
     } catch (e) {
-      if (e instanceof InteractorAbort) verdict = 'reject'; // honest record — the human walked away
+      if (e instanceof InteractAbort) verdict = 'reject'; // honest record — the human walked away
     }
     const doc = this.renderDoc({ verdict, recommendation, idea: opts.idea.trim(), summary: artifact?.summary ?? '', validatedAssumptions: (artifact?.validation ?? []).filter((v) => v.verdict === 'ok'), resolvedQuestions: resolved, risks: (artifact?.validation ?? []).filter((v) => v.verdict !== 'ok'), researchLog, remainingUnknowns: remaining, guidance: this.guidance(artifact, resolved, remaining, opts.constraints) });
     return { ok: true, doc, rounds, usage };

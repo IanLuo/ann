@@ -191,6 +191,25 @@ describe('the gate source is the CHAIN (core-design §6)', () => {
     expect(r.problems.join('\n')).toContain('unmapped-verdict');
   });
 
+  it('a DECIDED gate still RUNS its bound step — the write is skipped, the step is not', async () => {
+    const c = setup([ev('created'), ev('submitted', { gate: 'grill' }), ev('confirmed', { gate: 'grill' })]);
+    chainFile(CHAIN);
+    let ran = 0;
+    const grill = mkStep('idea-validate', {
+      decisions: ['solid', 'revise'],
+      out: () => {
+        ran++;
+        return { ok: true, artifact: 'grilled', verdict: { decision: 'solid' }, intents: [{ kind: 'lock-artifact', name: 'validation', content: '# v\n', type: 'validation' }] };
+      },
+    });
+    const r = await run(c, [grill, mkStep('envision')], new ScriptedInteract(['accept']));
+    expect(r.stop).toBe('completed');
+    expect(ran).toBe(1);
+    // its deferred lock reaches the SAME commit as the execute step's
+    expect(r.committed?.locked.map((l) => l.name).sort()).toEqual(['envision', 'validation']);
+    expect(c.events(TASK).filter((e) => e.type === 'confirmed' && e.gate === 'grill')).toHaveLength(1);
+  });
+
   it('a rejecting verdict re-obtains the gate, and the 3-reject bound ESCALATES', async () => {
     const c = setup();
     chainFile(CHAIN);

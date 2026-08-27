@@ -84,6 +84,11 @@ export interface InteractAbility {
   decide(question: string, options: string[]): Promise<string>;
 }
 
+/** The human WALKED AWAY. The one signal the interact protocol raises rather than
+ *  returns: there is no answer to carry, and a blank string would read as one. A step
+ *  that catches it must record the departure honestly, never infer the answer. */
+export class InteractAbort extends Error {}
+
 /** An OS process — NEVER the L1 surface. Protocol-declared; unbuilt in v1 (§8:295). */
 export interface ShellAbility {
   run(cmd: string, args: string[], opts?: { cwd?: string; timeoutMs?: number }): Promise<{ code: number; stdout: string; stderr: string }>;

@@ -94,6 +94,13 @@ export interface LookBack {
   pendingGates: Array<{ task: string; gate: string }>;
 }
 
+/** The advance view (flow-control v6 §2/§5 — the leg gate validated from logs). */
+export interface AdvanceView {
+  leg: string;
+  action: 'continue-leg' | 'advance-leg' | 'closure-needed' | 'none';
+  detail: string;
+}
+
 export interface ResolvedRead {
   name: string;
   path: string;
@@ -523,6 +530,32 @@ export class Commands {
       legGate,
       pendingGates,
     };
+  }
+
+  /** The ADVANCE view — where the journey goes next, derived from the logs and never
+   *  assumed. Closure-by-transfer is a GATED HUMAN decision (v6 §5, F-AC16): this
+   *  reports that the gate is unmet and stops. It never closes a leg on its own. */
+  advance(): AdvanceView {
+    const legs = this.store.ids().filter((i) => !i.includes('/')).sort();
+    const working = legs.find((l) => this.store.tasksOf(l).length > 0 && this.store.status(l) !== 'done');
+    if (working) {
+      const tasks = this.store.tasksOf(working);
+      const ready = tasks.filter((t) => ['queued', 'active'].includes(this.store.status(t)));
+      if (ready.length) return { leg: working, action: 'continue-leg', detail: `next task: ${ready[0]} (${this.store.status(ready[0])})` };
+      const done = tasks.filter((t) => ['done', 'superseded'].includes(this.store.status(t))).length;
+      const blocked = tasks.filter((t) => this.store.status(t) === 'blocked').length;
+      return {
+        leg: working,
+        action: 'closure-needed',
+        detail: `leg gate UNMET: ${done} done, ${blocked} blocked, remaining not done — close via a gated closure task (transfer/defer, F-AC16) or resolve the blocked tasks`,
+      };
+    }
+    // every spawned leg derives done → the frontmost not-done leg is where the review points
+    const front = legs.find((l) => this.store.status(l) !== 'done');
+    if (!front) return { leg: '', action: 'none', detail: 'every leg derived done — journey goal complete (or needs a closure decision)' };
+    const gate = this.store.legGateMet(front);
+    if (!gate.met) return { leg: front, action: 'closure-needed', detail: `leg gate UNMET: ${gate.blocker} — close via a gated closure task (transfer/defer, F-AC16)` };
+    return { leg: front, action: 'advance-leg', detail: `leg gate MET: all previous-leg tasks done — spawn tasks into ${front} carrying the epic goal` };
   }
 
   /* ══ shared derivations ════════════════════════════════════════════════════ */

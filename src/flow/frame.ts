@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs';
+import { recording } from '../abilities/recording.js';
 import { Commands, CommandError, LookBack } from '../commands/index.js';
 import { assemblePacket, ContextPacket } from '../engines/context.js';
 import { RuleFinding } from '../engines/validators/types.js';
@@ -120,8 +121,14 @@ export class Frame {
     const result: FrameResult = { ...base, chain: flow.chain };
     const transcript = new Transcript(this.commands, taskId);
 
+    // ONE translator for the whole run: a grill-bound step's deferred lock must reach
+    // the SAME commit as the execute steps' — a per-phase translator silently drops it.
+    // Deferral is keyed by artifact name and spawn id, so a rework cycle REPLACES rather
+    // than accumulates, which is what makes reusing it across cycles safe.
+    const translator = new IntentTranslator(this.commands, taskId);
+
     /* ── GATE · grill ───────────────────────────────────────────────────────── */
-    const grill = await this.gate('grill', taskId, flow.chain, packet, transcript, result, {}, new IntentTranslator(this.commands, taskId));
+    const grill = await this.gate('grill', taskId, flow.chain, packet, transcript, result, {}, translator);
     if (grill) return grill;
 
     /* ── validate + activate (the frame's own write, idempotent on replay) ──── */
@@ -140,7 +147,6 @@ export class Frame {
       for (let cycle = 0; cycle < cycles; cycle++) {
         result.phase = 'execute';
         result.outcomes = [];
-        const translator = new IntentTranslator(this.commands, taskId);
         const executed = await this.execute(taskId, flow.chain, packet, transcript, translator, result, feedback);
         if (executed) return executed;
 
@@ -203,11 +209,23 @@ export class Frame {
     let current = packet;
     for (;;) {
       const state = this.gateState(taskId, gate);
-      if (state === 'confirmed') return undefined; // tail state 1 — skip the WRITE, not the step
+      const source = chain.find((e) => phaseOf(e) === gate);
+
+      // TAIL STATE 1 — skip the WRITE, not the STEP. The bound step still runs: its
+      // transcript replays it, and its deferred intents must reach the same commit as
+      // every other step's. Its verdict is NOT re-routed — the gate is already decided,
+      // and a decided gate is a decided gate.
+      if (state === 'confirmed') {
+        if (source && translator) {
+          const outcome = await this.runStep(taskId, source, current, transcript, translator, this.latestRejection(taskId, gate));
+          result.outcomes.push(outcome);
+          if (outcome.result && !outcome.result.ok) return this.stopFailed(taskId, result, outcome.result.error);
+        }
+        return undefined;
+      }
       if (state === 'submitted') return { ...result, stop: 'blocked-at-gate' }; // tail state 2
 
       // tail state 3 (`rejected`) and the first pass both land here: obtain the decision
-      const source = chain.find((e) => phaseOf(e) === gate);
       let decision: { decision: 'accept' | 'reject'; feedback?: string };
       if (source && translator) {
         const outcome = await this.runStep(taskId, source, current, transcript, translator, this.latestRejection(taskId, gate));
@@ -326,7 +344,9 @@ export class Frame {
       packet,
       ...(entry.params ? { params: entry.params } : {}),
       read: this.read,
-      abilities: this.abilities,
+      // the abilities are TRANSCRIPT-BOUND: a replay is served the recorded values by
+      // identity, a miss falls through live and records at the next seq (§2)
+      abilities: recording(this.abilities, transcript.channel(entry.id, phase)),
       prior,
       ...(feedback ? { feedback: { gate: phase === 'grill' ? 'grill' : 'confirm', text: feedback } } : {}),
     };
@@ -444,17 +464,8 @@ export class Frame {
 
     /* ── look-back + advance (derived reads — never assumed) ─────────────────── */
     result.phase = 'advance';
-    const lookBack = this.commands.lookBack();
-    return {
-      ...result,
-      stop: 'completed',
-      lookBack,
-      advance: lookBack.frontmostReady
-        ? `next: ${lookBack.frontmostReady.task} (${lookBack.frontmostReady.status})`
-        : lookBack.legGate.met
-          ? 'leg gate MET — spawn the next leg'
-          : `leg gate UNMET: ${lookBack.legGate.blocker}`,
-    };
+    const next = this.commands.advance();
+    return { ...result, stop: 'completed', lookBack: this.commands.lookBack(), advance: `${next.action}: ${next.detail}` };
   }
 
   /* ══ tail reads + the failure write ════════════════════════════════════════ */

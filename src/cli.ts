@@ -61,10 +61,12 @@ import {
 import { getVOCAB } from './store/vocab.js';
 import { assemblePacket } from './engines/context.js';
 import { runValidators, RULES, derivedRegistry } from './engines/validators/index.js';
-import { PlannerKernel } from './kernel/kernel.js';
-import { buildDefaultRegistry } from './kernel/steps/index.js';
-import { loadProjectFlow, resolveFlow, validateChain } from './kernel/flow.js';
+import { buildStepRegistry } from './flow/steps/index.js';
+import { loadProjectFlow, phaseOf, resolveChain, validateChain } from './flow/chain.js';
+import { Frame } from './flow/frame.js';
+import { buildAbilities } from './abilities/index.js';
 import { resolveConfig } from './flow/config.js';
+import { getAdapter } from './adapters/provider/index.js';
 import { ProviderAdapter } from './adapters/provider/index.js';
 
 // ── PROJECT RESOLUTION (before anything touches the store) ──────────────────────
@@ -422,15 +424,6 @@ function cmdValidate(id: string | undefined) {
   console.log(`${findings.length} finding(s)`);
 }
 
-/** The kernel for READ commands — built once; the adapter is a never-called stub
- *  (lookBack/flow resolution never touch an LLM; execution would, but these don't). */
-const readKernel = () => {
-  const stub: ProviderAdapter = {
-    complete: async () => ({ ok: false, error: { code: 'provider-unavailable', blocker: 'read command — no execution' } }),
-  };
-  return new PlannerKernel(store, buildDefaultRegistry(), stub);
-};
-
 /** F3 (view side) — the project's step-chain flow config, as data. */
 function cmdChain() {
   const project = loadProjectFlow(ROOT);
@@ -441,7 +434,8 @@ function cmdChain() {
   }
   if (project.template) console.log(`  template: ${project.template}`);
   for (const [workType, chain] of Object.entries(project.chains)) {
-    console.log(`  ${workType.padEnd(16)} ${chain.length ? chain.join(' → ') : '(lifecycle only — the runner does the work)'}`);
+    const render = chain.map((e) => `${e.id}${e.at ? `@${e.at}` : ''}${e.when ? '?' : ''}`);
+    console.log(`  ${workType.padEnd(16)} ${render.length ? render.join(' → ') : '(lifecycle only — the runner does the work)'}`);
   }
   console.log('  selection: task contract.workType → chains[workType]; contract.flow overrides all');
   console.log('  per-task resolution: ann flow <id> · registered steps: ann steps');
@@ -449,18 +443,19 @@ function cmdChain() {
 
 /** The step registry — the pluggable surface future steps implement against. */
 function cmdSteps() {
-  const reg = buildDefaultRegistry();
-  console.log('STEP REGISTRY (id · inputs · co-located rules — add a step to src/kernel/steps/ + reference it in flow data)');
-  for (const id of reg.ids()) {
-    const s = reg.get(id);
-    console.log(`  ${id.padEnd(14)} inputs: [${s.inputs.join(', ')}]  rules: [${s.rules.map((r) => r.id).join(', ')}]`);
+  const reg = buildStepRegistry();
+  console.log('STEP REGISTRY (§2 contract — add a step to src/flow/steps/ + reference it in flow data)');
+  for (const s of reg.all()) {
+    const roles = s.roles.map((r) => `${r.name}${r.required ? '' : '?'}`).join(', ');
+    console.log(`  ${s.id.padEnd(15)} roles: [${roles}]  produces: [${(s.produces ?? []).join(', ')}]`);
+    console.log(`  ${' '.repeat(15)} decisions: [${(s.decisions ?? []).join(', ')}]  rules: [${s.rules.map((r) => r.id).join(', ')}]`);
   }
   console.log(`\n  ${reg.ids().length} steps — chains reference them by id; unregistered ids fail closed (chain validation)`);
 }
 
 /** F5 (pull side) — the run-next proposal, derived from events (never assumed). */
 function cmdNext() {
-  const lb = readKernel().lookBack();
+  const lb = commands.lookBack();
   if (JSON_OUT) return console.log(JSON.stringify(lb, null, 2));
   console.log('NEXT (derived from events — the observer action)');
   if (lb.activeLeg) console.log(`  active leg: ${lb.activeLeg} (${lb.activeLegStatus})`);
@@ -473,22 +468,47 @@ function cmdNext() {
   const lg = lb.legGate;
   console.log(`  leg gate: ${lg.met ? 'MET' : `UNMET — ${lg.blocker}`}`);
   if (!lb.frontmostReady && !lb.pendingGates.length) console.log('  no ready action — resolve blocked tasks or close via a gated closure task');
+  const next = commands.advance();
+  console.log(`  advance: ${next.action} — ${next.detail}`);
 }
 
-/** A task's RESOLVED flow + chain validation — the data the kernel will execute. */
+/** A task's RESOLVED flow + chain validation — the data the frame will execute. */
 function cmdFlow(id: string) {
   const node = resolveId(id);
-  const flow = resolveFlow(store, node, ROOT);
-  const problems = validateChain(buildDefaultRegistry(), flow.chain, assemblePacket(store, node));
+  const flow = resolveChain(store, node, ROOT);
+  const { config, problems: configProblems } = resolveConfig(ROOT);
+  const problems = validateChain(buildStepRegistry(), flow.chain, assemblePacket(store, node), config);
   console.log(`FLOW for ${node}`);
-  console.log(`  chain: ${flow.chain.length ? flow.chain.join(' → ') : '(lifecycle only — no content steps)'}  [${flow.source}]${flow.workType ? ` workType=${flow.workType}` : ''}`);
+  const render = flow.chain.map((e) => `${e.id}${phaseOf(e) === 'execute' ? '' : `@${phaseOf(e)}`}`);
+  console.log(`  chain: ${render.length ? render.join(' → ') : '(lifecycle only — no content steps)'}  [${flow.source}]${flow.workType ? ` workType=${flow.workType}` : ''}`);
   if (flow.template) console.log(`  template: ${flow.template}`);
   if (flow.problem) console.log(`  problem: ${flow.problem}`);
+  for (const p of configProblems) console.log(`  config-problem: ${p}`);
   if (problems.length) {
     for (const p of problems) console.log(`  chain-problem: ${p.at} — ${p.problem}`);
   } else {
     console.log('  chain validation: clean');
   }
+}
+
+/** THE FRAME — run a task through the fixed frame (core-design §4). Resumable: every
+ *  rung reads its own tail, so re-running after a stop picks up where it stopped. */
+async function cmdRun(id: string) {
+  const taskId = resolveId(id);
+  const frame = new Frame({ commands, root: ROOT, registry: buildStepRegistry(), abilities: buildAbilities(getAdapter(undefined, ROOT)) });
+  const r = await frame.run(taskId);
+  if (JSON_OUT) return console.log(JSON.stringify(r, null, 2));
+  console.log(`FRAME ${taskId} — ${r.stop.toUpperCase()} (at ${r.phase})`);
+  for (const o of r.outcomes) {
+    const how = !o.ran ? 'skipped' : o.replayed ? `replayed (run ${o.runId})` : `ran (run ${o.runId})`;
+    console.log(`  ${o.step.padEnd(15)} ${o.phase.padEnd(8)} ${how}`);
+    for (const f of o.ruleFindings) console.log(`    [${f.severity}] ${f.code} — ${f.detail}`);
+  }
+  for (const p of r.problems) console.log(`  problem: ${p}`);
+  if (r.committed?.locked.length) console.log(`  locked: ${r.committed.locked.map((l) => `${l.name} → ${l.contentPath}`).join(', ')}`);
+  if (r.committed?.spawned.length) console.log(`  spawned: ${r.committed.spawned.join(', ')}`);
+  if (r.advance) console.log(`  advance: ${r.advance}`);
+  if (r.stop !== 'completed') process.exitCode = 1;
 }
 
 function cmdRules(write: boolean) {
@@ -834,7 +854,8 @@ const COMMANDS: Array<{ name: string; args: string; desc: string }> = [
   { name: 'chain', args: '', desc: 'the project flow config as data (work-type chains, F3 view) · alias --chain' },
   { name: 'steps', args: '', desc: 'the step registry — the pluggable surface future steps implement against · alias --steps' },
   { name: 'next', args: '', desc: 'the run-next proposal (F5 pull): active leg, frontmost-ready, pending gates, leg gate — derived, never assumed · alias --next' },
-  { name: 'flow', args: '<id>', desc: 'a task\'s RESOLVED flow + chain validation (the data the kernel will execute) · alias --flow' },
+  { name: 'flow', args: '<id>', desc: 'a task\'s RESOLVED flow + chain validation (the data the frame will execute) · alias --flow' },
+  { name: 'run!', args: '<id>', desc: 'WRITE — run a task through the FRAME (materialize → grill → activate → execute → verify → confirm → commit); resumable, stops at the first block' },
   { name: 'commands', args: '', desc: 'this table as markdown (the derived doc) · alias --commands' },
   { name: 'help', args: '', desc: 'usage · alias --help / -h' },
   { name: 'read', args: '<name>', desc: 'the L1 CONTENT read view — a current artifact\'s marker-stripped content + path + sha (core-design §5) · alias --read' },
@@ -928,6 +949,7 @@ try {
   else if (command === 'steps' || command === '--steps') cmdSteps();
   else if (command === 'next' || command === '--next') cmdNext();
   else if (command === 'flow' || command === '--flow') cmdFlow(args[1]);
+  else if (command === 'run!') await cmdRun(args[1]);
   else if (command === 'read' || command === '--read') cmdRead(args[1] || '');
   else if (command === 'append!') {
     const raw = args.slice(2).join(' ');
