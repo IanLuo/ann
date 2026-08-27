@@ -63,10 +63,6 @@ export type VisionResult =
   | { ok: true; artifact: VisionArtifact; usage: CompletionUsage }
   | { ok: false; error: AdapterError };
 
-export interface EnvisionEngine {
-  envision(req: VisionRequest): Promise<VisionResult>;
-}
-
 const VISION_PROMPT = `You are the envision engine of a journey system (F8 — the beginning build step, AFTER the idea is confirmed).
 Help the builder IMAGINE the product: how it will be used and what it looks like. NEVER invent sourced-sounding facts.
 
@@ -117,7 +113,7 @@ const isRawVisionClaim = (p: unknown): p is RawVisionClaim => {
   );
 };
 
-export class DefaultEnvisionEngine implements EnvisionEngine {
+export class DefaultEnvisionEngine {
   constructor(
     /** The frozen provider-adapter interface — the ONLY way to reach an LLM (AC-4). */
     private readonly adapter: ProviderAdapter,

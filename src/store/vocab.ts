@@ -48,5 +48,3 @@ export function loadVocab(root: string): Vocab {
 let cached: Vocab | undefined;
 export const getVOCAB = (): Vocab => (cached ??= loadVocab(process.cwd()));
 
-/** The registered artifact type ids (the vocab's own key set). */
-export const artifactTypeIds = (): string[] => Object.keys(getVOCAB().artifactTypes);

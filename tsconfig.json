@@ -15,6 +15,7 @@
   "exclude": [
     "src/engines",
     "src/adapters",
-    "src/cli.ts"
+    "src/cli.ts",
+    "src/kernel"
   ]
 }

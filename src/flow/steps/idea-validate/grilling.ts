@@ -64,12 +64,6 @@ export type PrdResult =
   | { ok: true; prd: string; usage: CompletionUsage }
   | { ok: false; error: AdapterError };
 
-export interface GrillingEngine {
-  grill(req: GrillingRequest): Promise<GrillingResult>;
-  /** requirements-grilling (template + LLM) → PRD draft, grounded in the confirmed idea. */
-  requirementsGrilling(req: GrillingRequest, answered: GrillingArtifact): Promise<PrdResult>;
-}
-
 /* ------------------------------------------------------------------ */
 /* The requirements-grilling templates (data, not code — the LLM prompts) */
 /* ------------------------------------------------------------------ */
@@ -156,7 +150,7 @@ const isRawPoint = (p: unknown): p is RawValidationPoint => {
   );
 };
 
-export class DefaultGrillingEngine implements GrillingEngine {
+export class DefaultGrillingEngine {
   constructor(
     /** The frozen provider-adapter interface — the ONLY way to reach an LLM (AC-4). */
     private readonly adapter: ProviderAdapter,
