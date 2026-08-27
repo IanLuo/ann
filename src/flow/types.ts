@@ -20,7 +20,8 @@ export interface EvidenceIntent {
   kind: 'evidence';
   note: string;
   refs?: string[];
-  answers?: Array<{ id: string; [k: string]: unknown }>;
+  /** The answer-recording primitive (high-impact-defaulted): {id, answer, provenance?}. */
+  answers?: Array<{ id: string; answer: string; provenance?: string }>;
 }
 
 /** DEFER-RECORD: the working FILE writes immediately; the `artifact-locked` EVENT
