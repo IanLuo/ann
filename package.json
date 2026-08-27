@@ -4,7 +4,7 @@
   "type": "module",
   "description": "Ann \u2014 the journey-of-legs engine (tree store, planner kernel, validators). Pre-engine bootstrap lives in scripts/; the engine lives in src/.",
   "scripts": {
-    "ann": "node dist/cli.js",
+    "ann": "node dist/surface/cli.js",
     "build": "tsc",
     "test": "vitest run",
     "test:watch": "vitest",
