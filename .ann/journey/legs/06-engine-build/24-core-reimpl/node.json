@@ -1,0 +1,36 @@
+{
+  "id": "06-engine-build/24-core-reimpl",
+  "contract": {
+    "intent": "Re-implement the core against the locked core-design contract (core-design @ f7fb400, §8 ship list) — superseding the accreted kernel/flow/commands layer: L1 command surface, L2 frame + intent translation, the steps, and the ability wiring.",
+    "acceptanceCriteria": [
+      "L1: spawn! enforces the v14 node.json schema (shape) + F-AC19 + artifact gate + leg gate + id naming (moved from the CLI; description.md write retired); submit! exists (the resumable-gate write); gate! decides with the 3-reject bound + the fixed composite predicate (checks confirmed OR rejected); append! refuses composite-owned kinds + created; read as a derived view; --json structured emit on derived-view commands; CLI = a thin binding (cmdGate duplicate gate-sequence check dropped)",
+      "L2 frame: resumable coordinator per core-design §4 — the four tail states, submit/present/decide gate acquisition, activate (writes activated), execute never skipped, verify (outputs, not events; verifyFailCycles config; waiting on empty chains), commit (defer-record locks + deferred spawns + completed), look-back, advance; frame-write idempotence on replay",
+      "L2 intent translation per §3: five intents (evidence/lock-artifact/propose-spawn/supersede/close); replay/rework discriminated by transcript presence (attempt boundary; runId = 1 + rejections + verify cycles); defer-record (events at commit); gate-bound ordering; bidirectional role validation; the confirm-bound deadlock check (produces?[]); type-driven placement/filename",
+      "L2 gate-source routing + verdict maps + role-bound inputs per §6 (chain entries with at/inputs/params/verdict/when); the general config (rules/config/default.json) read: conditionals + verifyFailCycles",
+      "steps rebuilt: idea-validate (interactive session, grill-bound, transcript-replayable), envision, spec — declaring roles/produces/decisions, never touching the store",
+      "L3 abilities: llm (transcript emission keyed (stepId, runId, seq) through the record hook), interact (console, replayable), read (the L1 view); shell/tool protocol-declared, unbuilt",
+      "test suite green (169 existing + new tests for the new mechanisms); build clean; ann check clean (the 3 documented immutable findings on tasks 13/19 are known)",
+      "committed per slice with structured commit evidence + completed"
+    ],
+    "requiredInputs": [
+      "core-design",
+      "journey-format-spec",
+      "architecture",
+      "resource-registry",
+      "flow-control-spec"
+    ],
+    "expectedOutputs": [
+      "src/cli.ts",
+      "src/store/store.ts",
+      "src/kernel/",
+      "rules/config/default.json"
+    ],
+    "targetAreas": [
+      "src/cli.ts",
+      "src/store/",
+      "src/kernel/",
+      "rules/config/"
+    ]
+  },
+  "createdAt": "2026-08-27"
+}
