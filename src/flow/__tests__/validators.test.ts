@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store } from '../../store/store.js';
 import { runValidators, RULES, derivedRegistry } from '../validators/index.js';
-import { setConfig, resetConfigCache } from '../../adapters/provider/config.js';
+import { setConfig, resetConfigCache } from '../../abilities/llm/config.js';
 
 let root: string;
 function makeStore() {

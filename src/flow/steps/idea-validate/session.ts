@@ -1,5 +1,5 @@
 import { DefaultGrillingEngine, GrillingRequest, ValidationPoint } from './grilling.js';
-import { AdapterError, CompletionUsage } from '../../../adapters/provider/index.js';
+import { AdapterError, CompletionUsage } from '../../../abilities/llm/index.js';
 import { GroundingInput, GrillQuestion } from '../shared.js';
 import { Abilities, InteractAbort } from '../../types.js';
 import { adapterFromAbility } from '../engine-adapter.js';

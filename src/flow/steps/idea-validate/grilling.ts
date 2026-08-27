@@ -1,4 +1,4 @@
-import { ProviderAdapter, CompletionSuccess, CompletionUsage, AdapterError } from '../../../adapters/provider/index.js';
+import { ProviderAdapter, CompletionSuccess, CompletionUsage, AdapterError } from '../../../abilities/llm/index.js';
 
 /**
  * The grilling engine (S2) — F4: the idea's exit gate.

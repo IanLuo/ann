@@ -13,6 +13,7 @@
   },
   "include": ["src"],
   "exclude": [
-    "src/engines"
+    "src/engines",
+    "src/adapters"
   ]
 }

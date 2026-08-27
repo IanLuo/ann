@@ -1,6 +1,6 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { loadConfig } from '../adapters/provider/config.js';
+import { loadConfig } from '../abilities/llm/config.js';
 
 /**
  * THE GENERAL CONFIG (core-design §6; owner decision 2026-08-26) — the end-user knobs.

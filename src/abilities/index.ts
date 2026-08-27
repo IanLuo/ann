@@ -1,5 +1,5 @@
 import { createInterface } from 'node:readline/promises';
-import { ProviderAdapter } from '../adapters/provider/index.js';
+import { ProviderAdapter } from './llm/index.js';
 import { Abilities, InteractAbility, LlmAbility, ResearchFinding } from '../flow/types.js';
 
 export { recording } from './recording.js';

@@ -1,4 +1,4 @@
-import { ProviderAdapter, CompletionSuccess, CompletionUsage, AdapterError } from '../../adapters/provider/index.js';
+import { ProviderAdapter, CompletionSuccess, CompletionUsage, AdapterError } from '../../abilities/llm/index.js';
 import {
   GroundingInput,
   GrillQuestion,

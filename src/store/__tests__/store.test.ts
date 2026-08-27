@@ -425,7 +425,7 @@ describe('Store — F-AC18 artifact gate (format v9 §14)', () => {
   it('a v9 task with STRUCTURED commit evidence (no artifact-locked) passes F-AC18 (v10)', () => {
     writeV9Node('06-engine-build/07-code-task', '2026-08-21', [
       ev('created'), ev('confirmed', { gate: 'grill' }),
-      ev('evidence', { commits: [{ sha: '8e94c58', note: 'step 1' }], refs: ['src/adapters/provider/'] }),
+      ev('evidence', { commits: [{ sha: '8e94c58', note: 'step 1' }], refs: ['src/abilities/llm/'] }),
       ev('confirmed', { gate: 'confirm' }), ev('completed'),
     ]);
     expect(new Store(root).check().some((p) => p.includes('F-AC18'))).toBe(false);
@@ -481,7 +481,7 @@ describe('Store — commit traceability (format v10 §9)', () => {
 
   it('passes a commits[] sha that DOES resolve in git (real repo commit)', () => {
     writeNode('06-engine-build/10-code', {}, [
-      ev('evidence', { commits: [{ sha: '8e94c58' }], refs: ['src/adapters/provider/'] }),
+      ev('evidence', { commits: [{ sha: '8e94c58' }], refs: ['src/abilities/llm/'] }),
     ]);
     const problems = new Store(root).check();
     expect(problems.some((p) => p.includes('does not resolve') || p.includes('does not exist'))).toBe(false);
@@ -714,14 +714,14 @@ describe('Store — results() (type-aware result gathering, format v10)', () => 
     writeNode(id, {}, [
       ev('created'),
       ev('artifact-locked', { artifact: { name: 'thing-spec', path: 'journey/legs/06-engine-build/05-s2/artifacts/spec.md', lockSha: 'abc1234' } }),
-      ev('evidence', { commits: [{ sha: '8e94c58', note: 'step 1' }], refs: ['src/adapters/provider/', 'https://example.com/ext'] }),
+      ev('evidence', { commits: [{ sha: '8e94c58', note: 'step 1' }], refs: ['src/abilities/llm/', 'https://example.com/ext'] }),
       ev('evidence', { note: 'checkpoint — prose only' }),
     ]);
     const items = new Store(root).results(id);
     expect(items.map((i) => i.kind)).toEqual(['doc', 'commit', 'ref', 'link', 'evidence']);
     expect(items[0]).toMatchObject({ kind: 'doc', label: expect.stringContaining('thing-spec @ abc1234 [current]') });
     expect(items[1]).toMatchObject({ kind: 'commit', sha: '8e94c58' });
-    expect(items[2]).toMatchObject({ kind: 'ref', path: 'src/adapters/provider/' });
+    expect(items[2]).toMatchObject({ kind: 'ref', path: 'src/abilities/llm/' });
     expect(items[3]).toMatchObject({ kind: 'link', url: 'https://example.com/ext' });
     expect(items[4]).toMatchObject({ kind: 'evidence', note: expect.stringContaining('prose only') });
   });

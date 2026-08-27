@@ -1,4 +1,4 @@
-import { ProviderAdapter } from '../../adapters/provider/index.js';
+import { ProviderAdapter } from '../../abilities/llm/index.js';
 import { LlmAbility } from '../types.js';
 
 /**

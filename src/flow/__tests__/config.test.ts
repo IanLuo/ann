@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { resetConfigCache } from '../../adapters/provider/config.js';
+import { resetConfigCache } from '../../abilities/llm/config.js';
 import { resolveConfig, BUILTIN_CONFIG, VERIFY_FAIL_CYCLES_CEILING } from '../config.js';
 
 /**

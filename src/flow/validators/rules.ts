@@ -9,7 +9,7 @@ import { RuleFinding, ValidatorContext } from './types.js';
 const targetsOf = (ctx: ValidatorContext): string[] =>
   ctx.nodeId ? [ctx.nodeId] : ctx.store.ids().filter((i) => i.includes('/'));
 import { getVOCAB } from '../../store/vocab.js';
-import { loadProviderRegistry, loadConfig } from '../../adapters/provider/index.js';
+import { loadProviderRegistry, loadConfig } from '../../abilities/llm/index.js';
 
 /** gate-1 — produced work requires confirmed(gate=grill) before it (v9+ nodes; the
  *  cutoff grandfathers the prose-gate era at reporting — core-design §1). */

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { DefaultGrillingEngine } from '../grilling.js';
 import type { GrillingArtifact, GrillingRequest } from '../grilling.js';
-import type { Completion, ProviderAdapter } from '../../../../adapters/provider/index.js';
+import type { Completion, ProviderAdapter } from '../../../../abilities/llm/index.js';
 
 /** Fake adapter — engines never touch a real provider in tests (AC-4: interface only). */
 const fakeAdapter = (responses: Completion[]): { adapter: ProviderAdapter; calls: Array<{ prompt: string; opts?: object }> } => {

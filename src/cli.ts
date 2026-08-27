@@ -57,7 +57,7 @@ import {
   setProject,
   useProject,
   removeProject,
-} from './adapters/provider/index.js';
+} from './abilities/llm/index.js';
 import { getVOCAB } from './store/vocab.js';
 import { assemblePacket } from './flow/materialize.js';
 import { runValidators, RULES, derivedRegistry } from './flow/validators/index.js';
@@ -66,8 +66,8 @@ import { loadProjectFlow, phaseOf, resolveChain, validateChain } from './flow/ch
 import { Frame } from './flow/frame.js';
 import { buildAbilities } from './abilities/index.js';
 import { resolveConfig } from './flow/config.js';
-import { getAdapter } from './adapters/provider/index.js';
-import { ProviderAdapter } from './adapters/provider/index.js';
+import { getAdapter } from './abilities/llm/index.js';
+import { ProviderAdapter } from './abilities/llm/index.js';
 
 // ── PROJECT RESOLUTION (before anything touches the store) ──────────────────────
 // ann manages MULTIPLE projects (each with its own journey), identified by PATH only.
