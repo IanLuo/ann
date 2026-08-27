@@ -1,0 +1,34 @@
+{
+  "id": "06-engine-build/26-artifact-ownership",
+  "contract": {
+    "intent": "Invert artifact ownership per the placement-flip decision: the PRODUCING TASK owns its artifact's content as a real file; docs/ becomes a current-only pointer VIEW (a symlink from docs/<category>/<name>-v<N>.md to the producing task's artifact). The store becomes self-contained — no artifact depends on docs/ — and the version history lives in the journey artifacts (git-tracked), not in the mirror. Sequences after 25-layer-fold (both touch src/commands/index.ts).",
+    "acceptanceCriteria": [
+      "PLACEMENT FLIP: lock! writes the shared artifact as a REAL file at journey/legs/<id>/artifacts/<name>.md — the producing task owns the content — and the shared placement becomes a SYMLINK docs/<category>/<name>-v<N>.md -> the producing task's artifact. Exactly ONE physical copy of current content. Applies to the shared categories (spec/system-design/architecture); task-local types (record/vision/validation) unchanged. Core-design §3 rule 7 + journey-format-spec §14/§15 amended to match",
+      "HISTORY SELF-CONTAINED: every existing superseded artifact in the shared categories is snapshotted from its docs symlink into a REAL file (byte-identical, lock-stamped) so no artifact resolves through docs/; then all non-current docs files are removed. docs/ holds exactly the current versions (12 symlinks to their producing tasks). Deleting docs/ thereafter breaks nothing in the store",
+      "VERSION DERIVATION FROM THE LOG: nextVersion derives N from the artifact-locked history of the logical name (the supersession chain), NOT from filename resolution through the mirror — the current filename-resolution path (realpath -> basename -vN) returns 0 for real files and would collide with the existing current. The current docs name still carries -v<N>, N deterministic from the log",
+      "F-AC18 REFS: new lock! evidence refs point at journey artifact paths (stable, immutable), never docs paths. The 2 legacy refs in tasks 14/15 (docs/specs/journey-format-spec-v10.md, -v11.md) are recorded as immutable known findings, consistent with the existing grandfathering of tasks 13/19 (F-AC18/F-AC19). ann check reports only the known immutable set",
+      "AMENDMENT RECORDED per the change-protocol: journey-format-spec v14 -> v15 (complete superseding artifact, same logical name, §14/§15 placement-rule flip), supersede event, referrer re-pointing",
+      "docs/ = CURRENT-ONLY: the 12 current shared artifacts (the same set task 24's AC-7 counts) are the only files under docs/, all symlinks; no non-current version remains on disk in docs/",
+      "INTEGRITY: ann check reports no NEW findings beyond the known immutable set (3 existing + the 2 recorded legacy refs); ann specs / current() / read / detail / branch / packet / lock! all resolve; the 268-test suite stays green (re-pointed, not rewritten); typecheck clean",
+      "committed per slice with structured commit evidence + completed"
+    ],
+    "requiredInputs": [
+      "journey-format-spec",
+      "core-design",
+      "architecture",
+      "resource-registry"
+    ],
+    "expectedOutputs": [
+      "src/commands/index.ts",
+      ".ann/docs/",
+      "journey-format-spec (amendment artifact)"
+    ],
+    "targetAreas": [
+      "src/commands/index.ts",
+      "src/store/",
+      ".ann/docs/",
+      "journey-format-spec"
+    ]
+  },
+  "createdAt": "2026-08-27"
+}

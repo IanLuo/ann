@@ -1,0 +1,35 @@
+{
+  "id": "06-engine-build/25-layer-fold",
+  "contract": {
+    "intent": "Land the L0-L3 layer target tree per architecture-v3 rung 3 — the fold task 24 scoped out. src/engines/ and src/adapters/ do not exist in the new design: their units re-home to the layer that owns the invariant (architecture-v3 §76/§27) and the old directories are deleted. src/cli.ts becomes the L3 surface binding. Placement change only — core-design §8:9 marks the validators and the provider adapter as functionally UNCHANGED substrate, so this task moves and re-points, it does not rewrite.",
+    "acceptanceCriteria": [
+      "engines folded per architecture-v3 §76: grilling -> the grill-bound idea-validate step; envision/spec -> their chain steps; context.ts (the assembler) -> the materialize phase reached via L1 packet; validators/ -> the validate phase; shared.ts to its consumers. src/engines/ DELETED. Behavior unchanged (core-design §8:9) — the move re-points imports, it does not rewrite logic",
+      "adapter tier dissolved per architecture-v3 §27 + core-design §8 architecture bullet (':65 the adapter tier dissolves into L3 abilities'): src/adapters/provider/ (http · registry · config · credentials · types · oplog) becomes the llm ability under src/abilities/. src/adapters/ DELETED. The frozen ProviderAdapter contract is carried intact, not re-specified",
+      "L3 surface: src/cli.ts -> src/surface/ as a binding over L1 (architecture-v3 rung 3 tree; ':the surface is NOT a tier and NOT an initiator'). package.json scripts/bin + tsconfig + the dist entry path updated; npm run ann resolves",
+      "src/kernel/ tombstone cleared: task 08's traceability ref (the reason 6599f61 kept SUPERSEDED.md) re-pointed to the superseding location first, then the directory DELETED",
+      "residue of the falsified engine tier cleared: the EnvisionEngine + GrillingEngine interfaces (architecture-v3 §28 records ':63 the kernel routes each step to its engine' as FALSIFIED — the interfaces encode that concept and have no consumer), store/vocab.ts artifactTypeIds (no callers repo-wide), and stale dist/ output from deleted sources (clean build)",
+      "no directory outside the architecture-v3 rung-3 target tree remains under src/: store · commands · flow (+flow/steps) · abilities · surface are the complete set (evals/ stays unbuilt — task 12-s9)",
+      "test suite green (268 existing, re-pointed not rewritten); typecheck clean; ann check reports no NEW findings (the 3 documented immutable findings on tasks 13/19 are known)",
+      "committed per slice with structured commit evidence + completed"
+    ],
+    "requiredInputs": [
+      "architecture",
+      "core-design",
+      "resource-registry"
+    ],
+    "expectedOutputs": [
+      "src/flow/",
+      "src/abilities/",
+      "src/surface/",
+      "package.json"
+    ],
+    "targetAreas": [
+      "src/engines/",
+      "src/adapters/",
+      "src/cli.ts",
+      "src/kernel/",
+      "package.json"
+    ]
+  },
+  "createdAt": "2026-08-27"
+}
