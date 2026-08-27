@@ -28,6 +28,13 @@ function writeNode(id: string, contract: unknown, events: Array<Record<string, u
 }
 const ev = (type: string, extra: Record<string, unknown> = {}) => ({ at: '2026-08-23', type, ...extra });
 
+/** The product chain as DATA. It used to be a code literal (BUILTIN_CHAIN); core-design
+ *  §7 makes the builtin fallback the EMPTY chain, so a chain-exercising test writes it. */
+function writeDefaultChain(chain: unknown[] = ['idea-validate', 'envision', 'spec']) {
+  mkdirSync(join(root, '.ann', 'rules', 'flow'), { recursive: true });
+  writeFileSync(join(root, '.ann', 'rules', 'flow', 'default.json'), JSON.stringify({ chains: { default: chain, implementation: [] } }));
+}
+
 /** A current artifact 'x-spec' (resolvable requiredInput) with a file on disk. */
 function currentSpecArtifact() {
   const id = '00-leg/00-spec-producer';
@@ -173,6 +180,7 @@ describe('PlannerKernel — execute (flow chain through the step registry)', () 
   afterEach(() => rmSync(root, { recursive: true, force: true }));
 
   it('runs the default chain validate → envision → spec; spec consumes the vision; evidence emitted at the executor', async () => {
+    writeDefaultChain();
     currentSpecArtifact();
     writeNode('01-leg/01-a', taskContract(), [ev('created'), ev('confirmed', { gate: 'grill' })]);
     const { adapter, calls } = fakeAdapter([ok(GRILL_JSON), ok(VISION_JSON), ok('# Detailed spec\n\nAC-1: …')]);
@@ -180,9 +188,9 @@ describe('PlannerKernel — execute (flow chain through the step registry)', () 
     const r = await k.execute('01-leg/01-a');
 
     expect(r.ok).toBe(true);
-    expect(r.flow.chain).toEqual(['validate', 'envision', 'spec']);
-    expect(r.flow.source).toBe('builtin');
-    expect(r.outcomes.map((o) => o.step)).toEqual(['validate', 'envision', 'spec']);
+    expect(r.flow.chain).toEqual(['idea-validate', 'envision', 'spec']);
+    expect(r.flow.source).toBe('project-config');
+    expect(r.outcomes.map((o) => o.step)).toEqual(['idea-validate', 'envision', 'spec']);
     expect(r.outcomes.every((o) => o.result.ok && o.ruleFindings.length === 0)).toBe(true);
     // chain wiring: the spec step consumed the envision result (its prompt cites the vision summary)
     expect(calls.length).toBe(3);
@@ -224,6 +232,7 @@ describe('PlannerKernel — execute (flow chain through the step registry)', () 
   });
 
   it('a step rule failure stops the chain (co-located verify, R3-D5)', async () => {
+    writeDefaultChain();
     currentSpecArtifact();
     writeNode('01-leg/01-a', taskContract(), [ev('created')]);
     // an EMPTY grill — the session cannot inform a gate; the idea-validation-doc rule must fail it
@@ -231,28 +240,30 @@ describe('PlannerKernel — execute (flow chain through the step registry)', () 
     const k = kernel(new Store(root), adapter, new ScriptedInteractor([], [], 'solid'));
     const r = await k.execute('01-leg/01-a');
     expect(r.ok).toBe(false);
-    expect(r.failedAt).toBe('validate');
+    expect(r.failedAt).toBe('idea-validate');
     expect(r.outcomes[0].ruleFindings.some((f) => f.code === 'idea-validation-doc')).toBe(true);
   });
 
   it('the interactive validate step fails closed without an interactor (S8 seam)', async () => {
+    writeDefaultChain();
     currentSpecArtifact();
     writeNode('01-leg/01-a', taskContract(), [ev('created')]);
     const { adapter } = fakeAdapter([ok(GRILL_JSON)]);
     const k = kernel(new Store(root), adapter); // NO interactor
     const r = await k.execute('01-leg/01-a');
     expect(r.ok).toBe(false);
-    expect(r.failedAt).toBe('validate');
+    expect(r.failedAt).toBe('idea-validate');
     expect(r.outcomes[0].result.blocker).toContain('no interactor');
   });
 
   it('adapter failure passes through fail-closed (never fabricated)', async () => {
+    writeDefaultChain();
     currentSpecArtifact();
     writeNode('01-leg/01-a', taskContract(), [ev('created')]);
     const k = kernel(new Store(root), fakeAdapter([fail('provider down')]).adapter, new ScriptedInteractor([], [], 'solid'));
     const r = await k.execute('01-leg/01-a');
     expect(r.ok).toBe(false);
-    expect(r.failedAt).toBe('validate');
+    expect(r.failedAt).toBe('idea-validate');
     expect(r.outcomes[0].result.blocker).toContain('provider down');
   });
 
@@ -346,18 +357,18 @@ describe('Flow config — DATA, not code (AC-3/AC-4)', () => {
 
   it('project flow file is read (data), never overridden by code', () => {
     mkdirSync(join(root, '.ann', 'rules', 'flow'), { recursive: true });
-    writeFileSync(join(root, '.ann', 'rules', 'flow', 'default.json'), JSON.stringify({ chains: { default: ['validate', 'spec'], implementation: [] }, template: 'idea → validate → spec → continue' }));
+    writeFileSync(join(root, '.ann', 'rules', 'flow', 'default.json'), JSON.stringify({ chains: { default: ['idea-validate', 'spec'], implementation: [] }, template: 'idea → validate → spec → continue' }));
     writeNode('01-leg/01-a', taskContract(), [ev('created')]);
     const f = resolveFlow(new Store(root), '01-leg/01-a', root);
-    expect(f.chain).toEqual(['validate', 'spec']);
+    expect(f.chain).toEqual(['idea-validate', 'spec']);
     expect(f.source).toBe('project-config');
     expect(f.template).toContain('idea');
-    expect(loadProjectFlow(root)).toEqual({ chains: { default: ['validate', 'spec'], implementation: [] }, template: 'idea → validate → spec → continue' });
+    expect(loadProjectFlow(root)).toEqual({ chains: { default: ['idea-validate', 'spec'], implementation: [] }, template: 'idea → validate → spec → continue' });
   });
 
   it('work type selects the chain: implementation → lifecycle only (empty chain), planning → the beginning chain', () => {
     mkdirSync(join(root, '.ann', 'rules', 'flow'), { recursive: true });
-    writeFileSync(join(root, '.ann', 'rules', 'flow', 'default.json'), JSON.stringify({ chains: { default: ['validate', 'envision', 'spec'], implementation: [] } }));
+    writeFileSync(join(root, '.ann', 'rules', 'flow', 'default.json'), JSON.stringify({ chains: { default: ['idea-validate', 'envision', 'spec'], implementation: [] } }));
     const store = new Store(root);
     writeNode('01-leg/01-a', taskContract({ workType: 'implementation' }), [ev('created')]);
     const impl = resolveFlow(store, '01-leg/01-a', root);
@@ -366,18 +377,18 @@ describe('Flow config — DATA, not code (AC-3/AC-4)', () => {
     expect(impl.workType).toBe('implementation');
     writeNode('01-leg/02-b', taskContract({ workType: 'planning' }), [ev('created')]);
     const plan = resolveFlow(store, '01-leg/02-b', root);
-    expect(plan.chain).toEqual(['validate', 'envision', 'spec']);
+    expect(plan.chain).toEqual(['idea-validate', 'envision', 'spec']);
   });
 
   it('an unknown workType is a NAMED problem (never a silent fallback) and the kernel refuses to execute', async () => {
     mkdirSync(join(root, '.ann', 'rules', 'flow'), { recursive: true });
-    writeFileSync(join(root, '.ann', 'rules', 'flow', 'default.json'), JSON.stringify({ chains: { default: ['validate', 'envision', 'spec'] } }));
+    writeFileSync(join(root, '.ann', 'rules', 'flow', 'default.json'), JSON.stringify({ chains: { default: ['idea-validate', 'envision', 'spec'] } }));
     currentSpecArtifact();
     writeNode('01-leg/01-a', taskContract({ workType: 'teleport' }), [ev('created')]);
     const store = new Store(root);
     const f = resolveFlow(store, '01-leg/01-a', root);
     expect(f.problem).toContain("unknown workType 'teleport'");
-    expect(f.chain).toEqual(['validate', 'envision', 'spec']); // fell back, but NAMED
+    expect(f.chain).toEqual(['idea-validate', 'envision', 'spec']); // fell back, but NAMED
     const k = kernel(store, fakeAdapter([]).adapter);
     const r = await k.execute('01-leg/01-a');
     expect(r.ok).toBe(false); // the kernel refuses — the problem is surfaced, never silently run
@@ -386,7 +397,7 @@ describe('Flow config — DATA, not code (AC-3/AC-4)', () => {
 
   it('per-task contract.flow override beats work type (data overrides data)', () => {
     mkdirSync(join(root, '.ann', 'rules', 'flow'), { recursive: true });
-    writeFileSync(join(root, '.ann', 'rules', 'flow', 'default.json'), JSON.stringify({ chains: { default: ['validate', 'envision', 'spec'], implementation: [] } }));
+    writeFileSync(join(root, '.ann', 'rules', 'flow', 'default.json'), JSON.stringify({ chains: { default: ['idea-validate', 'envision', 'spec'], implementation: [] } }));
     writeNode('01-leg/01-a', taskContract({ workType: 'implementation', flow: ['envision'] }), [ev('created')]);
     const f = resolveFlow(new Store(root), '01-leg/01-a', root);
     expect(f.chain).toEqual(['envision']);
@@ -400,7 +411,7 @@ describe('Flow config — DATA, not code (AC-3/AC-4)', () => {
     const store = new Store(root);
     const packet = assemblePacket(store, '01-leg/01-a');
     // good chain: spec consumes envision (earlier) and packet deps resolve
-    expect(validateChain(reg, ['validate', 'envision', 'spec'], packet)).toEqual([]);
+    expect(validateChain(reg, ['idea-validate', 'envision', 'spec'], packet)).toEqual([]);
     // bad chain: forward reference
     expect(validateChain(reg, ['spec'], packet).some((p) => p.at === 'spec.inputs.envision')).toBe(true);
     // bad chain: unknown step

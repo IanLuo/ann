@@ -4,7 +4,9 @@ import { GroundingInput } from '../../engines/shared.js';
 import { IdeaValidationSession, IdeaValidationDoc } from './idea-validate/session.js';
 
 /**
- * The 'validate' step — the FLOW-1 IDEA VALIDATOR (finalized 2026-08-23).
+ * The 'idea-validate' step — the FLOW-1 IDEA VALIDATOR (finalized 2026-08-23; renamed
+ * from 'validate' by the core-design §8 listed migration — it validates the IDEA, and
+ * `ann validate` is the unrelated validator-rule command).
  *
  * NOT a context validator (S4: deterministic store checks) and NOT a one-shot
  * grill: this runs the INTERACTIVE idea-validation session — multi-round grilling
@@ -44,7 +46,7 @@ const groundingFrom = (ctx: StepContext): GroundingInput[] =>
     .map((d) => ({ label: d.name, text: d.excerpt ?? '', sourceType: 'prior plan' as const }));
 
 export class ValidateStep implements Step {
-  readonly id = 'validate';
+  readonly id = 'idea-validate';
   /** Consumes the task contract + packet only — no earlier-step dependency. */
   readonly inputs: string[] = [];
   readonly rules: RuleModule[] = [ideaValidationDocRule];

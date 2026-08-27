@@ -1,0 +1,15 @@
+{
+  "registry": "config",
+  "version": 1,
+  "category": "config",
+  "kind": "registry",
+  "definition": "the general user-facing configuration — DATA, never code (F17; owner decision 2026-08-26). ONE CONFIG CLASS, TWO INSTANCES (resource-registry v3): this PROJECT file holds flow.* and preferences.*; the USER overlay (~/.ann/config.json) overrides preferences.* and flow.verifyFailCycles only. PRECEDENCE per leaf key: env > user > project > builtin. flow.conditionals is PROJECT SEMANTICS and is NOT user-overridable (two people must not run the same journey as different chains — the product IS the journey). The GATE REJECT BOUND (3) and the gate set/positions are LOCKED constants, not knobs.",
+  "flow": {
+    "conditionals": false,
+    "verifyFailCycles": 1
+  },
+  "preferences": {
+    "askVsAssume": "ask",
+    "defaults": {}
+  }
+}

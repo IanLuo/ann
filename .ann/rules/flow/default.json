@@ -1,12 +1,24 @@
 {
   "registry": "flow",
-  "version": 2,
+  "version": 3,
   "category": "flow",
   "kind": "registry",
-  "definition": "the project's step-chain flow config — DATA, not code (requirements-spec AC-3, flow-control-spec v6 §7). chains maps a WORK TYPE to its step sequence; a task's contract.workType selects it, 'default' applies otherwise; an EMPTY chain = the task runs the lifecycle only (execution tasks — the runner does the work). A task's contract.flow overrides all. The engine reads this file and never overrides it.",
-  "template": "idea → validate → envision → detailed specs → continue (beginning build / planning); execution tasks run the lifecycle (work-type chains)",
+  "definition": "the project's step-chain flow config — DATA, not code (requirements-spec AC-3, flow-control-spec v6 §7, core-design §6). chains maps a WORK TYPE to its chain ENTRIES; a task's contract.workType selects it, 'default' applies otherwise; an EMPTY chain = the task runs the lifecycle only (execution tasks — the runner does the work, outcomes arrive as observed evidence commits). A task's contract.flow overrides all. v3: an entry is {id, inputs?: {role → source}, params?, at?: 'grill'|'confirm'|'execute', verdict?: {decision → {gate, feedback?}}, when?} — the GATE SOURCE is data, the gate set and positions are not. A bare string id is the short form of {id}. The engine reads this file and never overrides it; the builtin fallback is the EMPTY chain.",
+  "template": "idea → idea-validate → envision → detailed specs → continue (beginning build / planning); execution tasks run the lifecycle (work-type chains)",
   "chains": {
-    "default": ["validate", "envision", "spec"],
+    "default": [
+      {
+        "id": "idea-validate",
+        "at": "grill",
+        "verdict": {
+          "solid": { "gate": "accept" },
+          "revise": { "gate": "reject" },
+          "reject": { "gate": "reject" }
+        }
+      },
+      { "id": "envision" },
+      { "id": "spec", "inputs": { "vision": "envision" } }
+    ],
     "implementation": []
   }
 }

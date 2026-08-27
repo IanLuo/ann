@@ -27,6 +27,14 @@ export interface UserConfig {
   projects?: string[];
   /** The last-used project path (fallback when cwd discovery finds none). */
   currentProject?: string;
+  /**
+   * The GENERAL-CONFIG overlay (core-design §6; resource-registry v3 — ONE CONFIG
+   * CLASS, TWO INSTANCES). This overlay may override `flow.verifyFailCycles` (a cost
+   * knob) and `preferences.*` only — `flow.conditionals` is PROJECT SEMANTICS and is
+   * refused here, named (see flow/config.ts).
+   */
+  flow?: { verifyFailCycles?: number };
+  preferences?: { askVsAssume?: string; defaults?: Record<string, unknown> };
 }
 
 export const configPath = (): string => process.env.ANN_CONFIG || join(homedir(), '.ann', 'config.json');
@@ -49,7 +57,7 @@ export function resetConfigCache(): void {
 }
 
 /** Save one config value — creates the file, chmod 600 (user-only), never echoed. */
-export function setConfig(key: keyof UserConfig, value: string | number | string[]): UserConfig {
+export function setConfig(key: keyof UserConfig, value: string | number | string[] | Record<string, unknown>): UserConfig {
   const cfg = { ...loadConfig(), [key]: value };
   const p = configPath();
   mkdirSync(dirname(p), { recursive: true });

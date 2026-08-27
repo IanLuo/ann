@@ -64,6 +64,7 @@ import { runValidators, RULES, derivedRegistry } from './engines/validators/inde
 import { PlannerKernel } from './kernel/kernel.js';
 import { buildDefaultRegistry } from './kernel/steps/index.js';
 import { loadProjectFlow, resolveFlow, validateChain } from './kernel/flow.js';
+import { resolveConfig } from './flow/config.js';
 import { ProviderAdapter } from './adapters/provider/index.js';
 
 // ── PROJECT RESOLUTION (before anything touches the store) ──────────────────────
@@ -435,8 +436,7 @@ function cmdChain() {
   const project = loadProjectFlow(ROOT);
   console.log('FLOW CONFIG (rules/flow/default.json — DATA, never code)');
   if (!project) {
-    console.log('  (no project flow file — the builtin product template applies)');
-    console.log(`  default: ${JSON.stringify(['validate', 'envision', 'spec'])}`);
+    console.log('  (no project flow file — the builtin fallback is the EMPTY chain; flow content is DATA, never code)');
     return;
   }
   if (project.template) console.log(`  template: ${project.template}`);
@@ -508,20 +508,48 @@ function cmdRules(write: boolean) {
   console.log(`\n  ${reg.rules.length} rules — 'ann rules --write' regenerates rules/check/rules.json from this`);
 }
 
+/** ONE CONFIG CLASS, TWO INSTANCES (core-design §6): the personal overlay + the
+ *  PROJECT registry — shown together, each leaf tagged with the layer it came from. */
 function cmdConfig() {
+  const resolution = resolveConfig(ROOT);
+  if (JSON_OUT) return console.log(JSON.stringify({ file: configPath(), user: maskedConfig(), ...resolution }, null, 2));
   console.log(`CONFIG FILE: ${configPath()}${configExists() ? '' : ' (not created yet)'}`);
   console.log('  outside the repo · chmod 600 (user-only) · apiKey masked · resolution: env > config > keychain/fallback');
   const entries = Object.entries(maskedConfig());
   if (!entries.length) console.log('  (empty — defaults apply)');
-  for (const [k, v] of entries) console.log(`  ${k}: ${v}`);
-  console.log('  set: ann config! set <key> <value>  (keys: provider · model · baseUrl · apiKey · maxTokens)');
+  for (const [k, v] of entries) console.log(`  ${k}: ${typeof v === 'object' ? JSON.stringify(v) : v}`);
+  console.log('\nGENERAL CONFIG (rules/config/default.json — the project registry; precedence per leaf: env > user > project > builtin)');
+  for (const [key, layer] of Object.entries(resolution.provenance)) {
+    const [g, l] = key.split('.');
+    const v = (resolution.config[g as 'flow' | 'preferences'] as unknown as Record<string, unknown>)[l];
+    console.log(`  ${key.padEnd(26)} ${JSON.stringify(v)} [${layer}]`);
+  }
+  console.log('  flow.conditionals is PROJECT SEMANTICS — set it in the project registry, never the overlay');
+  for (const p of resolution.problems) console.log(`  PROBLEM: ${p}`);
+  console.log(`  set: ann config! set <key> <value>  (keys: ${CONFIG_KEYS.join(' · ')})`);
 }
 
+/** The overlay's writable keys — provider wiring + the general-config leaves the
+ *  overlay may override (core-design §6: preferences.* and flow.verifyFailCycles). */
+const CONFIG_KEYS = ['provider', 'model', 'baseUrl', 'apiKey', 'maxTokens', 'flow.verifyFailCycles', 'preferences.askVsAssume'];
+
 function cmdConfigSet(key: string, value: string | undefined) {
-  const keys = ['provider', 'model', 'baseUrl', 'apiKey', 'maxTokens'];
-  if (!keys.includes(key) || value === undefined || value === '') {
-    console.error(`usage: ann config! set <key> <value>  (keys: ${keys.join(' · ')})`);
+  if (!CONFIG_KEYS.includes(key) || value === undefined || value === '') {
+    console.error(`usage: ann config! set <key> <value>  (keys: ${CONFIG_KEYS.join(' · ')})`);
     process.exit(2);
+  }
+  // the general-config leaves nest under their group; validation stays in the resolver
+  if (key.includes('.')) {
+    const [group, leaf] = key.split('.');
+    const cfg = loadConfig() as Record<string, unknown>;
+    const existing = (cfg[group] as Record<string, unknown> | undefined) ?? {};
+    const v: unknown = leaf === 'verifyFailCycles' ? Number(value) : value;
+    if (leaf === 'verifyFailCycles' && !Number.isInteger(v)) { console.error('config!: flow.verifyFailCycles must be an integer'); process.exit(1); }
+    setConfig(group as 'flow' | 'preferences', { ...existing, [leaf]: v } as never);
+    const after = resolveConfig(ROOT).problems.filter((p) => p.startsWith(`config ${key}`));
+    for (const p of after) console.log(`  PROBLEM: ${p}`);
+    console.log(`config: saved ${key} → ${configPath()} = ${value}`);
+    return;
   }
   let v: string | number = value;
   if (key === 'maxTokens') {

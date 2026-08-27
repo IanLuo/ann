@@ -19,9 +19,16 @@ import { Store } from '../store/store.js';
  *   file → the built-in default product template applies (functional-spec F3).
  */
 
-/** The built-in default product template (functional-spec §2: idea → validate →
- *  envision → spec → continue; idea = the task contract, continue = the advance). */
-export const BUILTIN_CHAIN: string[] = ['validate', 'envision', 'spec'];
+/**
+ * LEGACY LOADER — the accreted path. The design target is `src/flow/chain.ts`
+ * (core-design §6: chain ENTRIES, execution order, gate-source routing). This module
+ * reads the SAME migrated v3 data, flattened to bare step ids, so the old kernel keeps
+ * running while the frame is built. It dies with `src/kernel/` when the frame lands.
+ */
+
+/** The builtin fallback is the EMPTY CHAIN (core-design §7: no hard-wired flow content
+ *  in code). It was ['validate','envision','spec'] — that content is DATA now. */
+export const BUILTIN_CHAIN: string[] = [];
 
 export interface FlowConfig {
   /** The resolved chain of step ids for this task. Empty = lifecycle only. */
@@ -61,10 +68,15 @@ export function loadProjectFlow(root: string): ProjectFlow | undefined {
       if (typeof raw.chains !== 'object' || raw.chains === null || Array.isArray(raw.chains)) throw new Error('chains must be an object of workType → step-id array');
       const chains: Record<string, string[]> = {};
       for (const [workType, seq] of Object.entries(raw.chains as Record<string, unknown>)) {
-        if (!Array.isArray(seq) || !seq.every((s) => typeof s === 'string')) {
-          throw new Error(`chains.${workType} must be an array of step ids (empty = lifecycle only)`);
-        }
-        chains[workType] = seq as string[];
+        if (!Array.isArray(seq)) throw new Error(`chains.${workType} must be an array (empty = lifecycle only)`);
+        // v3 (core-design §6): an entry is an OBJECT; a bare string is its short form.
+        // This legacy path consumes ids only — the entry's options belong to the frame.
+        chains[workType] = seq.map((s, i) => {
+          if (typeof s === 'string') return s;
+          const id = (s as { id?: unknown })?.id;
+          if (typeof id !== 'string' || !id) throw new Error(`chains.${workType}[${i}] is missing its step id`);
+          return id;
+        });
       }
       return { chains, ...(typeof raw.template === 'string' ? { template: raw.template } : {}) };
     }
