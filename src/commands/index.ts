@@ -78,6 +78,22 @@ export interface GateOutcome {
   escalated: boolean;
 }
 
+export interface FrontmostReady {
+  leg: string;
+  task: string;
+  status: string;
+}
+
+/** The look-back view (flow-control v6 §2a — the observer action, derived from events). */
+export interface LookBack {
+  activeLeg?: string;
+  activeLegStatus?: string;
+  frontmostReady?: FrontmostReady;
+  alsoReady: FrontmostReady[];
+  legGate: { met: boolean; blocker?: string };
+  pendingGates: Array<{ task: string; gate: string }>;
+}
+
 export interface ResolvedRead {
   name: string;
   path: string;
@@ -464,6 +480,49 @@ export class Commands {
 
   contractOf(id: string): Record<string, unknown> {
     return this.store.contractOf(id);
+  }
+
+  /* ══ look-back — a DERIVED view (core-design §1: an L1 read) ════════════════ */
+
+  /** The active leg: the frontmost leg not derived done/superseded. */
+  private activeLeg(): string | undefined {
+    const legs = this.store.ids().filter((i) => !i.includes('/')).sort();
+    return legs.find((l) => !['done', 'superseded'].includes(this.store.status(l)));
+  }
+
+  /** Frontmost-ready: prefix order; queued/active only; failed/superseded/blocked
+   *  siblings skipped (a blocked task is waiting on a human, not ready to run). */
+  frontmostReady(): FrontmostReady | undefined {
+    const legs = this.store.ids().filter((i) => !i.includes('/')).sort();
+    for (const leg of legs) {
+      const ready = this.store.tasksOf(leg).filter((t) => ['queued', 'active'].includes(this.store.status(t)));
+      if (ready.length) return { leg, task: ready[0], status: this.store.status(ready[0]) };
+    }
+    return undefined;
+  }
+
+  /** Where we are + what's ahead — derived from the tail, never assumed. */
+  lookBack(): LookBack {
+    const activeLeg = this.activeLeg();
+    const ready = activeLeg ? this.store.tasksOf(activeLeg).filter((t) => ['queued', 'active'].includes(this.store.status(t))) : [];
+    const alsoReady = (ready.length ? ready.slice(1) : []).map((t) => ({ leg: activeLeg!, task: t, status: this.store.status(t) }));
+    const legGate = activeLeg ? this.store.legGateMet(activeLeg) : { met: true };
+    const pendingGates: LookBack['pendingGates'] = [];
+    for (const t of this.store.tasksOf(activeLeg ?? '')) {
+      const evs = this.store.events(t);
+      for (const e of evs) {
+        if (e.type !== 'submitted' || typeof e.gate !== 'string') continue;
+        if (!this.undecidedSubmission(t, e.gate)) continue;
+        if (!pendingGates.some((p) => p.task === t && p.gate === e.gate)) pendingGates.push({ task: t, gate: e.gate });
+      }
+    }
+    return {
+      ...(activeLeg ? { activeLeg, activeLegStatus: this.store.status(activeLeg) } : {}),
+      frontmostReady: ready.length ? { leg: activeLeg!, task: ready[0], status: this.store.status(ready[0]) } : undefined,
+      alsoReady,
+      legGate,
+      pendingGates,
+    };
   }
 
   /* ══ shared derivations ════════════════════════════════════════════════════ */

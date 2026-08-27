@@ -1,4 +1,5 @@
 import { Store } from '../store/store.js';
+import { Commands, FrontmostReady, LookBack } from '../commands/index.js';
 import { assemblePacket, ContextPacket } from '../engines/context.js';
 import { RuleFinding, RuleModule, ValidatorContext } from '../engines/validators/types.js';
 import { ProviderAdapter } from '../adapters/provider/index.js';
@@ -19,25 +20,8 @@ import { EvidenceRecord, Step, StepContext, StepResult } from './step.js';
  * single writer (LB-3): evidence events at the emission points (R3-D2).
  */
 
-export interface FrontmostReady {
-  leg: string;
-  task: string;
-  status: string;
-}
-
-export interface LookBack {
-  /** Where we are — the active leg (or the leg whose gate is under review). */
-  activeLeg?: string;
-  activeLegStatus?: string;
-  /** What's ahead — the frontmost-ready task (queued/active, prefix order, failed/superseded skipped). */
-  frontmostReady?: FrontmostReady;
-  /** Other ready tasks in the same leg, prefix order. */
-  alsoReady: FrontmostReady[];
-  /** Leg gate review: gate met (all previous-leg tasks done) or its named blocker. */
-  legGate: { met: boolean; blocker?: string };
-  /** Pending human actions — submitted-but-undecided gates (the human must act). */
-  pendingGates: Array<{ task: string; gate: string }>;
-}
+// Look-back's shapes live at L1 now (core-design §1: look-back is a derived view).
+export type { FrontmostReady, LookBack } from '../commands/index.js';
 
 export interface MaterializeResult {
   packet: ContextPacket;
@@ -103,50 +87,16 @@ export class PlannerKernel {
 
   /* ── activate: frontmost-ready selection (AC-2, flow-control v6 §2) ─────────── */
 
-  /** The active leg — the FIRST not-done leg in prefix order (a leg whose tasks are
-   *  queued is not 'active' yet, but it IS the leg the human/runner must act on). */
-  private activeLeg(): string | undefined {
-    const legs = this.store.ids().filter((i) => !i.includes('/')).sort();
-    return legs.find((l) => !['done', 'superseded'].includes(this.store.status(l)));
-  }
-
-  /** Frontmost-ready: prefix order; queued/active only; failed/superseded/blocked
-   *  siblings skipped (readiness gate-validated from the log — a blocked task is
-   *  waiting on a human, not ready to run). */
+  /** Look-back is an L1 DERIVED VIEW (core-design §1) — this kernel delegates to it
+   *  rather than carrying a second copy of the derivation. */
   frontmostReady(): FrontmostReady | undefined {
-    const legs = this.store.ids().filter((i) => !i.includes('/')).sort();
-    for (const leg of legs) {
-      const ready = this.store
-        .tasksOf(leg)
-        .filter((t) => ['queued', 'active'].includes(this.store.status(t)));
-      if (ready.length) return { leg, task: ready[0], status: this.store.status(ready[0]) };
-    }
-    return undefined;
+    return new Commands(this.store).frontmostReady();
   }
 
   /* ── LOOK-BACK (flow-control v6 §2a — the observer action, derived from events) ── */
 
   lookBack(): LookBack {
-    const activeLeg = this.activeLeg();
-    const ready = activeLeg ? this.store.tasksOf(activeLeg).filter((t) => ['queued', 'active'].includes(this.store.status(t))) : [];
-    const alsoReady = (ready.length ? ready.slice(1) : []).map((t) => ({ leg: activeLeg!, task: t, status: this.store.status(t) }));
-    const legGate = activeLeg ? this.store.legGateMet(activeLeg) : { met: true };
-    const pendingGates: LookBack['pendingGates'] = [];
-    for (const t of this.store.tasksOf(activeLeg ?? '')) {
-      const evs = this.store.events(t);
-      for (const e of evs) {
-        if (e.type !== 'submitted' || typeof e.gate !== 'string') continue;
-        const decided = evs.slice(evs.indexOf(e) + 1).some((x) => (x.type === 'confirmed' || x.type === 'rejected') && x.gate === e.gate);
-        if (!decided) pendingGates.push({ task: t, gate: e.gate });
-      }
-    }
-    return {
-      ...(activeLeg ? { activeLeg, activeLegStatus: this.store.status(activeLeg) } : {}),
-      frontmostReady: ready.length ? { leg: activeLeg!, task: ready[0], status: this.store.status(ready[0]) } : undefined,
-      alsoReady,
-      legGate,
-      pendingGates,
-    };
+    return new Commands(this.store).lookBack();
   }
 
   /* ── materialize (flow-control v6 §2/§4 — the context packet + resolution ladder) ── */
