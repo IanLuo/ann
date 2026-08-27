@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
-import { DefaultEnvisionEngine } from '../envision.js';
-import type { VisionRequest } from '../envision.js';
-import type { Completion, ProviderAdapter } from '../../adapters/provider/index.js';
+import { DefaultEnvisionEngine } from '../envision-engine.js';
+import type { VisionRequest } from '../envision-engine.js';
+import type { Completion, ProviderAdapter } from '../../../adapters/provider/index.js';
 
 /** Fake adapter — engines never touch a real provider in tests (AC-4: interface only). */
 const fakeAdapter = (responses: Completion[]): { adapter: ProviderAdapter; calls: Array<{ prompt: string; opts?: object }> } => {

@@ -1,6 +1,6 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { ContextPacket } from '../engines/context.js';
+import { ContextPacket } from './materialize.js';
 import { Store } from '../store/store.js';
 import { getVOCAB } from '../store/vocab.js';
 import { GeneralConfig } from './config.js';

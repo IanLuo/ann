@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ContextPacket } from '../../engines/context.js';
+import { ContextPacket } from '../materialize.js';
 import { Store } from '../../store/store.js';
 import { BUILTIN_CONFIG, GeneralConfig } from '../config.js';
 import { ChainEntry, executionOrder, loadProjectFlow, resolveChain, validateChain, StepLookup } from '../chain.js';

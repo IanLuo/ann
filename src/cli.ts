@@ -59,8 +59,8 @@ import {
   removeProject,
 } from './adapters/provider/index.js';
 import { getVOCAB } from './store/vocab.js';
-import { assemblePacket } from './engines/context.js';
-import { runValidators, RULES, derivedRegistry } from './engines/validators/index.js';
+import { assemblePacket } from './flow/materialize.js';
+import { runValidators, RULES, derivedRegistry } from './flow/validators/index.js';
 import { buildStepRegistry } from './flow/steps/index.js';
 import { loadProjectFlow, phaseOf, resolveChain, validateChain } from './flow/chain.js';
 import { Frame } from './flow/frame.js';

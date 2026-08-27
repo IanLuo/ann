@@ -1,8 +1,8 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { recording } from '../abilities/recording.js';
 import { Commands, CommandError, LookBack } from '../commands/index.js';
-import { assemblePacket, ContextPacket } from '../engines/context.js';
-import { RuleFinding } from '../engines/validators/types.js';
+import { assemblePacket, ContextPacket } from './materialize.js';
+import { RuleFinding } from './validators/types.js';
 import { blobSha, stripMarkers } from '../store/sha.js';
 import { JourneyEvent } from '../store/store.js';
 import { ChainEntry, executionOrder, phaseOf, resolveChain, StepLookup, validateChain, Phase } from './chain.js';

@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store } from '../../store/store.js';
-import { assemblePacket } from '../context.js';
+import { assemblePacket } from '../materialize.js';
 
 let root: string;
 function makeStore() {

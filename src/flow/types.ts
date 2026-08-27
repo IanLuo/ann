@@ -1,5 +1,5 @@
-import { ContextPacket } from '../engines/context.js';
-import { RuleModule } from '../engines/validators/types.js';
+import { ContextPacket } from './materialize.js';
+import { RuleModule } from './validators/types.js';
 import { CommandError, CommandResult, ResolvedRead } from '../commands/index.js';
 
 /**

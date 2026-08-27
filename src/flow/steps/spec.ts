@@ -1,6 +1,6 @@
-import { RuleModule } from '../../engines/validators/types.js';
-import { VisionArtifact } from '../../engines/envision.js';
-import { renderContext } from '../../engines/shared.js';
+import { RuleModule } from '../validators/types.js';
+import { VisionArtifact } from './envision-engine.js';
+import { renderContext } from './shared.js';
 import { Intent, Step, StepContext, StepOutput, StepRole } from '../types.js';
 
 /**

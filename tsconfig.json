@@ -11,5 +11,8 @@
     "declaration": true,
     "types": ["node", "vitest/globals"]
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": [
+    "src/engines"
+  ]
 }

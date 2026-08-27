@@ -1,5 +1,5 @@
-import { RuleModule } from '../../engines/validators/types.js';
-import { GroundingInput } from '../../engines/shared.js';
+import { RuleModule } from '../validators/types.js';
+import { GroundingInput } from './shared.js';
 import { Intent, Step, StepContext, StepOutput, fail } from '../types.js';
 import { IdeaValidationDoc, IdeaValidationSession } from './idea-validate/session.js';
 

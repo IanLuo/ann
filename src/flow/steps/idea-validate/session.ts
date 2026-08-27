@@ -1,6 +1,6 @@
-import { DefaultGrillingEngine, GrillingRequest, ValidationPoint } from '../../../engines/grilling.js';
+import { DefaultGrillingEngine, GrillingRequest, ValidationPoint } from './grilling.js';
 import { AdapterError, CompletionUsage } from '../../../adapters/provider/index.js';
-import { GroundingInput, GrillQuestion } from '../../../engines/shared.js';
+import { GroundingInput, GrillQuestion } from '../shared.js';
 import { Abilities, InteractAbort } from '../../types.js';
 import { adapterFromAbility } from '../engine-adapter.js';
 
@@ -94,7 +94,7 @@ export class IdeaValidationSession {
     const resolved: ResolvedQuestion[] = [];
     const researchLog: ResearchFinding[] = [];
     let usage: CompletionUsage = { inputTokens: 0, outputTokens: 0 };
-    let lastArtifact: import('../../../engines/grilling.js').GrillingArtifact | undefined;
+    let lastArtifact: import('./grilling.js').GrillingArtifact | undefined;
 
     for (let round = 1; round <= maxRounds; round++) {
       // 1 — grill the CURRENT understanding (one-shot engine, honesty layer applies)
@@ -170,7 +170,7 @@ ${read}`);
     context: GroundingInput[],
     resolved: ResolvedQuestion[],
     researchLog: ResearchFinding[],
-    artifact: import('../../../engines/grilling.js').GrillingArtifact | undefined,
+    artifact: import('./grilling.js').GrillingArtifact | undefined,
     pending: GrillQuestion[],
     usage: CompletionUsage,
     rounds: number,
@@ -191,7 +191,7 @@ ${this.renderRead(artifact, rounds, true)}`);
 
   /** Deterministic guidance for the following work — provenance-clear, never invented. */
   private guidance(
-    artifact: import('../../../engines/grilling.js').GrillingArtifact | undefined,
+    artifact: import('./grilling.js').GrillingArtifact | undefined,
     resolved: ResolvedQuestion[],
     remaining: GrillQuestion[],
     constraints?: string[],
@@ -210,7 +210,7 @@ ${this.renderRead(artifact, rounds, true)}`);
     return g;
   }
 
-  private renderRead(artifact: import('../../../engines/grilling.js').GrillingArtifact | undefined, round: number, final = false): string {
+  private renderRead(artifact: import('./grilling.js').GrillingArtifact | undefined, round: number, final = false): string {
     if (!artifact) return '(no read yet)';
     const lines = [artifact.summary, ''];
     for (const v of artifact.validation) {

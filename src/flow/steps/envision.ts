@@ -1,5 +1,5 @@
-import { RuleModule } from '../../engines/validators/types.js';
-import { DefaultEnvisionEngine, VisionArtifact } from '../../engines/envision.js';
+import { RuleModule } from '../validators/types.js';
+import { DefaultEnvisionEngine, VisionArtifact } from './envision-engine.js';
 import { Intent, Step, StepContext, StepOutput, fail } from '../types.js';
 import { adapterFromAbility } from './engine-adapter.js';
 import { groundingFrom } from './idea-validate.js';
