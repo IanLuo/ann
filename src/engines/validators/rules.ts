@@ -11,16 +11,18 @@ const targetsOf = (ctx: ValidatorContext): string[] =>
 import { getVOCAB } from '../../store/vocab.js';
 import { loadProviderRegistry, loadConfig } from '../../adapters/provider/index.js';
 
-/** gate-1 — produced work requires confirmed(gate=grill) before it (retrospective honored). */
+/** gate-1 — produced work requires confirmed(gate=grill) before it (v9+ nodes; the
+ *  cutoff grandfathers the prose-gate era at reporting — core-design §1). */
 export const gate1 = {
   id: 'gate-1',
-  definition: 'produced work (artifact-locked/completed) requires confirmed(gate=grill) before it (retrospective records honored)',
+  definition: 'produced work (artifact-locked/completed) requires confirmed(gate=grill) before it (v9+ nodes; pre-cutoff nodes grandfathered at reporting)',
   severity: 'error' as const,
   enabled: true,
   params: {},
   run(ctx: ValidatorContext): RuleFinding[] {
     const out: RuleFinding[] = [];
     for (const id of targetsOf(ctx)) {
+      if (ctx.store.grandfathered(id)) continue; // CHECK-REPORTING cutoff — the writer stays unconditional
       for (const p of ctx.store.gateProblems(id)) {
         if (p.includes('GATE-1')) out.push({ severity: 'error', code: 'gate-1', detail: p, nodeId: id });
       }
@@ -39,6 +41,7 @@ export const gate2 = {
   run(ctx: ValidatorContext): RuleFinding[] {
     const out: RuleFinding[] = [];
     for (const id of targetsOf(ctx)) {
+      if (ctx.store.grandfathered(id)) continue; // CHECK-REPORTING cutoff — the writer stays unconditional
       for (const p of ctx.store.gateProblems(id)) {
         if (p.includes('GATE-2')) out.push({ severity: 'error', code: 'gate-2', detail: p, nodeId: id });
       }
@@ -182,7 +185,10 @@ export const vocabIntegrity = {
     const out: RuleFinding[] = [];
     try {
       const v = getVOCAB();
-      if (!v.eventTypes.length || !v.gates.length || !v.artifactTypes.length) out.push({ severity: 'error', code: 'vocab-integrity', detail: 'vocab registry loaded but empty of required lists' });
+      // v3: artifactTypes is a MAP of entry → {category?, versioned} (§3 rule 7).
+      if (!v.eventTypes.length || !v.gates.length || !Object.keys(v.artifactTypes).length) {
+        out.push({ severity: 'error', code: 'vocab-integrity', detail: 'vocab registry loaded but empty of required lists' });
+      }
     } catch (e) {
       out.push({ severity: 'error', code: 'vocab-integrity', detail: (e as Error).message });
     }

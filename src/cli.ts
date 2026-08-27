@@ -38,8 +38,9 @@ import {
 } from 'node:fs';
 import { join, basename, dirname, resolve } from 'node:path';
 import { execSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
 import { Store, legacyPath, logicalNameFromFile } from './store/store.js';
+import { blobSha } from './store/sha.js';
+import { Commands, CommandResult } from './commands/index.js';
 import {
   loadProviderRegistry,
   resolveSetting,
@@ -84,6 +85,16 @@ let projectFlag: string | undefined;
     args.splice(flagIdx, 2);
   }
 }
+// Global --json flag — structured emit on the derived-view commands (core-design
+// §8:289). Extracted and STRIPPED so per-command parsing never sees it.
+let JSON_OUT = false;
+{
+  const idx = args.indexOf('--json');
+  if (idx >= 0) {
+    JSON_OUT = true;
+    args.splice(idx, 1);
+  }
+}
 const isProjectCmd = args[0] === 'project' || args[0] === 'project!';
 
 const isProjectRoot = (dir: string): boolean => existsSync(join(dir, '.ann')) || existsSync(join(dir, 'journey'));
@@ -125,10 +136,16 @@ const store = new Proxy({} as Store, {
   },
 });
 
-const blobSha = (c: string): string => createHash('sha1').update('blob ' + Buffer.byteLength(c) + '\n' + c).digest('hex');
-const legsRoot = join(ROOT, '.ann', 'journey', 'legs'); // v12 layout: all ann files under .ann/
-const nodeFile = (id: string) => join(legsRoot, id, 'node.json');
-const eventFile = (id: string) => join(legsRoot, id, 'events.jsonl');
+/** L1 — every write and every derived view the binding renders goes through here. */
+const commands = new Proxy({} as Commands, {
+  get(_t, prop) {
+    const c = (_commands ??= new Commands(store, WHO));
+    const v = Reflect.get(c, prop as never);
+    return typeof v === 'function' ? (v as () => unknown).bind(c) : v;
+  },
+});
+let _commands: Commands | undefined;
+
 const hasSuperseded = (id: string) => store.events(id).some((e) => e.type === 'superseded');
 const display = (id: string) => store.status(id) + (hasSuperseded(id) ? ' · artifact superseded' : '');
 const nameOf = (e: { artifact?: { name?: string }; note?: string; path?: string }) => {
@@ -187,9 +204,9 @@ function cmdStatus() {
   // filter = the id argument (args[1]...), never the command word itself — bare
   // `ann status` with no filter prints every node (fix: silent-empty status).
   const filter = args.slice(1).find((a) => !a.startsWith('--'));
-  for (const id of store.ids().sort()) {
-    if (!filter || id.includes(filter)) console.log(`${id.padEnd(58)} ${display(id)}`);
-  }
+  const rows = commands.statuses(filter);
+  if (JSON_OUT) return console.log(JSON.stringify(rows, null, 2));
+  for (const r of rows) console.log(`${r.id.padEnd(58)} ${r.status}${r.superseded ? ' · artifact superseded' : ''}`);
 }
 
 function cmdCheck() {
@@ -265,11 +282,12 @@ function cmdCheck() {
   }
   console.log(errors === 0 ? `OK — ${currents.size} current artifacts, no gate gaps.` : `${errors} problem(s).`);
   console.log(state);
+  if (JSON_OUT) console.log(JSON.stringify({ problems, warnings: warns, notes, currents: currents.size, state }, null, 2));
   process.exit(errors === 0 ? 0 : 1);
 }
 
 function cmdSpecs() {
-  const rows: string[] = [];
+  const stack: Array<{ name: string; type: string; sha: string; path: string; producer: string; upstream?: string; referrers?: string }> = [];
   for (const id of store.ids().sort()) {
     for (const l of lockShaOf(id)) {
       if (store.current(l.name)?.producer !== id) continue;
@@ -288,11 +306,16 @@ function cmdSpecs() {
           if (r) referrers = r[1];
         }
       } catch {}
-      rows.push(`${l.name}  [${type || '?'}]  @ ${sha}`);
-      rows.push(`  path:      ${l.path}`);
-      if (upstream) rows.push(`  upstream:  ${upstream}`);
-      if (referrers) rows.push(`  referrers: ${referrers}`);
+      stack.push({ name: l.name, type: type || '?', sha, path: l.path, producer: id, ...(upstream ? { upstream } : {}), ...(referrers ? { referrers } : {}) });
     }
+  }
+  if (JSON_OUT) return console.log(JSON.stringify(stack, null, 2));
+  const rows: string[] = [];
+  for (const s of stack) {
+    rows.push(`${s.name}  [${s.type}]  @ ${s.sha}`);
+    rows.push(`  path:      ${s.path}`);
+    if (s.upstream) rows.push(`  upstream:  ${s.upstream}`);
+    if (s.referrers) rows.push(`  referrers: ${s.referrers}`);
   }
   console.log(rows.join('\n'));
 }
@@ -368,6 +391,7 @@ function cmdProjectSet(op: string, path: string | undefined) {
 
 function cmdPacket(id: string) {
   const p = assemblePacket(store, id);
+  if (JSON_OUT) return console.log(JSON.stringify(p, null, 2));
   console.log(`PACKET: ${id} (${p.pathDecisions.isLeg ? 'leg' : 'task'} · depth ${p.pathDecisions.depth})`);
   console.log(`readiness: ${p.readiness.ready ? 'ready' : 'BLOCKED'}` + (p.readiness.blockers.length ? `
   blockers: ${p.readiness.blockers.join('; ')}` : ''));
@@ -437,6 +461,7 @@ function cmdSteps() {
 /** F5 (pull side) — the run-next proposal, derived from events (never assumed). */
 function cmdNext() {
   const lb = readKernel().lookBack();
+  if (JSON_OUT) return console.log(JSON.stringify(lb, null, 2));
   console.log('NEXT (derived from events — the observer action)');
   if (lb.activeLeg) console.log(`  active leg: ${lb.activeLeg} (${lb.activeLegStatus})`);
   if (lb.frontmostReady) console.log(`  frontmost-ready: ${lb.frontmostReady.task} (${lb.frontmostReady.status})`);
@@ -584,8 +609,9 @@ function cmdConfirm(id: string) {
 }
 
 function cmdDetail(id: string) {
-  const d = store.detail(id);
+  const d = commands.detail(id);
   if (!d.contract) { console.error(`detail: no node ${id}`); process.exit(1); }
+  if (JSON_OUT) return console.log(JSON.stringify(d, null, 2));
   const kind = d.isLeg ? 'LEG' : 'TASK';
   console.log(`${kind}: ${d.id}`);
   console.log(`status: ${d.status}${d.superseded ? ' · superseded producer' : ''}`);
@@ -630,9 +656,10 @@ function cmdDetail(id: string) {
 }
 
 function cmdResults(id: string, index: string | undefined) {
-  const items = store.results(id);
+  const items = commands.results(id);
   if (!store.contract(id)) { console.error(`results: no node ${id}`); process.exit(1); }
   const kind = id.includes('/') ? 'TASK' : 'LEG';
+  if (JSON_OUT && index === undefined) return console.log(JSON.stringify(items, null, 2));
   if (index === undefined) {
     console.log(`RESULTS: ${id} (${kind})`);
     if (!items.length) { console.log('  (no results yet)'); return; }
@@ -690,110 +717,68 @@ function cmdResults(id: string, index: string | undefined) {
   }
 }
 
-// ---- THE SINGLE WRITE SURFACE (bookkeeper) ----
-function cmdSpawn(id: string, raw: string) {
-  const segs = id.split('/');
-  const last = segs[segs.length - 1];
-  if (segs.includes('00')) { console.error('spawn rejected: the 00/ level dir was removed in v8 — tasks live directly under the leg'); process.exit(1); }
-  if (!/^\d{2}-[a-z0-9]+(-[a-z0-9]+)*$/.test(last)) { console.error(`spawn rejected: last segment '${last}' must be NN-kebab-case`); process.exit(1); }
-  if (last.length > 24) { console.error(`spawn rejected: segment '${last}' exceeds 24 chars`); process.exit(1); }
-  if (existsSync(nodeFile(id))) { console.error(`spawn rejected: ${id} already exists`); process.exit(1); }
-  if (segs.length > 1) {
-    const parent = segs.slice(0, -1).join('/');
-    if (!existsSync(nodeFile(parent))) { console.error(`spawn rejected: parent ${parent} does not exist`); process.exit(1); }
-    if (parent.split('/').length >= 2 && !store.parentConcluded(parent)) {
-      console.error(`spawn rejected: artifact gate — parent task ${parent} has no artifact-locked or commit-evidence (format v10 §4)`);
-      process.exit(1);
-    }
-    const sibs = store.tasksOf(parent).map((t) => t.split('/').pop()!);
-    if (sibs.includes(last)) { console.error(`spawn rejected: sibling ${last} already exists`); process.exit(1); }
-    const prefix = last.split('-')[0];
-    const clash = sibs.find((s) => s.startsWith(prefix + '-'));
-    if (clash) { console.error(`spawn rejected: prefix ${prefix} already used by sibling ${clash}`); process.exit(1); }
-  } else {
-    const gate = store.legGateMet(id);
-    if (!gate.met) { console.error(`spawn rejected: leg gate — ${gate.blocker}`); process.exit(1); }
-  }
-  let contract: unknown;
-  try { contract = JSON.parse(raw); } catch (e) { console.error(`spawn rejected: bad contract JSON (${(e as Error).message})`); process.exit(1); }
-  // F-AC19 (v11) — the task contract checklist: a task must be self-sufficient when
-  // a fresh agent reads only its contract + resolvable inputs. Defining a task
-  // means following the checklist; a non-compliant contract cannot be spawned.
-  const c = ((contract as { contract?: unknown })?.contract ?? contract) as Record<string, unknown>;
-  const checklist = store.contractProblems(c);
-  if (checklist.length) {
-    console.error(`spawn rejected (F-AC19 contract checklist, format v11 §2):`);
-    for (const p of checklist) console.error(`  - ${p}`);
+// ---- THE SINGLE WRITE SURFACE: a THIN BINDING over L1 (core-design §8:289) ----
+// Every invariant these commands used to re-check by hand now lives in L1's composite
+// mutators, so the flow and the CLI get the same enforcement. The binding's whole job
+// is argv → command call → render.
+const emit = <T>(r: CommandResult<T>, render: (v: T) => void): void => {
+  if (!r.ok) {
+    console.error(`${r.error.code}: ${r.error.blocker}`);
     process.exit(1);
   }
-  store.spawn(id, contract, WHO);
-  const dir = join(legsRoot, id);
-  // unwrap the contract exactly like store.spawn (both {contract:{…}} and direct forms)
-  const cw = (contract as { contract?: Record<string, unknown> }).contract ?? (contract as Record<string, unknown>);
-  const intent = String(cw?.intent ?? '');
-  const terms = (intent.match(/[A-Za-z][A-Za-z0-9-]{3,}/g) || []).slice(0, 8).join(', ');
-  writeFileSync(join(dir, 'description.md'), `# ${last}\n\n- id: \`${id}\` · status: queued · type: ${segs.length > 1 ? 'task' : 'leg'}\n- summary: ${intent.split('\n')[0]}\n- search terms: ${terms}\n`);
-  console.log(`spawned ${id} (${segs.length > 1 ? 'task' : 'leg'})`);
+  render(r.value);
+};
+
+function cmdSpawn(id: string, raw: string) {
+  let contract: unknown;
+  try {
+    contract = JSON.parse(raw);
+  } catch (e) {
+    console.error(`spawn rejected: bad contract JSON (${(e as Error).message})`);
+    process.exit(1);
+  }
+  emit(commands.spawn(id, contract), (v) => console.log(`spawned ${v.id} (${v.kind})`));
 }
 
 function cmdGate(id: string, gate: string, decision: string, feedback: string) {
   if (!getVOCAB().gates.includes(gate) || !['accept', 'reject'].includes(decision)) {
-    console.error('usage: ann gate <id> grill|confirm accept|reject [feedback]');
+    console.error('usage: ann gate! <id> grill|confirm accept|reject [feedback]');
     process.exit(2);
   }
-  if (!store.contract(id)) { console.error(`gate: no node ${id}`); process.exit(1); }
-  if (!id.includes('/')) { console.error(`gate rejected: leg roots carry no gates (flow-control v4 §3 — gates live on tasks)`); process.exit(1); }
-  // flow-control v4 §3: gates are SEQUENTIAL — GATE② (confirm) requires GATE① (grill) confirmed first.
-  if (gate === 'confirm' && !store.events(id).some((e) => e.type === 'confirmed' && e.gate === 'grill')) {
-    console.error(`gate rejected: confirm gate requires a confirmed(gate=grill) first (flow-control v4 §3 — gates are sequential)`);
-    process.exit(1);
+  emit(commands.gate(id, gate, decision, feedback), (v) => {
+    console.log(`gate ${v.gate}: ${v.decision} → ${id}`);
+    if (v.escalated) console.log('  (reject bound reached — the next rejection escalates to a human design decision)');
+  });
+}
+
+function cmdSubmit(id: string, gate: string, sha: string | undefined) {
+  if (!getVOCAB().gates.includes(gate)) {
+    console.error('usage: ann submit! <id> grill|confirm [confirmedSha]');
+    process.exit(2);
   }
-  const evs = store.events(id);
-  const pending = evs.filter((e) => e.type === 'submitted' && e.gate === gate && !evs.slice(evs.indexOf(e) + 1).some((x) => x.type === 'confirmed' && x.gate === gate));
-  if (!pending.length) store.appendEvent(id, { at: TODAY, type: 'submitted', gate, note: `bookkeeper submission (${WHO})` });
-  const rejects = evs.filter((e) => e.type === 'rejected' && e.gate === gate).length;
-  if (decision === 'reject' && rejects >= 3) {
-    console.error('gate: 3 rejection cycles exhausted — escalate to a human design decision (force-approve / restructure / block)');
-    process.exit(1);
-  }
-  store.appendEvent(
-    id,
-    decision === 'accept'
-      ? { at: TODAY, type: 'confirmed', gate, note: `accepted (${WHO})` }
-      : { at: TODAY, type: 'rejected', gate, feedback, note: `rejected (${WHO})` },
+  emit(commands.submit(id, gate, sha ? { confirmedSha: sha } : {}), (v) =>
+    console.log(`submitted ${v.gate} → ${id}${v.confirmedSha ? ` (confirmedSha ${v.confirmedSha})` : ''}`),
   );
-  console.log(`gate ${gate}: ${decision} → ${id}`);
 }
 
 function cmdLock(id: string, name: string, type: string) {
-  if (!getVOCAB().artifactTypes.includes(type)) {
-    console.error(`lock rejected: type '${type}' not in the vocab registry (${getVOCAB().artifactTypes.join(' | ')})`);
-    process.exit(1);
-  }
-  if (store.current(name)) {
-    console.error(`lock rejected: '${name}' is already current (${store.current(name)!.path}) — supersede it first`);
-    process.exit(1);
-  }
-  const artDir = join(legsRoot, id, 'artifacts');
-  const candidates = existsSync(artDir) ? readdirSync(artDir).filter((f) => f.endsWith('.md')) : [];
-  const file = existsSync(join(artDir, name + '.md')) ? join(artDir, name + '.md') : candidates.length === 1 ? join(artDir, candidates[0]) : null;
-  if (!file) { console.error(`lock: no artifacts/${name}.md; candidates: ${candidates.join(', ') || '(none)'}`); process.exit(1); }
-  const content = readFileSync(file, 'utf8').replace(/^<!-- specs:locked:[^\n]* -->\n?/, '').replace(/^<!-- draft[^\n]* -->\n?/, '');
-  const sha = blobSha(content).slice(0, 7);
-  writeFileSync(file, `<!-- specs:locked:${sha} ${TODAY} type=${type} -->\n` + content);
-  store.appendEvent(id, {
-    at: TODAY,
-    type: 'artifact-locked',
-    artifact: { name, path: 'journey/legs/' + id + '/artifacts/' + basename(file), lockSha: sha },
-    note: `${basename(file)} specs-locked via bookkeeper (${WHO})`,
+  emit(commands.lock(id, name, { type }), (v) => {
+    console.log(`locked ${v.name} @ ${v.sha} → ${id}`);
+    console.log(`  content: ${v.contentPath}`);
+    console.log(`  ref:     ${v.path}`);
   });
-  console.log(`locked ${name} @ ${sha} → ${id}`);
 }
 
 function cmdSupersede(id: string, name: string, path: string, note: string) {
-  if (!existsSync(join(ROOT, path))) { console.error(`supersede: target path ${path} not found`); process.exit(1); }
-  store.appendEvent(id, { at: TODAY, type: 'superseded', successor: { name, path }, note: note || `${name} superseded → ${path} (${WHO})` });
-  console.log(`superseded ${name} → ${path} on ${id}`);
+  emit(commands.supersede(id, name, path, note), () => console.log(`superseded ${name} → ${path} on ${id}`));
+}
+
+function cmdRead(name: string) {
+  emit(commands.read(name), (v) => {
+    if (JSON_OUT) return console.log(JSON.stringify(v, null, 2));
+    console.error(`  (${v.path} @ ${v.sha} — marker-stripped, provenance ${v.provenance})`);
+    console.log(v.content);
+  });
 }
 
 // ---- DISPATCH ----
@@ -824,11 +809,13 @@ const COMMANDS: Array<{ name: string; args: string; desc: string }> = [
   { name: 'flow', args: '<id>', desc: 'a task\'s RESOLVED flow + chain validation (the data the kernel will execute) · alias --flow' },
   { name: 'commands', args: '', desc: 'this table as markdown (the derived doc) · alias --commands' },
   { name: 'help', args: '', desc: 'usage · alias --help / -h' },
-  { name: 'append!', args: '<id> \'<json>\'', desc: 'WRITE — single-writer append (store.appendEvent, LB-3)' },
-  { name: 'spawn!', args: '<id> \'<contract-json>\'', desc: 'WRITE — create a node; legs get NO events (v8); gates validated' },
-  { name: 'gate!', args: '<id> grill|confirm accept|reject [feedback]', desc: 'WRITE — human gate decision (submit + decide; 3-reject bound)' },
-  { name: 'lock!', args: '<id> <name> [type]', desc: 'WRITE — stamp lock marker + artifact-locked (hash-verifying sha)' },
-  { name: 'supersede!', args: '<id> <name> <path> [note]', desc: 'WRITE — superseded event with a forward pointer' },
+  { name: 'read', args: '<name>', desc: 'the L1 CONTENT read view — a current artifact\'s marker-stripped content + path + sha (core-design §5) · alias --read' },
+  { name: 'append!', args: '<id> \'<json>\'', desc: 'WRITE — single-writer append; REFUSES the composite-owned kinds (created/submitted/confirmed/rejected/artifact-locked/superseded)' },
+  { name: 'spawn!', args: '<id> \'<contract-json>\'', desc: 'WRITE — create a node; enforces the v14 contract schema + F-AC19 + id naming + the artifact/leg gates' },
+  { name: 'submit!', args: '<id> grill|confirm [confirmedSha]', desc: 'WRITE — the resumable gate write: `submitted` alone, so an interrupted gate stays blocked (confirm records the gate② content binding)' },
+  { name: 'gate!', args: '<id> grill|confirm accept|reject [feedback]', desc: 'WRITE — human gate decision (submit + decide; the 3-reject bound is a CONSTANT owned here)' },
+  { name: 'lock!', args: '<id> <name> [type]', desc: 'WRITE — record an artifact: type-driven docs/ placement + -v<N> filename + symlink + artifact-locked (hash-verifying sha)' },
+  { name: 'supersede!', args: '<id> <name> <path> [note]', desc: 'WRITE — superseded event with a forward pointer (the one cross-task write; refuses a live locker)' },
 ];
 
 const command = args[0];
@@ -880,7 +867,7 @@ try {
     console.log('\nEnv: `RECORDED_BY=<name>` — provenance on recorded events (default: agent).');
     process.exit(0);
   }
-  const WRITES = ['append', 'spawn', 'gate', 'lock', 'supersede', 'cred'];
+  const WRITES = ['append', 'spawn', 'submit', 'gate', 'lock', 'supersede', 'cred'];
   if (WRITES.includes(command)) {
     console.error(`ann: writes are marked with '!' — did you mean '${command}!'? (mutator convention: reads have no marker, writes always end in !)`);
     process.exit(1);
@@ -913,12 +900,13 @@ try {
   else if (command === 'steps' || command === '--steps') cmdSteps();
   else if (command === 'next' || command === '--next') cmdNext();
   else if (command === 'flow' || command === '--flow') cmdFlow(args[1]);
+  else if (command === 'read' || command === '--read') cmdRead(args[1] || '');
   else if (command === 'append!') {
     const raw = args.slice(2).join(' ');
     if (!args[1] || !raw) { console.error('usage: ann append! <id> \'{"at":..,"type":..}\''); process.exit(2); }
-    store.appendEvent(args[1], JSON.parse(raw));
-    console.log(`appended → ${args[1]}`);
-  } else if (command === 'spawn!') {
+    emit(commands.append(args[1], JSON.parse(raw)), () => console.log(`appended → ${args[1]}`));
+  } else if (command === 'submit!') cmdSubmit(args[1], args[2], args[3]);
+  else if (command === 'spawn!') {
     const raw = args.slice(2).join(' ');
     if (!args[1] || !raw) { console.error('usage: ann spawn! <id> \'<contract-json>\''); process.exit(2); }
     cmdSpawn(args[1], raw);

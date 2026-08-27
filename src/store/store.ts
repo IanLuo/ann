@@ -68,6 +68,12 @@ export const legacyPath = (p: string): string =>
     .replace(/^(journey\/legs\/[^/]+)\/00\//, '$1/')
     .replace(/^journey\//, '.ann/journey/'); // v12: the canonical on-disk root is .ann/journey/
 
+/** The v9 migration cutoff — the ONE grandfathering date. Tasks spawned before it are
+ *  exempt from the checks that arrived with v9+ (F-AC18 conclusion, F-AC19 contract
+ *  self-sufficiency, and the gate gaps whose prose escapes the v14 writer removed).
+ *  A CHECK-REPORTING rule only: no write path reads it. */
+const V9_CUTOFF = '2026-08-21';
+
 /** Logical name from a filename: strip .md and any -vN version suffix
  *  (functional-spec-v3.md → functional-spec). The third fallback of the
  *  resolver's collect() — notes may omit the explicit logical-name marker. */
@@ -141,6 +147,20 @@ export class Store {
     return this.nodes.get(id)?.events ?? [];
   }
 
+  /** A node's immutable creation date (node.json §2) — '' when absent. The cutoff reads it. */
+  createdAt(id: string): string {
+    return (this.contract(id) as { createdAt?: string } | undefined)?.createdAt ?? '';
+  }
+
+  /** THE CUTOFF, as one predicate (core-design §1): a node spawned before the v9
+   *  migration is not re-litigated by CHECK-REPORTING — F-AC18 conclusion, F-AC19
+   *  contract self-sufficiency, and the gate gaps the v14 writer no longer excuses in
+   *  prose. Every reporting consumer (check(), the S4 gate rules) asks HERE, so there
+   *  is one grandfathering rule instead of a copy per reader. No WRITE path reads it. */
+  grandfathered(id: string): boolean {
+    return this.createdAt(id) < V9_CUTOFF;
+  }
+
   /**
    * Derived status (v8 §3/§12). Tasks: tail mapping. Legs: pure function of the
    * leg's tasks — all done → done; frontmost-ready child → its status; childless
@@ -181,6 +201,14 @@ export class Store {
         return !evs.slice(evs.indexOf(e) + 1).some((x) => (x.type === 'confirmed' || x.type === 'rejected') && x.gate === e.gate);
       });
       if (pendingGate) status = 'blocked';
+      // v14 §3 (core-design §3 rule 8, resume tail-state 4): a `waiting` record with no
+      // SUBSEQUENT commit evidence = the empty-chain verify-wait — the runner has not
+      // committed yet. `waiting` maps to blocked; the commit evidence releases it.
+      // A stated code-literal change beside the eventTypes/statuses reconciliations.
+      const lastWaiting = evs.map((e) => e.type).lastIndexOf('waiting');
+      if (lastWaiting >= 0 && !evs.slice(lastWaiting + 1).some((e) => e.type === 'evidence' && Array.isArray(e.commits) && e.commits.length > 0)) {
+        status = 'blocked';
+      }
     }
     return status;
   }
@@ -475,12 +503,13 @@ export class Store {
       created: ['at', 'type', 'note'],
       activated: ['at', 'type', 'note'],
       extended: ['at', 'type', 'note'],
-      evidence: ['at', 'type', 'note', 'commits', 'refs', 'answers'],
+      evidence: ['at', 'type', 'note', 'commits', 'refs', 'answers', 'trace'],
       'artifact-locked': ['at', 'type', 'note', 'artifact'],
       completed: ['at', 'type', 'note'],
       failed: ['at', 'type', 'note'],
+      waiting: ['at', 'type', 'note'],
       superseded: ['at', 'type', 'note', 'successor'],
-      submitted: ['at', 'type', 'note', 'gate'],
+      submitted: ['at', 'type', 'note', 'gate', 'confirmedSha'],
       confirmed: ['at', 'type', 'note', 'gate'],
       rejected: ['at', 'type', 'note', 'gate', 'feedback'],
       'gate-revised': ['at', 'type', 'note', 'gate'],
@@ -495,6 +524,11 @@ export class Store {
       }
       if (e.type === 'rejected' && e.feedback !== undefined && typeof e.feedback !== 'string') {
         throw new Error('append rejected: rejected.feedback must be a string');
+      }
+      // v14 §3: the gate②-to-commit content binding — submit!(confirm) records the
+      // working artifact's blob sha over MARKER-STRIPPED content; commit refuses on mismatch.
+      if (e.type === 'submitted' && e.confirmedSha !== undefined && (typeof e.confirmedSha !== 'string' || !/^[0-9a-f]{7,40}$/.test(e.confirmedSha))) {
+        throw new Error('append rejected: submitted.confirmedSha must be a blob sha (7-40 hex, v14 §3)');
       }
     }
     if (e.type === 'gate-revised') {
@@ -527,12 +561,60 @@ export class Store {
       if (e.answers !== undefined && (!Array.isArray(e.answers) || !e.answers.every((a) => typeof (a as { id?: unknown })?.id === 'string' && typeof (a as { answer?: unknown })?.answer === 'string'))) {
         throw new Error('append rejected: evidence.answers must be [{id, answer, provenance?}, …]');
       }
+      if (e.trace !== undefined) this.validateTrace(e.trace);
     }
     if (e.type === 'transferred' && (typeof e.target !== 'string' || typeof e.scope !== 'string')) {
       throw new Error('append rejected: transferred.target and .scope must be strings');
     }
     if (e.type === 'deferred' && typeof e.reason !== 'string') {
       throw new Error('append rejected: deferred.reason must be a string');
+    }
+  }
+
+  /** THE TRANSCRIPT'S SHAPE (v14 §3, core-design §2): an `evidence` event may carry a
+   *  structured `trace` record — machine-truth, never prose. SIX kinds on one discriminant:
+   *  the FOUR step-level kinds (llm · ask · research · decide), keyed (stepId, runId, seq)
+   *  — the replay key; and TWO frame-phase kinds — `verify` {cycle} (NO stepId: a verify
+   *  cycle belongs to the frame) and `skip` {stepId, condition, evaluated:false} (NO cycle:
+   *  a skip is step-keyed, NFR-OBS-1). Shape-policed at the single writer, fail-closed. */
+  private validateTrace(t: unknown): void {
+    const r = t as Record<string, unknown>;
+    if (!r || typeof r !== 'object' || Array.isArray(r)) throw new Error('append rejected: evidence.trace must be an object (v14 §3)');
+    const allowed: Record<string, string[]> = {
+      llm: ['kind', 'stepId', 'runId', 'seq', 'prompt', 'completion'],
+      ask: ['kind', 'stepId', 'runId', 'seq', 'question', 'answer'],
+      research: ['kind', 'stepId', 'runId', 'seq', 'question', 'research'],
+      decide: ['kind', 'stepId', 'runId', 'seq', 'question', 'answer', 'options'],
+      verify: ['kind', 'cycle'],
+      skip: ['kind', 'stepId', 'condition', 'evaluated'],
+    };
+    const kind = r.kind;
+    if (typeof kind !== 'string' || !(kind in allowed)) {
+      throw new Error(`append rejected: evidence.trace.kind must be one of ${Object.keys(allowed).join('|')} (v14 §3)`);
+    }
+    const unknown = Object.keys(r).filter((k) => !allowed[kind].includes(k));
+    if (unknown.length) throw new Error(`append rejected: evidence.trace unknown field(s) '${unknown.join(', ')}' on kind '${kind}' (v14 §3)`);
+    if (kind === 'verify') {
+      if (typeof r.cycle !== 'number') throw new Error('append rejected: trace kind:verify must carry {cycle} — a frame-phase record, no stepId (v14 §3)');
+      return;
+    }
+    if (kind === 'skip') {
+      if (typeof r.stepId !== 'string' || !r.stepId || typeof r.condition !== 'string' || r.evaluated !== false) {
+        throw new Error('append rejected: trace kind:skip must be {stepId, condition, evaluated:false} — step-keyed, no cycle (v14 §3)');
+      }
+      return;
+    }
+    // the four STEP-LEVEL kinds — (stepId, runId, seq) IS the replay key
+    if (typeof r.stepId !== 'string' || !r.stepId) throw new Error(`append rejected: trace kind:${kind} must carry a stepId (the replay key)`);
+    if (typeof r.runId !== 'number' || typeof r.seq !== 'number') throw new Error(`append rejected: trace kind:${kind} must carry numeric runId + seq (the replay key)`);
+    if (kind === 'research') {
+      const rs = r.research;
+      if (!Array.isArray(rs) || !rs.every((x) => typeof (x as { topic?: unknown })?.topic === 'string' && typeof (x as { findings?: unknown })?.findings === 'string')) {
+        throw new Error('append rejected: trace kind:research.research must be [{topic, findings, sources?[]}, …] — an ARRAY with per-topic sources (v14 §3)');
+      }
+    }
+    if (kind === 'decide' && !Array.isArray(r.options)) {
+      throw new Error('append rejected: trace kind:decide must carry options[] — replay-by-identity needs them (v14 §3)');
     }
   }
 
@@ -564,7 +646,15 @@ export class Store {
     }
   }
 
-  /** GATE-1/GATE-2 (F-AC15): tasks only — leg roots carry no events (v8). */
+  /** GATE-1/GATE-2 (F-AC15): tasks only — leg roots carry no events (v8).
+   *
+   *  UNCONDITIONAL (core-design §1, §7): this reads no `createdAt` — the writer refuses
+   *  gate-skipping writes on every task, always. The v13-era PROSE ESCAPES are REMOVED:
+   *  the `gate` value comes from the STRUCTURED field only (no note-regex derivation, no
+   *  empty-gate fallback that let a bare `confirmed` count as gate②), and the
+   *  `retrospective`-note suppression of the GATE-1 gap is gone. Both were legacy-only;
+   *  the pre-cutoff tasks that carry them are grandfathered at CHECK-REPORTING (check()),
+   *  never at the writer. */
   gateProblems(id: string, evs?: JourneyEvent[]): string[] {
     const problems: string[] = [];
     if (!id.includes('/')) return problems;
@@ -572,22 +662,20 @@ export class Store {
     let lastComplete = -1,
       lastConfirm2 = -1,
       firstWork = -1,
-      lastConfirm1 = -1,
-      retroGrill = false;
+      lastConfirm1 = -1;
     list.forEach((e, i) => {
-      const gate = typeof e.gate === 'string' ? e.gate : String(e.note ?? '').match(/gate=(\w+)/)?.[1] ?? '';
+      const gate = typeof e.gate === 'string' ? e.gate : '';
       if (e.type === 'completed') lastComplete = i;
       if (e.type === 'artifact-locked' || e.type === 'completed') {
         if (firstWork === -1) firstWork = i;
       }
-      if (e.type === 'confirmed' && (gate === 'confirm' || gate === '')) lastConfirm2 = i;
+      if (e.type === 'confirmed' && gate === 'confirm') lastConfirm2 = i;
       if (e.type === 'confirmed' && gate === 'grill') lastConfirm1 = i;
-      if (e.type === 'confirmed' && gate === 'grill' && e.note?.includes('retrospective')) retroGrill = true;
     });
     if (lastComplete >= 0 && lastConfirm2 === -1) {
       problems.push(`GATE-2 GAP: ${id} — completed but no confirmed(gate=confirm) recorded`);
     }
-    if (firstWork >= 0 && !retroGrill && (lastConfirm1 === -1 || lastConfirm1 > firstWork)) {
+    if (firstWork >= 0 && (lastConfirm1 === -1 || lastConfirm1 > firstWork)) {
       problems.push(`GATE-1 GAP: ${id} — produced work (artifact-locked/completed) but no confirmed(gate=grill) before it`);
     }
     // flow-control v4 §3: gates are SEQUENTIAL — a confirm-gate with NO confirmed grill ever
@@ -607,7 +695,12 @@ export class Store {
    *  write path (spawn) is what keeps new leg roots free of events. */
   check(): string[] {
     const problems: string[] = [];
+    // THE CUTOFF grandfathers the legacy prose-gate era at CHECK-REPORTING only
+    // (core-design §1): gateProblems itself is unconditional — the writer refuses
+    // gate-skipping on every task — but the 19 measured pre-cutoff tasks whose gates
+    // were recorded in prose (or retrospectively) are not re-litigated by the check.
     for (const id of this.nodes.keys()) {
+      if (this.grandfathered(id)) continue;
       for (const p of this.gateProblems(id)) problems.push(p);
     }
     // F-AC16 closure invariants: completed-after-gate-revised requires transferred|deferred;
@@ -636,13 +729,11 @@ export class Store {
     // concluded — a locked artifact OR structured commit evidence (evidence.commits[],
     // format v10 §3/§14). Grandfathered: tasks spawned before the v9 migration
     // (createdAt < cutoff) are exempt — the one-time hot fix, never a live rule on history.
-    const V9_CUTOFF = '2026-08-21';
     for (const [id, node] of this.nodes) {
       if (!id.includes('/')) continue;
       if (!node.events.some((e) => e.type === 'completed')) continue;
       if (this.parentConcluded(id)) continue;
-      const createdAt = (this.contract(id) as { createdAt?: string } | undefined)?.createdAt ?? '';
-      if (createdAt >= V9_CUTOFF) {
+      if (!this.grandfathered(id)) {
         problems.push(`F-AC18: ${id} — completed without an artifact-locked record or structured commit evidence (v10: document artifact or evidence.commits[] required)`);
       }
     }
@@ -653,8 +744,7 @@ export class Store {
     // (pre-v9 contracts grandfathered, same cutoff as F-AC18).
     for (const id of this.nodes.keys()) {
       if (!id.includes('/')) continue;
-      const createdAt = (this.contract(id) as { createdAt?: string } | undefined)?.createdAt ?? '';
-      if (createdAt < V9_CUTOFF) continue;
+      if (this.grandfathered(id)) continue;
       for (const p of this.contractProblems(this.contractOf(id))) problems.push(`F-AC19: ${id} — ${p}`);
     }
     const lockersByName = new Map<string, string[]>();

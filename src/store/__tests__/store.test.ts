@@ -175,13 +175,37 @@ describe('Store — appendEvent, the single writer (LB-3)', () => {
   it('flags a confirm-gate before any confirmed grill (flow-control v4 §3 — gates are sequential)', () => {
     writeNode('01-goal/01-a', {}, [ev('created'), ev('submitted', { gate: 'confirm' }), ev('confirmed', { gate: 'confirm' })]);
     const s = new Store(root);
-    expect(s.check().some((p) => p.includes('GATE-SEQ'))).toBe(true);
+    expect(s.gateProblems('01-goal/01-a').some((p) => p.includes('GATE-SEQ'))).toBe(true);
     writeNode('01-goal/01-a', {}, [
       ev('created'),
       ev('submitted', { gate: 'grill' }), ev('confirmed', { gate: 'grill' }),
       ev('submitted', { gate: 'confirm' }), ev('confirmed', { gate: 'confirm' }),
     ]);
-    expect(new Store(root).check().some((p) => p.includes('GATE-SEQ'))).toBe(false);
+    expect(new Store(root).gateProblems('01-goal/01-a').some((p) => p.includes('GATE-SEQ'))).toBe(false);
+  });
+
+  it('gateProblems is UNCONDITIONAL; the cutoff grandfathers only at CHECK-REPORTING (core-design §1)', () => {
+    // A pre-cutoff task carrying the legacy prose-gate shape: the WRITER still sees the
+    // gap (so it refuses new gate-skipping writes), while check() does not re-litigate it.
+    writeNode('01-goal/01-a', {}, [ev('created'), ev('completed', { note: 'gate=confirm accepted' })]);
+    const s = new Store(root);
+    expect(s.gateProblems('01-goal/01-a').some((p) => p.includes('GATE-2'))).toBe(true);
+    expect(s.check().some((p) => p.includes('GATE-2'))).toBe(false);
+  });
+
+  it('the v13 prose escapes are GONE from the writer: a note-derived gate and a bare confirmed no longer count', () => {
+    // Both legacy escapes in one tail — `confirmed` with no structured gate (the
+    // empty-gate fallback) and a `retrospective` grill note (the suppression).
+    writeNode('01-goal/01-a', {}, [
+      ev('created'),
+      ev('confirmed', { gate: 'grill', note: 'retrospective grill' }),
+      ev('artifact-locked', { artifact: { name: 'x', path: 'x.md', lockSha: 'a' } }),
+      ev('confirmed', { gate: 'grill', note: 'gate=confirm — recorded in prose' }),
+      ev('completed'),
+    ]);
+    const problems = new Store(root).gateProblems('01-goal/01-a');
+    expect(problems.some((p) => p.includes('GATE-2'))).toBe(true); // no structured confirm gate
+    expect(problems.some((p) => p.includes('GATE-1'))).toBe(true); // the retrospective note no longer suppresses
   });
 
   it('the full honest sequence appends cleanly', () => {
@@ -205,8 +229,7 @@ describe('Store — check() integrity', () => {
     writeNode('01-goal', {}, [ev('created'), ev('completed')]);
     writeNode('01-goal/01-a', {}, [ev('created'), ev('submitted', { gate: 'grill' }), ev('confirmed', { gate: 'grill' }), ev('completed')]);
     const s = new Store(root);
-    const problems = s.check();
-    expect(problems.filter((p) => p.includes('GATE-2'))).toHaveLength(1); // 01-a completed without confirm gate
+    expect(s.gateProblems('01-goal/01-a').filter((p) => p.includes('GATE-2'))).toHaveLength(1); // 01-a completed without confirm gate
     writeNode('01-goal/01-a', {}, [ev('created'), ev('submitted', { gate: 'grill' }), ev('confirmed', { gate: 'grill' }), ev('submitted', { gate: 'confirm' }), ev('confirmed', { gate: 'confirm' }), ev('completed')]);
     expect(new Store(root).check()).toEqual([]);
   });
@@ -353,7 +376,13 @@ describe('VOCAB — the registry is the source of truth', () => {
   it('carries the schema vocabulary', () => {
     expect(getVOCAB().eventTypes).toContain('artifact-locked');
     expect(getVOCAB().gates).toEqual(['grill', 'confirm']);
-    expect(getVOCAB().artifactTypes).toContain('spec');
+    expect(getVOCAB().eventTypes).toContain('waiting'); // v14 §3 — the empty-chain verify wait
+    // v3 (resource-registry §9 migration 1): artifactTypes entries carry the docs/
+    // category they place into + whether they take a -v<N> filename — this is what
+    // makes placement DERIVE from the type instead of being a code convention.
+    expect(getVOCAB().artifactTypes.spec).toEqual({ category: 'specs', versioned: true });
+    expect(getVOCAB().artifactTypes.record.versioned).toBe(false);
+    expect(getVOCAB().artifactTypes.record.category).toBeUndefined(); // task-local
   });
 });
 
