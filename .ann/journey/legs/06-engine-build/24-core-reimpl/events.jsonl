@@ -1,3 +1,7 @@
 {"at":"2026-08-27","type":"created","note":"spawned by bookkeeper (agent)"}
 {"at":"2026-08-27","type":"submitted","gate":"grill","note":"bookkeeper submission (agent)"}
 {"at":"2026-08-27","type":"confirmed","gate":"grill","note":"accepted (agent)"}
+{"at":"2026-08-27","type":"submitted","gate":"confirm","note":"submitted with the decision (agent)"}
+{"at":"2026-08-27","type":"confirmed","gate":"confirm","note":"accepted (agent)"}
+{"at":"2026-08-27","type":"evidence","note":"core re-implementation shipped in five slices; build clean, 268 tests green, check at the 3 documented immutable findings","commits":[{"sha":"a9f7ffe","note":"slice 1: L1 command surface"},{"sha":"428e33e","note":"slice 4: chain schema + general config"},{"sha":"bf04f4a","note":"slice 3: transcript + intent translation"},{"sha":"a4d1c92","note":"slice 2: L2 frame"},{"sha":"6cb36ad","note":"slice 5: steps rebuilt + L3 abilities"}]}
+{"at":"2026-08-27","type":"completed","note":"core re-implementation accepted: all ACs shipped (L1 command surface, L2 frame + intent translation, chain schema + general config, steps rebuilt, L3 abilities)"}
