@@ -36,7 +36,7 @@ Leg roots have **no `events.jsonl`** (v7). Tasks carry the process log.
 - **Artifact gate:** a node may not spawn children until its own output artifact exists.
 - **Searchable cards:** `rg <term> journey/legs/**/description.md`.
 - **Pruning:** completed/superseded subtrees may be pruned (`rm -r`); git is the archive; nodes referenced by live `requiredInputs` are never pruned.
-- **Depth budget:** ≤ 8 levels, ≤ 260 chars full path; segments ≤ 24 chars, kebab-case.
+- **Depth budget:** ≤ 8 levels, ≤ 260 chars full path; segments ≤ 40 chars, kebab-case (v15: raised from 24 for the `<NN>-<worktype>-<slug>` task grammar).
 - A node commits = branch checkpoint (git commit); RPO = 0 for committed nodes.
 
 ## Current journey

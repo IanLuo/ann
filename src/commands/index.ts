@@ -138,7 +138,7 @@ export class Commands {
     if (!/^\d{2}-[a-z0-9]+(-[a-z0-9]+)*$/.test(last)) {
       return fail('id-naming', `last segment '${last}' must be NN-kebab-case`);
     }
-    if (last.length > 24) return fail('id-naming', `segment '${last}' exceeds 24 chars`);
+    if (last.length > 40) return fail('id-naming', `segment '${last}' exceeds 40 chars`);
     if (this.store.ids().includes(id)) return fail('exists', `${id} already exists (node.json is immutable — no re-spawn)`);
 
     if (segs.length > 1) {

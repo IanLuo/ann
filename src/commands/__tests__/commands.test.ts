@@ -74,10 +74,15 @@ describe('spawn! — the contract schema gate (core-design §1, §8:289)', () =>
 
   it('enforces id naming, sibling and prefix uniqueness', () => {
     expect(errorOf(cmds().spawn('01-leg/nope', CONTRACT)).code).toBe('id-naming');
-    expect(errorOf(cmds().spawn('01-leg/01-way-too-long-a-segment-here', CONTRACT)).code).toBe('id-naming');
+    expect(errorOf(cmds().spawn('01-leg/01-this-segment-is-way-too-long-for-the-cap-now', CONTRACT)).code).toBe('id-naming');
     valueOf(cmds().spawn('01-leg/01-a', CONTRACT));
     expect(errorOf(cmds().spawn('01-leg/01-a', CONTRACT)).code).toBe('exists');
     expect(errorOf(cmds().spawn('01-leg/01-b', CONTRACT)).code).toBe('prefix-clash');
+  });
+
+  it('allows grammar-named worktype segments up to the 40-char cap (v15: <NN>-<worktype>-<slug>)', () => {
+    valueOf(cmds().spawn('01-leg/27-implementation-journey-format-v15', CONTRACT)); // 35 chars, worktype-tagged — the v15 grammar name spawns
+    expect(errorOf(cmds().spawn('01-leg/27-implementation-journey-format-v15', CONTRACT)).code).toBe('exists');
   });
 
   it('holds the artifact gate on a TASK parent, and does not consult it at depth 2', () => {

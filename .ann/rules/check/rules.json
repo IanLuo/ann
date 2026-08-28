@@ -7,7 +7,7 @@
       "enabled": true,
       "severity": "error",
       "params": {},
-      "definition": "produced work (artifact-locked/completed) requires confirmed(gate=grill) before it (retrospective records honored)"
+      "definition": "produced work (artifact-locked/completed) requires confirmed(gate=grill) before it (v9+ nodes; pre-cutoff nodes grandfathered at reporting)"
     },
     {
       "id": "gate-2",
@@ -84,9 +84,9 @@
       "enabled": true,
       "severity": "warning",
       "params": {
-        "maxSegment": 24
+        "maxSegment": 40
       },
-      "definition": "path segments kebab-case, <= 24 chars (legacy tolerated)"
+      "definition": "path segments kebab-case, <= 40 chars (legacy tolerated)"
     },
     {
       "id": "vocab-integrity",

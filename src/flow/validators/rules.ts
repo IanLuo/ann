@@ -154,16 +154,16 @@ export const depthBudget = {
   },
 };
 
-/** name-discipline — path segments kebab-case, <= 24 chars (legacy tolerated as warning). */
+/** name-discipline — path segments kebab-case, <= 40 chars (v15: the cap raised from 24 for the <NN>-<worktype>-<slug> grammar; legacy tolerated as warning). */
 export const nameDiscipline = {
   id: 'name-discipline',
-  definition: 'path segments kebab-case, <= 24 chars (legacy tolerated)',
+  definition: 'path segments kebab-case, <= 40 chars (legacy tolerated)',
   severity: 'warning' as const,
   enabled: true,
-  params: { maxSegment: 24 },
+  params: { maxSegment: 40 },
   run(ctx: ValidatorContext): RuleFinding[] {
     const out: RuleFinding[] = [];
-    const max = 24; // name-discipline params.maxSegment
+    const max = 40; // name-discipline params.maxSegment
     for (const id of ctx.store.ids()) {
       for (const seg of id.split('/')) {
         if (seg.length > max) out.push({ severity: 'warning', code: 'name-discipline', detail: `${id}: segment '${seg}' > ${max} chars`, nodeId: id });
