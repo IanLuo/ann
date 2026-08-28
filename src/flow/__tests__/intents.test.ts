@@ -100,7 +100,7 @@ describe('lock-artifact — DEFER-RECORD (the file now, the event at commit)', (
     const t = new IntentTranslator(c, TASK);
     must(t.translate(step(['lock-artifact']), [lockIntent('my-spec', '# body\n')]));
     const r = must(t.commit());
-    expect(r.locked.map((l) => l.contentPath)).toEqual(['.ann/docs/specs/my-spec-v1.md']);
+    expect(r.locked.map((l) => l.contentPath)).toEqual(['.ann/journey/legs/01-leg/01-a/artifacts/my-spec.md']);
     expect(c.store.current('my-spec')?.producer).toBe(TASK);
     expect(must(t.commit()).locked).toEqual([]); // already recorded — no double lock
     expect(c.events(TASK).filter((e) => e.type === 'artifact-locked')).toHaveLength(1);

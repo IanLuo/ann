@@ -538,11 +538,12 @@ export class Store {
       }
     }
     if (e.type === 'artifact-locked' && e.artifact !== undefined) {
-      const a = e.artifact as { name?: unknown; path?: unknown; lockSha?: unknown };
+      const a = e.artifact as { name?: unknown; path?: unknown; lockSha?: unknown; version?: unknown };
       if (!a || typeof a !== 'object' || typeof a.name !== 'string' || !a.name || typeof a.path !== 'string' || !a.path) {
-        throw new Error('append rejected: artifact-locked.artifact must be {name, path, lockSha?}');
+        throw new Error('append rejected: artifact-locked.artifact must be {name, path, lockSha?, version?}');
       }
       if (a.lockSha !== undefined && typeof a.lockSha !== 'string') throw new Error('append rejected: artifact.lockSha must be a string');
+      if (a.version !== undefined && typeof a.version !== 'number') throw new Error('append rejected: artifact.version must be a number');
     }
     if (e.type === 'superseded' && e.successor !== undefined) {
       const s = e.successor as { name?: unknown; path?: unknown };
