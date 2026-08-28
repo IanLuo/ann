@@ -68,6 +68,7 @@ import { buildAbilities } from '../abilities/index.js';
 import { resolveConfig } from '../flow/config.js';
 import { getAdapter } from '../abilities/llm/index.js';
 import { ProviderAdapter } from '../abilities/llm/index.js';
+import { renderStatusTree, renderGateCard, renderPlan, PlanLeg, PlanAhead } from './renderers.js';
 
 // ── PROJECT RESOLUTION (before anything touches the store) ──────────────────────
 // ann manages MULTIPLE projects (each with its own journey), identified by PATH only.
@@ -173,34 +174,24 @@ const lockShaOf = (id: string): { name: string; path: string; sha: string }[] =>
 
 // ---- READ / DERIVE ----
 function cmdJourney() {
+  // S8 — the F12 full-plan renderer: where we are (legs + tasks) + what is ahead
+  // (the look-back — active leg, frontmost-ready, leg gate). Derived, never assumed.
   const legs = store.ids().filter((i) => !i.includes('/')).sort();
-  console.log('=== WHERE WE ARE ===');
-  for (const leg of legs) {
-    const tasks = store.tasksOf(leg);
-    const suffix = tasks.length
-      ? ' — tasks: ' + tasks.map((t) => t.replace(leg + '/', '') + ':' + display(t)).join(', ')
-      : '';
-    console.log(`${leg.padEnd(6)} ${display(leg)}${suffix}`);
-  }
-  console.log('\n=== WHAT IS AHEAD ===');
-  const activeLeg =
-    legs.find((l) => store.status(l) === 'active') ?? (legs.length && store.status(legs[legs.length - 1]) === 'queued' ? legs[legs.length - 1] : undefined);
-  if (activeLeg) {
-    console.log(`active leg: ${activeLeg} (${store.status(activeLeg)})`);
-    const ready = store.tasksOf(activeLeg).filter((t) => ['queued', 'active'].includes(store.status(t)));
-    if (ready.length) {
-      console.log(`frontmost-ready: ${ready[0]} (${store.status(ready[0])})`);
-      ready.slice(1).forEach((t) => console.log(`  also ready: ${t}`));
-    } else if (store.status(activeLeg).startsWith('done')) {
-      console.log('LEG GATE REVIEW: all spawned tasks done — verify the epic ACs (node.json contract) before advancing or spawning remaining tasks');
-    } else {
-      console.log('no ready tasks in leg — leg gate may need review');
-    }
-  } else {
-    const done = legs.filter((l) => store.status(l).startsWith('done'));
-    console.log(done.length ? `no active leg — previous leg (${done[done.length - 1]}) derived done; LEG GATE REVIEW before spawning the next leg` : 'no active round — next leg to spawn after gate review');
-  }
-  console.log('\n(grounded in: statuses + gates + validation — run --check / validate.mjs for the proof)');
+  const rows: PlanLeg[] = legs.map((l) => ({
+    id: l,
+    status: store.status(l),
+    superseded: hasSuperseded(l),
+    tasks: store.tasksOf(l).map((t) => ({ id: t, status: store.status(t), superseded: hasSuperseded(t) })),
+  }));
+  const lb = commands.lookBack();
+  const ahead: PlanAhead = {
+    activeLeg: lb.activeLeg,
+    activeLegStatus: lb.activeLegStatus,
+    frontmostReady: lb.frontmostReady ? { task: lb.frontmostReady.task, status: lb.frontmostReady.status } : undefined,
+    alsoReady: lb.alsoReady.map((a) => ({ task: a.task, status: a.status })),
+    legGate: lb.legGate,
+  };
+  console.log(renderPlan(rows, ahead));
 }
 
 function cmdStatus() {
@@ -209,7 +200,9 @@ function cmdStatus() {
   const filter = args.slice(1).find((a) => !a.startsWith('--'));
   const rows = commands.statuses(filter);
   if (JSON_OUT) return console.log(JSON.stringify(rows, null, 2));
-  for (const r of rows) console.log(`${r.id.padEnd(58)} ${r.status}${r.superseded ? ' · artifact superseded' : ''}`);
+  // S8 — the F10 tree renderer (statuses are derived rows; the renderer emits the
+  // padded tree view, never scalar progress — AC5).
+  console.log(renderStatusTree(rows));
 }
 
 function cmdCheck() {
@@ -627,33 +620,15 @@ function cmdJourneyOne(id: string) {
 }
 
 function cmdConfirm(id: string) {
-  const c = store.contract(id);
-  if (!c) { console.error(`confirm: no node ${id}`); process.exit(1); }
-  // defensively unwrap a legacy double-nested contract ({contract:{contract:{…}}})
-  const rawContract = (c.contract ?? {}) as Record<string, unknown>;
-  const contract = ((rawContract as { contract?: Record<string, unknown> }).contract ?? rawContract) as Record<string, unknown>;
-  console.log(`GATE CARD: ${id}`);
-  console.log(`intent: ${contract.intent ?? '(none)'}`);
-  const acs = (contract.acceptanceCriteria ?? []) as string[];
-  acs.forEach((a, i) => console.log(`AC-${i + 1}: ${a}`));
-  console.log(`status: ${display(id)}`);
-  console.log('ARTIFACT(S):');
-  for (const l of lockShaOf(id)) console.log(`  - ${l.name}: ${l.path} @ ${l.sha || '(no sha)'}`);
-  console.log('GATES:');
-  for (const e of store.events(id)) {
-    if (['submitted', 'confirmed', 'rejected'].includes(e.type)) {
-      const g = typeof e.gate === 'string' ? e.gate : '';
-      console.log(`  ${e.type} (gate=${g}) ${e.at}`);
-    }
-  }
-  // The gate card presents the task's RESULTS with the gate — at GATE② (confirm-result)
-  // these ARE what the human confirms: outputs (docs) + evidence (commits/refs).
-  console.log('RESULTS:');
+  // S8 — the F11 step-card renderer (detail is the derived card; results are the
+  // confirm-target outputs + evidence). The gate card presents the task's RESULTS
+  // with the gate — at GATE② (confirm-result) these ARE what the human confirms.
+  const d = commands.detail(id);
+  if (!d.contract) { console.error(`confirm: no node ${id}`); process.exit(1); }
+  if (JSON_OUT) return console.log(JSON.stringify(d, null, 2));
+  console.log(renderGateCard({ detail: d, results: store.results(id) }));
   const items = store.results(id);
-  if (!items.length) console.log('  (no results yet)');
-  items.forEach((it, i) => console.log(`  ${String(i + 1).padStart(2)}. [${it.kind.padEnd(8)}] ${it.label}`));
   if (items.length) console.log('  → drill: ann results <id> <n>');
-  console.log('\n→ verify each AC against the artifact + evidence, then confirm or reject + reason.');
 }
 
 function cmdDetail(id: string) {
