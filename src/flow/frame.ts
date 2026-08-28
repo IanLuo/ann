@@ -9,6 +9,7 @@ import { ChainEntry, executionOrder, phaseOf, resolveChain, StepLookup, validate
 import { GeneralConfig, resolveConfig, VERIFY_FAIL_CYCLES_CEILING } from './config.js';
 import { CommitRecord, IntentTranslator } from './intents.js';
 import { Transcript } from './transcript.js';
+import { reviewRunner, RunnerReview } from './runner-review.js';
 import { Abilities, ReadView, Step, StepContext, StepOutput, StepVerdict } from './types.js';
 
 /**
@@ -62,6 +63,8 @@ export interface FrameResult {
   committed?: CommitRecord;
   lookBack?: LookBack;
   advance?: string;
+  /** S6 — the runner-review verdict for the verify phase (set when a chain runs steps). */
+  runnerReview?: RunnerReview;
 }
 
 export interface FrameDeps {
@@ -426,6 +429,20 @@ export class Frame {
     }
     for (const o of result.outcomes) {
       for (const f of o.ruleFindings) if (f.severity === 'error') findings.push(`${o.step}: ${f.detail}`);
+    }
+
+    // S6 — THE RUNNER REVIEWER (architecture-v3 §76: "runner reviewer → the verify phase").
+    // A runner-simulation review of the node's context packet: can the runner execute
+    // WITHOUT GUESSING? Blocking confusion (missing inputs, unanswered blocking questions,
+    // absent intent/ACs) is a NAMED blocker, never a silent pass. The EMPTY-CHAIN flow is
+    // the runner's own work channel — a verify-fail there is a WAIT, not a defect — so the
+    // review only applies to a chain that runs steps.
+    if (chain.length) {
+      const review = reviewRunner(assemblePacket(this.commands.store, taskId));
+      result.runnerReview = review;
+      if (review.verdict !== 'pass') {
+        for (const b of review.blockers) findings.push(`runner-review: ${b}`);
+      }
     }
     return findings;
   }

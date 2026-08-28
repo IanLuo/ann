@@ -301,6 +301,37 @@ describe('conditional execution (flow.conditionals)', () => {
   });
 });
 
+describe('the runner reviewer (S6) IS the verify phase (architecture-v3 §76)', () => {
+  it('a task the runner can execute without guessing passes the review — no extra findings', async () => {
+    const c = setup();
+    chainFile([{ id: 'envision' }]);
+    const r = await run(c, [mkStep('envision')], new ScriptedInteract(['accept', 'accept']));
+    expect(r.stop).toBe('completed');
+    expect(r.runnerReview?.verdict).toBe('pass');
+    expect(r.runnerReview?.blockers).toEqual([]);
+    expect(r.problems.join('\n')).not.toContain('runner-review:');
+  });
+
+  it('blocking confusion is a NAMED verify finding, never a silent pass', async () => {
+    const c = setup([ev('created')], { intent: 'x' }); // no ACs — the runner would guess what 'done' means
+    chainFile([{ id: 'envision' }]);
+    const r = await run(c, [mkStep('envision')], new ScriptedInteract(['accept']));
+    expect(r.runnerReview?.verdict).toBe('reject');
+    expect(r.problems.join('\n')).toContain('runner-review:');
+    expect(r.problems.join('\n')).toContain('no acceptanceCriteria');
+    expect(r.stop).toBe('failed'); // rejection → the bounded verify loop → failed, never passed
+  });
+
+  it('the empty-chain flow is the runner’s own work channel — the review is skipped (a verify-fail there is a WAIT)', async () => {
+    const c = setup();
+    chainFile([]);
+    const r = await run(c, [], new ScriptedInteract(['accept']));
+    expect(r.runnerReview).toBeUndefined();
+    expect(r.stop).toBe('blocked-waiting');
+    expect(c.status(TASK)).toBe('blocked');
+  });
+});
+
 describe('the read view + prior are the two input channels (§5)', () => {
   it('binds a chain role from an earlier step through `prior`, and a packet dep through `read`', async () => {
     const c = setup();
