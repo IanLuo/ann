@@ -1,0 +1,26 @@
+{
+  "id": "06-engine-build/27-journey-format-v15",
+  "contract": {
+    "intent": "Produce journey-format-spec v15 — the complete superseding artifact per the task-splitting + task-naming convention (never designed; task ids accreted organically): the <NN>-<worktype>-<slug> grammar, the worktype→task-kind mapping (build slices + spec amendments → implementation; closures → closure; validate/envision/spec/binding for their kinds), one-cohesive-deliverable-per-task splitting, amendments-to-locked-artifacts = always their own task, rework = superseding sibling (never an edit), and the task-in-leg vs new-leg decision rule. Resolve explicitly: A the 24-char segment cap conflict (raise to 40 — §8 + code + registry), B -v<N> in slugs = the TARGET artifact version (never a task counter), C the s<N> slice tag (drop, historical), D slug semantics (short self-describing kebab noun; no dates/abbreviations). Preserve section anchors; back-reference v14; supersede! v14; re-point referrers (AGENTS.md). Forward-only: existing task ids are NOT renamed.",
+    "acceptanceCriteria": [
+      "journey-format-spec v15 is a COMPLETE superseding artifact (never a delta), reusing the logical name journey-format-spec, preserving section anchors",
+      "superseded event on the v14 producer with successor {name: journey-format-spec, path}",
+      "referrers re-pointed: AGENTS.md (currently v14 @ 71fa442)",
+      "the 24-char segment cap is raised to 40 (spawn hard-reject + name-discipline validator + derived rules registry) and a worktype-tagged implementation-… task name spawns under it",
+      "forward-only: the existing 26 tasks in 06-engine-build keep their ids; the new grammar applies from the next task onward",
+      "check clean: no new F-AC18 / NO-CURRENT; current(journey-format-spec) resolves to the v15 producer"
+    ],
+    "requiredInputs": [
+      "journey-format-spec",
+      "core-design"
+    ],
+    "expectedOutputs": [
+      "journey-format-spec"
+    ],
+    "targetAreas": [
+      ".ann/docs/specs/"
+    ],
+    "workType": "implementation"
+  },
+  "createdAt": "2026-08-28"
+}
