@@ -139,6 +139,24 @@ describe('runEvalSuite — the KPI report', () => {
     expect(report.failureSignal).toBe(false);
   });
 
+  it('a K1 miss in ONE fixture fails the aggregate and arms the signal (never masked by the first fixture)', async () => {
+    const wrongStatus: EvalFixture = {
+      id: 'nav-wrong-status',
+      name: 'a fixture whose derived status ground truth is wrong — K1 must catch it',
+      build: (root) =>
+        writeJourney(root, [
+          { id: '01-leg', tasks: [{ id: '01-a', events: [ev('created'), ev('completed')] }] },
+        ]),
+      expectedStatuses: { '01-leg/01-a': 'queued', '01-leg': 'queued' }, // wrong: 01-a is done
+      locateTarget: '01-leg/01-a',
+      expectedNext: '',
+    };
+    const report = await runEvalSuite({ nav: [wrongStatus, ...NAV_FIXTURES], flow: [] });
+    expect(report.k1.pass).toBe(false);
+    expect(report.k1.value).toMatch(/(4\/5|80%)/); // 4/5 fixtures accurate
+    expect(report.failureSignal).toBe(true);
+  });
+
   it('the failure signal arms when a KPI is below target (a wrong expectedNext fails K3+K4)', async () => {
     const wrongNext: EvalFixture = {
       id: 'nav-wrong-next',

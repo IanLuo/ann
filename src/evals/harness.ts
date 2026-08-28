@@ -237,6 +237,25 @@ export async function runEvalSuite(opts: { nav: EvalFixture[]; flow: FlowFixture
   const k5s: Kpi[] = [];
   for (const fixture of opts.flow) k5s.push(await measureK5(fixture));
 
+  // K1–K3 aggregate across ALL nav fixtures as RATES — one fixture below target is a
+  // measured failure, never masked by the first fixture's pass. (K4 keeps its ≥ 95% rate.)
+  const rate = (id: Kpi['id'], name: string, target: string, list: Kpi[], pass: boolean): Kpi => {
+    const ok = list.filter((k) => k.pass).length;
+    return list.length
+      ? {
+          id,
+          name,
+          value: `${Math.round((ok / list.length) * 1000) / 10}% (${ok}/${list.length})`,
+          target,
+          pass,
+          detail: `${ok}/${list.length} fixtures met the target on their ground truth`,
+        }
+      : { id, name, value: 'n/a', target, pass: false, detail: 'no navigation fixtures' };
+  };
+  const k1 = rate('k1', 'K1 — locate accuracy', '100%', k1s, k1s.every((k) => k.pass));
+  const k2 = rate('k2', 'K2 — locate ease', '≤ 2', k2s, k2s.every((k) => k.pass));
+  const k3 = rate('k3', 'K3 — advance ease', '≤ 1', k3s, k3s.every((k) => k.pass));
+
   // K4 aggregates the per-fixture correctness as a RATE (≥ 95%).
   const k4Rate = k4s.length ? Math.round((k4s.filter((k) => k.pass).length / k4s.length) * 1000) / 10 : 0;
   const k4 = k4s[0]
@@ -264,10 +283,6 @@ export async function runEvalSuite(opts: { nav: EvalFixture[]; flow: FlowFixture
         detail: `${firstPassCount}/${positive.length} fixtures first-passed; ${k5s.length - positive.length} negative control(s) ${negativesHonest ? 'honestly not counted' : 'FAILED THE HONESTY CHECK'}`,
       }
     : { id: 'k5' as const, name: 'K5 — completion success (first pass)', value: 'n/a', target: '≥ 85%', pass: false, detail: 'no flow fixtures' };
-
-  const k1 = k1s[0] ?? { id: 'k1' as const, name: 'K1 — locate accuracy', value: 'n/a', target: '100%', pass: false, detail: 'no fixtures' };
-  const k2 = k2s[0] ?? { id: 'k2' as const, name: 'K2 — locate ease', value: 'n/a', target: '≤ 2', pass: false, detail: 'no fixtures' };
-  const k3 = k3s[0] ?? { id: 'k3' as const, name: 'K3 — advance ease', value: 'n/a', target: '≤ 1', pass: false, detail: 'no fixtures' };
 
   const failureSignal = !k1.pass || !k2.pass || !k3.pass || !k4.pass || !k5.pass;
   return {
