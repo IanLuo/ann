@@ -3,6 +3,7 @@ import { ProviderAdapter } from './llm/index.js';
 import { Abilities, InteractAbility, LlmAbility, ResearchFinding } from '../flow/types.js';
 
 export { recording } from './recording.js';
+export * as github from './github/index.js';
 
 /**
  * L3 — THE ABILITIES (core-design §1, §2). L2 DEFINES the protocols; L3 implements
@@ -14,6 +15,9 @@ export { recording } from './recording.js';
  *              wrapper's job (src/abilities/recording.ts), not this one's.
  *   interact — the human channel, FOUR verbs. The console implementation is v1's; the
  *              real talk/UI adapter (S8) plugs in at this same interface.
+ *   github   — the S7 binding (F13): issue/PR creation, fail-closed, destructive
+ *              actions confirm first. A standalone L3 servant — NOT part of the L2
+ *              `Abilities` interface (llm · interact · shell · tool).
  *   shell / tool — protocol-declared in §2, UNBUILT in v1 (§8): no consumers. They are
  *              absent from the built set rather than stubbed, so a step that needs one
  *              fails closed on the optional field instead of silently doing nothing.
