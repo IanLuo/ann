@@ -1,3 +1,4 @@
+<!-- specs:locked:8a51ce6 2026-08-28 type=spec -->
 ## Link contract
 - **upstream** (this doc relies on): journey/legs/01-goal/artifacts/design.md,02-grilling/01-spec-rework/artifacts/requirements-spec.md,05-engine/17-format-amendment-v6/artifacts/tree-format-spec-v6.md,06-engine-build/19-core-design/artifacts/core-design-spec.md,06-engine-build/20-journey-format-v14/artifacts/journey-format-spec.md
 - **referrers** (must cite this when they change): flow-control-spec,change-protocol ann-system-design,architecture AGENTS.md,implementation slices
