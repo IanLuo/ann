@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { TaskDetail, ResultItem } from '../../store/store.js';
-import { renderStatusTree, renderGateCard, renderPlan, redact, hasSecret, hasScalarProgress } from '../renderers.js';
+import { renderStatusTree, renderGateCard, renderPlan, redact, hasSecret, hasScalarProgress, renderDrift } from '../renderers.js';
 
 const detail = (over: Partial<TaskDetail> = {}): TaskDetail => ({
   id: '06-engine-build/09-s6-runner-reviewer',
@@ -90,6 +90,13 @@ describe('renderPlan (F12 — full plan)', () => {
     expect(text).toContain('09-s6-runner-reviewer:queued');
     expect(text).toContain('frontmost-ready: 06-engine-build/09-s6-runner-reviewer (queued)');
     expect(text).toContain('also ready: 06-engine-build/10-s7-github-binding (queued)');
+  });
+});
+
+describe('renderDrift — the `ann verify` DRIFT line', () => {
+  it('prefixes DRIFT and passes the claim-vs-reality message through verbatim', () => {
+    expect(renderDrift('locksha: design — recorded lockSha 257cb79 vs file content b8c3629')).toBe('DRIFT locksha: design — recorded lockSha 257cb79 vs file content b8c3629');
+    expect(renderDrift('artifact-orphan: 01-goal/artifacts/goal.md vs no artifact-locked event of this node names it')).toContain('artifact-orphan: 01-goal/artifacts/goal.md');
   });
 });
 

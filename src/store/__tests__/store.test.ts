@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store, JourneyEvent } from '../store.js';
 import { getVOCAB } from '../vocab.js';
+import { blobSha, stripMarkers } from '../sha.js';
 
 // Fixture helper: a disposable journey store in a temp dir.
 let root: string;
@@ -289,6 +290,95 @@ describe('Store — check() integrity', () => {
     writeNode('01-goal/02-b', {}, [ev('created'), ev('artifact-locked', { artifact: { name: 'spec', path: 'p2.md', lockSha: 'b' } }), ev('superseded', { successor: { name: 'spec', path: 'p3.md' } })]);
     writeNode('01-goal/01-a', {}, [ev('created'), ev('artifact-locked', { artifact: { name: 'spec', path: 'p1.md', lockSha: 'a' } }), ev('superseded', { successor: { name: 'spec', path: 'p2.md' } })]);
     expect(new Store(root).check().some((p) => p.includes('NO CURRENT'))).toBe(false);
+  });
+});
+
+describe('Store — verify() the DRIFT read (log claims vs filesystem/git reality, D1-D5)', () => {
+  beforeEach(() => { makeStore(); });
+  afterEach(() => { rmSync(root, { recursive: true, force: true }); });
+
+  const SPEC = '<!-- specs:locked:deadbeef 2026-08-19 type=spec -->\n# Spec\n';
+  // write a real producer artifact + record a current artifact-locked event for it
+  const lockSpec = (lockSha: string, id = '01-goal/01-a') => {
+    const dir = join(nodeDir(id), 'artifacts');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'spec.md'), SPEC);
+    writeNode(id, {}, [ev('created'), ev('artifact-locked', { artifact: { name: 'spec', path: `journey/legs/${id}/artifacts/spec.md`, lockSha } })]);
+    return join(dir, 'spec.md');
+  };
+  const docsSymlink = () => {
+    const docs = join(root, '.ann', 'docs', 'specs');
+    mkdirSync(docs, { recursive: true });
+    symlinkSync('../../journey/legs/01-goal/01-a/artifacts/spec.md', join(docs, 'spec.md'));
+  };
+
+  it('stays green on a coherent store: real file, matching sha, resolving docs symlink', () => {
+    lockSpec(blobSha(stripMarkers(SPEC)).slice(0, 7));
+    docsSymlink();
+    expect(new Store(root).verify()).toEqual([]);
+  });
+
+  it('D2 — flags a current artifact whose recorded lockSha no longer matches the file bytes', () => {
+    const actual = blobSha(stripMarkers(SPEC));
+    lockSpec(actual.slice(0, 7) + 'x'); // last char changed — the recorded sha is stale
+    docsSymlink();
+    const drifts = new Store(root).verify();
+    expect(drifts).toHaveLength(1);
+    expect(drifts[0]).toContain('locksha: spec');
+  });
+
+  it('D3 — flags a docs symlink whose target is missing (dangling)', () => {
+    lockSpec(blobSha(stripMarkers(SPEC)).slice(0, 7));
+    const docs = join(root, '.ann', 'docs', 'specs');
+    mkdirSync(docs, { recursive: true });
+    symlinkSync('../../journey/legs/01-goal/01-a/artifacts/nowhere.md', join(docs, 'spec.md'));
+    const drifts = new Store(root).verify();
+    expect(drifts).toHaveLength(1);
+    expect(drifts[0]).toContain('docs-dangling: spec');
+  });
+
+  it('D3 — flags a docs symlink that resolves to the WRONG file (mis-pointed)', () => {
+    lockSpec(blobSha(stripMarkers(SPEC)).slice(0, 7));
+    writeFileSync(join(nodeDir('01-goal/01-a'), 'other.md'), 'not the artifact\n'); // the real wrong target
+    const docs = join(root, '.ann', 'docs', 'specs');
+    mkdirSync(docs, { recursive: true });
+    symlinkSync('../../journey/legs/01-goal/01-a/other.md', join(docs, 'spec.md'));
+    const drifts = new Store(root).verify();
+    expect(drifts).toHaveLength(1);
+    expect(drifts[0]).toContain('docs-mispointed: spec');
+  });
+
+  it('D4 — flags an .md under artifacts/ that no artifact-locked event names', () => {
+    writeNode('01-goal/01-a', {}, [ev('created')]);
+    const dir = join(nodeDir('01-goal/01-a'), 'artifacts');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'goal.md'), 'orphan\n');
+    expect(new Store(root).verify()).toContain('artifact-orphan: 01-goal/01-a/artifacts/goal.md vs no artifact-locked event of this node names it');
+  });
+
+  it('D4 — flags events.jsonl without node.json (invisible to the store) and the mirror', () => {
+    writeNode('01-goal', {}, []);
+    const ghost = join(nodeDir('01-goal'), '10-no-node');
+    mkdirSync(ghost, { recursive: true });
+    writeFileSync(join(ghost, 'events.jsonl'), JSON.stringify(ev('created')) + '\n');
+    // a task dir with node.json but no log — the "vice versa" of the pair
+    mkdirSync(join(nodeDir('01-goal'), '11-no-log'), { recursive: true });
+    writeFileSync(join(nodeDir('01-goal'), '11-no-log', 'node.json'), JSON.stringify({ id: '01-goal/11-no-log', contract: {}, createdAt: '2026-08-19' }));
+    const drifts = new Store(root).verify();
+    expect(drifts).toContain('node-orphan: 01-goal/10-no-node — events.jsonl vs node.json (invisible to the store — load keys on node.json)');
+    expect(drifts).toContain('node-orphan: 01-goal/11-no-log — node.json vs events.jsonl (a task dir with no log)');
+  });
+
+  it('D5 — flags a docs entry placed under the WRONG category for its marker type', () => {
+    lockSpec(blobSha(stripMarkers(SPEC)).slice(0, 7));
+    docsSymlink(); // the correct specs/ placement resolves — so ONLY the placement drift fires
+    // type=spec belongs in specs/ — a stray symlink under designs/ is a placement drift
+    const designs = join(root, '.ann', 'docs', 'designs');
+    mkdirSync(designs, { recursive: true });
+    symlinkSync('../../journey/legs/01-goal/01-a/artifacts/spec.md', join(designs, 'spec.md'));
+    const drifts = new Store(root).verify();
+    expect(drifts).toHaveLength(1);
+    expect(drifts[0]).toContain('type-coherence: spec');
   });
 });
 

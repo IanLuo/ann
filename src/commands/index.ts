@@ -491,6 +491,12 @@ export class Commands {
     return this.store.check();
   }
 
+  /** `verify` — the DRIFT read (the mirror direction): reconcile the log's claims
+   *  against filesystem/git reality (D1-D5). Read-only, like check(). */
+  verify(): string[] {
+    return this.store.verify();
+  }
+
   events(id: string): JourneyEvent[] {
     return this.store.events(id);
   }

@@ -146,6 +146,14 @@ export function hasSecret(text: string): boolean {
   return SECRET_PATTERNS.some((re) => re.test(text));
 }
 
+/* ══ the drift read (`ann verify`) — one pure line renderer ═══════════════════ */
+
+/** A drift line: `DRIFT <kind>: <claim> vs <reality>` (the reconcile mirror of
+ *  check's integrity lines). Pure — the CLI just prints it to stderr. */
+export function renderDrift(drift: string): string {
+  return `DRIFT ${drift}`;
+}
+
 /* ══ AC5 — the no-scalar-progress guard ═══════════════════════════════════════ */
 
 /** Scalar-progress patterns: percentages, counts-as-progress, progress bars. The

@@ -281,6 +281,32 @@ describe('lock! — one current per name + type-driven placement (§3 rule 7)', 
   });
 });
 
+describe('verify — the DRIFT read (the mirror direction of check)', () => {
+  beforeEach(() => {
+    makeStore();
+    writeNode('01-leg', {});
+  });
+  afterEach(() => { rmSync(root, { recursive: true, force: true }); });
+
+  it('passes through a clean store as clean', () => {
+    writeNode('01-leg/01-a', CONTRACT, [ev('created')]);
+    expect(cmds().verify()).toEqual([]);
+  });
+
+  it('surfaces a filesystem artifact the log never claimed', () => {
+    writeNode('01-leg/01-a', CONTRACT, [ev('created')]);
+    writeFileSync(join(nodeDir('01-leg/01-a'), 'artifacts', 'stray.md'), 'x\n');
+    expect(cmds().verify()).toContain('artifact-orphan: 01-leg/01-a/artifacts/stray.md vs no artifact-locked event of this node names it');
+  });
+
+  it('surfaces an events.jsonl dir the store does not key (node.json is the load key)', () => {
+    const ghost = join(nodeDir('01-leg'), '10-ghost');
+    mkdirSync(ghost, { recursive: true });
+    writeFileSync(join(ghost, 'events.jsonl'), JSON.stringify(ev('created')) + '\n');
+    expect(cmds().verify().some((p) => p.startsWith('node-orphan: 01-leg/10-ghost'))).toBe(true);
+  });
+});
+
 describe('supersede! — the one cross-task write', () => {
   beforeEach(() => {
     makeStore();

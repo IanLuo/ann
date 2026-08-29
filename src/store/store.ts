@@ -1,7 +1,8 @@
-import { readdirSync, readFileSync, appendFileSync, existsSync, statSync, lstatSync, mkdirSync, writeFileSync } from 'node:fs';
+import { readdirSync, readFileSync, appendFileSync, existsSync, statSync, lstatSync, mkdirSync, writeFileSync, realpathSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join, basename } from 'node:path';
 import { getVOCAB } from './vocab.js';
+import { blobSha, stripMarkers } from './sha.js';
 
 export interface JourneyEvent {
   at: string;
@@ -764,6 +765,238 @@ export class Store {
       if (this.current(nm)) continue;
       const allSuperseded = producers.every((p) => this.supersededLocks(nm).has(p));
       if (!allSuperseded) problems.push(`NO CURRENT: ${nm} (locked but never superseded and not current — orphan)`);
+    }
+    return problems;
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* verify() — the DRIFT reconciliation (`ann verify`). READ-ONLY.     */
+  /* Internal drift is impossible (ONE writer, LB-3) — drift is always  */
+  /* log-vs-filesystem/git: a recorded claim whose on-disk reality      */
+  /* changed. Five checks, two directions (record→disk, disk→record).   */
+  /* ---------------------------------------------------------------- */
+
+  /** The logical name + derived filename an artifact-locked event claims —
+   *  the same fallbacks current()/lockers() use (structured → note marker → filename). */
+  private claimedName(e: JourneyEvent): string {
+    const a = e.artifact;
+    const filename = a?.path ? basename(a.path) : String(e.note ?? '').match(/([\w.-]+\.md)/)?.[1] ?? '';
+    return a?.name ?? String(e.note ?? '').match(/logical name:\s*([\w.-]+)/)?.[1] ?? logicalNameFromFile(filename);
+  }
+
+  /** Repo-root-relative path (`.ann/docs/…`) — the message vocabulary. */
+  private rel(p: string): string {
+    return p.startsWith(this.root + '/') ? p.slice(this.root.length + 1) : p;
+  }
+
+  /** Directory entries as [] when absent (fresh stores have no docs/ yet). */
+  private dirNames(dir: string): string[] {
+    return existsSync(dir) ? readdirSync(dir) : [];
+  }
+
+  /** Every subdir under a root (not following symlinks) — the disk walk for D4. */
+  private walkDirs(dir: string, acc: string[] = []): string[] {
+    for (const entry of readdirSync(dir)) {
+      const p = join(dir, entry);
+      if (!lstatSync(p).isSymbolicLink() && statSync(p).isDirectory()) {
+        acc.push(p);
+        this.walkDirs(p, acc);
+      }
+    }
+    return acc;
+  }
+
+  /**
+   * Drift reconciliation — the LOG's claims vs filesystem/git reality. One string
+   * per drift, prefixed with the check kind; empty = the store and the disk agree.
+   * D1 record→disk existence (kept from check's MISSING) · D2 event lockSha vs file
+   * content · D3 the docs/ symlink layer · D4 filesystem orphans · D5 version/type
+   * coherence. Never writes — reports only (the single writer stays the only mutator).
+   */
+  verify(): string[] {
+    const problems: string[] = [];
+    const root = this.root;
+    // THE CURRENT LOCK PER LOGICAL NAME: the artifact-locked event whose producer
+    // IS current(name).producer — the claims a healthy store must still hold.
+    const currentEvents = new Map<string, { id: string; event: JourneyEvent }>();
+    for (const [id, node] of this.nodes) {
+      for (const e of node.events) {
+        if (e.type !== 'artifact-locked') continue;
+        const nm = this.claimedName(e);
+        if (!nm) continue;
+        if (this.current(nm)?.producer !== id) continue; // only the CURRENT producer's lock
+        currentEvents.set(nm, { id, event: e });
+      }
+    }
+    // D1 — record → disk existence (the store's MISSING check, kept verbatim shape)
+    for (const [id, node] of this.nodes) {
+      for (const e of node.events) {
+        if (e.type !== 'artifact-locked' || !e.artifact?.name) continue;
+        const p = e.artifact.path;
+        if (p && !existsSync(join(root, legacyPath(p)))) problems.push(`missing-file: ${e.artifact.name} → ${p} vs no such file on disk`);
+      }
+    }
+    // D2 — the RECORDED event lockSha vs the ACTUAL file content (blob over
+    // marker-stripped). The artifact-hash validator only cross-checks the file's
+    // own marker — this compares the log's claim to the bytes, and reports the gap.
+    for (const [nm, { event }] of currentEvents) {
+      const a = event.artifact;
+      const rec = typeof a?.lockSha === 'string' && a.lockSha ? a.lockSha : '';
+      if (!rec) continue; // no recorded sha — nothing claimed (prose-era locks)
+      const cur = this.current(nm)!;
+      const full = join(root, cur.path);
+      if (!existsSync(full)) continue; // D1 already reports the missing file
+      const actual = blobSha(stripMarkers(readFileSync(full, 'utf8')));
+      if (!actual.startsWith(rec)) problems.push(`locksha: ${nm} — recorded lockSha ${rec} vs file content ${actual.slice(0, 7)}`);
+    }
+    // D3 + D5 — the docs/ symlink layer (the placement flip, task 26) and the
+    // version/type coherence. docs/<category>/<name>[-v<N>].md must EXIST, RESOLVE,
+    // point at the producer's real file, and carry the recorded version; the walk
+    // catches entries no current/claimed layout accounts for.
+    const docsRoot = join(root, '.ann', 'docs');
+    const reportedDocs = new Set<string>(); // docs paths a per-name check already reported
+    const accountedDocs = new Set<string>(); // docs paths the current/claimed layout accounts for
+    for (const [id, node] of this.nodes) {
+      for (const e of node.events) {
+        if (e.type !== 'artifact-locked' || !e.artifact?.path) continue;
+        const p = legacyPath(e.artifact.path);
+        if (p.startsWith('.ann/docs/')) accountedDocs.add(p); // legacy claim pointing INTO docs/
+      }
+    }
+    const docsRel = (p: string) => this.rel(p).replace(/^\.ann\/docs\//, '');
+    for (const [nm, { event }] of currentEvents) {
+      const cur = this.current(nm)!;
+      const full = join(root, cur.path);
+      if (!existsSync(full)) continue; // D1 covers the missing file
+      const type = (readFileSync(full, 'utf8').match(/specs:locked:[0-9a-f]+ [0-9-]+ type=(\S+)/) || [])[1] ?? '';
+      const entry = type ? getVOCAB().artifactTypes[type] : undefined;
+      if (type && !entry) problems.push(`type-coherence: ${nm} — marker type '${type}' vs the vocab registry (unknown)`);
+      // A docs entry belongs to this artifact by LOGICAL NAME, or — legacy locks —
+      // by the recorded FILE name (docs/<name>-spec.md carries the filename, not the
+      // logical name; the realpath test below is what settles it).
+      const recordedFile = event.artifact?.path
+        ? basename(legacyPath(event.artifact.path))
+        : String(event.note ?? '').match(/([\w.-]+\.md)/)?.[1] ?? '';
+      const isNamedFor = (f: string) => logicalNameFromFile(f) === nm || (recordedFile !== '' && f === recordedFile);
+      if (!entry?.category) {
+        // task-local type — no docs view is expected; a stray docs entry is drift
+        for (const cat of this.dirNames(docsRoot)) {
+          for (const f of this.dirNames(join(docsRoot, cat))) {
+            if (!isNamedFor(f)) continue;
+            problems.push(`type-coherence: ${nm} — docs/${cat}/${f} vs type '${type || '(none)'}' is task-local (no docs view)`);
+            reportedDocs.add(this.rel(join(docsRoot, cat, f)));
+          }
+        }
+        continue;
+      }
+      const dir = join(docsRoot, entry.category);
+      const currentReal = realpathSync(full);
+      const version = (event.artifact as { version?: unknown } | undefined)?.version;
+      // The docs entry for this name is the one that RESOLVES to the current artifact.
+      // realpath is the definitive test: a legacy docs filename (e.g. resource-registry-spec-v3.md)
+      // may embed neither the logical name nor the current basename.
+      let matched: string | undefined;
+      const named: string[] = [];
+      for (const f of this.dirNames(dir)) {
+        const p = join(dir, f);
+        let target: string | undefined;
+        try {
+          target = realpathSync(p);
+        } catch {
+          // dangling symlink — target missing (reported below, if the name matches)
+        }
+        if (target === currentReal) {
+          matched = p;
+          if (isNamedFor(f)) named.push(f);
+          continue;
+        }
+        if (!isNamedFor(f)) continue;
+        named.push(f);
+        if (target === undefined) {
+          problems.push(`docs-dangling: ${nm} — docs/${docsRel(p)} vs target missing (does not resolve)`);
+        } else {
+          problems.push(`docs-mispointed: ${nm} — docs/${docsRel(p)} vs resolves to ${this.rel(target)} not the current artifact (${cur.path})`);
+        }
+        reportedDocs.add(this.rel(p));
+      }
+      if (matched) {
+        accountedDocs.add(this.rel(matched));
+        if (typeof version === 'number' && basename(matched) !== `${nm}-v${version}.md`) {
+          problems.push(`docs-version: ${nm} — event records version ${version} vs docs symlink ${basename(matched)}`);
+          reportedDocs.add(this.rel(matched));
+        }
+      } else if (typeof version === 'number') {
+        // modern lock — the docs entry is pinned at exactly <name>-v<version>.md
+        const expectFile = `${nm}-v${version}.md`;
+        const expectPath = join(dir, expectFile);
+        const expectRel = this.rel(expectPath);
+        if (reportedDocs.has(expectRel)) {
+          // the pinned entry exists but is broken — already reported per-entry above
+        } else if (existsSync(expectPath)) {
+          problems.push(`docs-version: ${nm} — event records version ${version} vs the pinned docs symlink ${expectFile} does not resolve to the current artifact`);
+          reportedDocs.add(expectRel);
+        } else {
+          const stale = named.filter((f) => !reportedDocs.has(this.rel(join(dir, f))));
+          problems.push(`docs-version: ${nm} — event records version ${version} vs no docs symlink ${expectFile} resolves to it${stale.length ? ` (stale: ${stale.join(', ')})` : ''}`);
+          for (const f of stale) reportedDocs.add(this.rel(join(dir, f)));
+        }
+      } else if (!named.length) {
+        // legacy lock with no docs entry at all — nothing even attempted
+        problems.push(`docs-missing: ${nm} — no docs/${entry.category} symlink resolves to the current artifact (${cur.path})`);
+      }
+      // D5 placement coherence: the name must not appear in any OTHER category
+      for (const cat of this.dirNames(docsRoot)) {
+        if (cat === entry.category) continue;
+        for (const f of this.dirNames(join(docsRoot, cat))) {
+          if (!isNamedFor(f)) continue;
+          problems.push(`type-coherence: ${nm} — docs/${cat}/${f} vs type '${type}' places into '${entry.category}'`);
+          reportedDocs.add(this.rel(join(docsRoot, cat, f)));
+        }
+      }
+    }
+    // the walk: every docs/ entry no current/claimed layout accounts for
+    for (const cat of this.dirNames(docsRoot)) {
+      for (const f of this.dirNames(join(docsRoot, cat))) {
+        if (!f.endsWith('.md')) continue;
+        const r = this.rel(join(docsRoot, cat, f));
+        if (accountedDocs.has(r) || reportedDocs.has(r)) continue;
+        problems.push(`docs-orphan: docs/${docsRel(join(docsRoot, cat, f))} vs no current/claimed layout accounts for it`);
+      }
+    }
+    // D4 — filesystem orphans (the MIRROR direction: walk the disk, not the store).
+    // Store.load() keys on node.json ONLY — a bare events.jsonl dir is invisible to
+    // the store today, so this walk must not rely on ids() alone.
+    for (const d of this.walkDirs(this.legs)) {
+      const rel = d.slice(this.legs.length + 1);
+      const hasNode = existsSync(join(d, 'node.json'));
+      const hasEv = existsSync(join(d, 'events.jsonl'));
+      if (hasEv && !hasNode) problems.push(`node-orphan: ${rel} — events.jsonl vs node.json (invisible to the store — load keys on node.json)`);
+      if (hasNode && !hasEv && rel.includes('/')) problems.push(`node-orphan: ${rel} — node.json vs events.jsonl (a task dir with no log)`);
+      if (hasNode) {
+        let id = '';
+        try {
+          id = String((JSON.parse(readFileSync(join(d, 'node.json'), 'utf8')) as { id?: unknown }).id ?? '');
+        } catch { /* unparseable node.json — the id mismatch below reports it */ }
+        if (id !== rel) problems.push(`node-id-mismatch: ${rel} — node.json id '${id}' vs directory path`);
+      }
+      // every .md under artifacts/ must be named by an artifact-locked event of this node
+      const adir = join(d, 'artifacts');
+      if (!existsSync(adir)) continue;
+      let events = this.nodes.get(rel)?.events;
+      if (!events) {
+        const ef = join(d, 'events.jsonl');
+        events = existsSync(ef) ? this.parse(ef) : [];
+      }
+      const claimed = new Set<string>();
+      for (const e of events) {
+        if (e.type !== 'artifact-locked') continue;
+        const filename = e.artifact?.path ? basename(e.artifact.path) : String(e.note ?? '').match(/([\w.-]+\.md)/)?.[1] ?? '';
+        if (filename) claimed.add(filename);
+      }
+      for (const f of readdirSync(adir)) {
+        if (!f.endsWith('.md')) continue;
+        if (!claimed.has(f)) problems.push(`artifact-orphan: ${rel}/artifacts/${f} vs no artifact-locked event of this node names it`);
+      }
     }
     return problems;
   }
