@@ -1,1 +1,0 @@
-../../journey/legs/06-engine-build/22-resource-registry-v3/artifacts/resource-registry.md

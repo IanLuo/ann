@@ -1,1 +1,0 @@
-../../journey/legs/01-goal/artifacts/design.md

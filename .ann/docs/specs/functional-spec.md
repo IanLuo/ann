@@ -1,1 +1,0 @@
-../../journey/legs/05-engine/06-functional-spec/artifacts/functional-spec.md

@@ -1,1 +1,0 @@
-../../journey/legs/06-engine-build/21-amend-architecture-v3/artifacts/architecture.md

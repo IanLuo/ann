@@ -1,1 +1,0 @@
-../../journey/legs/05-engine/03-change-protocol-amendment/artifacts/requirements-change-protocol-v2.md

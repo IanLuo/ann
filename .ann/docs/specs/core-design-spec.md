@@ -1,1 +1,0 @@
-../../journey/legs/06-engine-build/19-core-design/artifacts/core-design-spec.md

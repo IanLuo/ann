@@ -1,1 +1,0 @@
-../../journey/legs/05-engine/15-system-design-stack/artifacts/ann-system-design-v3.md

@@ -1,1 +1,0 @@
-../../journey/legs/05-engine/17-format-amendment-v6/artifacts/tree-format-spec-v6.md

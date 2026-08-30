@@ -1,1 +1,0 @@
-../../journey/legs/06-engine-build/06-s3-context-assembler/artifacts/context-packet-spec.md

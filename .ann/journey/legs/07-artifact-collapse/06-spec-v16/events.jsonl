@@ -1,1 +1,4 @@
 {"at":"2026-08-30","type":"created","note":"spawned by bookkeeper (claude)"}
+{"at":"2026-08-30","type":"submitted","gate":"grill","note":"submitted for the grill gate (claude)"}
+{"at":"2026-08-30","type":"confirmed","gate":"grill","feedback":"v16 amendment per the change protocol: thin-record artifact model, legacy-reader rule, docs/ retirement; superseding v15, cleaning the 12 inert docs symlinks","note":"accepted (claude)"}
+{"at":"2026-08-30","type":"artifact-locked","artifact":{"name":"journey-format-spec","path":".ann/journey/legs/07-artifact-collapse/06-spec-v16/artifacts/journey-format-spec.md","lockSha":"047f1b2","type":"spec","version":16},"note":"journey-format-spec.md locked @ 047f1b2 (claude)"}
