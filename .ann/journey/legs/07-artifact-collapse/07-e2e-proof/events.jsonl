@@ -1,3 +1,7 @@
 {"at":"2026-08-30","type":"created","note":"spawned by bookkeeper (claude)"}
 {"at":"2026-08-30","type":"submitted","gate":"grill","note":"submitted for the grill gate (claude)"}
 {"at":"2026-08-30","type":"confirmed","gate":"grill","feedback":"fresh-project drive under /tmp with a .js deliverable: full gated lifecycle, thin lock!, check 0, verify 0, F3/F4 no longer reproduce","note":"accepted (claude)"}
+{"at":"2026-08-30","type":"evidence","note":"Fresh-project drive (AC7): full gated lifecycle on /tmp/ann-collapse-e2e.G1MkHM with a .js deliverable locked via the NEW thin lock! (F3: any file type). check = 0, verify = 0; the evidence-cited analysis.md fixture is claimed via refs (F4 gone, no artifact-orphan); read/current/specs resolve from the log to the producer own .js file, content verbatim; no .ann/docs layer is created. The .js file is byte-identical after lock (AC1). See the proof report.","commits":[{"sha":"3556c21","note":"journey: e2e proof report"}],"refs":[".ann/journey/legs/07-artifact-collapse/07-e2e-proof/artifacts/e2e-proof.md"]}
+{"at":"2026-08-30","type":"submitted","gate":"confirm","note":"submitted for the confirm gate (claude)"}
+{"at":"2026-08-30","type":"confirmed","gate":"confirm","feedback":"fresh project with a .js deliverable: check 0, verify 0, F3/F4 gone, read/current/specs work, no docs/ layer","note":"accepted (claude)"}
+{"at":"2026-08-30","type":"completed","note":"e2e proof shipped: full lifecycle with a .js deliverable under /tmp; check 0, verify 0, F3/F4 no longer reproduce. See commit 3556c21."}
