@@ -6,3 +6,4 @@
 {"at":"2026-08-28","type":"submitted","gate":"confirm","note":"submitted with the decision (agent)"}
 {"at":"2026-08-28","type":"confirmed","gate":"confirm","note":"accepted (agent)"}
 {"at":"2026-08-28","type":"completed","note":"journey-format-spec v15 complete: task-splitting + naming convention landed; v15 locked @ 8a51ce6, docs symlink + artifact-locked recorded, AGENTS.md re-pointed, cap 24->40 enforced; 10 transient F-AC19s cleared; human decision accepted both gates"}
+{"at":"2026-08-30","type":"superseded","successor":{"name":"journey-format-spec","path":".ann/journey/legs/07-artifact-collapse/06-spec-v16/artifacts/journey-format-spec.md"},"note":"v15 superseded by v16 (the artifact collapse — thin lock!, any-file artifacts, log-derived views, docs/ retired, legacy marker tolerance)"}
