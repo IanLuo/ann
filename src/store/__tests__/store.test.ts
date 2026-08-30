@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, symlinkSync, appendFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, appendFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store, JourneyEvent } from '../store.js';
 import { getVOCAB } from '../vocab.js';
-import { blobSha, stripMarkers } from '../sha.js';
+import { blobSha } from '../sha.js';
 
 // Fixture helper: a disposable journey store in a temp dir.
 let root: string;
@@ -293,11 +293,11 @@ describe('Store — check() integrity', () => {
   });
 });
 
-describe('Store — verify() the DRIFT read (log claims vs filesystem/git reality, D1-D5)', () => {
+describe('Store — verify() the DRIFT read (log claims vs filesystem/git reality)', () => {
   beforeEach(() => { makeStore(); });
   afterEach(() => { rmSync(root, { recursive: true, force: true }); });
 
-  const SPEC = '<!-- specs:locked:deadbeef 2026-08-19 type=spec -->\n# Spec\n';
+  const SPEC = '# Spec\n';
   // write a real producer artifact + record a current artifact-locked event for it
   const lockSpec = (lockSha: string, id = '01-goal/01-a') => {
     const dir = join(nodeDir(id), 'artifacts');
@@ -306,46 +306,18 @@ describe('Store — verify() the DRIFT read (log claims vs filesystem/git realit
     writeNode(id, {}, [ev('created'), ev('artifact-locked', { artifact: { name: 'spec', path: `journey/legs/${id}/artifacts/spec.md`, lockSha } })]);
     return join(dir, 'spec.md');
   };
-  const docsSymlink = () => {
-    const docs = join(root, '.ann', 'docs', 'specs');
-    mkdirSync(docs, { recursive: true });
-    symlinkSync('../../journey/legs/01-goal/01-a/artifacts/spec.md', join(docs, 'spec.md'));
-  };
 
-  it('stays green on a coherent store: real file, matching sha, resolving docs symlink', () => {
-    lockSpec(blobSha(stripMarkers(SPEC)).slice(0, 7));
-    docsSymlink();
+  it('stays green on a coherent store: real file + matching lockSha (no docs/ layer)', () => {
+    lockSpec(blobSha(SPEC).slice(0, 7));
     expect(new Store(root).verify()).toEqual([]);
   });
 
   it('D2 — flags a current artifact whose recorded lockSha no longer matches the file bytes', () => {
-    const actual = blobSha(stripMarkers(SPEC));
+    const actual = blobSha(SPEC);
     lockSpec(actual.slice(0, 7) + 'x'); // last char changed — the recorded sha is stale
-    docsSymlink();
     const drifts = new Store(root).verify();
     expect(drifts).toHaveLength(1);
     expect(drifts[0]).toContain('locksha: spec');
-  });
-
-  it('D3 — flags a docs symlink whose target is missing (dangling)', () => {
-    lockSpec(blobSha(stripMarkers(SPEC)).slice(0, 7));
-    const docs = join(root, '.ann', 'docs', 'specs');
-    mkdirSync(docs, { recursive: true });
-    symlinkSync('../../journey/legs/01-goal/01-a/artifacts/nowhere.md', join(docs, 'spec.md'));
-    const drifts = new Store(root).verify();
-    expect(drifts).toHaveLength(1);
-    expect(drifts[0]).toContain('docs-dangling: spec');
-  });
-
-  it('D3 — flags a docs symlink that resolves to the WRONG file (mis-pointed)', () => {
-    lockSpec(blobSha(stripMarkers(SPEC)).slice(0, 7));
-    writeFileSync(join(nodeDir('01-goal/01-a'), 'other.md'), 'not the artifact\n'); // the real wrong target
-    const docs = join(root, '.ann', 'docs', 'specs');
-    mkdirSync(docs, { recursive: true });
-    symlinkSync('../../journey/legs/01-goal/01-a/other.md', join(docs, 'spec.md'));
-    const drifts = new Store(root).verify();
-    expect(drifts).toHaveLength(1);
-    expect(drifts[0]).toContain('docs-mispointed: spec');
   });
 
   it('D4 — flags an .md under artifacts/ that no artifact-locked event names', () => {
@@ -354,6 +326,14 @@ describe('Store — verify() the DRIFT read (log claims vs filesystem/git realit
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, 'goal.md'), 'orphan\n');
     expect(new Store(root).verify()).toContain('artifact-orphan: 01-goal/01-a/artifacts/goal.md vs no artifact-locked event of this node names it');
+  });
+
+  it('D4 — an evidence-cited fixture in artifacts/ is accounted for, not an orphan (F4 gone)', () => {
+    const dir = join(nodeDir('01-goal/01-a'), 'artifacts');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'analysis.md'), '# analysis\n');
+    writeNode('01-goal/01-a', {}, [ev('created'), ev('evidence', { refs: ['.ann/journey/legs/01-goal/01-a/artifacts/analysis.md'] })]);
+    expect(new Store(root).verify()).toEqual([]);
   });
 
   it('D4 — flags events.jsonl without node.json (invisible to the store) and the mirror', () => {
@@ -367,18 +347,6 @@ describe('Store — verify() the DRIFT read (log claims vs filesystem/git realit
     const drifts = new Store(root).verify();
     expect(drifts).toContain('node-orphan: 01-goal/10-no-node — events.jsonl vs node.json (invisible to the store — load keys on node.json)');
     expect(drifts).toContain('node-orphan: 01-goal/11-no-log — node.json vs events.jsonl (a task dir with no log)');
-  });
-
-  it('D5 — flags a docs entry placed under the WRONG category for its marker type', () => {
-    lockSpec(blobSha(stripMarkers(SPEC)).slice(0, 7));
-    docsSymlink(); // the correct specs/ placement resolves — so ONLY the placement drift fires
-    // type=spec belongs in specs/ — a stray symlink under designs/ is a placement drift
-    const designs = join(root, '.ann', 'docs', 'designs');
-    mkdirSync(designs, { recursive: true });
-    symlinkSync('../../journey/legs/01-goal/01-a/artifacts/spec.md', join(designs, 'spec.md'));
-    const drifts = new Store(root).verify();
-    expect(drifts).toHaveLength(1);
-    expect(drifts[0]).toContain('type-coherence: spec');
   });
 });
 
@@ -725,16 +693,25 @@ describe('Store — strict event schema (format v12 §3: unknown fields + shapes
     expectReject('06-engine-build/20-a', { at: '2026-08-22', type: 'evidence', note: 'x', totallyUnknown: 1 }, /unknown field/);
   });
 
-  it('rejects a malformed artifact (not {name, path, lockSha?})', () => {
+  it('rejects a malformed artifact (not {name, path, lockSha?, type?, version?})', () => {
     writeNode('06-engine-build/20-b', {}, [ev('created')]);
     expectReject('06-engine-build/20-b', { at: '2026-08-22', type: 'artifact-locked', artifact: 'garbage' } as unknown as JourneyEvent, /artifact.*must be/);
     expectReject('06-engine-build/20-b', { at: '2026-08-22', type: 'artifact-locked', artifact: { name: 'x' } } as unknown as JourneyEvent, /artifact.*must be/); // path missing
+    // type is an optional STRING tag; version must stay a number
+    expectReject('06-engine-build/20-b', { at: '2026-08-22', type: 'artifact-locked', artifact: { name: 'x', path: 'x.md', lockSha: 'a', type: 7 } } as unknown as JourneyEvent, /type must be a string/);
+    expectReject('06-engine-build/20-b', { at: '2026-08-22', type: 'artifact-locked', artifact: { name: 'x', path: 'x.md', lockSha: 'a', version: 'v1' } } as unknown as JourneyEvent, /version must be a number/);
   });
 
   it('rejects a malformed successor and a gate outside the vocab', () => {
     writeNode('06-engine-build/20-c', {}, [ev('created')]);
     expectReject('06-engine-build/20-c', { at: '2026-08-22', type: 'superseded', successor: { name: 'x' } } as unknown as JourneyEvent, /successor.*must be/);
     expectReject('06-engine-build/20-c', { at: '2026-08-22', type: 'confirmed', gate: 'not-a-gate' } as unknown as JourneyEvent, /gate must be/);
+  });
+
+  it('G1 — a non-string feedback on confirmed is rejected (mirrors rejected)', () => {
+    writeNode('06-engine-build/20-g', {}, [ev('created')]);
+    expectReject('06-engine-build/20-g', { at: '2026-08-22', type: 'confirmed', gate: 'grill', feedback: 42 } as unknown as JourneyEvent, /confirmed.feedback must be a string/);
+    expectReject('06-engine-build/20-g', { at: '2026-08-22', type: 'rejected', gate: 'grill', feedback: ['no'] } as unknown as JourneyEvent, /rejected.feedback must be a string/);
   });
 
   it('rejects malformed commits/refs on evidence', () => {
@@ -746,9 +723,9 @@ describe('Store — strict event schema (format v12 §3: unknown fields + shapes
   it('accepts the valid shapes the engine itself writes (dogfood)', () => {
     writeNode('06-engine-build/20-e', {}, [ev('created')]);
     const s2 = s();
-    s2.appendEvent('06-engine-build/20-e', { at: '2026-08-22', type: 'confirmed', gate: 'grill', note: 'ok' }); // GATE-1 first
+    s2.appendEvent('06-engine-build/20-e', { at: '2026-08-22', type: 'confirmed', gate: 'grill', note: 'ok', feedback: 'looks right' }); // GATE-1 first (G1 feedback)
     s2.appendEvent('06-engine-build/20-e', { at: '2026-08-22', type: 'evidence', commits: [{ sha: 'abc1234', note: 'step' }], refs: ['src/x'], note: 'ok' });
-    s2.appendEvent('06-engine-build/20-e', { at: '2026-08-22', type: 'artifact-locked', artifact: { name: 'x', path: 'journey/legs/06-engine-build/20-e/artifacts/x.md', lockSha: 'abc' }, note: 'ok' });
+    s2.appendEvent('06-engine-build/20-e', { at: '2026-08-22', type: 'artifact-locked', artifact: { name: 'x', path: 'journey/legs/06-engine-build/20-e/artifacts/x.md', lockSha: 'abc', type: 'script', version: 1 }, note: 'ok' });
     expect(s2.events('06-engine-build/20-e').length).toBe(4); // created + 3 valid
   });
 });

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, lstatSync, realpathSync, symlinkSync, appendFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, appendFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, relative } from 'node:path';
+import { join } from 'node:path';
 import { Store, JourneyEvent } from '../../store/store.js';
 import { Commands, CommandResult } from '../index.js';
 
@@ -145,6 +145,17 @@ describe('submit! + gate! — the two-write gate sequence (core-design §4)', ()
     expect(evs.filter((e) => e.type === 'confirmed')).toHaveLength(1);
   });
 
+  it('G1: a gate accept with a rationale persists it as feedback on the confirmed event', () => {
+    const c = cmds();
+    valueOf(c.gate('01-leg/01-a', 'grill', 'accept', 'looks right — the contract mirrors the plan'));
+    const confirmed = c.events('01-leg/01-a').find((e) => e.type === 'confirmed' && e.gate === 'grill');
+    expect(confirmed!.feedback).toBe('looks right — the contract mirrors the plan');
+    // an accept with no rationale records no feedback field
+    valueOf(c.gate('01-leg/01-a', 'confirm', 'accept'));
+    const confirm2 = c.events('01-leg/01-a').find((e) => e.type === 'confirmed' && e.gate === 'confirm');
+    expect(confirm2!.feedback).toBeUndefined();
+  });
+
   it('owns the 3-reject bound as a CONSTANT and surfaces only {escalated}', () => {
     for (let i = 0; i < 2; i++) expect(valueOf(cmds().gate('01-leg/01-a', 'grill', 'reject', 'no')).escalated).toBe(false);
     expect(valueOf(cmds().gate('01-leg/01-a', 'grill', 'reject', 'no')).escalated).toBe(true);
@@ -202,7 +213,7 @@ describe('append! — refuses what the composites own (§8:289)', () => {
   });
 });
 
-describe('lock! — one current per name + type-driven placement (§3 rule 7)', () => {
+describe('lock! — the THIN artifact record (one current per name; any file; never touches the file)', () => {
   beforeEach(() => {
     makeStore();
     writeNode('01-leg', {});
@@ -210,74 +221,73 @@ describe('lock! — one current per name + type-driven placement (§3 rule 7)', 
   });
   afterEach(() => { rmSync(root, { recursive: true, force: true }); });
 
-  const workingFile = (id: string, name: string, body: string) => writeFileSync(join(nodeDir(id), 'artifacts', `${name}.md`), body);
+  /** Write a deliverable anywhere under the project; returns its project-relative path. */
+  const deliverable = (id: string, name: string, body: string): string => {
+    const p = join(nodeDir(id), 'artifacts', name);
+    mkdirSync(join(nodeDir(id), 'artifacts'), { recursive: true });
+    writeFileSync(p, body);
+    return `.ann/journey/legs/${id}/artifacts/${name}`;
+  };
 
-  it('THE FLIP: the producer owns a REAL file; docs/<name>-v<N>.md is a symlink to it', () => {
-    workingFile('01-leg/01-a', 'my-spec', '# body\n');
-    const locked = valueOf(cmds().lock('01-leg/01-a', 'my-spec', { type: 'spec' }));
-    // the producing task owns the CONTENT as a real file — exactly one physical copy
-    expect(locked.contentPath).toBe('.ann/journey/legs/01-leg/01-a/artifacts/my-spec.md');
-    expect(locked.path).toBe('journey/legs/01-leg/01-a/artifacts/my-spec.md');
-    const ref = join(nodeDir('01-leg/01-a'), 'artifacts', 'my-spec.md');
-    expect(lstatSync(ref).isSymbolicLink()).toBe(false); // a REAL file, not a symlink
-    // marker stamped on the producer's file, sha over the STRIPPED content
-    const via = readFileSync(ref, 'utf8');
-    expect(via).toBe(`<!-- specs:locked:${locked.sha} ${new Date().toISOString().slice(0, 10)} type=spec -->\n# body\n`);
-    // the shared placement is a SYMLINK pointing at the producer's artifact
-    const view = join(root, '.ann', 'docs', 'specs', 'my-spec-v1.md');
-    expect(lstatSync(view).isSymbolicLink()).toBe(true);
-    expect(readFileSync(realpathSync(view), 'utf8')).toBe(via);
+  it('records a THIN artifact over the producer\'s own file — bytes untouched, no stamp, no symlink', () => {
+    const rel = deliverable('01-leg/01-a', 'my-spec.md', '# body\n');
+    const before = readFileSync(join(root, rel), 'utf8');
+    const locked = valueOf(cmds().lock('01-leg/01-a', 'my-spec', { path: rel }));
+    // contentPath IS the recorded path (the producer's own file — ann never copies)
+    expect(locked.contentPath).toBe(rel);
+    expect(locked.path).toBe(rel);
+    // AC1: the file on disk is byte-identical after the lock — no marker, no re-write
+    expect(readFileSync(join(root, rel), 'utf8')).toBe(before);
+    // the event records {name, path, lockSha, version} — and NO docs/ layer appears
+    const evt = cmds().events('01-leg/01-a').find((e) => e.type === 'artifact-locked');
+    expect(evt!.artifact).toMatchObject({ name: 'my-spec', path: rel, version: 1 });
+    expect(evt!.artifact!.lockSha).toMatch(/^[0-9a-f]{7}$/);
+    expect(existsSync(join(root, '.ann', 'docs'))).toBe(false);
   });
 
-  it('LEGACY locks (pre-version field) derive N from the docs FILENAME their ref resolves to', () => {
-    // A legacy lock event with no `artifact.version`, whose recorded ref is a symlink to
-    // `docs/specs/legacy-spec-v5.md` — the fallback must NOT collide with the current v5.
-    const done = [ev('created'), ev('submitted', { gate: 'grill' }), ev('confirmed', { gate: 'grill' }), ev('submitted', { gate: 'confirm' }), ev('confirmed', { gate: 'confirm' })];
-    writeNode('01-leg/01-a', CONTRACT, done);
-    mkdirSync(join(root, '.ann', 'docs', 'specs'), { recursive: true });
-    writeFileSync(join(root, '.ann', 'docs', 'specs', 'legacy-spec-v5.md'), 'v5\n'); // docs = the real file (pre-flip shape)
-    symlinkSync(relative(join(nodeDir('01-leg/01-a'), 'artifacts'), join(root, '.ann', 'docs', 'specs', 'legacy-spec-v5.md')), join(nodeDir('01-leg/01-a'), 'artifacts', 'legacy-spec.md'));
-    const store = new Store(root);
-    store.appendEvent('01-leg/01-a', { at: '2026-08-27', type: 'artifact-locked', artifact: { name: 'legacy-spec', path: 'journey/legs/01-leg/01-a/artifacts/legacy-spec.md', lockSha: 'abc1234' }, note: 'legacy v5 locked' });
-    store.appendEvent('01-leg/01-a', { at: '2026-08-27', type: 'completed', note: 'legacy' });
-    store.appendEvent('01-leg/01-a', { at: '2026-08-27', type: 'superseded', successor: { name: 'legacy-spec', path: '.ann/docs/specs/legacy-spec-v5.md' }, note: 'x' });
+  it('locks ANY file type — a .js deliverable locks (F3 gone)', () => {
+    const rel = deliverable('01-leg/01-a', 'tool.js', 'export const x = 1;\n');
+    const locked = valueOf(cmds().lock('01-leg/01-a', 'tool', { path: rel }));
+    expect(locked.path).toBe(rel);
+    expect(locked.sha).toMatch(/^[0-9a-f]{7}$/);
+    expect(readFileSync(join(root, rel), 'utf8')).toBe('export const x = 1;\n'); // bytes untouched
+  });
+
+  it('records the optional free-form type tag; unknown types are NOT refused (F2 gone)', () => {
+    const rel = deliverable('01-leg/01-a', 'x.md', 'x\n');
+    const locked = valueOf(cmds().lock('01-leg/01-a', 'x', { path: rel, type: 'script' }));
+    expect(locked.sha).toMatch(/^[0-9a-f]{7}$/);
+    expect(cmds().events('01-leg/01-a').find((e) => e.type === 'artifact-locked')!.artifact!.type).toBe('script');
+    // no type → the event omits it
+    deliverable('01-leg/01-a', 'y.md', 'y\n');
+    const s = new Store(root);
+    s.appendEvent('01-leg/01-a', { at: '2026-08-27', type: 'superseded', successor: { name: 'x', path: '.ann/journey/legs/01-leg/01-a/artifacts/y.md' }, note: 'x' });
+    // (one current per name — step x aside first; the successor file must exist)
+    valueOf(new Commands(new Store(root), 'test').lock('01-leg/01-a', 'y', { path: '.ann/journey/legs/01-leg/01-a/artifacts/y.md' }));
+    expect(new Store(root).events('01-leg/01-a').find((e) => e.type === 'artifact-locked' && e.artifact?.name === 'y')!.artifact!.type).toBeUndefined();
+  });
+
+  it('derives N from the LOG — one current per name; the next version follows the recorded locks', () => {
+    deliverable('01-leg/01-a', 'my-spec.md', 'v1\n');
+    valueOf(cmds().lock('01-leg/01-a', 'my-spec', { path: '.ann/journey/legs/01-leg/01-a/artifacts/my-spec.md' }));
     writeNode('01-leg/02-b', CONTRACT, [ev('created'), ev('submitted', { gate: 'grill' }), ev('confirmed', { gate: 'grill' })]);
-    workingFile('01-leg/02-b', 'legacy-spec', 'v6\n');
-    // the new lock writes the PRODUCER's real file and a docs SYMLINK at the next version
-    const locked = valueOf(new Commands(new Store(root), 'test').lock('01-leg/02-b', 'legacy-spec', { type: 'spec' }));
-    expect(locked.contentPath).toBe('.ann/journey/legs/01-leg/02-b/artifacts/legacy-spec.md');
-    expect(lstatSync(join(root, '.ann', 'docs', 'specs', 'legacy-spec-v6.md')).isSymbolicLink()).toBe(true);
-  });
-
-  it('keeps a TASK-LOCAL type as a real file, unversioned', () => {
-    workingFile('01-leg/01-a', 'a-record', '# note\n');
-    const locked = valueOf(cmds().lock('01-leg/01-a', 'a-record', { type: 'record' }));
-    expect(locked.contentPath).toBe('.ann/journey/legs/01-leg/01-a/artifacts/a-record.md');
-    expect(lstatSync(join(nodeDir('01-leg/01-a'), 'artifacts', 'a-record.md')).isSymbolicLink()).toBe(false);
-  });
-
-  it('derives N from the LOG — the next version follows the recorded locks, not a counter', () => {
-    workingFile('01-leg/01-a', 'my-spec', 'v1\n');
-    valueOf(cmds().lock('01-leg/01-a', 'my-spec', { type: 'spec' }));
-    writeNode('01-leg/02-b', CONTRACT, [ev('created'), ev('submitted', { gate: 'grill' }), ev('confirmed', { gate: 'grill' })]);
-    workingFile('01-leg/02-b', 'my-spec', 'v2\n');
+    deliverable('01-leg/02-b', 'my-spec.md', 'v2\n');
     // the old locker must step aside first — one current per name
-    expect(errorOf(cmds().lock('01-leg/02-b', 'my-spec', { type: 'spec' })).code).toBe('already-current');
+    expect(errorOf(cmds().lock('01-leg/02-b', 'my-spec', { path: '.ann/journey/legs/01-leg/02-b/artifacts/my-spec.md' })).code).toBe('already-current');
     const c = cmds();
     c.append('01-leg/01-a', ev('completed') as JourneyEvent);
     // (superseding needs a done locker; the successor path is the file it points at)
     const s = new Store(root);
-    s.appendEvent('01-leg/01-a', { at: '2026-08-27', type: 'superseded', successor: { name: 'my-spec', path: '.ann/docs/specs/my-spec-v1.md' }, note: 'x' });
-    const locked = valueOf(new Commands(new Store(root), 'test').lock('01-leg/02-b', 'my-spec', { type: 'spec' }));
+    s.appendEvent('01-leg/01-a', { at: '2026-08-27', type: 'superseded', successor: { name: 'my-spec', path: '.ann/journey/legs/01-leg/02-b/artifacts/my-spec.md' }, note: 'x' });
+    const locked = valueOf(new Commands(new Store(root), 'test').lock('01-leg/02-b', 'my-spec', { path: '.ann/journey/legs/01-leg/02-b/artifacts/my-spec.md' }));
     expect(locked.contentPath).toBe('.ann/journey/legs/01-leg/02-b/artifacts/my-spec.md');
     // the version is recorded on the lock event — N is deterministic from the log
     const lockEvent = new Store(root).events('01-leg/02-b').find((e) => e.type === 'artifact-locked');
     expect((lockEvent!.artifact as { version?: number }).version).toBe(2);
   });
 
-  it('refuses an unknown artifact type', () => {
-    workingFile('01-leg/01-a', 'x', 'x\n');
-    expect(errorOf(cmds().lock('01-leg/01-a', 'x', { type: 'not-a-type' })).code).toBe('unknown-type');
+  it('refuses a path that does not exist (no-file)', () => {
+    expect(errorOf(cmds().lock('01-leg/01-a', 'x', { path: 'nowhere/thing.js' })).code).toBe('no-file');
   });
 });
 
@@ -337,9 +347,9 @@ describe('read — the L1 content view (core-design §5)', () => {
   });
   afterEach(() => { rmSync(root, { recursive: true, force: true }); });
 
-  it('serves MARKER-STRIPPED content so what a caller reads hashes to what was locked', () => {
+  it('serves the content verbatim so what a caller reads hashes to what was locked', () => {
     writeFileSync(join(nodeDir('01-leg/01-a'), 'artifacts', 'my-spec.md'), '# body\n');
-    const locked = valueOf(cmds().lock('01-leg/01-a', 'my-spec', { type: 'spec' }));
+    const locked = valueOf(cmds().lock('01-leg/01-a', 'my-spec', { path: '.ann/journey/legs/01-leg/01-a/artifacts/my-spec.md' }));
     const r = valueOf(new Commands(new Store(root), 'test').read('my-spec'));
     expect(r.content).toBe('# body\n');
     expect(r.sha).toBe(locked.sha);

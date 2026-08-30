@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, mkdirSync, cpSync, rmSync, writeFileSync, symlinkSync, lstatSync, appendFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, cpSync, rmSync, writeFileSync, symlinkSync, existsSync, appendFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync, execFileSync } from 'node:child_process';
@@ -43,11 +43,11 @@ function newProject(): string {
   const root = mkdtempSync(join(tmpdir(), 'ann-e2e-'));
   mkdirSync(join(root, '.ann', 'journey', 'legs'), { recursive: true });
   cpSync(join(REPO, '.ann', 'rules'), join(root, '.ann', 'rules'), { recursive: true });
-  // Mirror the real repo's docs-migration view: root journey/ docs/ rules/ are symlinks onto .ann/.
+  // Mirror the real repo's root view: journey/ rules/ are symlinks onto .ann/.
+  // (docs/ is RETIRED in the thin model, leg 07 — no root docs symlink is created.)
   // cmdCheck verifies on-disk hashes via join(ROOT, l.path) — the legacy path resolves through
   // the journey symlink, so the integrity loop runs instead of skipping.
   symlinkSync('.ann/journey', join(root, 'journey'));
-  symlinkSync('.ann/docs', join(root, 'docs'));
   symlinkSync('.ann/rules', join(root, 'rules'));
   writeFileSync(join(root, '.e2e-config.json'), '{}');
   git(root, ['init', '-q']);
@@ -87,10 +87,11 @@ describe('e2e — the CLI binary', () => {
     expect(bare.code).toBe(1);
     expect(out(bare)).toContain("writes are marked with '!'");
 
-    // evidence with a resolvable ref (F-AC18 traceability)
-    mkdirSync(join(root, '.ann', 'docs', 'specs'), { recursive: true });
-    writeFileSync(join(root, '.ann', 'docs', 'specs', 'thing.md'), '# Thing\n');
-    expect(out(cli(root, ['append!', TASK, JSON.stringify({ at: '2026-08-29', type: 'evidence', refs: ['docs/specs/thing.md'] })]))).toContain('appended');
+    // evidence with a resolvable ref (F-AC18 traceability) — a fixture in artifacts/
+    // that the collapse's D4 rework claims (F4: evidence-cited files are not orphans)
+    mkdirSync(join(root, '.ann', 'journey', 'legs', TASK, 'artifacts'), { recursive: true });
+    writeFileSync(join(root, '.ann', 'journey', 'legs', TASK, 'artifacts', 'analysis.md'), '# Analysis\n');
+    expect(out(cli(root, ['append!', TASK, JSON.stringify({ at: '2026-08-29', type: 'evidence', refs: ['.ann/journey/legs/01-leg/01-a/artifacts/analysis.md'] })]))).toContain('appended');
 
     // gate ①: submit alone blocks, the decision releases it
     expect(out(cli(root, ['submit!', TASK, 'grill']))).toContain('submitted grill');
@@ -98,11 +99,11 @@ describe('e2e — the CLI binary', () => {
     expect(out(cli(root, ['gate!', TASK, 'grill', 'accept', 'looks right']))).toContain('gate grill: accept');
     expect(out(cli(root, ['status', TASK]))).not.toContain('blocked');
 
-    // the deliverable: draft on disk, then lock! (the one-current-per-name write)
+    // the deliverable: draft on disk, then lock! the producer's own file (thin record)
     writeDraft(root, TASK, 'thing', 'the actual deliverable\n');
-    expect(out(cli(root, ['lock!', TASK, 'thing', 'spec']))).toContain('locked thing @');
-    const symlink = join(root, '.ann', 'docs', 'specs', 'thing-v1.md');
-    expect(lstatSync(symlink).isSymbolicLink()).toBe(true);
+    expect(out(cli(root, ['lock!', TASK, 'thing', '.ann/journey/legs/01-leg/01-a/artifacts/thing.md', 'spec']))).toContain('locked thing @');
+    // the thin model records the producer's own file — NO docs/<name>-v<N>.md symlink appears
+    expect(existsSync(join(root, '.ann', 'docs', 'specs', 'thing-v1.md'))).toBe(false);
     expect(out(cli(root, ['read', 'thing']))).toContain('the actual deliverable');
 
     // gate ②: confirm is not 'done' on its own — completed event closes it
@@ -135,12 +136,13 @@ describe('e2e — the CLI binary', () => {
     // a composite-owned event kind cannot be appended around the mutator
     expect(out(cli(root, ['append!', TASK, EVENT('confirmed', { gate: 'grill' })]))).toContain('composite-owned');
 
-    // lock! requires a decided grill gate and a draft on disk. With a draft present the gate
-    // gap surfaces first; with no draft at all the missing working file fires instead.
+    // lock! requires a decided grill gate (the store's gateProblems refuse the write). With
+    // the grill confirmed the gate gap surfaces first; a lock path that does not exist is
+    // refused outright — the thin model has no working-file auto-resolution.
     writeDraft(root, TASK, 'thing', 'x\n');
-    expect(out(cli(root, ['lock!', TASK, 'thing', 'spec']))).toContain('GATE-1 GAP');
+    expect(out(cli(root, ['lock!', TASK, 'thing', '.ann/journey/legs/01-leg/01-a/artifacts/thing.md', 'spec']))).toContain('GATE-1 GAP');
     cli(root, ['spawn!', '01-leg/02-a', CONTRACT('x')]);
-    expect(out(cli(root, ['lock!', '01-leg/02-a', 'thing', 'spec']))).toContain('no-working-file');
+    expect(out(cli(root, ['lock!', '01-leg/02-a', 'thing', 'nowhere/thing.md']))).toContain('no-file');
 
     // gate! validates its decision vocabulary
     expect(cli(root, ['gate!', TASK, 'grill', 'maybe']).code).toBe(2);

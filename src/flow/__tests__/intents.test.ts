@@ -202,10 +202,11 @@ describe('evidence + close + supersede — immediate, idempotent on replay', () 
     node('01-leg/02-b', CONTRACT, [ev('created')]);
     const c2 = new Commands(new Store(root), 'test');
     const t2 = new IntentTranslator(c2, '01-leg/02-b');
-    // the locker (01-leg/01-a) is not done — refused
-    const e = errorOf(t2.translate(step(['supersede']), [{ kind: 'supersede', name: 'my-spec', path: '.ann/docs/specs/my-spec-v1.md' }]));
+    // the locker (01-leg/01-a) is not done — refused (successor = the producer's own file, thin model)
+    const e = errorOf(t2.translate(step(['supersede']), [{ kind: 'supersede', name: 'my-spec', path: '.ann/journey/legs/01-leg/01-a/artifacts/my-spec.md' }]));
     expect(e.code).toBe('live-locker');
-    expect(existsSync(join(root, '.ann', 'docs', 'specs', 'my-spec-v1.md'))).toBe(true);
+    // the thin model writes no docs/ layer
+    expect(existsSync(join(root, '.ann', 'docs'))).toBe(false);
   });
 });
 

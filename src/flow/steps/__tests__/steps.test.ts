@@ -120,9 +120,10 @@ describe('the real chain: idea-validate@grill → envision → spec', () => {
 
     expect(r.committed?.locked.map((l) => l.name).sort()).toEqual(['idea-validation', 'spec', 'vision']);
     expect(artifact('vision')).toContain('# Product Vision');
-    // lock! stamps the provenance marker at commit; the body is the step's own bytes
+    // the thin model (leg 07): the working file stays the step's own bytes — lock!
+    // records the log event and never stamps or rewrites the file
     expect(artifact('spec')).toContain(SPEC);
-    expect(artifact('spec')).toMatch(/^<!-- specs:locked:[0-9a-f]{7} /);
+    expect(artifact('spec')).not.toMatch(/^<!-- specs:locked:/);
     expect(artifact('idea-validation')).toContain('# Idea Validation Doc');
   });
 
