@@ -1,8 +1,8 @@
-import { existsSync, readdirSync, readFileSync, writeFileSync, mkdirSync, symlinkSync, realpathSync, lstatSync } from 'node:fs';
-import { join, basename, relative } from 'node:path';
-import { Store, JourneyEvent, legacyPath, ResultItem, TaskDetail } from '../store/store.js';
+import { existsSync, readFileSync } from 'node:fs';
+import { join, basename } from 'node:path';
+import { Store, JourneyEvent, ResultItem, TaskDetail } from '../store/store.js';
 import { blobSha, stripMarkers } from '../store/sha.js';
-import { getVOCAB, ArtifactTypeEntry } from '../store/vocab.js';
+import { getVOCAB } from '../store/vocab.js';
 
 /**
  * L1 — THE COMMAND SURFACE (core-design §1): the store's interface, and the ONLY
@@ -64,9 +64,9 @@ export interface SpawnedNode {
 
 export interface LockedArtifact {
   name: string;
-  /** The RECORDED path — the task-local ref (`journey/legs/<id>/artifacts/<name>.md`). */
+  /** The RECORDED path — the producer's own file, project-relative (thin model, leg 07). */
   path: string;
-  /** The content file the ref resolves to (the shared `docs/` file, or the ref itself). */
+  /** The content file the ref resolves to — the recorded path itself (ann never copies). */
   contentPath: string;
   sha: string;
 }
@@ -271,7 +271,7 @@ export class Commands {
       this.store.appendEvent(
         id,
         decision === 'accept'
-          ? { at: this.today, type: 'confirmed', gate, note: `accepted (${this.who})` }
+          ? { at: this.today, type: 'confirmed', gate, ...(feedback ? { feedback } : {}), note: `accepted (${this.who})` }
           : { at: this.today, type: 'rejected', gate, feedback, note: `rejected (${this.who})` },
       );
     } catch (e) {
@@ -301,113 +301,47 @@ export class Commands {
   }
 
   /**
-   * `lock!` — record an artifact. Owner of ONE-CURRENT-PER-NAME and of TYPE-DRIVEN
-   * PLACEMENT (core-design §3 rule 7; the placement FLIP — task 26): the artifact TYPE
-   * names the `docs/` category and whether the file is versioned, via the vocab registry.
-   *
-   * THE FLIP: the PRODUCING TASK owns the content as a REAL file at its own
-   * `journey/legs/<id>/artifacts/<name>.md` (marker-stamped), and the shared placement
-   * `docs/<category>/<name>-v<N>.md` becomes a SYMLINK to that real file — exactly one
-   * physical copy of current content. `N` is derived from the LOG (the artifact-locked
-   * history of the logical name, recorded as `artifact.version`) and stamped onto the
-   * event, so the version is deterministic without resolving through the mirror.
-   * Task-local types stay real files where they are (no docs view).
+   * `lock!` — record an artifact (the COLLAPSED model, leg 07): a THIN named-artifact
+   * RECORD `{name, path, lockSha, type?, version?}` over the producer's OWN file.
+   * `path` is project-relative (like `supersede!`); ann VERIFIES it exists, hashes the
+   * raw bytes (marker-tolerant — a no-op on unstamped files), derives the version from
+   * THE LOG, and records the event. It NEVER writes, copies, stamps, or symlinks the
+   * file — the bytes on disk are untouched (AC1). `type` is an optional free-form tag
+   * with zero placement semantics (F2/F3 gone): any file type locks.
    */
-  lock(id: string, name: string, opts: { type: string; note?: string } = { type: 'spec' }): CommandResult<LockedArtifact> {
-    const entry = getVOCAB().artifactTypes[opts.type] as ArtifactTypeEntry | undefined;
-    if (!entry) {
-      return fail('unknown-type', `type '${opts.type}' is not in the vocab registry (${Object.keys(getVOCAB().artifactTypes).join(' | ')})`);
-    }
+  lock(id: string, name: string, opts: { path: string; type?: string; note?: string }): CommandResult<LockedArtifact> {
     const current = this.store.current(name);
     if (current) return fail('already-current', `'${name}' is already current (${current.path}) — supersede it first (one current per name)`);
 
-    const workingFile = this.workingFile(id, name);
-    if (!workingFile.ok) return workingFile;
-    const file = workingFile.value;
-    const content = stripMarkers(readFileSync(file, 'utf8'));
-    const sha = blobSha(content).slice(0, 7);
-    const stamped = `<!-- specs:locked:${sha} ${this.today} type=${opts.type} -->\n` + content;
-
-    const n = entry.versioned ? this.nextVersion(name) : undefined;
-    let contentPath = file;
-    if (entry.category) {
-      const placed = this.place(name, entry, stamped, file, n);
-      if (!placed.ok) return placed;
-      contentPath = placed.value;
-    } else {
-      writeFileSync(file, stamped);
-    }
-    const recorded = 'journey/legs/' + id + '/artifacts/' + basename(file);
+    const full = join(this.store.root, opts.path);
+    if (!existsSync(full)) return fail('no-file', `no file at ${opts.path} — lock! records a path that exists (project-relative, like supersede!)`);
+    const sha = blobSha(stripMarkers(readFileSync(full, 'utf8'))).slice(0, 7);
+    const n = this.nextVersion(name);
     try {
       this.store.appendEvent(id, {
         at: this.today,
         type: 'artifact-locked',
-        artifact: { name, path: recorded, lockSha: sha, ...(n !== undefined ? { version: n } : {}) },
-        note: opts.note ?? `${basename(file)} locked @ ${sha} (${this.who})`,
+        artifact: { name, path: opts.path, lockSha: sha, ...(opts.type ? { type: opts.type } : {}), version: n },
+        note: opts.note ?? `${basename(opts.path)} locked @ ${sha} (${this.who})`,
       });
     } catch (e) {
       return fail('store-refused', (e as Error).message);
     }
-    return ok({ name, path: recorded, contentPath: relative(this.store.root, contentPath), sha });
-  }
-
-  /** The WORKING FILE for a lock: `artifacts/<name>.md`, or the single .md candidate. */
-  private workingFile(id: string, name: string): CommandResult<string> {
-    const dir = join(this.store.legs, id, 'artifacts');
-    const exact = join(dir, name + '.md');
-    if (existsSync(exact)) return ok(exact);
-    const candidates = existsSync(dir) ? readdirSync(dir).filter((f) => f.endsWith('.md')) : [];
-    if (candidates.length === 1) return ok(join(dir, candidates[0]));
-    return fail('no-working-file', `no artifacts/${name}.md under ${id}; candidates: ${candidates.join(', ') || '(none)'}`);
-  }
-
-  /**
-   * SHARED PLACEMENT (the placement FLIP — task 26): the PRODUCING TASK owns the
-   * content. `N` is derived from THE LOG (passed in — `nextVersion`), never from a
-   * counter, never from a filesystem scan. Write the marker-stamped content to the
-   * task's OWN `artifacts/<name>.md` (a REAL file — the one physical copy), then make
-   * `docs/<category>/<name>-v<N>.md` a SYMLINK to it: docs/ is the current-only pointer
-   * view, deletable without breaking the store.
-   */
-  private place(name: string, entry: ArtifactTypeEntry, stamped: string, workingFile: string, n?: number): CommandResult<string> {
-    const dir = join(this.store.root, '.ann', 'docs', entry.category!);
-    const target = join(dir, `${name}${n === undefined ? '' : `-v${n}`}.md`);
-    if (lstatSync(target, { throwIfNoEntry: false })) {
-      return fail('placement-collision', `${relative(this.store.root, target)} already exists — the version derivation would overwrite a locked file`);
-    }
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(workingFile, stamped); // producer owns the content — a REAL file
-    symlinkSync(relative(dir, workingFile), target); // docs/<name>-v<N>.md → producer's artifact
-    return ok(workingFile);
+    return ok({ name, path: opts.path, contentPath: opts.path, sha });
   }
 
   /**
    * Highest version among THIS name's recorded locks, + 1 — derived from THE LOG, never
-   * from filename resolution through the mirror. The version is recorded on the lock as
-   * `artifact.version`; LEGACY locks (pre-flip, no version field) fall back to the docs
-   * FILENAME their recorded ref resolves to — still valid until the migration back-fills
-   * versions into the log. A recorded path that resolves to a real producer file with no
-   * `-vN` (the flipped layout) contributes nothing by name, only by its recorded version.
+   * from filename resolution (the thin model has no docs/ filename to resolve: the log
+   * is the only source). Recorded on each lock as `artifact.version`.
    */
   private nextVersion(name: string): number {
     let max = 0;
     for (const id of this.store.ids()) {
       for (const e of this.store.events(id)) {
         if (e.type !== 'artifact-locked' || e.artifact?.name !== name) continue;
-        const a = e.artifact as { version?: unknown };
-        if (typeof a.version === 'number') {
-          max = Math.max(max, a.version);
-          continue;
-        }
-        const recorded = join(this.store.root, legacyPath(e.artifact.path));
-        let file = recorded;
-        try {
-          file = realpathSync(recorded);
-        } catch {
-          /* an unresolvable recorded path contributes nothing — the log still names it */
-        }
-        const m = basename(file).match(/-v(\d+)\.md$/);
-        if (m) max = Math.max(max, Number(m[1]));
+        const v = (e.artifact as { version?: unknown } | undefined)?.version;
+        if (typeof v === 'number' && v > max) max = v;
       }
     }
     return max + 1;
