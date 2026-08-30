@@ -156,8 +156,8 @@ const nameOf = (e: { artifact?: { name?: string }; note?: string; path?: string 
   const filename = e.path ?? String(e.note ?? '').match(/([\w.-]+\.md)/)?.[1] ?? '';
   return e.artifact?.name ?? String(e.note ?? '').match(/logical name:\s*([\w.-]+)/)?.[1] ?? logicalNameFromFile(filename);
 };
-const lockShaOf = (id: string): { name: string; path: string; sha: string }[] => {
-  const out: Array<{ name: string; path: string; sha: string }> = [];
+const lockShaOf = (id: string): { name: string; path: string; sha: string; type: string }[] => {
+  const out: Array<{ name: string; path: string; sha: string; type: string }> = [];
   for (const e of store.events(id)) {
     if (e.type !== 'artifact-locked') continue;
     const a = e.artifact;
@@ -167,6 +167,8 @@ const lockShaOf = (id: string): { name: string; path: string; sha: string }[] =>
       // normalize legacy recorded paths (tree/rounds → journey/legs, /00/ → flat)
       path: legacyPath(a?.path ?? `journey/legs/${id}/artifacts/${filename}`),
       sha: a?.lockSha ?? String(e.note ?? '').match(/@\s*([0-9a-f]{7,})/)?.[1] ?? '',
+      // type is an optional free-form tag on the log event (thin model, leg 07)
+      type: typeof a?.type === 'string' ? a.type : '',
     });
   }
   return out;
@@ -305,15 +307,15 @@ function cmdSpecs() {
   for (const id of store.ids().sort()) {
     for (const l of lockShaOf(id)) {
       if (store.current(l.name)?.producer !== id) continue;
-      let type = '',
+      // thin model (leg 07): type + sha come from the LOG EVENT; only the upstream/
+      // referrers prose is still read from the file head (it is content, not claim).
+      let type = l.type,
         sha = l.sha,
         upstream = '',
         referrers = '';
       try {
         const head = readFileSync(join(ROOT, l.path), 'utf8').split('\n').slice(0, 10);
         for (const line of head) {
-          const m = line.match(/specs:locked:([0-9a-f]+) [0-9-]+ type=(\S+)/);
-          if (m) { sha = m[1]; type = m[2]; }
           const u = line.match(/\*\*upstream\*\* \(this doc relies on\): (.*)/);
           if (u) upstream = u[1];
           const r = line.match(/\*\*referrers\*\* \(must cite this when they change\): (.*)/);
@@ -802,8 +804,8 @@ function cmdSubmit(id: string, gate: string, sha: string | undefined) {
   );
 }
 
-function cmdLock(id: string, name: string, type: string) {
-  emit(commands.lock(id, name, { type }), (v) => {
+function cmdLock(id: string, name: string, path: string, type: string) {
+  emit(commands.lock(id, name, { path, ...(type ? { type } : {}) }), (v) => {
     console.log(`locked ${v.name} @ ${v.sha} → ${id}`);
     console.log(`  content: ${v.contentPath}`);
     console.log(`  ref:     ${v.path}`);
@@ -817,7 +819,7 @@ function cmdSupersede(id: string, name: string, path: string, note: string) {
 function cmdRead(name: string) {
   emit(commands.read(name), (v) => {
     if (JSON_OUT) return console.log(JSON.stringify(v, null, 2));
-    console.error(`  (${v.path} @ ${v.sha} — marker-stripped, provenance ${v.provenance})`);
+    console.error(`  (${v.path} @ ${v.sha} — provenance ${v.provenance})`);
     console.log(v.content);
   });
 }
@@ -858,7 +860,7 @@ const COMMANDS: Array<{ name: string; args: string; desc: string }> = [
   { name: 'spawn!', args: '<id> \'<contract-json>\'', desc: 'WRITE — create a node; enforces the v14 contract schema + F-AC19 + id naming + the artifact/leg gates' },
   { name: 'submit!', args: '<id> grill|confirm [confirmedSha]', desc: 'WRITE — the resumable gate write: `submitted` alone, so an interrupted gate stays blocked (confirm records the gate② content binding)' },
   { name: 'gate!', args: '<id> grill|confirm accept|reject [feedback]', desc: 'WRITE — human gate decision (submit + decide; the 3-reject bound is a CONSTANT owned here)' },
-  { name: 'lock!', args: '<id> <name> [type]', desc: 'WRITE — record an artifact: type-driven docs/ placement + -v<N> filename + symlink + artifact-locked (hash-verifying sha)' },
+  { name: 'lock!', args: '<id> <name> <path> [type]', desc: 'WRITE — thin artifact record over the producer\'s own file: verifies path, hashes it, records artifact-locked {name, path, lockSha, type?, version?}; never writes/stamps/symlinks the file' },
   { name: 'supersede!', args: '<id> <name> <path> [note]', desc: 'WRITE — superseded event with a forward pointer (the one cross-task write; refuses a live locker)' },
 ];
 
@@ -958,7 +960,7 @@ try {
     if (!args[1] || !raw) { console.error('usage: ann spawn! <id> \'<contract-json>\''); process.exit(2); }
     cmdSpawn(args[1], raw);
   } else if (command === 'gate!') cmdGate(args[1], args[2], args[3], args.slice(4).join(' '));
-  else if (command === 'lock!') cmdLock(args[1], args[2], args[3] || 'spec');
+  else if (command === 'lock!') cmdLock(args[1], args[2], args[3] || '', args[4] || '');
   else if (command === 'supersede!') cmdSupersede(args[1], args[2], args[3], args.slice(4).join(' '));
   else {
     const cur = store.current(command);

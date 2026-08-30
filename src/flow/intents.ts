@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { Commands, CommandError, CommandResult, LockedArtifact } from '../commands/index.js';
 import { blobSha, stripMarkers } from '../store/sha.js';
 import { JourneyEvent } from '../store/store.js';
@@ -195,7 +195,7 @@ export class IntentTranslator {
     for (const l of this.deferred.locks) {
       const already = this.commands.store.current(l.name);
       if (already?.producer === this.taskId) continue; // idempotent on replay — already recorded
-      const r = this.commands.lock(this.taskId, l.name, { type: l.type });
+      const r = this.commands.lock(this.taskId, l.name, { path: relative(this.commands.store.root, l.workingPath), type: l.type });
       if (!r.ok) return r;
       locked.push(r.value);
     }

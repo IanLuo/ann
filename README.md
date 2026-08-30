@@ -71,7 +71,7 @@ on recorded events (default: `agent`).
 | `spawn!` | `<id> '<contract-json>'` | WRITE — create a node; enforces the v14 contract schema + F-AC19 + id naming + the artifact/leg gates |
 | `submit!` | `<id> grill\|confirm [confirmedSha]` | WRITE — the resumable gate write: `submitted` alone, so an interrupted gate stays blocked (confirm records the gate② content binding) |
 | `gate!` | `<id> grill\|confirm accept\|reject [feedback]` | WRITE — human gate decision (submit + decide; the 3-reject bound is a CONSTANT owned here) |
-| `lock!` | `<id> <name> [type]` | WRITE — record an artifact: type-driven docs/ placement + -v<N> filename + symlink + artifact-locked (hash-verifying sha) |
+| `lock!` | `<id> <name> <path> [type]` | WRITE — thin artifact record over the producer's own file: verifies path, hashes it, records artifact-locked {name, path, lockSha, type?, version?}; never writes/stamps/symlinks the file |
 | `supersede!` | `<id> <name> <path> [note]` | WRITE — superseded event with a forward pointer (the one cross-task write; refuses a live locker) |
 
 ### When to use each
@@ -107,18 +107,20 @@ will execute) · `chain` (the flow config as data) · `steps` (the step registry
    present.
 2. Do the work, then record evidence: `append! <id> '{"at":"<date>","type":"evidence","refs":[...]}'`.
 3. Open the task: `submit! <id> grill` then `gate! <id> grill accept|reject [feedback]`.
-4. Record the deliverable: `lock! <id> <name> [type]` — stamps the marker, writes the
-   producer-owned REAL artifact under `journey/legs/<id>/artifacts/`, and symlinks it
-   from `docs/<category>/<name>-v<N>.md`. `lock!` reads the draft from the task's
-   `artifacts/` dir, so write the file there first.
+4. Record the deliverable: `lock! <id> <name> <path> [type]` — a THIN named-artifact
+   record over the producer's own file (the collapse, leg 07). `path` is project-
+   relative; ann verifies it exists, hashes the raw bytes, and records `artifact-locked
+   {name, path, lockSha, type?, version?}`. It NEVER writes, copies, stamps, or symlinks
+   the file — the bytes on disk are untouched, and any file type locks. `type` is an
+   optional free-form tag with no placement meaning.
 5. Close: `submit! <id> confirm` then `gate! <id> confirm accept`, then
    `append! <id> '{"at":"<date>","type":"completed",...}'`. A task is `done` only after
    a `completed` event — the confirm gate alone does not record it.
 6. Advance a version: the NEW producer writes its draft and closes, then
-   `supersede! <old-id> <name> .ann/journey/legs/<new-producer>/artifacts/<name>.md`
-   (the successor path is **project-relative, including `.ann/`, and the file must
-   already exist**; `supersede!` refuses a producer that isn't done). Then
-   `lock! <new-id> <name>` — `current(<name>)` flips to the new producer.
+   `supersede! <old-id> <name> <path-to-successor>` (the successor path is
+   **project-relative and the file must already exist**; `supersede!` refuses a producer
+   that isn't done). Then `lock! <new-id> <name> <path> [type]` —
+   `current(<name>)` flips to the new producer.
 
 **Automate.** `run! <id>` drives a task through the frame and stops at the first block
 (fail-closed when no provider is configured). It is resumable, but re-enters the frame
