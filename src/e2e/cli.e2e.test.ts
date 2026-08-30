@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, mkdirSync, cpSync, rmSync, writeFileSync, symlinkSync, lstatSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, cpSync, rmSync, writeFileSync, symlinkSync, lstatSync, appendFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync, execFileSync } from 'node:child_process';
@@ -156,5 +156,33 @@ describe('e2e — the CLI binary', () => {
     expect(out(run)).toContain('FAILED');
     expect(out(run)).toContain('provider-unavailable');
     expect(out(cli(root, ['status', '01-leg/02-a']))).toContain('failed');
+  });
+
+  it('detects a store change made outside the CLI, refuses to write over it, and reasons about it', () => {
+    expect(out(cli(root, ['spawn!', LEG, CONTRACT('l')]))).toContain('spawned');
+    expect(out(cli(root, ['spawn!', TASK, CONTRACT('do the thing')]))).toContain('spawned');
+
+    // the write-rev ledger read
+    expect(out(cli(root, ['ledger']))).toContain('LEDGER rev');
+    expect(out(cli(root, ['ledger', '--json']))).toContain('"rev"');
+    const before = JSON.parse(cli(root, ['ledger', '--json']).stdout);
+    expect(before.rev).toBeGreaterThanOrEqual(2); // leg + task spawns
+    expect(before.nodes[TASK]).toBeDefined();
+
+    // a hand edit (another process / a human editor) appends a line to the task's log
+    appendFileSync(join(root, '.ann', 'journey', 'legs', TASK, 'events.jsonl'), JSON.stringify({ at: '2026-08-29', type: 'extended', note: 'hand-forged' }) + '\n');
+
+    // write discipline: the CLI REFUSES to build on the unrecognized state
+    const append = cli(root, ['append!', TASK, EVENT('extended', { note: 'after' })]);
+    expect(append.code).toBe(1);
+    expect(out(append)).toContain('store-external edit');
+    expect(out(append)).toContain('ann verify');
+
+    // verify: the drift is detected, classified, and localized to the rev ann last wrote
+    const v = cli(root, ['verify']);
+    expect(v.code).toBe(1);
+    expect(out(v)).toContain('store-external:');
+    expect(out(v)).toContain('class=append');
+    expect(out(v)).toContain('ann wrote rev');
   });
 });

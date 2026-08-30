@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, symlinkSync, appendFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store, JourneyEvent } from '../store.js';
@@ -819,5 +819,122 @@ describe('Store — results() (type-aware result gathering, format v10)', () => 
   it('returns an empty list for a node with no results', () => {
     writeNode('06-engine-build/05-empty', {}, [ev('created')]);
     expect(new Store(root).results('06-engine-build/05-empty')).toEqual([]);
+  });
+});
+
+describe('Store — the write-rev ledger (store-external integrity)', () => {
+  beforeEach(() => { makeStore(); });
+  afterEach(() => { rmSync(root, { recursive: true, force: true }); });
+
+  const CONTRACT = { intent: 'build the ledger', acceptanceCriteria: ['detection works'] };
+  const LEDGER = () => join(root, '.ann', 'journey', '.ledger.json');
+  const readLedger = () =>
+    JSON.parse(readFileSync(LEDGER(), 'utf8')) as { rev: number; nodes: Record<string, { eventsContent: string; nodeContent: string; lastRev: number }> };
+  const evPath = (id: string) => join(nodeDir(id), 'events.jsonl');
+  const drift = (id: string) => new Store(root).verify().find((d) => d.startsWith(`store-external: ${id}`));
+  const extended = () => ev('extended', { note: 'more work' });
+
+  it('reads never create the ledger; the first write bootstraps it with exact bytes', () => {
+    writeNode('01-leg/01-a', {}, [ev('created')]);
+    new Store(root).verify();
+    expect(existsSync(LEDGER())).toBe(false);
+    new Store(root).spawn('01-leg/02-b', CONTRACT);
+    expect(existsSync(LEDGER())).toBe(true);
+    const node = readLedger().nodes['01-leg/02-b'];
+    expect(readLedger().rev).toBeGreaterThanOrEqual(1);
+    expect(node.eventsContent).toBe(readFileSync(evPath('01-leg/02-b'), 'utf8')); // byte-for-byte
+    expect(node.nodeContent).toBe(readFileSync(join(nodeDir('01-leg/02-b'), 'node.json'), 'utf8'));
+  });
+
+  it('a leg spawn records nodeContent only (leg roots carry no events)', () => {
+    new Store(root).spawn('01-leg', CONTRACT);
+    const node = readLedger().nodes['01-leg'];
+    expect(node.eventsContent).toBe('');
+    expect(node.nodeContent.length).toBeGreaterThan(0);
+  });
+
+  it('refuses a write when events.jsonl was changed outside the CLI (no masking)', () => {
+    const s = new Store(root);
+    s.spawn('01-leg/01-a', CONTRACT);
+    appendFileSync(evPath('01-leg/01-a'), JSON.stringify(ev('extended', { note: 'hand-written' })) + '\n');
+    expect(() => s.appendEvent('01-leg/01-a', extended())).toThrow(/store-external edit on 01-leg\/01-a/);
+  });
+
+  it('refuses a write when node.json was changed outside the CLI', () => {
+    const s = new Store(root);
+    s.spawn('01-leg/01-a', CONTRACT);
+    writeFileSync(join(nodeDir('01-leg/01-a'), 'node.json'), JSON.stringify({ id: '01-leg/01-a', contract: { intent: 'tampered' }, createdAt: '2026-08-20' }));
+    expect(() => s.appendEvent('01-leg/01-a', extended())).toThrow(/store-external edit on 01-leg\/01-a/);
+  });
+
+  it('a fixture node with no ledger entry writes cleanly and gains an entry', () => {
+    writeNode('01-leg/01-a', {}, [ev('created')]);
+    const s = new Store(root);
+    s.appendEvent('01-leg/01-a', extended());
+    expect(readLedger().nodes['01-leg/01-a'].lastRev).toBeGreaterThan(0);
+    expect(() => s.appendEvent('01-leg/01-a', extended())).not.toThrow(); // disk now matches the ledger
+  });
+
+  it('verify classifies an external append with its onset bound and the differing line', () => {
+    const s = new Store(root);
+    s.spawn('01-leg/01-a', CONTRACT);
+    s.appendEvent('01-leg/01-a', extended());
+    appendFileSync(evPath('01-leg/01-a'), JSON.stringify(ev('extended', { note: 'forged' })) + '\n');
+    const d = drift('01-leg/01-a');
+    expect(d).toContain('class=append');
+    expect(d).toContain('rev ');
+    expect(d).toContain('+1 line(s)');
+    expect(d).toContain('forged');
+  });
+
+  it('verify classifies truncate, reorder and rewrite', () => {
+    const s = new Store(root);
+    s.spawn('01-leg/01-a', CONTRACT);
+    s.appendEvent('01-leg/01-a', extended());
+    const twoLines = readFileSync(evPath('01-leg/01-a'), 'utf8');
+    // truncate — one ann line gone
+    writeFileSync(evPath('01-leg/01-a'), twoLines.split('\n')[0] + '\n');
+    expect(drift('01-leg/01-a')).toContain('class=truncate');
+    // reorder — same events, different order
+    writeFileSync(evPath('01-leg/01-a'), twoLines);
+    const lines = twoLines.trim().split('\n');
+    writeFileSync(evPath('01-leg/01-a'), lines[1] + '\n' + lines[0] + '\n');
+    expect(drift('01-leg/01-a')).toContain('class=reorder');
+    // rewrite — a line changed in place
+    writeFileSync(evPath('01-leg/01-a'), twoLines);
+    writeFileSync(evPath('01-leg/01-a'), twoLines.replace('more work', 'changed!'));
+    const d = drift('01-leg/01-a');
+    expect(d).toContain('class=rewrite');
+    expect(d).toMatch(/L\d+/); // names the differing line number
+    expect(d).toContain('changed!');
+  });
+
+  it('verify classifies a node.json edit', () => {
+    const s = new Store(root);
+    s.spawn('01-leg/01-a', CONTRACT);
+    const nd = join(nodeDir('01-leg/01-a'), 'node.json');
+    writeFileSync(nd, readFileSync(nd, 'utf8').replace('build the ledger', 'tampered'));
+    expect(drift('01-leg/01-a')).toContain('class=node-edit');
+  });
+
+  it('verify reports an unparseable events.jsonl without crashing (load hardening)', () => {
+    new Store(root).spawn('01-leg/01-a', CONTRACT);
+    writeFileSync(evPath('01-leg/01-a'), 'not-json\n');
+    const problems = new Store(root).verify();
+    expect(problems.some((d) => d.startsWith('unparseable-events: 01-leg/01-a'))).toBe(true);
+  });
+
+  it('a corrupt ledger refuses writes (before touching the log) and is reported by verify', () => {
+    new Store(root).spawn('01-leg/01-a', CONTRACT); // bootstrap a real ledger
+    writeFileSync(LEDGER(), '{{{ not json');
+    const s2 = new Store(root);
+    expect(() => s2.appendEvent('01-leg/01-a', extended())).toThrow(/ledger-corrupt/);
+    expect(readFileSync(evPath('01-leg/01-a'), 'utf8')).not.toContain('more work'); // log untouched
+    expect(new Store(root).verify().some((d) => d.includes('ledger-corrupt'))).toBe(true);
+  });
+
+  it('verify has no store-external lines on a legacy store with no ledger', () => {
+    writeNode('01-leg/01-a', {}, [ev('created'), ev('completed')]);
+    expect(new Store(root).verify().filter((d) => d.startsWith('store-external:'))).toEqual([]);
   });
 });

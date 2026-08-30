@@ -1,3 +1,8 @@
 node_modules/
 dist/
 coverage/
+# The store write-rev ledger (store-external integrity guard) — a DERIVED local
+# integrity view, not source data: gitignored so a checkout re-bootstraps from the
+# store's current state (which IS the baseline) instead of churning on every append.
+.ann/journey/.ledger.json
+.ann/journey/.ledger.json.tmp

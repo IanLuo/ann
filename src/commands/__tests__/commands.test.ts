@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, lstatSync, realpathSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, lstatSync, realpathSync, symlinkSync, appendFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { Store, JourneyEvent } from '../../store/store.js';
@@ -348,5 +348,33 @@ describe('read — the L1 content view (core-design §5)', () => {
 
   it('fails closed on an unresolvable name', () => {
     expect(errorOf(cmds().read('nope')).code).toBe('unresolved');
+  });
+});
+
+describe('ledger — the write-rev ledger read + the store-external guard', () => {
+  beforeEach(() => { makeStore(); writeNode('01-leg', {}); });
+  afterEach(() => { rmSync(root, { recursive: true, force: true }); });
+
+  it('exposes the rev + per-node last-write after a CLI write', () => {
+    const c = cmds();
+    expect(valueOf(c.spawn('01-leg/01-a', CONTRACT)).kind).toBe('task');
+    const view = c.ledger();
+    expect(view.rev).toBeGreaterThanOrEqual(1);
+    expect(view.nodes['01-leg/01-a'].lastRev).toBeGreaterThan(0);
+    expect(view.nodes['01-leg/01-a'].eventsSha).toMatch(/^[0-9a-f]{40}$/);
+    expect(view.nodes['01-leg/01-a'].lastEventAt.length).toBeGreaterThan(0);
+  });
+
+  it('verify surfaces an external edit and append! fails store-refused with the verify hint', () => {
+    const c = cmds();
+    c.spawn('01-leg/01-a', CONTRACT);
+    appendFileSync(join(nodeDir('01-leg/01-a'), 'events.jsonl'), JSON.stringify({ at: '2026-08-27', type: 'extended', note: 'forged' }) + '\n');
+    expect(c.verify().some((d) => d.startsWith('store-external:'))).toBe(true);
+    const r = c.append('01-leg/01-a', { at: '2026-08-27', type: 'extended', note: 'after' });
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.error.code).toBe('store-refused');
+      expect(r.error.blocker).toContain('ann verify');
+    }
   });
 });

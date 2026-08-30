@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, appendFileSync, existsSync, statSync, lstatSync, mkdirSync, writeFileSync, realpathSync } from 'node:fs';
+import { readdirSync, readFileSync, appendFileSync, existsSync, statSync, lstatSync, mkdirSync, writeFileSync, realpathSync, renameSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join, basename } from 'node:path';
 import { getVOCAB } from './vocab.js';
@@ -19,6 +19,46 @@ export interface JourneyEvent {
 interface NodeEntry {
   id: string;
   events: JourneyEvent[];
+}
+
+/** The store write-rev ledger (`.ann/journey/.ledger.json`) — ann's last-known state
+ *  per node, recorded after every CLI write. `verify` diffs the current store against
+ *  it to detect changes made OUTSIDE the CLI (a human editor, another process), and
+ *  to reason about them (class + the rev/time ann last wrote). Purely additive: this
+ *  is the ONLY writer of the ledger — events.jsonl/node.json are never modified. */
+export interface LedgerNodeEntry {
+  eventsContent: string; // exact bytes ann last wrote to events.jsonl
+  nodeContent: string;   // exact bytes ann last wrote to node.json
+  eventsSha: string;     // blobSha(eventsContent)
+  nodeSha: string;       // blobSha(nodeContent)
+  lastEventAt: string;   // tail event .at at the last ann write ('' for a leg)
+  lastRev: number;       // global ledger rev at this node's last ann write
+}
+
+export interface Ledger {
+  rev: number;           // global write counter (monotonic across all nodes)
+  bootstrappedAt: string;
+  nodes: Record<string, LedgerNodeEntry>;
+}
+
+/** Named error for the fail-closed write guard: a store write was rejected because
+ *  the on-disk node diverged from the ledger — i.e. the store was changed outside the
+ *  CLI. The message carries the `ann verify` hint (ann never builds on a state it
+ *  does not recognize, and never advances the ledger past an external edit). */
+export class StoreExternalEditError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'StoreExternalEditError';
+  }
+}
+
+/** Ledger-write refusal: the integrity record is unreadable (or unwritable), so ann
+ *  refuses to write — writing without a readable ledger would reopen the masking hole. */
+export class LedgerError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'LedgerError';
+  }
 }
 
 /** Detail card types — `Store.detail()` derives; the CLI renders (ann detail <id>). */
@@ -90,6 +130,9 @@ export class Store {
   readonly root: string;
   readonly legs: string;
   private nodes = new Map<string, NodeEntry>();
+  private ledger?: Ledger;              // the write-rev ledger (absent = no baseline yet)
+  private ledgerCorrupt = false;        // ledger file exists but is unparseable → fail-closed
+  private unparseableNodes = new Set<string>(); // events.jsonl that failed load-parsing
 
   constructor(root: string) {
     this.root = root;
@@ -107,13 +150,35 @@ export class Store {
   }
 
   private load(): void {
+    this.loadLedger();
     // Node EXISTENCE comes from node.json (v8: leg roots have no events.jsonl);
     // events are optional (tasks have them, leg roots don't).
     for (const file of this.walk(this.legs, [], 'node.json')) {
       const id = file.replace(new RegExp('^' + this.legs + '/'), '').replace(/\/node\.json$/, '');
       const evFile = file.replace(/node\.json$/, 'events.jsonl');
-      const events = existsSync(evFile) ? this.parse(evFile) : [];
+      let events: JourneyEvent[] = [];
+      if (existsSync(evFile)) {
+        try {
+          events = this.parse(evFile);
+        } catch {
+          // unparseable events — never let a corrupt log kill every command; the node
+          // loads empty and `verify` reports it (unparseable-events / class=unparseable).
+          this.unparseableNodes.add(id);
+        }
+      }
       this.nodes.set(id, { id, events });
+    }
+  }
+
+  /** Read the write-rev ledger (if present). Corrupt → flagged: every write is refused
+   *  and verify reports it — ann never reasons about an unreadable integrity record. */
+  private loadLedger(): void {
+    const p = join(this.root, '.ann', 'journey', '.ledger.json');
+    if (!existsSync(p)) return;
+    try {
+      this.ledger = JSON.parse(readFileSync(p, 'utf8')) as Ledger;
+    } catch {
+      this.ledgerCorrupt = true;
     }
   }
 
@@ -146,6 +211,17 @@ export class Store {
 
   events(id: string): JourneyEvent[] {
     return this.nodes.get(id)?.events ?? [];
+  }
+
+  /** The read view for `ann ledger` — rev + per-node last-write rev/at + hashes.
+   *  Content snapshots stay private (the read surface needs no bytes). */
+  ledgerView(): { rev: number; bootstrappedAt: string; nodes: Record<string, { eventsSha: string; nodeSha: string; lastEventAt: string; lastRev: number }> } {
+    if (!this.ledger) return { rev: 0, bootstrappedAt: '', nodes: {} };
+    const nodes: Record<string, { eventsSha: string; nodeSha: string; lastEventAt: string; lastRev: number }> = {};
+    for (const [id, n] of Object.entries(this.ledger.nodes)) {
+      nodes[id] = { eventsSha: n.eventsSha, nodeSha: n.nodeSha, lastEventAt: n.lastEventAt, lastRev: n.lastRev };
+    }
+    return { rev: this.ledger.rev, bootstrappedAt: this.ledger.bootstrappedAt, nodes };
   }
 
   /** A node's immutable creation date (node.json §2) — '' when absent. The cutoff reads it. */
@@ -488,11 +564,89 @@ export class Store {
     this.validateEventShape(event); // strict schema (format v12 §3): unknown fields + shapes rejected
     const node = this.nodes.get(id);
     if (!node) throw new Error(`append rejected: no node ${id}`);
+    // The ledger guard — fail-closed, AFTER schema (a bad incoming event still gets its
+    // schema error) but BEFORE gate work (ann never computes gates over a store state it
+    // does not recognize). If the on-disk node diverged from what ann last wrote, the
+    // write is refused and the ledger never advances past the external edit (no masking).
+    const drift = this.ledgerDivergence(id);
+    this.assertLedgerReadable(); // before any data write — an unreadable ledger refuses everything
+    if (drift) {
+      throw new StoreExternalEditError(`append rejected: store-external edit on ${id} — ${drift}. Run 'ann verify' to diff; ann never writes on a state it does not recognize.`);
+    }
     const prospective = [...node.events, event];
     const gaps = this.gateProblems(id, prospective);
     if (gaps.length) throw new Error(gaps.join('\n'));
     appendFileSync(join(this.legs, id, 'events.jsonl'), JSON.stringify(event) + '\n');
     node.events = prospective;
+    this.recordWrite(id);
+  }
+
+  /* ══ THE STORE WRITE-REV LEDGER (.ann/journey/.ledger.json) — the store-external
+   *   integrity guard. ann records its own last-known state per node after every
+   *   write; verify() diffs the disk against it and the write guard refuses to build
+   *   on (or bless) an unrecognized state. Purely additive: only the ledger is
+   *   written here — events.jsonl/node.json are never modified. */
+
+  /** Fail-closed: ann never writes without a readable integrity record (an unreadable
+   *  ledger means ann cannot verify the state it is about to build on). */
+  private assertLedgerReadable(): void {
+    if (this.ledgerCorrupt) {
+      throw new LedgerError('ledger-corrupt: .ann/journey/.ledger.json is unparseable — run \'ann verify\' (ann refuses to write without a readable integrity record)');
+    }
+  }
+
+  /** undefined = clean (no baseline, or disk matches the ledger); a string = why the
+   *  node's on-disk state is unrecognized. Byte comparison against what ann last wrote. */
+  private ledgerDivergence(id: string): string | undefined {
+    const entry = this.ledger?.nodes?.[id];
+    if (!entry) return undefined; // no baseline — a first write (or fixture node) is clean
+    const ev = join(this.legs, id, 'events.jsonl');
+    const evDisk = existsSync(ev) ? readFileSync(ev, 'utf8') : null;
+    if (evDisk !== entry.eventsContent) {
+      return `events.jsonl differs from the ledger (ann wrote rev ${entry.lastRev} at ${entry.lastEventAt})`;
+    }
+    const nd = join(this.legs, id, 'node.json');
+    const ndDisk = existsSync(nd) ? readFileSync(nd, 'utf8') : null;
+    if (ndDisk !== entry.nodeContent) {
+      return `node.json differs from the ledger (ann wrote rev ${entry.lastRev} at ${entry.lastEventAt})`;
+    }
+    return undefined;
+  }
+
+  /** Record ann's last-known state for a node (post-write). Events come from the
+   *  in-memory log (canonical serialization is byte-identical to the file — V8 order is
+   *  insertion order); node.json content is passed by spawn (what ann wrote) or carried
+   *  from the prior entry, so the steady state never re-reads. */
+  private recordWrite(id: string, nodeContent?: string): void {
+    this.assertLedgerReadable();
+    if (!this.ledger) this.ledger = { rev: 0, bootstrappedAt: new Date().toISOString(), nodes: {} };
+    const node = this.nodes.get(id);
+    // Empty logs serialize to '' (a leg has no events.jsonl at all) — never '\n'.
+    const eventsContent = node && node.events.length ? node.events.map((e) => JSON.stringify(e)).join('\n') + '\n' : '';
+    const prev = this.ledger.nodes[id];
+    const nodeContentFinal =
+      nodeContent ??
+      prev?.nodeContent ??
+      (existsSync(join(this.legs, id, 'node.json')) ? readFileSync(join(this.legs, id, 'node.json'), 'utf8') : '');
+    this.ledger.rev += 1;
+    this.ledger.nodes[id] = {
+      eventsContent,
+      nodeContent: nodeContentFinal,
+      eventsSha: blobSha(eventsContent),
+      nodeSha: blobSha(nodeContentFinal),
+      lastEventAt: node && node.events.length ? (node.events[node.events.length - 1].at ?? '') : '',
+      lastRev: this.ledger.rev,
+    };
+    this.writeLedger();
+  }
+
+  /** Atomic ledger write (tmp + rename — a reader never sees a partial ledger). */
+  private writeLedger(): void {
+    const p = join(this.root, '.ann', 'journey', '.ledger.json');
+    mkdirSync(join(this.root, '.ann', 'journey'), { recursive: true });
+    const tmp = p + '.tmp';
+    writeFileSync(tmp, JSON.stringify(this.ledger, null, 2) + '\n');
+    renameSync(tmp, p);
   }
 
   /** STRICT SCHEMA (format v12 §3): the allowed top-level fields per event type and
@@ -625,6 +779,12 @@ export class Store {
    *  Leg roots get NO events at all (v8 §13) — only node.json + the card. */
   spawn(id: string, contract: unknown, who = 'agent'): void {
     if (this.nodes.has(id)) throw new Error(`spawn rejected: ${id} already exists (node.json immutable — no re-spawn)`);
+    this.assertLedgerReadable();
+    // Fail-closed: a ledger-tracked node that is no longer on disk is an external
+    // deletion — refuse to silently re-bless it (the store only changes through the CLI).
+    if (this.ledger?.nodes?.[id]) {
+      throw new StoreExternalEditError(`spawn rejected: ${id} is tracked in the ledger but no longer exists on disk (external deletion?). Run 'ann verify'.`);
+    }
     // normalize: accept the contract directly, or a wrapped {contract:{…}} (spawn-arg convenience)
     const raw = (contract ?? {}) as Record<string, unknown>;
     const c = ((raw.contract ?? raw) ?? {}) as Record<string, unknown>;
@@ -634,18 +794,19 @@ export class Store {
     const openQuestions = raw.openQuestions ?? nested;
     const dir = join(this.legs, id);
     mkdirSync(join(dir, 'artifacts'), { recursive: true });
-    writeFileSync(
-      join(this.legs, id, 'node.json'),
+    const nodeJson =
       JSON.stringify(
         { id, contract: contractFields, ...(openQuestions ? { openQuestions } : {}), createdAt: new Date().toISOString().slice(0, 10) },
         null,
         2,
-      ) + '\n',
-    );
+      ) + '\n';
+    writeFileSync(join(this.legs, id, 'node.json'), nodeJson);
     this.nodes.set(id, { id, events: [] });
     if (id.includes('/')) {
       this.appendEvent(id, { at: new Date().toISOString().slice(0, 10), type: 'created', note: `spawned by bookkeeper (${who})` });
     }
+    // record the exact bytes ann wrote — the ledger never re-reads node.json on spawn
+    this.recordWrite(id, nodeJson);
   }
 
   /** GATE-1/GATE-2 (F-AC15): tasks only — leg roots carry no events (v8).
@@ -985,7 +1146,11 @@ export class Store {
       let events = this.nodes.get(rel)?.events;
       if (!events) {
         const ef = join(d, 'events.jsonl');
-        events = existsSync(ef) ? this.parse(ef) : [];
+        try {
+          events = existsSync(ef) ? this.parse(ef) : [];
+        } catch {
+          events = []; // corrupt orphan log — the walk still reports the missing node.json
+        }
       }
       const claimed = new Set<string>();
       for (const e of events) {
@@ -998,7 +1163,107 @@ export class Store {
         if (!claimed.has(f)) problems.push(`artifact-orphan: ${rel}/artifacts/${f} vs no artifact-locked event of this node names it`);
       }
     }
+    /* ══ store-external — the write-rev ledger integrity: a node's on-disk
+     *   events.jsonl/node.json vs what ann last wrote. Runs only when the ledger
+     *   exists (lazy bootstrap — a legacy store has no baseline and skips entirely,
+     *   so verify is unchanged until the first CLI write creates one). */
+    if (this.ledgerCorrupt) {
+      problems.push('store-external: ledger-corrupt — .ann/journey/.ledger.json is not valid JSON; ann cannot verify store-external integrity');
+    } else if (this.ledger) {
+      for (const [id, entry] of Object.entries(this.ledger.nodes)) {
+        if (this.unparseableNodes.has(id)) continue; // reported below as unparseable-events (with its bound)
+        const ev = join(this.legs, id, 'events.jsonl');
+        const evDisk = existsSync(ev) ? readFileSync(ev, 'utf8') : null;
+        const nd = join(this.legs, id, 'node.json');
+        const ndDisk = existsSync(nd) ? readFileSync(nd, 'utf8') : null;
+        const bound = `ann wrote rev ${entry.lastRev} at ${entry.lastEventAt}`;
+        // node.json side
+        if (ndDisk === null && entry.nodeContent !== '') {
+          problems.push(`store-external: ${id} — node.json missing vs ${bound}; class=node-deleted`);
+        } else if (ndDisk !== null && ndDisk !== entry.nodeContent) {
+          problems.push(`store-external: ${id} — node.json differs vs ${bound}; class=node-edit`);
+        }
+        // events.jsonl side
+        if (evDisk === null) {
+          if (entry.eventsContent !== '') problems.push(`store-external: ${id} — events.jsonl missing vs ${bound}; class=deleted`);
+        } else if (evDisk === entry.eventsContent) {
+          // clean
+        } else if (evDisk.startsWith(entry.eventsContent) && evDisk.length > entry.eventsContent.length) {
+          const added = evDisk.slice(entry.eventsContent.length).split('\n').filter(Boolean);
+          problems.push(
+            added.every((l) => this.parseLine(l))
+              ? `store-external: ${id} — events.jsonl differs vs ${bound}; class=append; +${added.length} line(s) ${this.terse(added[0])}`
+              : `store-external: ${id} — events.jsonl differs vs ${bound}; class=unparseable (the appended tail is not valid JSON lines)`,
+          );
+        } else if (entry.eventsContent.startsWith(evDisk)) {
+          const gone = entry.eventsContent.split('\n').length - evDisk.split('\n').length;
+          problems.push(`store-external: ${id} — events.jsonl differs vs ${bound}; class=truncate (${gone} ann line(s) gone)`);
+        } else {
+          const cur = this.tryParseLines(evDisk);
+          const base = this.tryParseLines(entry.eventsContent);
+          if (cur === null) {
+            problems.push(`store-external: ${id} — events.jsonl differs vs ${bound}; class=unparseable (not valid JSON lines)`);
+          } else if (base !== null && this.sameMultiset(cur, base)) {
+            problems.push(`store-external: ${id} — events.jsonl differs vs ${bound}; class=reorder`);
+          } else {
+            problems.push(`store-external: ${id} — events.jsonl differs vs ${bound}; class=rewrite; ${this.diffLines(entry.eventsContent, evDisk)}`);
+          }
+        }
+      }
+    }
+    // unparseable-events — the always-on counterpart to the load() hardening: a corrupt
+    // log used to crash every command; now it loads empty and verify names it, with the
+    // ledger bound when ann had recorded one.
+    for (const id of this.unparseableNodes) {
+      const entry = this.ledger?.nodes?.[id];
+      problems.push(`unparseable-events: ${id} — events.jsonl is not valid JSON lines (load skipped it)${entry ? `; ledger bound: rev ${entry.lastRev} at ${entry.lastEventAt}` : ''}`);
+    }
     return problems;
+  }
+
+  /* ══ store-external classification helpers (the reasoning ann does over a detected
+   *   change: what KIND of change, and which lines differ). */
+
+  private parseLine(l: string): boolean {
+    try { JSON.parse(l); return true; } catch { return false; }
+  }
+
+  /** All-or-nothing parse: null when the content is not valid JSON lines. */
+  private tryParseLines(content: string): JourneyEvent[] | null {
+    const lines = content.split('\n').map((l) => l.trim()).filter(Boolean);
+    try { return lines.map((l) => JSON.parse(l) as JourneyEvent); } catch { return null; }
+  }
+
+  /** Same events, possibly a different order? (the `reorder` classification) */
+  private sameMultiset(a: JourneyEvent[], b: JourneyEvent[]): boolean {
+    if (a.length !== b.length) return false;
+    const counts = new Map<string, number>();
+    for (const e of a) counts.set(JSON.stringify(e), (counts.get(JSON.stringify(e)) ?? 0) + 1);
+    for (const e of b) {
+      const k = JSON.stringify(e);
+      const n = counts.get(k);
+      if (!n) return false;
+      if (n === 1) counts.delete(k);
+      else counts.set(k, n - 1);
+    }
+    return true;
+  }
+
+  /** Line-level summary of two differing serializations (≤3 differing line numbers). */
+  private diffLines(a: string, b: string): string {
+    const la = a.split('\n');
+    const lb = b.split('\n');
+    const diffs: string[] = [];
+    for (let i = 0; i < Math.max(la.length, lb.length) && diffs.length < 3; i++) {
+      if (la[i] !== lb[i]) diffs.push(`L${i + 1}: ${this.terse(lb[i] ?? '∅')}`);
+    }
+    return diffs.join(', ');
+  }
+
+  /** One-line compaction for drift reporting (whitespace-collapsed, capped). */
+  private terse(l: string): string {
+    const s = (l ?? '').replace(/\s+/g, ' ').trim();
+    return s.length > 120 ? s.slice(0, 120) + '…' : s;
   }
 
   /** Leg gate (v8 §12/§13): is every task of this leg's predecessor done? */  legGateMet(legId: string): { met: boolean; blocker?: string } {

@@ -154,6 +154,24 @@ export function renderDrift(drift: string): string {
   return `DRIFT ${drift}`;
 }
 
+/* ══ the ledger read (`ann ledger`) — the store write-rev integrity view ═══════ */
+
+/** The read surface of `.ann/journey/.ledger.json` (content snapshots stay private). */
+export interface LedgerView {
+  rev: number;
+  bootstrappedAt: string;
+  nodes: Record<string, { eventsSha: string; nodeSha: string; lastEventAt: string; lastRev: number }>;
+}
+
+/** The write-rev ledger as text: the global rev + one padded line per tracked node. */
+export function renderLedger(v: LedgerView): string {
+  const out = [`LEDGER rev ${v.rev}${v.bootstrappedAt ? ` (bootstrapped ${v.bootstrappedAt.slice(0, 10)})` : ' — no ledger yet (no CLI writes recorded)'}`];
+  for (const [id, n] of Object.entries(v.nodes).sort(([a], [b]) => a.localeCompare(b))) {
+    out.push(`  ${id.padEnd(46)} rev ${n.lastRev} @ ${n.lastEventAt}  events ${n.eventsSha.slice(0, 7)} · node ${n.nodeSha.slice(0, 7)}`);
+  }
+  return out.join('\n');
+}
+
 /* ══ AC5 — the no-scalar-progress guard ═══════════════════════════════════════ */
 
 /** Scalar-progress patterns: percentages, counts-as-progress, progress bars. The

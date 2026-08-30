@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { TaskDetail, ResultItem } from '../../store/store.js';
-import { renderStatusTree, renderGateCard, renderPlan, redact, hasSecret, hasScalarProgress, renderDrift } from '../renderers.js';
+import { renderStatusTree, renderGateCard, renderPlan, redact, hasSecret, hasScalarProgress, renderDrift, renderLedger } from '../renderers.js';
 
 const detail = (over: Partial<TaskDetail> = {}): TaskDetail => ({
   id: '06-engine-build/09-s6-runner-reviewer',
@@ -97,6 +97,28 @@ describe('renderDrift — the `ann verify` DRIFT line', () => {
   it('prefixes DRIFT and passes the claim-vs-reality message through verbatim', () => {
     expect(renderDrift('locksha: design — recorded lockSha 257cb79 vs file content b8c3629')).toBe('DRIFT locksha: design — recorded lockSha 257cb79 vs file content b8c3629');
     expect(renderDrift('artifact-orphan: 01-goal/artifacts/goal.md vs no artifact-locked event of this node names it')).toContain('artifact-orphan: 01-goal/artifacts/goal.md');
+    // the store-external kind rides the same renderer — the CLI just prints it to stderr
+    expect(renderDrift('store-external: 01-leg/01-a — events.jsonl differs vs ann wrote rev 3 at 2026-08-29; class=append')).toContain('store-external: 01-leg/01-a');
+  });
+});
+
+describe('renderLedger — the `ann ledger` write-rev view', () => {
+  it('renders the rev header and one padded line per tracked node', () => {
+    const text = renderLedger({
+      rev: 3,
+      bootstrappedAt: '2026-08-30T10:00:00.000Z',
+      nodes: {
+        '06-engine-build/13-format-amendment-v9': { eventsSha: 'a'.repeat(40), nodeSha: 'b'.repeat(40), lastEventAt: '2026-08-22', lastRev: 2 },
+      },
+    });
+    expect(text).toContain('LEDGER rev 3 (bootstrapped 2026-08-30)');
+    expect(text).toContain('06-engine-build/13-format-amendment-v9');
+    expect(text).toContain('rev 2 @ 2026-08-22');
+    expect(text).toContain('events aaaaaaa · node bbbbbbb');
+  });
+
+  it('renders the no-ledger state', () => {
+    expect(renderLedger({ rev: 0, bootstrappedAt: '', nodes: {} })).toContain('no ledger yet');
   });
 });
 

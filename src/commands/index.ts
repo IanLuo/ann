@@ -497,6 +497,12 @@ export class Commands {
     return this.store.verify();
   }
 
+  /** `ledger` — the write-rev ledger read: rev + per-node last-write rev/at + hashes
+   *  (the store-external integrity guard — what ann recorded on its own writes). */
+  ledger(): { rev: number; bootstrappedAt: string; nodes: Record<string, { eventsSha: string; nodeSha: string; lastEventAt: string; lastRev: number }> } {
+    return this.store.ledgerView();
+  }
+
   events(id: string): JourneyEvent[] {
     return this.store.events(id);
   }

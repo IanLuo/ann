@@ -43,7 +43,8 @@ on recorded events (default: `agent`).
 | `journey` | `[id]` | the look-back (no id) · one node's walk (with id) · alias --journey |
 | `status` | `[filter]` | every node's derived status (+ superseded marker) · alias --status |
 | `check` | `` | integrity + gates + hashes + the journey state line · alias --check |
-| `verify` | `` | the DRIFT read — reconcile the log's recorded claims vs filesystem/git reality (D1-D5); exits 1 on any drift · alias --verify |
+| `verify` | `` | the DRIFT read — reconcile the log's recorded claims vs filesystem/git reality (D1-D5 + store-external); exits 1 on any drift · alias --verify |
+| `ledger` | `` | the write-rev ledger — rev + per-node last-write rev/at + hashes (the store-external integrity guard) · alias --ledger |
 | `specs` | `` | the locked contract stack (name · type · @sha · path) · alias --specs |
 | `providers` | `` | the adapter registry: providers, models, defaults (env-resolved, api key masked) · alias --providers |
 | `config` | `` | the user config file (~/.ann/config.json; apiKey masked) · alias --config |

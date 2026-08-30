@@ -68,7 +68,7 @@ import { buildAbilities } from '../abilities/index.js';
 import { resolveConfig } from '../flow/config.js';
 import { getAdapter } from '../abilities/llm/index.js';
 import { ProviderAdapter } from '../abilities/llm/index.js';
-import { renderStatusTree, renderGateCard, renderPlan, renderDrift, PlanLeg, PlanAhead } from './renderers.js';
+import { renderStatusTree, renderGateCard, renderPlan, renderDrift, renderLedger, PlanLeg, PlanAhead } from './renderers.js';
 
 // ── PROJECT RESOLUTION (before anything touches the store) ──────────────────────
 // ann manages MULTIPLE projects (each with its own journey), identified by PATH only.
@@ -290,6 +290,14 @@ function cmdVerify() {
   if (JSON_OUT) console.log(JSON.stringify({ drifts, count: drifts.length }, null, 2));
   console.log(drifts.length === 0 ? 'verify: clean — the log and the filesystem agree (0 drifts).' : `${drifts.length} drift(s).`);
   process.exit(drifts.length === 0 ? 0 : 1);
+}
+
+/** `ledger` — the write-rev ledger read: rev + per-node last-write rev/at + hashes
+ *  (the store-external integrity guard). Read-only. */
+function cmdLedger() {
+  const view = commands.ledger();
+  if (JSON_OUT) return console.log(JSON.stringify(view, null, 2));
+  console.log(renderLedger(view));
 }
 
 function cmdSpecs() {
@@ -822,7 +830,8 @@ const COMMANDS: Array<{ name: string; args: string; desc: string }> = [
   { name: 'journey', args: '[id]', desc: 'the look-back (no id) · one node\'s walk (with id) · alias --journey' },
   { name: 'status', args: '[filter]', desc: 'every node\'s derived status (+ superseded marker) · alias --status' },
   { name: 'check', args: '', desc: 'integrity + gates + hashes + the journey state line · alias --check' },
-  { name: 'verify', args: '', desc: 'the DRIFT read — reconciles the log\'s recorded claims vs filesystem/git reality (D1-D5); exits 1 on any drift · alias --verify' },
+  { name: 'verify', args: '', desc: 'the DRIFT read — reconciles the log\'s recorded claims vs filesystem/git reality (D1-D5 + store-external); exits 1 on any drift · alias --verify' },
+  { name: 'ledger', args: '', desc: 'the write-rev ledger — rev + per-node last-write rev/at + hashes (the store-external integrity guard) · alias --ledger' },
   { name: 'specs', args: '', desc: 'the locked contract stack (name · type · @sha · path) · alias --specs' },
   { name: 'providers', args: '', desc: 'the adapter registry: providers, models, defaults (env-resolved, api key masked) · alias --providers' },
   { name: 'config', args: '', desc: 'the user config file (~/.ann/config.json; apiKey masked) · alias --config' },
@@ -913,6 +922,7 @@ try {
   } else if (command === 'status' || command === '--status') cmdStatus();
   else if (command === 'check' || command === '--check') cmdCheck();
   else if (command === 'verify' || command === '--verify') cmdVerify();
+  else if (command === 'ledger' || command === '--ledger') cmdLedger();
   else if (command === 'specs' || command === '--specs') cmdSpecs();
   else if (command === 'providers' || command === '--providers') cmdProviders();
   else if (command === 'config' || command === '--config') cmdConfig();
