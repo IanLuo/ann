@@ -1,0 +1,13 @@
+{
+  "id": "07-artifact-collapse/01-store-schema",
+  "contract": {
+    "intent": "Extend the event schema for the artifact collapse: the artifact-locked event records an optional free-form type tag; the confirmed event accepts an optional feedback field so a gate accept persists the human's rationale (G1).",
+    "acceptanceCriteria": [
+      "artifact-locked shape validates {name, path, lockSha?, type?, version?} with type as an optional string",
+      "confirmed allowlist includes feedback; a non-string feedback on confirmed is rejected (mirrors rejected)",
+      "JourneyEvent needs no interface change (top-level feedback already declared)",
+      "existing tests for the strict schema updated to cover type + confirmed.feedback"
+    ]
+  },
+  "createdAt": "2026-08-30"
+}

@@ -1,0 +1,7 @@
+{"at":"2026-08-30","type":"created","note":"spawned by bookkeeper (claude)"}
+{"at":"2026-08-30","type":"submitted","gate":"grill","note":"submitted for the grill gate (claude)"}
+{"at":"2026-08-30","type":"confirmed","gate":"grill","note":"accepted (claude)"}
+{"at":"2026-08-30","type":"evidence","note":"Surface + flow (AC2/AC4): commit() passes the deferred working file project-relative path to the thin lock (relative()); cmdLock takes <id> <name> <path> [type]; cmdSpecs reads type/sha from the log event, keeping only upstream/referrers prose from the file head; cmdRead drops the marker-stripped label; README usage row + quickstart document the thin contract.","commits":[{"sha":"051a073","note":"flow+surface: explicit-path lock calls at commit, log-derived specs/read, lock! usage"}],"refs":["src/flow/intents.ts","src/surface/cli.ts","README.md"]}
+{"at":"2026-08-30","type":"submitted","gate":"confirm","note":"submitted for the confirm gate (claude)"}
+{"at":"2026-08-30","type":"confirmed","gate":"confirm","feedback":"lock! takes an explicit path, specs/read are log-derived, flow commit passes the explicit working path — covered by e2e and unit tests","note":"accepted (claude)"}
+{"at":"2026-08-30","type":"completed","note":"Surface + flow shipped: lock! <path> [type], cmdSpecs from log events, cmdRead verbatim, flow commit explicit-path locks, README updated. See commit 051a073."}

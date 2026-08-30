@@ -1,0 +1,7 @@
+{"at":"2026-08-30","type":"created","note":"spawned by bookkeeper (claude)"}
+{"at":"2026-08-30","type":"submitted","gate":"grill","note":"submitted for the grill gate (claude)"}
+{"at":"2026-08-30","type":"confirmed","gate":"grill","note":"accepted (claude)"}
+{"at":"2026-08-30","type":"evidence","note":"Thin artifact schema (AC1/AC5): artifact-locked records optional type (string) + version; confirmed allowlist gains feedback — the gate accept rationale now persists on the event (G1, verified data-loss fix). validateEventShape + JourneyEvent updated; full suite green (362), build clean.","commits":[{"sha":"454b66b","note":"store: collapse artifact schema + verify"}],"refs":["src/store/store.ts"]}
+{"at":"2026-08-30","type":"submitted","gate":"confirm","note":"submitted for the confirm gate (claude)"}
+{"at":"2026-08-30","type":"confirmed","gate":"confirm","feedback":"schema allows the thin record shape and confirmed.feedback; store tests green","note":"accepted (claude)"}
+{"at":"2026-08-30","type":"completed","note":"Thin artifact schema shipped: artifact-locked {name,path,lockSha,type?,version?} + confirmed.feedback (G1). See evidence + commit 454b66b."}

@@ -1,0 +1,7 @@
+{"at":"2026-08-30","type":"created","note":"spawned by bookkeeper (claude)"}
+{"at":"2026-08-30","type":"submitted","gate":"grill","note":"submitted for the grill gate (claude)"}
+{"at":"2026-08-30","type":"confirmed","gate":"grill","note":"accepted (claude)"}
+{"at":"2026-08-30","type":"evidence","note":"Test suite (all ACs): commands tests pin byte-identical files after lock (AC1), any-file locking (F3), free-form type tag (F2), no-file guard, and gate-accept feedback (AC5); store tests drop D3/D5 docs-layer cases and add the D4 evidence-cited fixture case (F4 gone); intents/steps tests drop docs-symlink + marker-stamp assertions and pass explicit paths; e2e CLI drive locks with an explicit path, asserts no docs/<name>-v1 symlink, and cites an artifacts/ fixture as evidence. Full suite: 362 green, build clean.","commits":[{"sha":"2f05dde","note":"tests: thin-model blast radius"}],"refs":["src/commands/__tests__/commands.test.ts","src/store/__tests__/store.test.ts","src/flow/__tests__/intents.test.ts","src/flow/steps/__tests__/steps.test.ts","src/e2e/cli.e2e.test.ts"]}
+{"at":"2026-08-30","type":"submitted","gate":"confirm","note":"submitted for the confirm gate (claude)"}
+{"at":"2026-08-30","type":"confirmed","gate":"confirm","feedback":"the whole thin-model blast radius is pinned by tests and the suite is green at 362 with a clean build","note":"accepted (claude)"}
+{"at":"2026-08-30","type":"completed","note":"Test suite shipped: thin-model blast radius across commands/store/intents/steps/e2e; 362 tests green, build clean. See commit 2f05dde."}

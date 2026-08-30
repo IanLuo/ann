@@ -1,0 +1,13 @@
+{
+  "id": "07-artifact-collapse/06-spec-v16",
+  "contract": {
+    "intent": "Amend journey-format-spec v15 -> v16 via the change protocol: an amendment task produces the superseding v16 artifact describing the thin-record artifact model, the legacy-reader rule, and the retirement of the docs/ layer; v15 is superseded with a forward pointer; the real store's 12 inert docs/ symlinks are cleaned up.",
+    "acceptanceCriteria": [
+      "the v16 artifact is written and locked; current(journey-format-spec) flips to it",
+      "the v15 producer is superseded with a forward pointer to v16",
+      "the 12 inert docs/ symlinks are removed; read/verify stay clean",
+      "v16 text documents: thin lock!, any-file artifacts, log-derived views (read/current/specs), no docs layer, legacy marker tolerance"
+    ]
+  },
+  "createdAt": "2026-08-30"
+}

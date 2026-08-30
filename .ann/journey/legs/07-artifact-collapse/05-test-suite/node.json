@@ -1,0 +1,12 @@
+{
+  "id": "07-artifact-collapse/05-test-suite",
+  "contract": {
+    "intent": "Update the test blast radius for the collapse: remove D3/D5 and marker/symlink assertions, rewrite the lock! suite for the thin contract, and add coverage for any-file locks, D4 honoring evidence refs, and confirmed.feedback.",
+    "acceptanceCriteria": [
+      "full test suite is green (current 362 plus updated and added cases)",
+      "no test asserts docs/ symlinks, -v<N> filenames, marker stamps, unknown-type, no-working-file, or placement-collision",
+      "new coverage: a .js file is lockable; an evidence-cited .md is not artifact-orphan; gate accept records the rationale"
+    ]
+  },
+  "createdAt": "2026-08-30"
+}

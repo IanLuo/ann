@@ -1,0 +1,13 @@
+{
+  "id": "07-artifact-collapse/03-verify-rework",
+  "contract": {
+    "intent": "Rework store.verify() for the collapse: remove the D3/D5 docs-layer checks; D4's claimed set becomes artifact-locked paths union evidence refs (so evidence-cited .md inputs are not drift); D2's hash check stays marker-tolerant.",
+    "acceptanceCriteria": [
+      "no docs-layer drift kinds are emitted (docs-dangling, docs-mispointed, docs-version, docs-missing, docs-orphan, type-coherence)",
+      "a file cited in an evidence event's refs is not reported as artifact-orphan",
+      "D1 (missing-file) and D2 (recorded lockSha vs file content, marker-tolerant) are still enforced",
+      "verify on the live repo stays clean (no new drifts from the rework)"
+    ]
+  },
+  "createdAt": "2026-08-30"
+}

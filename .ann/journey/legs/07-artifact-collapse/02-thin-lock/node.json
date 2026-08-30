@@ -1,0 +1,14 @@
+{
+  "id": "07-artifact-collapse/02-thin-lock",
+  "contract": {
+    "intent": "Rewrite lock! to a thin named-artifact record: lock! <id> <name> <path> [type] verifies the path exists, hashes the raw file, derives the version from the log, and records the artifact-locked event — never writing, copying, stamping, or symlinking the file. gate! accept persists the rationale. read returns verbatim content, marker-tolerant for legacy files.",
+    "acceptanceCriteria": [
+      "lock() takes an explicit project-relative path that must exist; records {name, path, lockSha, type?, version?}",
+      "place() and workingFile() are deleted; no marker stamp is written; no docs/ symlink is created; any file type is lockable",
+      "gate() accept event carries feedback (G1); reject unchanged",
+      "read() returns verbatim content; stripMarkers retained as a read-time no-op for legacy stamped files",
+      "return shape keeps {name, path, contentPath, sha} with contentPath equal to the recorded path (flow tests depend on it)"
+    ]
+  },
+  "createdAt": "2026-08-30"
+}

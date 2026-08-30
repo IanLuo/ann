@@ -1,0 +1,7 @@
+{"at":"2026-08-30","type":"created","note":"spawned by bookkeeper (claude)"}
+{"at":"2026-08-30","type":"submitted","gate":"grill","note":"submitted for the grill gate (claude)"}
+{"at":"2026-08-30","type":"confirmed","gate":"grill","note":"accepted (claude)"}
+{"at":"2026-08-30","type":"evidence","note":"Verify rework (AC3): the D3/D5 docs-layer block (docs-dangling/mispointed/version/missing/orphan, type-coherence) is removed; D2 hash check stays marker-tolerant; D4 claimed set = artifact-locked paths union evidence.refs[] basenames — an evidence-cited fixtures/artifacts file is accounted for, not an orphan (F4 gone). Real-store comparison: HEAD flagged 5 drifts, reworked verify flags 4 — the one removed is the F4 false positive (eval-results.md, evidence-cited); no new drifts introduced.","commits":[{"sha":"454b66b","note":"store: collapse artifact schema + verify"}],"refs":["src/store/store.ts"]}
+{"at":"2026-08-30","type":"submitted","gate":"confirm","note":"submitted for the confirm gate (claude)"}
+{"at":"2026-08-30","type":"confirmed","gate":"confirm","feedback":"verify reports no docs-layer drifts; the D4 evidence-refs fix removes the F4 false positive on the real store and the e2e fixture test proves it","note":"accepted (claude)"}
+{"at":"2026-08-30","type":"completed","note":"Verify rework shipped: D3/D5 docs-layer checks removed, D4 claimed set unions evidence.refs[] basenames (F4 gone). Real store: 5 drifts -> 4, the removed one is the F4 false positive; zero new drifts. See commit 454b66b."}

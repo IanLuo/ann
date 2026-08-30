@@ -1,0 +1,7 @@
+{"at":"2026-08-30","type":"created","note":"spawned by bookkeeper (claude)"}
+{"at":"2026-08-30","type":"submitted","gate":"grill","note":"submitted for the grill gate (claude)"}
+{"at":"2026-08-30","type":"confirmed","gate":"grill","note":"accepted (claude)"}
+{"at":"2026-08-30","type":"evidence","note":"Thin lock! (AC1/AC2/AC3/AC4): lock() takes an explicit project-relative path, verifies it exists, hashes raw bytes (marker-tolerant), derives version from the log, records artifact-locked {name,path,lockSha,type?,version?}. Never writes/copies/stamps/symlinks the file — bytes byte-identical after lock; any file type locks (F3); type is an optional free-form tag, zero placement (F2); place()/workingFile() deleted; unknown-type / no-working-file / placement-collision gone.","commits":[{"sha":"abf4ac2","note":"commands: thin lock! + gate! accept rationale"}],"refs":["src/commands/index.ts"]}
+{"at":"2026-08-30","type":"submitted","gate":"confirm","note":"submitted for the confirm gate (claude)"}
+{"at":"2026-08-30","type":"confirmed","gate":"confirm","feedback":"lock records the producer's own file, never touches it; byte-identical, any-file, free-form type covered by unit tests","note":"accepted (claude)"}
+{"at":"2026-08-30","type":"completed","note":"Thin lock! shipped: record-only artifact-locked over the producer own file; byte-identical (AC1), any file type (F3), optional type tag (F2); place()/workingFile() deleted. See commit abf4ac2."}

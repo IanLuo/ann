@@ -1,0 +1,13 @@
+{
+  "id": "07-artifact-collapse/04-surface-flow",
+  "contract": {
+    "intent": "Update the surface and flow layer for the thin record: lock! takes <id> <name> <path> [type]; cmdSpecs reads type/sha from the log events (prose upstream/referrers reads stay); the flow's lockArtifact/commit pass the explicit working path; vocab drops artifactTypes placement consumption.",
+    "acceptanceCriteria": [
+      "lock! dispatch and the usage table row take the explicit path arg",
+      "cmdSpecs shows type and sha from the log, not from marker lines; upstream/referrers still read from the file head",
+      "intents.ts / frame.ts pass the explicit working path + type to lock()",
+      "no consumer of artifactTypes as a placement driver remains"
+    ]
+  },
+  "createdAt": "2026-08-30"
+}

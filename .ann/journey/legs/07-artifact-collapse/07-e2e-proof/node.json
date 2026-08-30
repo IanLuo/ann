@@ -1,0 +1,13 @@
+{
+  "id": "07-artifact-collapse/07-e2e-proof",
+  "contract": {
+    "intent": "Prove the collapse end-to-end: re-run the full gated lifecycle on a fresh project whose deliverable is a .js file, and confirm the original e2e findings F3 (code un-lockable) and F4 (evidence-cited input flagged as drift) no longer reproduce.",
+    "acceptanceCriteria": [
+      "full lifecycle: spawn goal + tasks, grill and confirm gates, evidence with refs, lock a .js deliverable via thin lock!, completed events, git commit",
+      "check exits 0 and verify exits 0 (no drifts)",
+      "read/specs/current work; the .js is a current locked artifact; an evidence-cited .md fixture is not artifact-orphan",
+      "the docs/ symlink is never created (machinery gone)"
+    ]
+  },
+  "createdAt": "2026-08-30"
+}

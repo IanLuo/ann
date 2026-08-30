@@ -1,0 +1,16 @@
+{
+  "id": "07-artifact-collapse",
+  "contract": {
+    "intent": "Collapse the artifact model: lock! becomes a thin named-artifact record over the producer's own file. An artifact is log data {name, path, lockSha, type?, version?} + the file the producer made — ann never writes, copies, stamps, or symlinks it. Remove the docs/ symlink layer, marker stamping, and type-driven placement; read/current/specs become log-derived views; verify drops the docs-layer checks (D3/D5) and lets evidence refs claim files (D4). Also persist the human's gate rationale on confirmed events (currently swallowed). Amend journey-format-spec to v16 documenting the new model.",
+    "acceptanceCriteria": [
+      "AC1: lock! <id> <name> <path> [type] records the artifact; ANY file type works (a .js deliverable is lockable); the file on disk is byte-identical after the lock (no stamp injected).",
+      "AC2: read <name> / current(name) / specs resolve from the log for new files AND legacy marker-stamped files (marker strip stays as a read-time no-op).",
+      "AC3: verify reports no docs-layer drifts (docs-dangling/docs-mispointed/docs-version/docs-missing/docs-orphan/type-coherence gone); an evidence-cited .md input is no longer artifact-orphan (D4 claimed set includes evidence refs); hash checks pass for new + legacy files.",
+      "AC4: unknown-type / no-working-file / placement-collision no longer exist; type is an optional tag recorded on the event, not a placement driver.",
+      "AC5: gate! <id> <gate> accept \"<rationale>\" records the rationale on the confirmed event (G1 — today it is swallowed).",
+      "AC6: journey-format-spec amended v15 -> v16 via the change protocol (amendment node -> superseding artifact -> superseded event -> referrer re-pointing), and the real store's 12 inert docs/ symlinks are cleaned up.",
+      "AC7: e2e proof — full gated lifecycle on a fresh project with a .js deliverable; check exits 0, verify exits 0; the F3 (code un-lockable) and F4 (evidence-cited input flagged) reproductions from the original e2e drive no longer reproduce."
+    ]
+  },
+  "createdAt": "2026-08-30"
+}
