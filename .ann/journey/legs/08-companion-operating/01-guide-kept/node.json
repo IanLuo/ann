@@ -1,0 +1,21 @@
+{
+  "id": "08-companion-operating/01-guide-kept",
+  "contract": {
+    "intent": "Keep the companion operating guide durable and versioned under this leg: it lives as a committed, locked record artifact (companion-guide), and any revision re-locks it as a new version — so the look-back always reads the current operating contract.",
+    "acceptanceCriteria": [
+      "The guide HTML is committed to the repo and locked as a record artifact under this task (artifact-locked event records name, path, lockSha)",
+      "ann check exits 0 after the lock — no gate gaps, integrity clean",
+      "Any future revision to the guide re-locks under a new version via supersede! — recorded in this task's evidence"
+    ],
+    "targetAreas": [
+      ".agents/artifacts/ann-companion-guide.html",
+      ".ann/journey/legs/08-companion-operating"
+    ],
+    "requiredInputs": [],
+    "expectedOutputs": [
+      "locked companion-guide record artifact",
+      "committed guide + this task's events"
+    ]
+  },
+  "createdAt": "2026-09-01"
+}

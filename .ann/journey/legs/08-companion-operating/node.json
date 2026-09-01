@@ -1,0 +1,25 @@
+{
+  "id": "08-companion-operating",
+  "contract": {
+    "intent": "Make the companion operating guide ann's living contract: keep it durable (committed, locked artifact) and make it a goal leg in ann's own journey, so the look-back can check how ann is doing against its promises.",
+    "acceptanceCriteria": [
+      "Guide kept: the companion guide is a committed, locked artifact in this leg (real file under the leg's artifacts/, type record, sha recorded) — re-locked as a new version whenever it changes",
+      "Gaps tracked: every §3 gap in the guide maps to a task in this journey (open or done) — no gap is silent; the mapping is visible in the journey",
+      "Log-protectors landed: terminal freeze, gate rationale, and native correction flow each complete as a done task under this leg, with check + verify staying clean as evidence",
+      "Look-back works: ann journey 08-companion-operating + check + verify report ann's fitness — green, or naming exactly what is off — so a periodic review can check how ann is doing directly from the journey",
+      "Dogfooding holds: this leg is managed through ann (spawned, gated, locked via CLI; no hand-edited events), with rationale recorded at its gates"
+    ],
+    "targetAreas": [
+      ".agents/artifacts/ann-companion-guide.html",
+      ".ann/journey/legs/08-companion-operating"
+    ],
+    "requiredInputs": [],
+    "expectedOutputs": [
+      "locked companion-guide artifact",
+      "gap-to-task mapping",
+      "log-protector tasks (terminal freeze, gate rationale, correction flow)",
+      "fitness look-back read (journey / check / verify)"
+    ]
+  },
+  "createdAt": "2026-09-01"
+}
