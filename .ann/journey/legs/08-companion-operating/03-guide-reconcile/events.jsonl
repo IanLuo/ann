@@ -1,0 +1,8 @@
+{"at":"2026-09-02","type":"created","note":"spawned by bookkeeper (agent)"}
+{"at":"2026-09-02","type":"submitted","gate":"grill","note":"submitted for the grill gate (agent)"}
+{"at":"2026-09-02","type":"confirmed","gate":"grill","feedback":"grilled accept: the durable companion guide must read current under the thin model; reconciling by supersede is the AC-3 revision path of 01-guide-kept","note":"accepted (agent)"}
+{"at":"2026-09-02","type":"artifact-locked","artifact":{"name":"companion-guide","path":".ann/journey/legs/08-companion-operating/03-guide-reconcile/artifacts/companion-guide.html","lockSha":"04d6958","version":2},"note":"companion-guide.html locked @ 04d6958 (agent)"}
+{"at":"2026-09-02","type":"evidence","refs":[".ann/journey/legs/08-companion-operating/03-guide-reconcile/artifacts/companion-guide.html"],"note":"guide reconciled (exactly 3 lines: strengths 204, gaps 213, glossary 227): removed the docs/ layer claims and the lock! records docs/ placement wording; lock/supersede descriptions now match the confined registry signatures. Locked @04d6958 under this task; superseded 01-guide-kept (its AC-3 revision path); current(companion-guide) flipped; check stays 15 accepted, verify 4 accepted, suite 367 green."}
+{"at":"2026-09-02","type":"submitted","gate":"confirm","note":"submitted for the confirm gate (agent)"}
+{"at":"2026-09-02","type":"confirmed","gate":"confirm","feedback":"accepted: all ACs verified — guide reconcile diff is exactly the 3 flagged lines (docs/ layer retired, lock/supersede wording matches confined signatures); locked @04d6958 current, v1 superseded; check 15 / verify 4 / suite 367 unchanged","note":"accepted (agent)"}
+{"at":"2026-09-02","type":"completed"}

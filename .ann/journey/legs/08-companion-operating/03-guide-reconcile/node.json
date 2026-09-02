@@ -1,0 +1,23 @@
+{
+  "id": "08-companion-operating/03-guide-reconcile",
+  "contract": {
+    "intent": "Reconcile the durable companion operating guide with the current thin, write-confined model: it must no longer claim a docs/ layer or that lock! records a docs/ placement, and its lock!/supersede! descriptions must match the confined signatures. The revised guide is produced as THIS task locked companion-guide artifact and supersedes the guide locked by 01-guide-kept (the AC-3 path of 01-guide-kept), so the durable operating contract reads current again.",
+    "acceptanceCriteria": [
+      "A revised companion-guide.html is produced and locked under THIS task own artifacts/ (thin lock) and becomes current(companion-guide); supersede! advances it past the done producer 01-guide-kept, naming the successor by node id + the file basename (no raw path)",
+      "No surviving claim that lock! records a docs/ placement or that a docs/ layer is part of the current model — every docs/ mention in the guide is audited and reconciled to the thin model (real files under the node artifacts/, thin lock records)",
+      "The guide lock!/supersede! descriptions match the confined signatures in the command registry (ann commands output), not the retired free-<path> forms",
+      "ann check stays at the accepted baseline (no new findings) and the test suite stays green",
+      "The revision + supersede are evidenced under this task and the revised guide is committed"
+    ],
+    "targetAreas": [
+      ".ann/journey/legs/08-companion-operating",
+      ".agents/artifacts/ann-companion-guide.html"
+    ],
+    "requiredInputs": [],
+    "expectedOutputs": [
+      "revised + locked companion-guide artifact (supersedes the 01-guide-kept version)",
+      "committed guide revision + this task events"
+    ]
+  },
+  "createdAt": "2026-09-02"
+}
