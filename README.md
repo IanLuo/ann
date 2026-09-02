@@ -71,8 +71,8 @@ on recorded events (default: `agent`).
 | `spawn!` | `<id> '<contract-json>'` | WRITE — create a node; enforces the v14 contract schema + F-AC19 + id naming + the artifact/leg gates |
 | `submit!` | `<id> grill\|confirm [confirmedSha]` | WRITE — the resumable gate write: `submitted` alone, so an interrupted gate stays blocked (confirm records the gate② content binding) |
 | `gate!` | `<id> grill\|confirm accept\|reject [feedback]` | WRITE — human gate decision (submit + decide; the 3-reject bound is a CONSTANT owned here) |
-| `lock!` | `<id> <name> <path> [type]` | WRITE — thin artifact record over the producer's own file: verifies path, hashes it, records artifact-locked {name, path, lockSha, type?, version?}; never writes/stamps/symlinks the file |
-| `supersede!` | `<id> <name> <path> [note]` | WRITE — superseded event with a forward pointer (the one cross-task write; refuses a live locker) |
+| `lock!` | `<id> <artifact-file> [type]` | WRITE — thin artifact record over the producer's own file (write confinement): `<artifact-file>` is a single basename resolved inside `<id>`'s OWN `artifacts/` — an out-of-folder file is refused; records artifact-locked {name = file stem, path, lockSha, type?, version?}; never writes/stamps/symlinks the file |
+| `supersede!` | `<id> <successor-id> <artifact-file> [note]` | WRITE — superseded event with a forward pointer (the one cross-task write; refuses a live locker): the successor is named by `<successor-id>` + its OWN `<artifact-file>`, resolved via resolveNode — never a raw path |
 
 ### When to use each
 
@@ -107,19 +107,22 @@ will execute) · `chain` (the flow config as data) · `steps` (the step registry
    present.
 2. Do the work, then record evidence: `append! <id> '{"at":"<date>","type":"evidence","refs":[...]}'`.
 3. Open the task: `submit! <id> grill` then `gate! <id> grill accept|reject [feedback]`.
-4. Record the deliverable: `lock! <id> <name> <path> [type]` — a THIN named-artifact
-   record over the producer's own file (the collapse, leg 07). `path` is project-
-   relative; ann verifies it exists, hashes the raw bytes, and records `artifact-locked
-   {name, path, lockSha, type?, version?}`. It NEVER writes, copies, stamps, or symlinks
-   the file — the bytes on disk are untouched, and any file type locks. `type` is an
-   optional free-form tag with no placement meaning.
+4. Record the deliverable: `lock! <id> <artifact-file> [type]` — a THIN artifact
+   record over the producer's OWN file (the collapse, leg 07). `<artifact-file>` is a
+   single basename resolved inside `<id>`'s own `artifacts/` (write confinement — an
+   out-of-folder file is refused); ann verifies it exists, hashes the raw bytes, and
+   records `artifact-locked {name = file stem, path, lockSha, type?, version?}`. It
+   NEVER writes, copies, stamps, or symlinks the file — the bytes on disk are
+   untouched, and any file type locks. `type` is an optional free-form tag with no
+   placement meaning.
 5. Close: `submit! <id> confirm` then `gate! <id> confirm accept`, then
    `append! <id> '{"at":"<date>","type":"completed",...}'`. A task is `done` only after
    a `completed` event — the confirm gate alone does not record it.
-6. Advance a version: the NEW producer writes its draft and closes, then
-   `supersede! <old-id> <name> <path-to-successor>` (the successor path is
-   **project-relative and the file must already exist**; `supersede!` refuses a producer
-   that isn't done). Then `lock! <new-id> <name> <path> [type]` —
+6. Advance a version: the NEW producer writes its draft file into its OWN
+   `artifacts/` and closes, then `supersede! <old-id> <new-id> <artifact-file>` — the
+   successor is named by the NEW node's id + that file's basename, resolved inside its
+   own `artifacts/` (never a raw path; the file must already exist; `supersede!`
+   refuses a producer that isn't done). Then `lock! <new-id> <artifact-file> [type]` —
    `current(<name>)` flips to the new producer.
 
 **Automate.** `run! <id>` drives a task through the frame and stops at the first block
