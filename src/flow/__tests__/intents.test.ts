@@ -209,5 +209,41 @@ describe('evidence + close + supersede — immediate, idempotent on replay', () 
     // the thin model writes no docs/ layer
     expect(existsSync(join(root, '.ann', 'docs'))).toBe(false);
   });
+
+  /** A concluded locker of `my-spec` v1 (01-leg/01-a) — current for that name. */
+  const doneLockerOfMySpec = () => {
+    setup();
+    node(TASK, CONTRACT, [
+      ev('created'), ev('submitted', { gate: 'grill' }), ev('confirmed', { gate: 'grill' }),
+      ev('submitted', { gate: 'confirm' }), ev('confirmed', { gate: 'confirm' }), ev('completed'),
+    ]);
+    writeFileSync(join(root, '.ann', 'journey', 'legs', TASK, 'artifacts', 'my-spec.md'), '# v1\n');
+    must(new Commands(new Store(root), 'test').lock(TASK, 'my-spec.md'));
+  };
+
+  it('supersede REFUSES before the successor file materializes — no-successor, never a raw path', () => {
+    doneLockerOfMySpec();
+    node('01-leg/02-b', CONTRACT, [ev('created')]);
+    const t = new IntentTranslator(new Commands(new Store(root), 'test'), '01-leg/02-b');
+    // no deferred lock and no canonical artifacts/my-spec.md yet — the successor is unborn
+    const e = errorOf(t.translate(step(['supersede']), [{ kind: 'supersede', name: 'my-spec' }]));
+    expect(e.code).toBe('no-successor');
+  });
+
+  it('happy path — supersedes the DONE locker once this task has materialized its own file', () => {
+    doneLockerOfMySpec();
+    node('01-leg/02-b', CONTRACT, [ev('created')]);
+    const t = new IntentTranslator(new Commands(new Store(root), 'test'), '01-leg/02-b');
+    // lock-artifact writes the working file (deferred); the supersede beside it names it
+    must(t.translate(step(['lock-artifact', 'supersede']), [
+      lockIntent('my-spec', '# v2\n'),
+      { kind: 'supersede', name: 'my-spec', note: 'v2 supersedes v1' },
+    ]));
+    // the `superseded` record lands on the OLD locker; the successor path is DERIVED
+    // from this node's own artifacts file — never a caller-supplied path (AC-4)
+    const superseded = new Commands(new Store(root), 'test').events(TASK).find((e) => e.type === 'superseded');
+    expect(superseded!.successor).toEqual({ name: 'my-spec', path: '.ann/journey/legs/01-leg/02-b/artifacts/my-spec.md' });
+    expect(readFileSync(join(root, '.ann', 'journey', 'legs', '01-leg', '02-b', 'artifacts', 'my-spec.md'), 'utf8')).toBe('# v2\n');
+  });
 });
 
