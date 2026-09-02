@@ -1,0 +1,24 @@
+{
+  "id": "08-companion-operating/02-implementation-write-confinement",
+  "contract": {
+    "intent": "Constrain ann's writers in CODE so an out-of-folder write is unrepresentable: every write path derives from the addressed node's canonical folder (a store node handle), never from a caller-supplied path. lock! and supersede! lose their free path arguments. The AGENTS.md rule is convention only — this makes it structural.",
+    "acceptanceCriteria": [
+      "Node handle: store.resolveNode(id) is the only id→folder mapping — it returns an opaque NodeDir (canonical folder under .ann/journey/legs) and refuses anything not under the store's legs root",
+      "Writers take the handle: appendEvent(node, …) and every task write derive their file path as join(node.dir, <fixed relative>); no caller passes or re-derives a path string",
+      "lock! drops the free path: it takes the handle + an artifact-relative name, resolves it inside the node's own artifacts/ dir, and refuses a file outside that folder",
+      "supersede! names its successor by node id + artifact name (resolved via resolveNode), not a raw path — remaining the one sanctioned cross-node writer",
+      "Proven green: existing suite passes, ann check stays at the accepted baseline (no new findings), and a test demonstrates an out-of-folder write target is refused/unrepresentable"
+    ],
+    "targetAreas": [
+      "src/store",
+      "src/commands"
+    ],
+    "requiredInputs": [],
+    "expectedOutputs": [
+      "refactored store/commands writer API (NodeDir handle-based)",
+      "lock! and supersede! with no free path argument",
+      "test proving out-of-folder writes are unrepresentable"
+    ]
+  },
+  "createdAt": "2026-09-02"
+}

@@ -1,0 +1,3 @@
+{"at":"2026-09-02","type":"created","note":"spawned by bookkeeper (ianluo)"}
+{"at":"2026-09-02","type":"submitted","gate":"grill","note":"submitted for the grill gate (ianluo)"}
+{"at":"2026-09-02","type":"confirmed","gate":"grill","feedback":"User approved the write-confinement-by-construction contract (handle-based writers; lock!/supersede! lose free path args). Scope = the store/commands writer API only; check baseline stays accepted.","note":"accepted (ianluo)"}
