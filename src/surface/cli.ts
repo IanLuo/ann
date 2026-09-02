@@ -23,8 +23,8 @@
  *   ann append <id> '{"at":..,"type":..}'   → single-writer append (LB-3)
  *   ann spawn <id> '<contract-json>'        → create a node (validated)
  *   ann gate <id> grill|confirm accept|reject [feedback]
- *   ann lock <id> <name> [type]             → stamp marker + artifact-locked
- *   ann supersede <id> <name> <path> [note]
+ *   ann lock <id> <artifact-file> [type]             → thin artifact record over the node's own file
+ *   ann supersede <id> <successor-id> <artifact-file> [note]   → the one cross-task write
  */
 import {
   readFileSync,
@@ -804,16 +804,18 @@ function cmdSubmit(id: string, gate: string, sha: string | undefined) {
   );
 }
 
-function cmdLock(id: string, name: string, path: string, type: string) {
-  emit(commands.lock(id, name, { path, ...(type ? { type } : {}) }), (v) => {
+function cmdLock(id: string, artifactFile: string, type: string) {
+  emit(commands.lock(id, artifactFile, type ? { type } : {}), (v) => {
     console.log(`locked ${v.name} @ ${v.sha} → ${id}`);
-    console.log(`  content: ${v.contentPath}`);
-    console.log(`  ref:     ${v.path}`);
+    console.log(`  content: ${v.path}`);
+    console.log(`  ref:     ${v.contentPath}`);
   });
 }
 
-function cmdSupersede(id: string, name: string, path: string, note: string) {
-  emit(commands.supersede(id, name, path, note), () => console.log(`superseded ${name} → ${path} on ${id}`));
+function cmdSupersede(id: string, successorId: string, artifactFile: string, note: string) {
+  emit(commands.supersede(id, successorId, artifactFile, note), (v) => {
+    console.log(`superseded ${v.name} → ${v.path} on ${id}`);
+  });
 }
 
 function cmdRead(name: string) {
@@ -860,8 +862,8 @@ const COMMANDS: Array<{ name: string; args: string; desc: string }> = [
   { name: 'spawn!', args: '<id> \'<contract-json>\'', desc: 'WRITE — create a node; enforces the v14 contract schema + F-AC19 + id naming + the artifact/leg gates' },
   { name: 'submit!', args: '<id> grill|confirm [confirmedSha]', desc: 'WRITE — the resumable gate write: `submitted` alone, so an interrupted gate stays blocked (confirm records the gate② content binding)' },
   { name: 'gate!', args: '<id> grill|confirm accept|reject [feedback]', desc: 'WRITE — human gate decision (submit + decide; the 3-reject bound is a CONSTANT owned here)' },
-  { name: 'lock!', args: '<id> <name> <path> [type]', desc: 'WRITE — thin artifact record over the producer\'s own file: verifies path, hashes it, records artifact-locked {name, path, lockSha, type?, version?}; never writes/stamps/symlinks the file' },
-  { name: 'supersede!', args: '<id> <name> <path> [note]', desc: 'WRITE — superseded event with a forward pointer (the one cross-task write; refuses a live locker)' },
+  { name: 'lock!', args: '<id> <artifact-file> [type]', desc: 'WRITE — thin artifact record over the producer\'s own file (write confinement): <artifact-file> is resolved inside <id>/artifacts/, hashed, and recorded as artifact-locked {name = file stem, path, lockSha, type?, version?}; an out-of-folder file is refused; never writes/stamps/symlinks the file' },
+  { name: 'supersede!', args: '<id> <successor-id> <artifact-file> [note]', desc: 'WRITE — superseded event with a forward pointer (the one cross-task write; refuses a live locker): the successor is named by <successor-id> + its own <artifact-file>, resolved via resolveNode — never a raw path' },
 ];
 
 const command = args[0];
@@ -960,8 +962,8 @@ try {
     if (!args[1] || !raw) { console.error('usage: ann spawn! <id> \'<contract-json>\''); process.exit(2); }
     cmdSpawn(args[1], raw);
   } else if (command === 'gate!') cmdGate(args[1], args[2], args[3], args.slice(4).join(' '));
-  else if (command === 'lock!') cmdLock(args[1], args[2], args[3] || '', args[4] || '');
-  else if (command === 'supersede!') cmdSupersede(args[1], args[2], args[3], args.slice(4).join(' '));
+  else if (command === 'lock!') cmdLock(args[1], args[2] || '', args[3] || '');
+  else if (command === 'supersede!') cmdSupersede(args[1], args[2], args[3] || '', args.slice(4).join(' '));
   else {
     const cur = store.current(command);
     if (!cur) { console.error(`ann: no current artifact for '${command}'`); process.exit(1); }

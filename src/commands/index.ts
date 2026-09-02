@@ -1,8 +1,14 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { join, basename } from 'node:path';
-import { Store, JourneyEvent, ResultItem, TaskDetail } from '../store/store.js';
+import { join, relative } from 'node:path';
+import { Store, JourneyEvent, NodeDir, ResultItem, TaskDetail } from '../store/store.js';
 import { blobSha, stripMarkers } from '../store/sha.js';
 import { getVOCAB } from '../store/vocab.js';
+
+/** A producer artifact's LOGICAL NAME from its file — the stem (last extension
+ *  stripped). lock!/supersede! take the artifacts-relative FILE and record this as
+ *  the artifact name: the thin model names an artifact by the file that carries it
+ *  (my-spec.md → my-spec, companion-guide.html → companion-guide, tool.js → tool). */
+const artifactNameOf = (file: string): string => file.replace(/\.[^./]*$/, '');
 
 /**
  * L1 — THE COMMAND SURFACE (core-design §1): the store's interface, and the ONLY
@@ -19,8 +25,10 @@ import { getVOCAB } from '../store/vocab.js';
  *   gate!       the reject bound (3/gate, a CONSTANT) + the two-write sequence
  *   submit!     the other half of that sequence + the gate② content binding
  *   append!     refuses the composite-owned kinds and `created`
- *   lock!       one-current-per-name + type-driven placement/filename/versioning
- *   supersede!  the one cross-task write
+ *   lock!       one-current-per-name + versioning (thin record over the node's own
+ *               producer file — confined to the node's artifacts/ dir, AC-3)
+ *   supersede!  the one cross-task write (successor named by node id + artifact file,
+ *               resolved via resolveNode — never a raw path, AC-4)
  *
  * MULTI-CLIENT = multiple IN-PROCESS initiators (the flow, the validators, the
  * adapters). The CLI is a BINDING, not an initiator.
@@ -118,6 +126,23 @@ export class Commands {
 
   private get today(): string {
     return new Date().toISOString().slice(0, 10);
+  }
+
+  /** Resolve the addressed node's write handle — the id→folder mapping (AC-1). Every
+   *  write lands on `node.dir`; the node handle makes an out-of-folder write
+   *  unrepresentable (a caller has no path string to hand to a writer). */
+  private node(id: string): NodeDir {
+    return this.store.resolveNode(id);
+  }
+
+  /** Confinement (AC-3/AC-4): the artifacts-relative FILE names lock!/supersede!
+   *  accept — a single path segment (the producer file's basename) resolved INSIDE
+   *  the node's own artifacts/ dir. Anything else — a separator, `..`, an absolute
+   *  path, empty — is refused: a write target outside that folder is unrepresentable.
+   *  Returns null (refusal) or the confined full path. */
+  private nodeArtifactFile(node: NodeDir, file: string): string | null {
+    if (!file || file === '.' || file === '..' || file.includes('/') || file.includes('\\')) return null;
+    return join(node.dir, 'artifacts', file);
   }
 
   /* ══ WRITES — the mutators ══════════════════════════════════════════════════ */
@@ -236,7 +261,7 @@ export class Commands {
       ...(opts.confirmedSha ? { confirmedSha: opts.confirmedSha } : {}),
     };
     try {
-      this.store.appendEvent(id, event);
+      this.store.appendEvent(this.node(id), event);
     } catch (e) {
       return fail('store-refused', (e as Error).message);
     }
@@ -266,10 +291,10 @@ export class Commands {
     }
     try {
       if (!this.undecidedSubmission(id, gate)) {
-        this.store.appendEvent(id, { at: this.today, type: 'submitted', gate, note: `submitted with the decision (${this.who})` });
+        this.store.appendEvent(this.node(id), { at: this.today, type: 'submitted', gate, note: `submitted with the decision (${this.who})` });
       }
       this.store.appendEvent(
-        id,
+        this.node(id),
         decision === 'accept'
           ? { at: this.today, type: 'confirmed', gate, ...(feedback ? { feedback } : {}), note: `accepted (${this.who})` }
           : { at: this.today, type: 'rejected', gate, feedback, note: `rejected (${this.who})` },
@@ -293,7 +318,7 @@ export class Commands {
       return fail('composite-owned', `'${event.type}' is owned by ${owner} — use it (the composite encodes the invariant; append! would bypass it)`);
     }
     try {
-      this.store.appendEvent(id, event);
+      this.store.appendEvent(this.node(id), event);
     } catch (e) {
       return fail('store-refused', (e as Error).message);
     }
@@ -303,31 +328,40 @@ export class Commands {
   /**
    * `lock!` — record an artifact (the COLLAPSED model, leg 07): a THIN named-artifact
    * RECORD `{name, path, lockSha, type?, version?}` over the producer's OWN file.
-   * `path` is project-relative (like `supersede!`); ann VERIFIES it exists, hashes the
-   * raw bytes (marker-tolerant — a no-op on unstamped files), derives the version from
-   * THE LOG, and records the event. It NEVER writes, copies, stamps, or symlinks the
-   * file — the bytes on disk are untouched (AC1). `type` is an optional free-form tag
-   * with zero placement semantics (F2/F3 gone): any file type locks.
+   * The caller names the file (a single artifacts-relative segment, AC-3); ann resolves
+   * it INSIDE the addressed node's own artifacts/ dir (never a free path), VERIFIES it
+   * exists, hashes the raw bytes (marker-tolerant — a no-op on unstamped files), derives
+   * the version from THE LOG, and records the event. The recorded `name` is the file's
+   * stem (the thin model names an artifact by the file that carries it). It NEVER
+   * writes, copies, stamps, or symlinks the file — the bytes on disk are untouched (AC1).
+   * `type` is an optional free-form tag with zero placement semantics (F2/F3 gone): any
+   * file type locks.
    */
-  lock(id: string, name: string, opts: { path: string; type?: string; note?: string }): CommandResult<LockedArtifact> {
+  lock(id: string, artifactFile: string, opts: { type?: string; note?: string } = {}): CommandResult<LockedArtifact> {
+    if (!this.store.ids().includes(id)) return fail('no-node', `no node ${id}`);
+    const node = this.store.resolveNode(id);
+    const full = this.nodeArtifactFile(node, artifactFile);
+    if (!full) {
+      return fail('outside-artifacts', `'${artifactFile}' is not a file inside ${id}/artifacts/ — lock! records the node's OWN producer file (write confinement); an out-of-folder write is unrepresentable`);
+    }
+    if (!existsSync(full)) return fail('no-file', `no file at ${id}/artifacts/${artifactFile} — lock! records a file that exists (the producer's own file)`);
+    const name = artifactNameOf(artifactFile);
     const current = this.store.current(name);
     if (current) return fail('already-current', `'${name}' is already current (${current.path}) — supersede it first (one current per name)`);
-
-    const full = join(this.store.root, opts.path);
-    if (!existsSync(full)) return fail('no-file', `no file at ${opts.path} — lock! records a path that exists (project-relative, like supersede!)`);
     const sha = blobSha(stripMarkers(readFileSync(full, 'utf8'))).slice(0, 7);
     const n = this.nextVersion(name);
+    const path = relative(this.store.root, full); // .ann/journey/legs/<id>/artifacts/<file> (project-relative record)
     try {
-      this.store.appendEvent(id, {
+      this.store.appendEvent(node, {
         at: this.today,
         type: 'artifact-locked',
-        artifact: { name, path: opts.path, lockSha: sha, ...(opts.type ? { type: opts.type } : {}), version: n },
-        note: opts.note ?? `${basename(opts.path)} locked @ ${sha} (${this.who})`,
+        artifact: { name, path, lockSha: sha, ...(opts.type ? { type: opts.type } : {}), version: n },
+        note: opts.note ?? `${artifactFile} locked @ ${sha} (${this.who})`,
       });
     } catch (e) {
       return fail('store-refused', (e as Error).message);
     }
-    return ok({ name, path: opts.path, contentPath: opts.path, sha });
+    return ok({ name, path, contentPath: path, sha });
   }
 
   /**
@@ -349,13 +383,19 @@ export class Commands {
 
   /**
    * `supersede!` — the ONLY cross-task write: `superseded` on the OLD LOCKER's node.
-   * The frame REFUSES to supersede a locker that is not `done` (core-design §3): the
-   * status collapse applies to any non-done/failed node carrying `superseded`, so
-   * superseding a live locker in its commit window would silently kill it.
+   * Write confinement (AC-4): the successor is named by NODE ID + an artifacts-relative
+   * file — resolved via resolveNode(successorId) into that node's own artifacts/ dir —
+   * never a raw caller-supplied path. The recorded successor {name, path} therefore
+   * always points at a REAL producer file inside the successor node's folder; `name` is
+   * that file's stem (the artifact it replaces carries the same logical name — rework
+   * never renames). The frame REFUSES to supersede a locker that is not `done`
+   * (core-design §3): the status collapse applies to any non-done/failed node carrying
+   * `superseded`, so superseding a live locker in its commit window would silently kill
+   * it — checked BEFORE the successor is resolved, so a live locker is refused even when
+   * its replacement file is not yet materialized.
    */
-  supersede(id: string, name: string, path: string, note = ''): CommandResult {
+  supersede(id: string, successorId: string, artifactFile: string, note = ''): CommandResult<{ name: string; path: string }> {
     if (!this.store.ids().includes(id)) return fail('no-node', `no node ${id}`);
-    if (!existsSync(join(this.store.root, path))) return fail('no-successor', `successor path ${path} not found`);
     const status = this.store.status(id);
     if (!['done', 'failed', 'superseded'].includes(status)) {
       return fail(
@@ -363,8 +403,21 @@ export class Commands {
         `refusing to supersede ${id}: it is '${status}', not done — a 'superseded' event collapses a live node's status (core-design §3)`,
       );
     }
+    let successorNode: NodeDir;
     try {
-      this.store.appendEvent(id, {
+      successorNode = this.store.resolveNode(successorId);
+    } catch (e) {
+      return fail('no-successor-node', (e as Error).message);
+    }
+    const full = this.nodeArtifactFile(successorNode, artifactFile);
+    if (!full) {
+      return fail('outside-artifacts', `'${artifactFile}' is not a file inside ${successorId}/artifacts/ — the successor must be the node's own producer file (write confinement)`);
+    }
+    if (!existsSync(full)) return fail('no-successor', `successor file not found: ${successorId}/artifacts/${artifactFile}`);
+    const name = artifactNameOf(artifactFile);
+    const path = relative(this.store.root, full);
+    try {
+      this.store.appendEvent(this.store.resolveNode(id), {
         at: this.today,
         type: 'superseded',
         successor: { name, path },
@@ -373,7 +426,7 @@ export class Commands {
     } catch (e) {
       return fail('store-refused', (e as Error).message);
     }
-    return ok(undefined);
+    return ok({ name, path });
   }
 
   /* ══ READS — the derived views ══════════════════════════════════════════════ */

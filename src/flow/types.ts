@@ -42,11 +42,12 @@ export interface ProposeSpawnIntent {
   contract: unknown;
 }
 
-/** `superseded` on the OLD LOCKER's node — the ONLY cross-task write (AC-7). */
+/** `superseded` on the OLD LOCKER's node — the ONLY cross-task write (AC-7). The
+ *  successor is THIS task's own artifact file for `name` (derived by the translator,
+ *  never a caller-supplied path) — supersede! resolves it inside this task's node. */
 export interface SupersedeIntent {
   kind: 'supersede';
   name: string;
-  path: string;
   note?: string;
 }
 

@@ -136,32 +136,32 @@ describe('Store — appendEvent, the single writer (LB-3)', () => {
   it('rejects an unknown event type (vocab registry)', () => {
     writeNode('01-goal/01-a', {}, [ev('created')]);
     const s = new Store(root);
-    expect(() => s.appendEvent('01-goal/01-a', ev('bogus-type'))).toThrow(/known type|vocab/);
+    expect(() => s.appendEvent(s.resolveNode('01-goal/01-a'), ev('bogus-type'))).toThrow(/known type|vocab/);
   });
 
   it('rejects an event without at', () => {
     writeNode('01-goal/01-a', {}, [ev('created')]);
     const s = new Store(root);
-    expect(() => s.appendEvent('01-goal/01-a', { type: 'extended' } as never)).toThrow(/at/);
+    expect(() => s.appendEvent(s.resolveNode('01-goal/01-a'), { type: 'extended' } as never)).toThrow(/at/);
   });
 
   it('appends a valid event (tasks only — leg roots carry no events)', () => {
     writeNode('01-goal/01-a', {}, [ev('created')]);
     const s = new Store(root);
-    s.appendEvent('01-goal/01-a', ev('extended'));
+    s.appendEvent(s.resolveNode('01-goal/01-a'), ev('extended'));
     expect(s.events('01-goal/01-a').map((e) => e.type)).toEqual(['created', 'extended']);
   });
 
   it('enforces GATE-1: produced work requires confirmed(gate=grill) before it', () => {
     writeNode('01-goal/01-a', {}, [ev('created')]);
     const s = new Store(root);
-    expect(() => s.appendEvent('01-goal/01-a', ev('artifact-locked', { artifact: { name: 'x', path: 'x.md', lockSha: 'a' } }))).toThrow(/grill/);
+    expect(() => s.appendEvent(s.resolveNode('01-goal/01-a'), ev('artifact-locked', { artifact: { name: 'x', path: 'x.md', lockSha: 'a' } }))).toThrow(/grill/);
   });
 
   it('enforces GATE-2: completed requires confirmed(gate=confirm)', () => {
     writeNode('01-goal/01-a', {}, [ev('created'), ev('submitted', { gate: 'grill' }), ev('confirmed', { gate: 'grill' })]);
     const s = new Store(root);
-    expect(() => s.appendEvent('01-goal/01-a', ev('completed'))).toThrow(/confirm/);
+    expect(() => s.appendEvent(s.resolveNode('01-goal/01-a'), ev('completed'))).toThrow(/confirm/);
   });
 
   it('a submitted without a decision at a gate derives blocked (v8 §3 — a gate cannot be skipped silently)', () => {
@@ -212,12 +212,12 @@ describe('Store — appendEvent, the single writer (LB-3)', () => {
   it('the full honest sequence appends cleanly', () => {
     writeNode('01-goal/01-a', {}, [ev('created')]);
     const s = new Store(root);
-    s.appendEvent('01-goal/01-a', ev('submitted', { gate: 'grill' }));
-    s.appendEvent('01-goal/01-a', ev('confirmed', { gate: 'grill' }));
-    s.appendEvent('01-goal/01-a', ev('artifact-locked', { artifact: { name: 'x', path: 'x.md', lockSha: 'a' } }));
-    s.appendEvent('01-goal/01-a', ev('submitted', { gate: 'confirm' }));
-    s.appendEvent('01-goal/01-a', ev('confirmed', { gate: 'confirm' }));
-    s.appendEvent('01-goal/01-a', ev('completed'));
+    s.appendEvent(s.resolveNode('01-goal/01-a'), ev('submitted', { gate: 'grill' }));
+    s.appendEvent(s.resolveNode('01-goal/01-a'), ev('confirmed', { gate: 'grill' }));
+    s.appendEvent(s.resolveNode('01-goal/01-a'), ev('artifact-locked', { artifact: { name: 'x', path: 'x.md', lockSha: 'a' } }));
+    s.appendEvent(s.resolveNode('01-goal/01-a'), ev('submitted', { gate: 'confirm' }));
+    s.appendEvent(s.resolveNode('01-goal/01-a'), ev('confirmed', { gate: 'confirm' }));
+    s.appendEvent(s.resolveNode('01-goal/01-a'), ev('completed'));
     expect(s.status('01-goal/01-a')).toBe('done');
   });
 });
@@ -372,7 +372,7 @@ describe('Store — spawn (creation record + created event through the single wr
   it('appendEvent refuses events on leg roots (write path = the enforcement)', () => {
     const s = new Store(root);
     s.spawn('07-new-leg', { contract: { intent: 'x', acceptanceCriteria: ['a'] } });
-    expect(() => s.appendEvent('07-new-leg', ev('completed'))).toThrow(/leg roots carry no events/);
+    expect(() => s.appendEvent(s.resolveNode('07-new-leg'), ev('completed'))).toThrow(/leg roots carry no events/);
   });
 
   it('writes openQuestions as a TOP-LEVEL sibling of contract (format v14 §2)', () => {
@@ -389,6 +389,22 @@ describe('Store — spawn (creation record + created event through the single wr
     const s = new Store(root);
     s.spawn('01-goal/01-a', { contract: { intent: 'x', acceptanceCriteria: ['a'] } });
     expect(() => new Store(root).spawn('01-goal/01-a', {})).toThrow();
+  });
+
+  it('write confinement (AC-1): resolveNode mints the ONE id→folder mapping and refuses every escape', () => {
+    const s = new Store(root);
+    s.spawn('01-goal/01-a', { contract: { intent: 'x', acceptanceCriteria: ['a'] } });
+    // the canonical folder — the only target a writer may derive from
+    expect(s.resolveNode('01-goal/01-a').dir).toBe(join(root, '.ann', 'journey', 'legs', '01-goal', '01-a'));
+    expect(s.resolveNode('01-goal/01-a').id).toBe('01-goal/01-a');
+    // a nonexistent node is refused (the handle names an EXISTING node only)
+    expect(() => s.resolveNode('01-goal/zzz')).toThrow(/no node/);
+    // anything that would smuggle a write outside the legs root is refused at resolve,
+    // before any write — a caller cannot mint a handle for a folder it does not own
+    expect(() => s.resolveNode('..')).toThrow(/not a node under the store's legs root/);
+    expect(() => s.resolveNode('../escape')).toThrow(/not a node under the store's legs root/);
+    expect(() => s.resolveNode('01-goal/01-a/../..')).toThrow(/not a node under the store's legs root/); // normalizes to the legs root itself
+    expect(() => s.resolveNode('01-goal/01-a/../01-a')).toThrow(/no node/); // back under the root, but not an existing node
   });
 });
 
@@ -685,7 +701,8 @@ describe('Store — strict event schema (format v12 §3: unknown fields + shapes
 
   const s = () => new Store(root);
   const expectReject = (id: string, event: JourneyEvent, re: RegExp) => {
-    expect(() => s().appendEvent(id, event)).toThrow(re);
+    const store = s();
+    expect(() => store.appendEvent(store.resolveNode(id), event)).toThrow(re);
   };
 
   it('rejects an unknown top-level field on any event type', () => {
@@ -723,9 +740,9 @@ describe('Store — strict event schema (format v12 §3: unknown fields + shapes
   it('accepts the valid shapes the engine itself writes (dogfood)', () => {
     writeNode('06-engine-build/20-e', {}, [ev('created')]);
     const s2 = s();
-    s2.appendEvent('06-engine-build/20-e', { at: '2026-08-22', type: 'confirmed', gate: 'grill', note: 'ok', feedback: 'looks right' }); // GATE-1 first (G1 feedback)
-    s2.appendEvent('06-engine-build/20-e', { at: '2026-08-22', type: 'evidence', commits: [{ sha: 'abc1234', note: 'step' }], refs: ['src/x'], note: 'ok' });
-    s2.appendEvent('06-engine-build/20-e', { at: '2026-08-22', type: 'artifact-locked', artifact: { name: 'x', path: 'journey/legs/06-engine-build/20-e/artifacts/x.md', lockSha: 'abc', type: 'script', version: 1 }, note: 'ok' });
+    s2.appendEvent(s2.resolveNode('06-engine-build/20-e'), { at: '2026-08-22', type: 'confirmed', gate: 'grill', note: 'ok', feedback: 'looks right' }); // GATE-1 first (G1 feedback)
+    s2.appendEvent(s2.resolveNode('06-engine-build/20-e'), { at: '2026-08-22', type: 'evidence', commits: [{ sha: 'abc1234', note: 'step' }], refs: ['src/x'], note: 'ok' });
+    s2.appendEvent(s2.resolveNode('06-engine-build/20-e'), { at: '2026-08-22', type: 'artifact-locked', artifact: { name: 'x', path: 'journey/legs/06-engine-build/20-e/artifacts/x.md', lockSha: 'abc', type: 'script', version: 1 }, note: 'ok' });
     expect(s2.events('06-engine-build/20-e').length).toBe(4); // created + 3 valid
   });
 });
@@ -834,28 +851,28 @@ describe('Store — the write-rev ledger (store-external integrity)', () => {
     const s = new Store(root);
     s.spawn('01-leg/01-a', CONTRACT);
     appendFileSync(evPath('01-leg/01-a'), JSON.stringify(ev('extended', { note: 'hand-written' })) + '\n');
-    expect(() => s.appendEvent('01-leg/01-a', extended())).toThrow(/store-external edit on 01-leg\/01-a/);
+    expect(() => s.appendEvent(s.resolveNode('01-leg/01-a'), extended())).toThrow(/store-external edit on 01-leg\/01-a/);
   });
 
   it('refuses a write when node.json was changed outside the CLI', () => {
     const s = new Store(root);
     s.spawn('01-leg/01-a', CONTRACT);
     writeFileSync(join(nodeDir('01-leg/01-a'), 'node.json'), JSON.stringify({ id: '01-leg/01-a', contract: { intent: 'tampered' }, createdAt: '2026-08-20' }));
-    expect(() => s.appendEvent('01-leg/01-a', extended())).toThrow(/store-external edit on 01-leg\/01-a/);
+    expect(() => s.appendEvent(s.resolveNode('01-leg/01-a'), extended())).toThrow(/store-external edit on 01-leg\/01-a/);
   });
 
   it('a fixture node with no ledger entry writes cleanly and gains an entry', () => {
     writeNode('01-leg/01-a', {}, [ev('created')]);
     const s = new Store(root);
-    s.appendEvent('01-leg/01-a', extended());
+    s.appendEvent(s.resolveNode('01-leg/01-a'), extended());
     expect(readLedger().nodes['01-leg/01-a'].lastRev).toBeGreaterThan(0);
-    expect(() => s.appendEvent('01-leg/01-a', extended())).not.toThrow(); // disk now matches the ledger
+    expect(() => s.appendEvent(s.resolveNode('01-leg/01-a'), extended())).not.toThrow(); // disk now matches the ledger
   });
 
   it('verify classifies an external append with its onset bound and the differing line', () => {
     const s = new Store(root);
     s.spawn('01-leg/01-a', CONTRACT);
-    s.appendEvent('01-leg/01-a', extended());
+    s.appendEvent(s.resolveNode('01-leg/01-a'), extended());
     appendFileSync(evPath('01-leg/01-a'), JSON.stringify(ev('extended', { note: 'forged' })) + '\n');
     const d = drift('01-leg/01-a');
     expect(d).toContain('class=append');
@@ -867,7 +884,7 @@ describe('Store — the write-rev ledger (store-external integrity)', () => {
   it('verify classifies truncate, reorder and rewrite', () => {
     const s = new Store(root);
     s.spawn('01-leg/01-a', CONTRACT);
-    s.appendEvent('01-leg/01-a', extended());
+    s.appendEvent(s.resolveNode('01-leg/01-a'), extended());
     const twoLines = readFileSync(evPath('01-leg/01-a'), 'utf8');
     // truncate — one ann line gone
     writeFileSync(evPath('01-leg/01-a'), twoLines.split('\n')[0] + '\n');
@@ -905,7 +922,7 @@ describe('Store — the write-rev ledger (store-external integrity)', () => {
     new Store(root).spawn('01-leg/01-a', CONTRACT); // bootstrap a real ledger
     writeFileSync(LEDGER(), '{{{ not json');
     const s2 = new Store(root);
-    expect(() => s2.appendEvent('01-leg/01-a', extended())).toThrow(/ledger-corrupt/);
+    expect(() => s2.appendEvent(s2.resolveNode('01-leg/01-a'), extended())).toThrow(/ledger-corrupt/);
     expect(readFileSync(evPath('01-leg/01-a'), 'utf8')).not.toContain('more work'); // log untouched
     expect(new Store(root).verify().some((d) => d.includes('ledger-corrupt'))).toBe(true);
   });

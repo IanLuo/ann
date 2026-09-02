@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { join, relative, basename } from 'node:path';
 import { Commands, CommandError, CommandResult, LockedArtifact } from '../commands/index.js';
 import { blobSha, stripMarkers } from '../store/sha.js';
 import { JourneyEvent } from '../store/store.js';
@@ -101,7 +101,9 @@ export class IntentTranslator {
 
   private lockArtifact(step: Step, intent: LockArtifactIntent): CommandResult<undefined> {
     const type = intent.type ?? 'record';
-    const dir = join(this.commands.store.legs, this.taskId, 'artifacts');
+    // Write confinement (AC-2): the working file derives from the node's canonical
+    // folder (resolveNode) — never re-derived from a raw legs/ id join here.
+    const dir = join(this.commands.store.resolveNode(this.taskId).dir, 'artifacts');
     const file = join(dir, `${intent.name}.md`);
     let content: string;
     if (typeof intent.content === 'string') content = intent.content;
@@ -138,11 +140,22 @@ export class IntentTranslator {
     const current = this.commands.store.current(intent.name);
     if (!current) return fail('no-current', `nothing current for '${intent.name}' — there is nothing to supersede`);
     const locker = current.producer;
+    // The successor is THIS task's own artifact file for the same name (write
+    // confinement): the deferred lock's working file when one was materialized beside
+    // the supersede, else the canonical artifacts/<name>.md the flow would write. The
+    // supersede record never names a caller-supplied path — commands.supersede derives
+    // the successor path from resolveNode(this.taskId) + this file.
+    const deferred = this.deferred.locks.find((l) => l.name === intent.name);
+    const dir = join(this.commands.store.resolveNode(this.taskId).dir, 'artifacts');
+    const working = deferred ? deferred.workingPath : join(dir, `${intent.name}.md`);
+    const recordPath = relative(this.commands.store.root, working);
     const identical = this.commands
       .events(locker)
-      .some((e) => e.type === 'superseded' && e.successor?.name === intent.name && e.successor?.path === intent.path);
+      .some((e) => e.type === 'superseded' && e.successor?.name === intent.name && e.successor?.path === recordPath);
     if (identical) return ok(undefined); // no-op on the identical event
-    return this.commands.supersede(locker, intent.name, intent.path, intent.note ?? `superseded by ${this.taskId}`);
+    const r = this.commands.supersede(locker, this.taskId, basename(working), intent.note ?? `superseded by ${this.taskId}`);
+    if (!r.ok) return r;
+    return ok(undefined);
   }
 
   /* ── close — F-AC16 validated, then appended (deduped on the identical event) ── */
@@ -195,7 +208,9 @@ export class IntentTranslator {
     for (const l of this.deferred.locks) {
       const already = this.commands.store.current(l.name);
       if (already?.producer === this.taskId) continue; // idempotent on replay — already recorded
-      const r = this.commands.lock(this.taskId, l.name, { path: relative(this.commands.store.root, l.workingPath), type: l.type });
+      // Confinement (AC-3): the working file lives in this task's own artifacts/ dir —
+      // commit names its basename, and lock! resolves it there. No path string crosses.
+      const r = this.commands.lock(this.taskId, basename(l.workingPath), { type: l.type });
       if (!r.ok) return r;
       locked.push(r.value);
     }

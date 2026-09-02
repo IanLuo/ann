@@ -101,7 +101,7 @@ describe('e2e — the CLI binary', () => {
 
     // the deliverable: draft on disk, then lock! the producer's own file (thin record)
     writeDraft(root, TASK, 'thing', 'the actual deliverable\n');
-    expect(out(cli(root, ['lock!', TASK, 'thing', '.ann/journey/legs/01-leg/01-a/artifacts/thing.md', 'spec']))).toContain('locked thing @');
+    expect(out(cli(root, ['lock!', TASK, 'thing.md', 'spec']))).toContain('locked thing @');
     // the thin model records the producer's own file — NO docs/<name>-v<N>.md symlink appears
     expect(existsSync(join(root, '.ann', 'docs', 'specs', 'thing-v1.md'))).toBe(false);
     expect(out(cli(root, ['read', 'thing']))).toContain('the actual deliverable');
@@ -137,12 +137,15 @@ describe('e2e — the CLI binary', () => {
     expect(out(cli(root, ['append!', TASK, EVENT('confirmed', { gate: 'grill' })]))).toContain('composite-owned');
 
     // lock! requires a decided grill gate (the store's gateProblems refuse the write). With
-    // the grill confirmed the gate gap surfaces first; a lock path that does not exist is
-    // refused outright — the thin model has no working-file auto-resolution.
+    // the grill confirmed the gate gap surfaces first; the caller names an artifacts-relative
+    // FILE (write confinement) — no free path.
     writeDraft(root, TASK, 'thing', 'x\n');
-    expect(out(cli(root, ['lock!', TASK, 'thing', '.ann/journey/legs/01-leg/01-a/artifacts/thing.md', 'spec']))).toContain('GATE-1 GAP');
+    expect(out(cli(root, ['lock!', TASK, 'thing.md', 'spec']))).toContain('GATE-1 GAP');
     cli(root, ['spawn!', '01-leg/02-a', CONTRACT('x')]);
-    expect(out(cli(root, ['lock!', '01-leg/02-a', 'thing', 'nowhere/thing.md']))).toContain('no-file');
+    // write confinement (AC-5): an out-of-folder target is refused before any file check,
+    // and a file that does not exist inside artifacts/ is refused outright (no-file)
+    expect(out(cli(root, ['lock!', '01-leg/02-a', '../escape.md']))).toContain('outside-artifacts');
+    expect(out(cli(root, ['lock!', '01-leg/02-a', 'ghost.md']))).toContain('no-file');
 
     // gate! validates its decision vocabulary
     expect(cli(root, ['gate!', TASK, 'grill', 'maybe']).code).toBe(2);

@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync, appendFileSync, existsSync, statSync, lstatSync, mkdirSync, writeFileSync, renameSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { join, basename } from 'node:path';
+import { join, basename, resolve, sep } from 'node:path';
 import { getVOCAB } from './vocab.js';
 import { blobSha, stripMarkers } from './sha.js';
 
@@ -14,6 +14,23 @@ export interface JourneyEvent {
   target?: string;
   feedback?: string;
   [key: string]: unknown;
+}
+
+/** Write-confinement handle (AC-1): the canonical folder for ONE node id — the only
+ *  id→folder mapping. Opaque: external code can read `.id`/`.dir` but cannot construct
+ *  a NodeDir from an arbitrary path string, so a write path can only ever derive from
+ *  the node a command addresses (never from a caller-supplied path). Only
+ *  `Store.resolveNode` (and `spawn`, for its own new node) mints handles. */
+export interface NodeDir {
+  readonly id: string;
+  /** The canonical folder — `<store root>/.ann/journey/legs/<id>`. */
+  readonly dir: string;
+}
+
+/** Module-private implementation — NOT exported, which is what makes the handle
+ *  opaque. A caller that wants a NodeDir has to ask the store for one. */
+class NodeDirImpl implements NodeDir {
+  constructor(readonly id: string, readonly dir: string) {}
 }
 
 interface NodeEntry {
@@ -138,6 +155,30 @@ export class Store {
     this.root = root;
     this.legs = join(root, '.ann', 'journey', 'legs'); // v12 layout: all ann files under .ann/
     this.load();
+  }
+
+  /** Write confinement (AC-1): resolve a node id to its canonical folder under the
+   *  legs root — THE id→folder mapping. Writers take the returned handle and derive
+   *  their file paths as `join(node.dir, <fixed relative>)`; they never re-derive a
+   *  path from an id, and a caller never passes a path string at all. Refuses (throws)
+   *  anything that is not an existing node under the store's legs root. */
+  resolveNode(id: string): NodeDir {
+    const dir = this.nodeFolder(id);
+    if (!this.nodes.has(id)) throw new Error(`resolveNode rejected: no node ${id}`);
+    return new NodeDirImpl(id, dir);
+  }
+
+  /** Normalize an id to its folder under the legs root, refusing (throw) anything
+   *  that does not stay under it — a `.`/`..`/separator smuggling an id outside the
+   *  store's own tree is caught here, not at the write. Shared by resolveNode (an
+   *  existing node) and spawn (a NEW node not yet in the map). */
+  private nodeFolder(id: string): string {
+    const legsRoot = resolve(this.legs);
+    const dir = resolve(legsRoot, id);
+    if (dir === legsRoot || !dir.startsWith(legsRoot + sep)) {
+      throw new Error(`resolveNode rejected: '${id}' is not a node under the store's legs root (${this.legs})`);
+    }
+    return dir;
   }
 
   private walk(dir: string, acc: string[] = [], file: string): string[] {
@@ -553,32 +594,36 @@ export class Store {
   /**
    * THE single write path (LB-3): validate schema against the vocab registry,
    * gate-check the prospective log, append only when clean — fail-closed.
+   *
+   * Write confinement (AC-2): the event goes to the ADDRESSED node only — the handle
+   * mints the one write target (`join(node.dir, 'events.jsonl')`), so a caller can
+   * never aim an append at a sibling, a parent, or the store root.
    */
-  appendEvent(id: string, event: JourneyEvent): void {
-    if (!id.includes('/')) {
+  appendEvent(node: NodeDir, event: JourneyEvent): void {
+    if (!node.id.includes('/')) {
       throw new Error(`append rejected: leg roots carry no events (v8 §3) — record process facts on tasks`);
     }
     if (!event.at || !event.type || !getVOCAB().eventTypes.includes(event.type)) {
       throw new Error(`append rejected: bad schema (at + known type required, got ${event.type})`);
     }
     this.validateEventShape(event); // strict schema (format v12 §3): unknown fields + shapes rejected
-    const node = this.nodes.get(id);
-    if (!node) throw new Error(`append rejected: no node ${id}`);
+    const entry = this.nodes.get(node.id);
+    if (!entry) throw new Error(`append rejected: no node ${node.id}`);
     // The ledger guard — fail-closed, AFTER schema (a bad incoming event still gets its
     // schema error) but BEFORE gate work (ann never computes gates over a store state it
     // does not recognize). If the on-disk node diverged from what ann last wrote, the
     // write is refused and the ledger never advances past the external edit (no masking).
-    const drift = this.ledgerDivergence(id);
+    const drift = this.ledgerDivergence(node.id);
     this.assertLedgerReadable(); // before any data write — an unreadable ledger refuses everything
     if (drift) {
-      throw new StoreExternalEditError(`append rejected: store-external edit on ${id} — ${drift}. Run 'ann verify' to diff; ann never writes on a state it does not recognize.`);
+      throw new StoreExternalEditError(`append rejected: store-external edit on ${node.id} — ${drift}. Run 'ann verify' to diff; ann never writes on a state it does not recognize.`);
     }
-    const prospective = [...node.events, event];
-    const gaps = this.gateProblems(id, prospective);
+    const prospective = [...entry.events, event];
+    const gaps = this.gateProblems(node.id, prospective);
     if (gaps.length) throw new Error(gaps.join('\n'));
-    appendFileSync(join(this.legs, id, 'events.jsonl'), JSON.stringify(event) + '\n');
-    node.events = prospective;
-    this.recordWrite(id);
+    appendFileSync(join(node.dir, 'events.jsonl'), JSON.stringify(event) + '\n');
+    entry.events = prospective;
+    this.recordWrite(node.id);
   }
 
   /* ══ THE STORE WRITE-REV LEDGER (.ann/journey/.ledger.json) — the store-external
@@ -795,7 +840,10 @@ export class Store {
     // field — lift it out wherever the caller put it (the packet assembler reads it there).
     const { openQuestions: nested, ...contractFields } = c;
     const openQuestions = raw.openQuestions ?? nested;
-    const dir = join(this.legs, id);
+    // Write confinement (AC-1/AC-2): the folder derives from the store's own legs
+    // root (nodeFolder normalizes + refuses an escape), and the `created` event flows
+    // through the single writer on a handle — spawn itself never joins a raw id+path.
+    const dir = this.nodeFolder(id);
     mkdirSync(join(dir, 'artifacts'), { recursive: true });
     const nodeJson =
       JSON.stringify(
@@ -803,10 +851,10 @@ export class Store {
         null,
         2,
       ) + '\n';
-    writeFileSync(join(this.legs, id, 'node.json'), nodeJson);
+    writeFileSync(join(dir, 'node.json'), nodeJson);
     this.nodes.set(id, { id, events: [] });
     if (id.includes('/')) {
-      this.appendEvent(id, { at: new Date().toISOString().slice(0, 10), type: 'created', note: `spawned by bookkeeper (${who})` });
+      this.appendEvent(new NodeDirImpl(id, dir), { at: new Date().toISOString().slice(0, 10), type: 'created', note: `spawned by bookkeeper (${who})` });
     }
     // record the exact bytes ann wrote — the ledger never re-reads node.json on spawn
     this.recordWrite(id, nodeJson);
