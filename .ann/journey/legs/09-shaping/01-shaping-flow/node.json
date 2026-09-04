@@ -1,0 +1,25 @@
+{
+  "id": "09-shaping/01-shaping-flow",
+  "contract": {
+    "intent": "Make the shaping phase concrete in the flow: name the idea-to-plan phase shaping (spec remains the name of the final document only), and make depth conditional on the grill so a solid small/clear idea runs straight to a light spec without a vision step, while a full vision still runs for genuinely ambiguous ideas.",
+    "acceptanceCriteria": [
+      "Naming: the definition side of the flow is called shaping in the chain template, generated docs, and companion guide; nothing calls the whole phase specs; the final document is still called spec",
+      "Depth routing: a solid low-ambiguity idea runs without a vision step (test: no vision artifact is produced for that case)",
+      "Full path preserved: an ambiguous idea still produces vision then spec (test)",
+      "Proportionate interaction: the grill gathers the depth signal and any open questions in a bounded batched session; the human never re-authors a prior artifact",
+      "Proven green: suite passes; check and verify hold at the accepted baselines; the conditional path is expressed in the flow chain data, not hard-coded per step"
+    ],
+    "targetAreas": [
+      "rules/flow/default.json",
+      "src/flow/steps",
+      "companion guide"
+    ],
+    "requiredInputs": [],
+    "expectedOutputs": [
+      "conditional chain (vision optional by grill verdict)",
+      "shaping naming reconciled",
+      "tests for both depth paths"
+    ]
+  },
+  "createdAt": "2026-09-04"
+}

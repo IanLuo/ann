@@ -1,0 +1,26 @@
+{
+  "id": "09-shaping",
+  "contract": {
+    "intent": "Make the shaping phase a real, proportionate product: the phase that turns an idea into a validated, grounded plan is named and built out as shaping. Depth is decided by the grill (small clear ideas skip the vision), and the interactive session gathers enough with a paced, human experience. This leg turns the decided shaping model into working flow + tests and documents the phase so the look-back reads it as part of how ann operates.",
+    "acceptanceCriteria": [
+      "Shaping is the name of the idea-to-plan phase wherever the flow is described; spec names only the final document",
+      "Depth is conditional: the grill decides whether the vision runs; a small/clear solid idea reaches a light spec without a vision (tested)",
+      "The full path still exists for ambiguous ideas: vision then spec (tested)",
+      "The grill session gathers the depth signal and open questions in a bounded, batched dialogue; the human never re-authors a prior artifact",
+      "ann check and verify hold at the accepted baselines and the leg is managed through ann with rationale at its gates"
+    ],
+    "targetAreas": [
+      "rules/flow",
+      "src/flow",
+      "companion guide / generated docs"
+    ],
+    "requiredInputs": [],
+    "expectedOutputs": [
+      "conditional shaping chain (vision optional by grill)",
+      "shaping naming reconciled across flow data + docs",
+      "proportionate grill-depth interaction",
+      "tests + evidence + committed leg"
+    ]
+  },
+  "createdAt": "2026-09-04"
+}

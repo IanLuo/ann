@@ -1,0 +1,3 @@
+{"at":"2026-09-04","type":"created","note":"spawned by bookkeeper (agent)"}
+{"at":"2026-09-04","type":"submitted","gate":"grill","note":"submitted for the grill gate (agent)"}
+{"at":"2026-09-04","type":"confirmed","gate":"grill","feedback":"grilled accept: shaping naming + grill-decides-depth is the decided model; sub-questions (light spec shape, depth signal) resolve inside the task shaping","note":"accepted (agent)"}
