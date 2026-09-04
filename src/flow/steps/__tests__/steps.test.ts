@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store } from '../../../store/store.js';
@@ -36,31 +36,36 @@ function setup(): Commands {
     writeFileSync(join(dir, 'node.json'), JSON.stringify({ id, contract, createdAt: '2026-08-27' }));
     if (events.length) writeFileSync(join(dir, 'events.jsonl'), events.map((e) => JSON.stringify(e)).join('\n') + '\n');
   }
-  // THE PROJECT'S OWN CHAIN SHAPE — grill-bound validator, then envision, then spec
+  // THE PROJECT'S OWN CHAIN SHAPE (shaping, v4) — grill-bound validator whose verdict
+  // carries the depth, then a CONDITIONAL envision (only when ambiguous), then spec
   mkdirSync(join(root, '.ann', 'rules', 'flow'), { recursive: true });
   writeFileSync(
     join(root, '.ann', 'rules', 'flow', 'default.json'),
     JSON.stringify({
       chains: {
         default: [
-          { id: 'idea-validate', at: 'grill', verdict: { solid: { gate: 'accept' }, revise: { gate: 'reject', feedback: 'sharpen the idea' }, reject: { gate: 'reject', feedback: 'the idea was rejected' } } },
-          { id: 'envision' },
+          { id: 'idea-validate', at: 'grill', verdict: { clear: { gate: 'accept' }, ambiguous: { gate: 'accept' }, revise: { gate: 'reject', feedback: 'sharpen the idea' }, reject: { gate: 'reject', feedback: 'the idea was rejected' } } },
+          { id: 'envision', when: { verdict: { step: 'idea-validate', decision: 'ambiguous' } } },
           { id: 'spec', inputs: { vision: 'envision' } },
         ],
       },
     }),
   );
+  // the conditional chain needs flow.conditionals enabled (project registry)
+  mkdirSync(join(root, '.ann', 'rules', 'config'), { recursive: true });
+  writeFileSync(join(root, '.ann', 'rules', 'config', 'default.json'), JSON.stringify({ flow: { conditionals: true } }));
   return new Commands(new Store(root), 'test');
 }
 afterEach(() => rmSync(root, { recursive: true, force: true }));
 
 /** A fake human. The frame's OWN gate question is answered `accept`; the validation
- *  session's verdict question gets the scripted verdict. Two distinct decisions on one
- *  channel — which is exactly the shape the real chain has. */
+ *  session's solidness question gets the scripted verdict; the session's DEPTH question
+ *  (shaping) gets the scripted route. Three distinct decisions on one channel — which is
+ *  exactly the shape the real chain has. */
 class Human implements InteractAbility {
   readonly asked: string[] = [];
   readonly decided: string[] = [];
-  constructor(private readonly verdict = 'solid') {}
+  constructor(private readonly verdict = 'solid', private readonly route: 'vision' | 'light' = 'vision') {}
   async present() {}
   async ask(q: string) {
     this.asked.push(q);
@@ -71,7 +76,9 @@ class Human implements InteractAbility {
   }
   async decide(q: string, _o: string[]) {
     this.decided.push(q);
-    return q.startsWith('decide gate') ? 'accept' : this.verdict;
+    if (q.startsWith('decide gate')) return 'accept';
+    if (q.includes('solid enough to proceed')) return this.verdict;
+    return this.route; // the depth decide — vision or light
   }
 }
 
@@ -102,10 +109,10 @@ const runFrame = (c: Commands, human: Human) => {
 
 const artifact = (name: string) => readFileSync(join(root, '.ann', 'journey', 'legs', TASK, 'artifacts', `${name}.md`), 'utf8');
 
-describe('the real chain: idea-validate@grill → envision → spec', () => {
-  it("takes the grill gate from the validator's verdict, binds the vision by ROLE, and locks all three at commit", async () => {
+describe('the real shaping chain: idea-validate@grill → [vision] → spec', () => {
+  it("an AMBIGUOUS idea routes the full path: vision runs, its claims reach the spec by ROLE, and all three lock at commit", async () => {
     const c = setup();
-    const human = new Human('solid');
+    const human = new Human('solid', 'vision');
     const { r, prompts } = await runFrame(c, human);
 
     expect(r.problems).toEqual([]);
@@ -137,6 +144,41 @@ describe('the real chain: idea-validate@grill → envision → spec', () => {
     // MEANS for the gate; the step says why it reached it
     expect(rejects[0].feedback).toContain('The idea as validated');
     expect(rejects[0].feedback).not.toBe('sharpen the idea');
+  });
+});
+
+describe('depth routing (shaping AC-2/AC-3) — the vision is CONDITIONAL on the grill verdict', () => {
+  it('a CLEAR solid idea (route: light) runs straight to a LIGHT spec — NO vision runs, NO vision artifact', async () => {
+    const c = setup();
+    const human = new Human('solid', 'light');
+    const { r, prompts } = await runFrame(c, human);
+
+    expect(r.problems).toEqual([]);
+    expect(r.stop).toBe('completed');
+    expect(r.outcomes.find((o) => o.step === 'envision')?.ran).toBe(false); // skipped
+    // the skip is RECORDED as a frame-phase trace
+    const skips = c.events(TASK).map((e) => e.trace as { kind?: string; stepId?: string; condition?: string } | undefined).filter((t) => t?.kind === 'skip');
+    expect(skips).toContainEqual({ kind: 'skip', stepId: 'envision', condition: 'verdict:idea-validate=ambiguous', evaluated: false });
+    // the light path locked idea-validation + spec only — the vision NEVER ran (its
+    // prompt was never asked) and no vision artifact exists
+    expect(r.committed?.locked.map((l) => l.name).sort()).toEqual(['idea-validation', 'spec']);
+    expect(prompts.some((p) => p.includes('envision engine'))).toBe(false); // no VISION completion
+    expect(prompts.find((p) => p.includes('spec-expansion step'))).toContain('no vision bound');
+    // the spec still locked a real (light) document
+    expect(artifact('spec')).toContain(SPEC);
+    expect(existsSync(join(root, '.ann', 'journey', 'legs', TASK, 'artifacts', 'vision.md'))).toBe(false);
+  });
+
+  it('an AMBIGUOUS solid idea (route: vision) still runs vision then spec (the full path survives)', async () => {
+    const c = setup();
+    const { r, prompts } = await runFrame(c, new Human('solid', 'vision'));
+    expect(r.problems).toEqual([]);
+    expect(r.stop).toBe('completed');
+    expect(r.outcomes.find((o) => o.step === 'envision')?.ran).toBe(true);
+    expect(r.committed?.locked.map((l) => l.name).sort()).toEqual(['idea-validation', 'spec', 'vision']);
+    expect(existsSync(join(root, '.ann', 'journey', 'legs', TASK, 'artifacts', 'vision.md'))).toBe(true);
+    // the spec prompt still carries the vision claims (role-bound)
+    expect(prompts.find((p) => p.includes('spec-expansion step'))).toContain('The user runs it');
   });
 });
 

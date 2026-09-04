@@ -15,8 +15,10 @@ import {
  *
  * Helps the builder imagine USAGE (who uses it, scenarios, flows) and LOOK (surface /
  * key elements) → a product-vision artifact (usage + look). Batch-asks vision questions
- * at the end (flow-control v6 §7). Chain effect: detailed specs (F9, S5) spawn after —
- * the vision artifact is the spec step's input.
+ * at the end (flow-control v6 §7). SHAPING DEPTH: the engine is CONDITIONAL — the grill
+ * runs it only when it routes the idea ambiguous; on the clear route it is skipped and a
+ * light spec (F9) is produced directly. When it runs, the vision artifact is the spec
+ * step's input.
  *
  * Honesty invariants (design §4/§6, task AC-3/AC-4 — same honesty layer as grilling):
  *  - every usage/look claim carries provenance: cited `basis` labels must exist in the

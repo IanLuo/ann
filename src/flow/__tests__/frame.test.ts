@@ -299,6 +299,48 @@ describe('conditional execution (flow.conditionals)', () => {
     const skips = c.events(TASK).map((e) => e.trace as { kind?: string; stepId?: string } | undefined).filter((t) => t?.kind === 'skip');
     expect(skips).toEqual([{ kind: 'skip', stepId: 'spec', condition: 'verdict:envision=go', evaluated: false }]);
   });
+
+  it('a `when` may reference the GRILL step that DECIDED the gate — its verdict reaches execute (depth routing)', async () => {
+    // idea-validate is grill-bound; an execute step is conditional on its depth verdict.
+    // Before the gate-outcome seed, produced held only execute steps, so this always skipped.
+    const config = () => {
+      const c = setup();
+      mkdirSync(join(root, '.ann', 'rules', 'config'), { recursive: true });
+      writeFileSync(join(root, '.ann', 'rules', 'config', 'default.json'), JSON.stringify({ flow: { conditionals: true } }));
+      return c;
+    };
+    const grill = (decision: string) =>
+      mkStep('idea-validate', {
+        decisions: ['clear', 'ambiguous'],
+        out: () => ({ ok: true, artifact: 'grilled', verdict: { decision }, intents: [{ kind: 'lock-artifact', name: 'validation', content: '# v\n', type: 'validation' }] }),
+      });
+
+    // CLEAR verdict → the conditional step does NOT run
+    const c1 = config();
+    chainFile([
+      { id: 'idea-validate', at: 'grill', verdict: { clear: { gate: 'accept' }, ambiguous: { gate: 'accept' } } },
+      { id: 'envision', when: { verdict: { step: 'idea-validate', decision: 'ambiguous' } } },
+    ]);
+    let ran1 = 0;
+    const env1 = mkStep('envision', { out: () => { ran1++; return { ok: true, artifact: 'a' }; } });
+    const r1 = await run(c1, [grill('clear'), env1], new ScriptedInteract(['accept']));
+    expect(r1.stop).toBe('completed');
+    expect(ran1).toBe(0); // skipped
+    expect(r1.outcomes.find((o) => o.step === 'envision')?.ran).toBe(false);
+
+    // AMBIGUOUS verdict → the same conditional step DOES run
+    const c2 = config();
+    chainFile([
+      { id: 'idea-validate', at: 'grill', verdict: { clear: { gate: 'accept' }, ambiguous: { gate: 'accept' } } },
+      { id: 'envision', when: { verdict: { step: 'idea-validate', decision: 'ambiguous' } } },
+    ]);
+    let ran2 = 0;
+    const env2 = mkStep('envision', { out: () => { ran2++; return { ok: true, artifact: 'a' }; } });
+    const r2 = await run(c2, [grill('ambiguous'), env2], new ScriptedInteract(['accept']));
+    expect(r2.stop).toBe('completed');
+    expect(ran2).toBe(1); // ran
+    expect(r2.outcomes.find((o) => o.step === 'envision')?.ran).toBe(true);
+  });
 });
 
 describe('the runner reviewer (S6) IS the verify phase (architecture-v3 §76)', () => {

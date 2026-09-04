@@ -7,10 +7,12 @@ import { IdeaValidationSession } from '../session.js';
  *  which is a departure to record, not a blank answer to infer from. */
 class ScriptedInteractor implements InteractAbility {
   readonly presented: string[] = [];
+  readonly decidedQuestions: string[] = [];
   constructor(
     private readonly answers: string[] = [],
     private readonly findings: ResearchFinding[] = [],
     private readonly decision: string = 'solid',
+    private readonly decisions: string[] = [],
   ) {}
   async present(text: string) {
     this.presented.push(text);
@@ -23,8 +25,10 @@ class ScriptedInteractor implements InteractAbility {
   async research(_topics: string[]): Promise<ResearchFinding[]> {
     return this.findings;
   }
-  async decide(_question: string, _options: string[]): Promise<string> {
-    return this.decision;
+  async decide(question: string, _options: string[]): Promise<string> {
+    this.decidedQuestions.push(question);
+    const d = this.decisions.shift();
+    return d !== undefined ? d : this.decision;
   }
 }
 
@@ -179,6 +183,53 @@ describe('IdeaValidationSession (flow-1 validate — interactive idea validator)
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.rounds).toBe(1); // resolved in round 1 — no re-ask
+  });
+});
+
+describe('the depth signal (shaping) — one extra bounded decide, only on a solid verdict', () => {
+  it('a clean solid idea recommends LIGHT; the human routing decides needsVision and the doc records the depth', async () => {
+    const { llm } = fakeLlm([cleanGrill()]);
+    const interact = new ScriptedInteractor([], [], 'solid', ['solid', 'light']);
+    const r = await session(llm, interact).run(base());
+
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.doc.verdict).toBe('solid');
+    expect(r.doc.needsVision).toBe(false); // route light
+    // exactly two decisions in the SAME final read: solidness, then the depth route
+    expect(interact.decidedQuestions.length).toBe(2);
+    expect(interact.decidedQuestions[1]).toContain('recommendation: light');
+    expect(r.doc.markdown).toContain('**Depth: light — no vision, spec directly**');
+    // the guidance never names a step the light route will skip
+    expect(r.doc.guidance.some((g) => g.includes('Vision must cover'))).toBe(false);
+  });
+
+  it('an ambiguous solid idea recommends VISION and the doc names the full depth', async () => {
+    // a high-impact question the human cannot resolve stays OPEN → the depth recommends vision
+    const { llm } = fakeLlm([highQuestionGrill()]);
+    const interact = new ScriptedInteractor(['unknown'], [], 'solid', ['solid', 'vision']);
+    const r = await session(llm, interact).run({ ...base(), maxRounds: 3 });
+
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.doc.verdict).toBe('solid');
+    expect(r.doc.remainingUnknowns.some((q) => q.impact === 'high')).toBe(true);
+    expect(r.doc.needsVision).toBe(true); // the open question needs the vision to resolve
+    expect(interact.decidedQuestions[1]).toContain('recommendation: vision');
+    expect(r.doc.markdown).toContain('**Depth: full — a product vision runs before the spec**');
+    expect(r.doc.guidance.some((g) => g.includes('Vision must cover') || g.includes('RESOLVE BEFORE SPEC'))).toBe(true);
+  });
+
+  it('the depth decide is NOT asked on a revise/reject verdict — no route to gather', async () => {
+    const { llm } = fakeLlm([cleanGrill()]);
+    const interact = new ScriptedInteractor([], [], 'solid', ['revise']);
+    const r = await session(llm, interact).run(base());
+
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.doc.verdict).toBe('revise');
+    expect(r.doc.needsVision).toBe(false); // meaningless off the solid path
+    expect(interact.decidedQuestions.length).toBe(1); // only the solidness decide
   });
 });
 

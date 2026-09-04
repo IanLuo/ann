@@ -44,6 +44,10 @@ export interface IdeaValidationDoc {
   verdict: IdeaVerdict;
   /** What the session recommended vs what the human decided. */
   recommendation: IdeaVerdict;
+  /** THE DEPTH SIGNAL (shaping): whether the following work should run a vision before
+   *  the spec. Only meaningful when verdict === 'solid' — a clear idea (false) reaches a
+   *  light spec with no vision; an ambiguous idea (true) runs vision then spec. */
+  needsVision: boolean;
   idea: string;
   summary: string;
   /** Provenance-labeled (each carries basis/sourceType — the grilling honesty layer). */
@@ -53,7 +57,7 @@ export interface IdeaValidationDoc {
   researchLog: ResearchFinding[];
   /** Asked and still open — high-impact ones must be resolved before the spec step. */
   remainingUnknowns: GrillQuestion[];
-  /** What the following work (envision/spec) must cover; non-negotiables. */
+  /** What the following work (vision/spec) must cover; non-negotiables. */
   guidance: string[];
   /** The renderable artifact (locked as the doc file). */
   markdown: string;
@@ -177,23 +181,39 @@ ${read}`);
   ): Promise<SessionResult> {
     const remaining: GrillQuestion[] = pending.filter((q) => !resolved.some((r) => r.question === q.question));
     let verdict: IdeaVerdict = recommendation;
+    let needsVision = false;
     try {
       await this.abilities.interact.present(`── Idea validation — final read ──
 ${this.renderRead(artifact, rounds, true)}`);
       const choice = await this.abilities.interact.decide(`Is the idea solid enough to proceed? (recommendation: ${recommendation})`, ['solid', 'revise', 'reject']);
       if (['solid', 'revise', 'reject'].includes(choice)) verdict = choice as IdeaVerdict;
+      // THE DEPTH DECIDE — bounded: one extra decision in the SAME final read, only on a
+      // solid idea (revise/reject re-obtain the gate with no depth to route). It turns
+      // what the session learned into the route the chain branches on.
+      if (verdict === 'solid') {
+        const recVision = remaining.some((q) => q.impact === 'high' || q.impact === 'medium');
+        const route = await this.abilities.interact.decide(
+          `Depth (shaping): does this solid idea still need a product VISION first, or is it clear enough to spec directly? (recommendation: ${recVision ? 'vision' : 'light'})`,
+          ['vision', 'light'],
+        );
+        needsVision = route === 'vision' ? true : route === 'light' ? false : recVision;
+      }
     } catch (e) {
       if (e instanceof InteractAbort) verdict = 'reject'; // honest record — the human walked away
     }
-    const doc = this.renderDoc({ verdict, recommendation, idea: opts.idea.trim(), summary: artifact?.summary ?? '', validatedAssumptions: (artifact?.validation ?? []).filter((v) => v.verdict === 'ok'), resolvedQuestions: resolved, risks: (artifact?.validation ?? []).filter((v) => v.verdict !== 'ok'), researchLog, remainingUnknowns: remaining, guidance: this.guidance(artifact, resolved, remaining, opts.constraints) });
+    const doc = this.renderDoc({ verdict, recommendation, needsVision, idea: opts.idea.trim(), summary: artifact?.summary ?? '', validatedAssumptions: (artifact?.validation ?? []).filter((v) => v.verdict === 'ok'), resolvedQuestions: resolved, risks: (artifact?.validation ?? []).filter((v) => v.verdict !== 'ok'), researchLog, remainingUnknowns: remaining, guidance: this.guidance(artifact, resolved, remaining, needsVision, opts.constraints) });
     return { ok: true, doc, rounds, usage };
   }
 
-  /** Deterministic guidance for the following work — provenance-clear, never invented. */
+  /** Deterministic guidance for the following work — provenance-clear, never invented.
+   *  Route-aware: on the vision path the vision must cover what remains open; on the
+   *  light path (no vision) the spec absorbs it — the guidance never names a step the
+   *  depth-route will skip. */
   private guidance(
     artifact: import('./grilling.js').GrillingArtifact | undefined,
     resolved: ResolvedQuestion[],
     remaining: GrillQuestion[],
+    needsVision: boolean,
     constraints?: string[],
   ): string[] {
     const g: string[] = [];
@@ -202,7 +222,7 @@ ${this.renderRead(artifact, rounds, true)}`);
     const blocking = (artifact?.validation ?? []).filter((v) => v.verdict === 'blocking');
     if (blocking.length) g.push(`Blocking concerns to resolve before building: ${blocking.map((b) => b.claim).join('; ')}`);
     const med = remaining.filter((q) => q.impact !== 'high');
-    if (med.length) g.push(`Envision must cover: ${med.map((q) => q.question).join('; ')}`);
+    if (med.length) g.push(`${needsVision ? 'Vision must cover' : 'Spec must cover (no vision — a light spec absorbs these)'}: ${med.map((q) => q.question).join('; ')}`);
     if (remaining.some((q) => q.impact === 'high')) g.push(`RESOLVE BEFORE SPEC (high-impact unknowns): ${remaining.filter((q) => q.impact === 'high').map((q) => q.question).join('; ')}`);
     const grounded = (artifact?.validation ?? []).filter((v) => v.basis.length > 0);
     if (grounded.length) g.push(`Spec must ground on: ${grounded.map((v) => v.claim).join('; ')}`);
@@ -229,6 +249,7 @@ ${this.renderRead(artifact, rounds, true)}`);
       `# Idea Validation Doc`,
       ``,
       `**Verdict: ${d.verdict}** (session recommendation: ${d.recommendation})`,
+      ...(d.verdict === 'solid' ? [`**Depth: ${d.needsVision ? 'full — a product vision runs before the spec' : 'light — no vision, spec directly'}**`] : []),
       ``,
       `## The idea`,
       d.idea,

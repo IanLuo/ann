@@ -3,20 +3,21 @@
   "version": 3,
   "category": "flow",
   "kind": "registry",
-  "definition": "the project's step-chain flow config — DATA, not code (requirements-spec AC-3, flow-control-spec v6 §7, core-design §6). chains maps a WORK TYPE to its chain ENTRIES; a task's contract.workType selects it, 'default' applies otherwise; an EMPTY chain = the task runs the lifecycle only (execution tasks — the runner does the work, outcomes arrive as observed evidence commits). A task's contract.flow overrides all. v3: an entry is {id, inputs?: {role → source}, params?, at?: 'grill'|'confirm'|'execute', verdict?: {decision → {gate, feedback?}}, when?} — the GATE SOURCE is data, the gate set and positions are not. A bare string id is the short form of {id}. The engine reads this file and never overrides it; the builtin fallback is the EMPTY chain.",
-  "template": "idea → idea-validate → envision → detailed specs → continue (beginning build / planning); execution tasks run the lifecycle (work-type chains)",
+  "definition": "the project's step-chain flow config — DATA, not code (requirements-spec AC-3, flow-control-spec v6 §7, core-design §6). chains maps a WORK TYPE to its chain ENTRIES; a task's contract.workType selects it, 'default' applies otherwise; an EMPTY chain = the task runs the lifecycle only (execution tasks — the runner does the work, outcomes arrive as observed evidence commits). A task's contract.flow overrides all. v3: an entry is {id, inputs?: {role → source}, params?, at?: 'grill'|'confirm'|'execute', verdict?: {decision → {gate, feedback?}}, when?} — the GATE SOURCE is data, the gate set and positions are not. A bare string id is the short form of {id}. The engine reads this file and never overrides it; the builtin fallback is the EMPTY chain. v4 (shaping): the idea→spec phase is SHAPING; the default chain is CONDITIONAL — the grill's verdict carries the depth (clear vs ambiguous, both accept; revise/reject reject), so a small/clear solid idea skips the vision and runs straight to a light spec, while an ambiguous idea still runs vision then spec. Requires flow.conditionals: true (set in rules/config/default.json).",
+  "template": "shaping: idea → idea-validate (grill) → [vision when the grill deems the idea ambiguous] → spec — depth is the grill's call, so a clear idea reaches a light spec with no vision; execution tasks run the lifecycle (work-type chains)",
   "chains": {
     "default": [
       {
         "id": "idea-validate",
         "at": "grill",
         "verdict": {
-          "solid": { "gate": "accept" },
+          "clear": { "gate": "accept" },
+          "ambiguous": { "gate": "accept" },
           "revise": { "gate": "reject" },
           "reject": { "gate": "reject" }
         }
       },
-      { "id": "envision" },
+      { "id": "envision", "when": { "verdict": { "step": "idea-validate", "decision": "ambiguous" } } },
       { "id": "spec", "inputs": { "vision": "envision" } }
     ],
     "implementation": []

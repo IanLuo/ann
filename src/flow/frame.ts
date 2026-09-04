@@ -84,6 +84,11 @@ export class Frame {
   private readonly root: string;
   private readonly registry: StepLookup;
   private readonly abilities: Abilities;
+  /** The GATE steps' outcomes (grill), keyed by step id. A `when` on an execute-phase
+   *  entry may reference the step that DECIDED the grill gate (it precedes execute in
+   *  execution order) — the depth-route conditional (`envision when idea-validate is
+   *  ambiguous`) is that case. Reseeded every run(); the last (accepting) run wins. */
+  private gateResults = new Map<string, StepOutput>();
 
   constructor(deps: FrameDeps) {
     this.commands = deps.commands;
@@ -98,6 +103,7 @@ export class Frame {
   }
 
   async run(taskId: string): Promise<FrameResult> {
+    this.gateResults = new Map();
     const base: FrameResult = { taskId, stop: 'not-ready', phase: 'materialize', problems: [], chain: [], outcomes: [], verifyCycles: 0 };
 
     /* ── config + chain (data; a problem fails closed, never proceeds) ───────── */
@@ -223,6 +229,7 @@ export class Frame {
           const outcome = await this.runStep(taskId, source, current, transcript, translator, this.latestRejection(taskId, gate));
           result.outcomes.push(outcome);
           if (outcome.result && !outcome.result.ok) return this.stopFailed(taskId, result, outcome.result.error);
+          if (gate === 'grill' && outcome.result?.ok) this.gateResults.set(source.id, outcome.result);
         }
         return undefined;
       }
@@ -234,6 +241,7 @@ export class Frame {
         const outcome = await this.runStep(taskId, source, current, transcript, translator, this.latestRejection(taskId, gate));
         result.outcomes.push(outcome);
         if (outcome.result && !outcome.result.ok) return this.stopFailed(taskId, result, outcome.result.error);
+        if (gate === 'grill' && outcome.result?.ok) this.gateResults.set(source.id, outcome.result);
         const routed = this.route(source, outcome.result?.ok ? outcome.result.verdict : undefined);
         if ('code' in routed) return this.stopFailed(taskId, result, routed);
         decision = routed;
@@ -290,7 +298,10 @@ export class Frame {
     result: FrameResult,
     feedback: string | undefined,
   ): Promise<FrameResult | undefined> {
-    const produced = new Map<string, StepOutput>();
+    // SEED with the grill step's outcome: a `when`/role may reference the step that
+    // DECIDED the grill gate (it precedes execute in execution order) — the depth-route
+    // conditional (`envision` runs only when idea-validate is ambiguous) reads it here.
+    const produced = new Map<string, StepOutput>(this.gateResults);
     for (const entry of executionOrder(chain)) {
       if (phaseOf(entry) === 'grill') continue; // its run produced the gate decision
       if (phaseOf(entry) === 'confirm') continue; // GATE② is after verify, locked

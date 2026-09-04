@@ -13,12 +13,18 @@ import { IdeaValidationDoc, IdeaValidationSession } from './idea-validate/sessio
  * check) and not a one-shot grill.
  *
  * It is the chain's GRILL-BOUND step: its `decisions` are the gate's source, and the
- * chain entry's verdict map routes them (solid→accept, revise/reject→reject). The step
- * itself neither knows nor decides that routing — it returns a verdict and nothing else.
+ * chain entry's verdict map routes them. DEPTH RIDES THE DECISION (shaping): the chain
+ * must branch on whether a solid idea still needs a vision, so the step's decision
+ * VOCABULARY folds the doc's two axes (verdict · needsVision) into four gate-meaningful
+ * values — `clear` (solid, no vision → straight to a light spec) and `ambiguous`
+ * (solid, a vision runs first) both route ACCEPT; `revise`/`reject` route REJECT. The
+ * step itself neither knows nor decides that routing — it returns a decision and
+ * nothing else; only the DOC carries the human-shaped verdict + depth.
  */
 
 /** Co-located verify rule: the session must produce a doc with a verdict + guidance —
- *  an empty session cannot guide anything that follows it. */
+ *  an empty session cannot guide anything that follows it. A SOLID verdict must also
+ *  carry the depth signal (needsVision), because the chain's verdict map routes on it. */
 export const ideaValidationDocRule: RuleModule = {
   id: 'idea-validation-doc',
   definition: 'the idea-validate step must produce the validation doc (verdict + guidance for the following work) — an empty session cannot guide anything',
@@ -32,6 +38,9 @@ export const ideaValidationDocRule: RuleModule = {
     if (!d?.doc || !['solid', 'revise', 'reject'].includes(d.doc.verdict) || !d.doc.guidance.length) {
       return [{ severity: 'error', code: 'idea-validation-doc', detail: 'idea-validate returned no verdict or no guidance — nothing to guide the following work' }];
     }
+    if (d.doc.verdict === 'solid' && typeof d.doc.needsVision !== 'boolean') {
+      return [{ severity: 'error', code: 'idea-validation-doc', detail: 'idea-validate returned a SOLID verdict without the depth signal (needsVision) — the chain cannot route the depth (fail closed)' }];
+    }
     return [];
   },
 };
@@ -43,12 +52,21 @@ export const groundingFrom = (ctx: StepContext): GroundingInput[] =>
     .filter((d) => d.status === 'resolved' && d.excerpt)
     .map((d) => ({ label: d.name, text: d.excerpt ?? '', sourceType: 'prior plan' as const }));
 
+/** Fold the doc's two axes (verdict · depth) into the chain-data DECISION vocabulary.
+ *  A solid idea is `clear` (no vision) or `ambiguous` (a vision runs first); a doc that
+ *  is not solid keeps its own verdict value. A solid doc without needsVision is a shape
+ *  problem caught by the doc rule — the fold never fabricates a route. */
+const foldDepth = (doc: IdeaValidationDoc): string =>
+  doc.verdict === 'solid' ? (doc.needsVision ? 'ambiguous' : 'clear') : doc.verdict;
+
 export class IdeaValidateStep implements Step {
   readonly id = 'idea-validate';
   /** Consumes the task contract + packet only — no earlier-step binding. */
   readonly roles = [];
   readonly produces = ['lock-artifact' as const];
-  readonly decisions = ['solid', 'revise', 'reject'];
+  /** DEPTH IS THE DECISION (shaping): clear/ambiguous both accept at the grill gate but
+   *  route different depths downstream; revise/reject reject. */
+  readonly decisions = ['clear', 'ambiguous', 'revise', 'reject'];
   readonly rules: RuleModule[] = [ideaValidationDocRule];
 
   async execute(ctx: StepContext): Promise<StepOutput> {
@@ -65,11 +83,12 @@ export class IdeaValidateStep implements Step {
     });
     if (!r.ok) return fail(r.error.code, r.error.blocker);
 
+    const decision = foldDepth(r.doc);
     const intents: Intent[] = [{ kind: 'lock-artifact', name: 'idea-validation', content: r.doc.markdown, type: 'validation' }];
     return {
       ok: true,
       artifact: { doc: r.doc, markdown: r.doc.markdown },
-      verdict: { decision: r.doc.verdict, ...(r.doc.guidance.length ? { feedback: r.doc.guidance.join(' · ') } : {}) },
+      verdict: { decision, ...(r.doc.guidance.length ? { feedback: r.doc.guidance.join(' · ') } : {}) },
       intents,
     };
   }

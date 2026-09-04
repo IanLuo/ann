@@ -4,10 +4,12 @@ import { renderContext } from './shared.js';
 import { Intent, Step, StepContext, StepOutput, StepRole } from '../types.js';
 
 /**
- * `spec` — F9 spec expansion, rebuilt on the §2 step contract: the detailed spec, from
- * the vision, grounded in the packet.
+ * `spec` — F9 spec expansion, rebuilt on the §2 step contract: the spec (the FINAL
+ * document of shaping), from the vision when one ran, grounded in the packet. On the
+ * grill's clear-depth route the vision is absent and this step produces the LIGHT spec
+ * straight from the idea + grounded context.
  *
- * It declares the role it CONSUMES (`vision`, required) rather than naming a step. The
+ * It declares the role it CONSUMES (`vision`, optional) rather than naming a step. The
  * chain binds {role → source} and validateChain checks both directions, so the step
  * never knows which step fed it — swap `envision` for another producer and the step is
  * unchanged. What arrives through `prior` is the earlier step's in-memory artifact;
@@ -53,14 +55,17 @@ Rules (hard): every requirement must cite its ground. Anything not grounded goes
 
 /** Render the bound vision for the prompt — the claims keep their provenance. */
 const renderVision = (v: VisionArtifact | undefined): string => {
-  if (!v) return '(no vision bound — the role resolved to nothing)';
+  if (!v) return '(no vision bound — the grill routed this idea clear, so this is a LIGHT spec: ground on the idea and grounded context only, never invent scope)';
   return [`Summary: ${v.summary}`, ...[...v.usage, ...v.look].map((c) => `- [${c.kind}] ${c.claim} (ground: ${c.basis.join(', ') || 'inference'}, ${c.confidence})`)].join('\n');
 };
 
 export class SpecStep implements Step {
   readonly id = 'spec';
-  /** The chain binds this role to a source; validateChain fails closed if it does not. */
-  readonly roles: StepRole[] = [{ name: 'vision', required: true, description: 'the product vision the spec expands (F8 → F9)' }];
+  /** The chain binds this role to a source; validateChain fails closed if it does not.
+   *  `vision` is OPTIONAL — the depth-routing chain may SKIP envision (a clear idea runs
+   *  straight to a LIGHT spec with no vision), so the role must tolerate resolving to
+   *  nothing. When it does, the spec grounds on the idea + grounded context only. */
+  readonly roles: StepRole[] = [{ name: 'vision', required: false, description: 'the product vision the spec expands (F8 → F9) — absent when the grill routes the idea clear (light spec)' }];
   readonly produces = ['lock-artifact' as const];
   readonly rules: RuleModule[] = [specArtifactRule];
 
