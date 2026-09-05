@@ -13,8 +13,10 @@ import { IdeaValidationDoc, IdeaVerdict, IdeaValidationSession } from './steps/i
  *
  * NOTHING IS CREATED unless the human says GO: revise → the grill recommends refining
  * (re-run with a sharper statement) · reject → the idea does not get a session ·
- * abort → the human walked away. The empty-journey guard runs BEFORE any provider call,
- * so the refusal is dogfoodable on a non-empty repo with no provider configured.
+ * abort → the human walked away. The goal! seed gate (goalSeedGate — an EMPTY journey
+ * seeds fresh; a RE-SEEDABLE sole unconsumed goal is REPLACED; consumed/met refuses)
+ * runs BEFORE any provider call, so the refusal is dogfoodable on a non-empty repo with
+ * no provider configured.
  */
 
 export interface GoalSeedOptions {
@@ -85,10 +87,13 @@ export const runGoalSeed = async (
   abilities: Abilities,
   opts: GoalSeedOptions = {},
 ): Promise<GoalSeedResult> => {
-  // GUARD — EMPTY-JOURNEY ONLY. Before any provider call (dogfoodable: the non-empty
-  // repo refuses with the guard message even with no provider configured).
-  if (commands.ids().length > 0) {
-    return { ok: false, error: { code: 'not-empty', blocker: GOAL_SEED_GUARD } };
+  // GUARD — EMPTY journey (fresh seed) OR a RE-SEEDABLE goal (sole, unconsumed → the
+  // reseed REPLACES it). Consumed/met refuses with the WHY. Runs before any provider
+  // call (dogfoodable: a non-seedable journey refuses with the gate message even with
+  // no provider configured); the gate is the SAME one the L1 composite enforces.
+  const gate = commands.goalSeedGate();
+  if (!gate.allow) {
+    return { ok: false, error: { code: 'not-empty', blocker: gate.blocker ?? GOAL_SEED_GUARD } };
   }
 
   // GATHER — from argv when given, else the human channel.
@@ -113,6 +118,7 @@ export const runGoalSeed = async (
     ...(opts.context?.length ? { context: opts.context } : {}),
     ...(opts.constraints?.length ? { constraints: opts.constraints } : {}),
     ...(opts.maxRounds ? { maxRounds: opts.maxRounds } : {}),
+    forceRefine: true, // the GOAL must reflect a REFINED understanding — answers are re-grilled before the verdict
   });
   if (!r.ok) return { ok: false, error: r.error };
   const doc = r.doc;

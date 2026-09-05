@@ -611,6 +611,68 @@ Success criteria:
     expect(g.goalDoc).toMatchObject({ name: 'goal' });
     expect(g.contract).toEqual(r.contract);
     expect(g.verdict).toBe('open'); // exhaustion needs WORK — a bare seed is the open state
+    expect(g.reseed).toMatchObject({ reseedable: true, why: expect.stringContaining('fresh & unconsumed') }); // the sole goal is re-seedable
+  });
+
+  it('RE-SEED: a sole UNCONSUMED goal is REPLACED in place — goal.md overwritten, node contract + seed events + lock regenerated', () => {
+    const c = cmds();
+    valueOf(c.goalSeed(GOAL_DOC)); // first seed — the journey's only node
+    const GOAL_DOC_2 = `# Goal
+
+Goal: Build a RE-SEEDABLE goal! seed command
+
+Success criteria:
+- The validated goal is realized: Build a RE-SEEDABLE goal! seed command
+- re-seeding replaces goal.md + the regenerated contract + the re-sealed lock
+`;
+    const r = valueOf(c.goalSeed(GOAL_DOC_2)); // goal! seed again on the same sole goal
+    expect(r.id).toBe('01-goal'); // replaced IN PLACE — not a second leg
+    expect(r.contract).toEqual({
+      intent: 'Build a RE-SEEDABLE goal! seed command',
+      acceptanceCriteria: [
+        'The validated goal is realized: Build a RE-SEEDABLE goal! seed command',
+        're-seeding replaces goal.md + the regenerated contract + the re-sealed lock',
+      ],
+    });
+    // the new doc is on disk, the old doc is gone; the node contract regenerated 1:1
+    const md = readFileSync(join(nodeDir('01-goal'), 'artifacts', 'goal.md'), 'utf8');
+    expect(md).toContain('Goal: Build a RE-SEEDABLE goal! seed command');
+    expect(md).not.toContain('Build a working goal! seed command');
+    expect(JSON.parse(readFileSync(join(nodeDir('01-goal'), 'node.json'), 'utf8')).contract.intent).toBe('Build a RE-SEEDABLE goal! seed command');
+    // the lock re-sealed at the NEW sha — the reseed stays D2/D4-clean (goal.md named by a matching lock)
+    const lock = c.events('01-goal').find((e) => e.type === 'artifact-locked');
+    expect(lock?.artifact).toMatchObject({ name: 'goal', type: 'goal', lockSha: r.doc.sha });
+    const verify = new Store(root).verify();
+    expect(verify.some((d) => (d.includes('artifact-orphan') || d.includes('locksha')) && d.includes('goal'))).toBe(false);
+    expect(new Store(root).ids()).toEqual(['01-goal']); // still exactly one leg — nothing leaked
+  });
+
+  it('RE-SEED GUARD: once a work leg spawns AFTER the goal, re-seeding refuses with the consumer + the archive path', () => {
+    const c = cmds();
+    valueOf(c.goalSeed(GOAL_DOC));
+    valueOf(c.spawn('02-work', CONTRACT)); // the first work leg after the goal — goal.md is now consumed
+    const e = errorOf(c.goalSeed(GOAL_DOC));
+    expect(e.code).toBe('not-empty');
+    expect(e.blocker).toContain('consumed by 02-work');
+    expect(e.blocker).toContain('goal! archive'); // the change path is archive → a new goal, never a silent reseed
+    // the goal view surfaces the same state + why
+    const g = valueOf(c.goal());
+    expect(g.reseed).toMatchObject({ reseedable: false, why: expect.stringContaining('consumed by 02-work') });
+    // the original doc was NOT touched by the refused reseed
+    expect(readFileSync(join(nodeDir('01-goal'), 'artifacts', 'goal.md'), 'utf8')).toContain('Goal: Build a working goal! seed command');
+  });
+
+  it('RE-SEED GUARD: a met goal never re-seeds — the sealed session is terminal', () => {
+    // the met state: an exhausted session sealed by the human verdict (goal-session-design §4)
+    writeNode('01-goal', CONTRACT, [ev('created'), ev('completed')]);
+    writeNode('02-work', CONTRACT);
+    writeNode('02-work/01-a', CONTRACT, [ev('created'), ev('completed')]);
+    valueOf(cmds().goalVerdict('met', 'sealed'));
+    const e = errorOf(cmds().goalSeed(GOAL_DOC));
+    expect(e.code).toBe('not-empty');
+    expect(e.blocker).toContain('sealed');
+    const g = valueOf(cmds().goal());
+    expect(g.reseed).toMatchObject({ reseedable: false, why: expect.stringContaining('sealed (met)') });
   });
 
   it('a malformed doc is refused with NO partial writes (seedGoal parses before it writes)', () => {

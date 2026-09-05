@@ -188,4 +188,53 @@ describe('runGoalSeed — the goal! seed materialize path (flow/goal-seed)', () 
     expect(r.seeded).toBe(true);
     expect(interact.presented.some((p) => p.includes('Idea validation'))).toBe(true);
   });
+
+  it('RE-SEED: goal! seed again on the SOLE UNCONSUMED goal re-grills and REPLACES goal.md + the regenerated contract + the lock', async () => {
+    const commands = fresh();
+    const grillWith = (summary: string) =>
+      grill([{ verdict: 'ok', claim: 'buildable scope', basis: ['goal-session-design'], confidence: 'high' }], [], summary);
+    const first = await runGoalSeed(commands, { llm: fakeLlm([grillWith('The FIRST goal framing.')]).llm, interact: new ScriptedInteractor() }, { idea: 'a first framing' });
+    expect(first.ok && first.seeded).toBe(true);
+    if (!first.ok || !first.seeded) return;
+
+    // goal! seed AGAIN — the goal leg is still the journey's ONLY node and unconsumed → reseed replaces it
+    const second = await runGoalSeed(commands, { llm: fakeLlm([grillWith('The REFINED goal framing.')]).llm, interact: new ScriptedInteractor() }, { idea: 'a sharper framing' });
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    expect(second.seeded).toBe(true);
+    if (!second.seeded) return;
+    expect(second.goalId).toBe('01-goal'); // replaced IN PLACE — no second leg
+    expect(second.contract.intent).toBe('The REFINED goal framing.');
+    // the reseed overwrote goal.md — only the refined doc remains
+    const md = readFileSync(goalDoc(), 'utf8');
+    expect(md).toContain('The REFINED goal framing.');
+    expect(md).not.toContain('The FIRST goal framing.');
+    // still exactly one leg; the goal re-locked @ the new sha; the store reloads D2/D4-clean
+    const verify = new Store(root).verify();
+    expect(verify.some((d) => (d.includes('artifact-orphan') || d.includes('locksha')) && d.includes('goal'))).toBe(false);
+    expect(new Store(root).ids()).toEqual(['01-goal']);
+    // the goal view reads back reseedable — the refined sole goal is STILL re-seedable until consumed
+    const g = commands.goal();
+    expect(g.ok && g.value.reseed?.reseedable).toBe(true);
+  });
+
+  it('RE-SEED GUARD: once a work leg spawns AFTER the goal, goal! seed refuses (consumed → archive path) BEFORE any provider call', async () => {
+    const commands = fresh();
+    const { llm } = fakeLlm([cleanGrill()]);
+    const r1 = await runGoalSeed(commands, { llm, interact: new ScriptedInteractor() }, { idea: GOAL_IDEA });
+    expect(r1.ok && r1.seeded).toBe(true);
+
+    // the first work leg spawned after the goal consumes goal.md → the goal is sealed
+    expect(commands.spawn('02-work', { intent: 'build a work leg', acceptanceCriteria: ['it is done'] }).ok).toBe(true);
+
+    const { llm: l2, calls } = throwingLlm('should never be reached');
+    const r2 = await runGoalSeed(commands, { llm: l2, interact: new ScriptedInteractor() }, { idea: GOAL_IDEA });
+    expect(r2.ok).toBe(false);
+    if (r2.ok) return;
+    expect(r2.error.code).toBe('not-empty');
+    expect(r2.error.blocker).toContain('consumed by 02-work'); // the WHY names the consumer
+    expect(r2.error.blocker).toContain('goal! archive'); // the change path is archive → new goal
+    expect(calls.n).toBe(0); // the gate precedes the grill — dogfoodable without a provider
+    expect(new Store(root).ids()).toEqual(['01-goal', '02-work']); // nothing was re-seeded
+  });
 });

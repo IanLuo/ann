@@ -69,6 +69,12 @@ export interface SessionOptions {
   constraints?: string[];
   /** Bounded rounds (flow-control §3: bounded loops — never unbounded). */
   maxRounds?: number;
+  /** FORCE REFINEMENT (goal! seed): a round in which the human ANSWERS a question
+   *  must not itself conclude the session — the answers must first be re-grilled by a
+   *  following round, so the read/verdict reflects a REFINED understanding of what the
+   *  human said. Default OFF: the task idea-validate flow converges as soon as the
+   *  answers resolve the grill (a round that asked/answered nothing is never deferred). */
+  forceRefine?: boolean;
 }
 
 export type SessionResult =
@@ -92,6 +98,7 @@ export class IdeaValidationSession {
     }
     const engine = new DefaultGrillingEngine(adapterFromAbility(this.abilities.llm, this.options.model), { model: this.options.model, ...(this.options.maxTokens ? { maxTokens: this.options.maxTokens } : {}) });
     const maxRounds = opts.maxRounds ?? DEFAULT_MAX_ROUNDS;
+    const refinement = opts.forceRefine ?? false; // goal! seed — re-grill what the human answered
     const seen = new Set<string>(); // question dedupe across rounds (never ask twice)
     const pending: GrillQuestion[] = []; // asked and NOT resolved — accumulates across rounds
     const context: GroundingInput[] = [...(opts.context ?? [])];
@@ -101,6 +108,7 @@ export class IdeaValidationSession {
     let lastArtifact: import('./grilling.js').GrillingArtifact | undefined;
 
     for (let round = 1; round <= maxRounds; round++) {
+      let answeredThisRound = false; // did the human answer a question THIS round?
       // 1 — grill the CURRENT understanding (one-shot engine, honesty layer applies)
       const req: GrillingRequest = { idea: opts.idea.trim(), context, constraints: opts.constraints };
       const g = await engine.grill(req);
@@ -129,6 +137,7 @@ ${read}`);
         if (isUnresolved(answer)) continue; // still open → research topic below
         resolved.push({ id: q.id, question: q.question, answer, impact: q.impact });
         context.push({ label: `answer:${q.id}`, text: answer, sourceType: 'user input' });
+        answeredThisRound = true; // a substantive answer — forceRefine re-grills it before concluding
       }
 
       // 3 — research together: high-impact unknowns → topics; findings fold back
@@ -154,10 +163,13 @@ ${read}`);
         }
       }
 
-      // 4 — convergence: no blocking concerns AND no high-impact open questions
+      // 4 — convergence: no blocking concerns AND no high-impact open questions. Under
+      // forceRefine the round that ANSWERED a question must not be the concluding read —
+      // its answers need a re-grill round to fold into the understanding first (the next
+      // round's read reflects them; a clean round with nothing answered never defers).
       const blocking = g.artifact.validation.filter((v) => v.verdict === 'blocking');
       const openHighAfter = openHigh.filter((q) => !findings.some((f) => f.topic === q.question));
-      if (blocking.length === 0 && openHighAfter.length === 0) {
+      if (blocking.length === 0 && openHighAfter.length === 0 && !(refinement && answeredThisRound)) {
         return this.finish('solid', opts, context, resolved, researchLog, lastArtifact, pending, usage, round);
       }
     }

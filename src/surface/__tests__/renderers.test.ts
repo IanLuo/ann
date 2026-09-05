@@ -136,10 +136,38 @@ describe('renderGoal — the goal-session view (goal-session-design §9)', () =>
     expect(text).toContain('journey is empty');
   });
 
+  it('surfaces the RE-SEEDABLE state: YES only while fresh + unconsumed; NO names the consumer or the seal', () => {
+    const yes = renderGoal({
+      ...base,
+      reseed: { reseedable: true, why: "fresh & unconsumed — the goal leg is the journey's only node: nothing spawned under or after it, nothing derived from goal.md yet" },
+    });
+    expect(yes).toContain('reseed: YES — fresh & unconsumed');
+    const no = renderGoal({
+      ...base,
+      reseed: { reseedable: false, why: 'consumed by 02-shaping — work spawned under/after the goal derives from goal.md; change the goal via goal! archive → a new goal' },
+    });
+    expect(no).toContain('reseed: NO — consumed by 02-shaping');
+    const sealed = renderGoal({
+      ...base,
+      verdict: 'met',
+      metEvent: { at: '2026-09-01', type: 'goal-met', decision: 'met', note: 'goal met (ian)' },
+      reseed: { reseedable: false, why: 'goal sealed (met) — the session is terminal; change the goal via goal! archive → a new goal' },
+    });
+    expect(sealed).toContain('reseed: NO — goal sealed (met)');
+  });
+
   it('never emits scalar progress (AC5 — the goal surface is status words only)', () => {
     const texts = [
       renderGoal(base),
       renderGoal({ ...base, verdict: 'met', metEvent: { at: '2026-09-01', type: 'goal-met', decision: 'met', note: 'goal met (ian)' } }),
+      renderGoal({
+        ...base,
+        reseed: { reseedable: true, why: "fresh & unconsumed — the goal leg is the journey's only node: nothing spawned under or after it, nothing derived from goal.md yet" },
+      }),
+      renderGoal({
+        ...base,
+        reseed: { reseedable: false, why: 'consumed by 02-shaping — work spawned under/after the goal derives from goal.md; change the goal via goal! archive → a new goal' },
+      }),
       renderGoal({ present: false, structural: { exhausted: false, detail: 'no goal leg — work legs without a seeded goal (a legacy journey): archive & reseed for the goal-session shape' }, verdict: 'open', legs: [{ id: '01-leg', status: 'done' }] }),
     ];
     for (const t of texts) expect(hasScalarProgress(t)).toBe(false);

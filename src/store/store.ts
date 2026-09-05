@@ -632,9 +632,10 @@ export class Store {
    *  is the authored truth; node.json is generated 1:1 from it (the machine reads it);
    *  the `created`+`completed` seed events make legStatus derive done so the first work
    *  leg's legGateMet opens. A goal seeds the FIRST leg of an EMPTY journey only (a
-   *  changed goal is a new session — archive first). The seed writes flow through the
-   *  store's own write path + ledger (recordWrite) so verify stays clean from the first
-   *  write. goal.md is NOT artifact-locked here — sealing the doc is the grill close. */
+   *  changed goal is a new session — archive first; re-seeding a SOLE UNCONSUMED goal is
+   *  reseedGoal below, never seedGoal). The seed writes flow through the store's own
+   *  write path + ledger (recordWrite) so verify stays clean from the first write.
+   *  goal.md is NOT artifact-locked here — sealing the doc is the grill close. */
   seedGoal(doc: string): { id: string; contract: { intent: string; acceptanceCriteria: string[] } } {
     if (this.nodes.size) throw new Error('seedGoal rejected: the journey is not empty — a goal seeds the first leg of an empty session (archive first)');
     if (this.goalLegId()) throw new Error('seedGoal rejected: a goal leg already exists');
@@ -654,6 +655,38 @@ export class Store {
     this.nodes.set(id, { id, events: seed });
     this.recordWrite(id, nodeJson); // events come from the in-memory log → bytes match the file
     return { id, contract: parsed };
+  }
+
+  /** v6 re-seed (the RE-SEEDABLE rule): REPLACE the freshly-seeded, UNCONSUMED goal leg
+   *  IN PLACE — goal.md is overwritten with the new doc, node.json is regenerated 1:1
+   *  from it, and the seed events are rewritten (the old goal.md lock dies with the doc
+   *  it sealed — the caller re-locks the new sha). Refused unless the goal leg is the
+   *  journey's ONLY node and carries no goal-met verdict — the guard that makes this
+   *  immutability break safe: nothing has spawned under/after the goal and nothing has
+   *  derived from goal.md, so replacing it orphans nothing (goal-session-design §1/§2). */
+  reseedGoal(doc: string): { id: string; contract: { intent: string; acceptanceCriteria: string[] } } {
+    const goalId = this.goalLegId();
+    if (!goalId || this.nodes.size !== 1 || !this.nodes.has(goalId)) {
+      throw new Error('reseedGoal rejected: a goal re-seeds only while it is the journey\'s SOLE unconsumed node — archive the consumed session and seed a new goal');
+    }
+    if (this.events(goalId).some((e) => e.type === 'goal-met')) {
+      throw new Error('reseedGoal rejected: the goal is met/sealed — a changed goal is a new session (archive first)');
+    }
+    const parsed = this.parseGoalDoc(doc);
+    const today = new Date().toISOString().slice(0, 10);
+    const dir = this.nodeFolder(goalId);
+    mkdirSync(join(dir, 'artifacts'), { recursive: true });
+    writeFileSync(join(dir, 'artifacts', 'goal.md'), doc);
+    const nodeJson = JSON.stringify({ id: goalId, contract: parsed, createdAt: today }, null, 2) + '\n';
+    writeFileSync(join(dir, 'node.json'), nodeJson);
+    const seed: JourneyEvent[] = [
+      { at: today, type: 'created', note: 'goal re-seeded — the goal was replaced by a fresh grill' },
+      { at: today, type: 'completed', note: 'goal re-grilled & recorded — success criteria sealed when goal.md locks' },
+    ];
+    writeFileSync(join(dir, 'events.jsonl'), seed.map((e) => JSON.stringify(e)).join('\n') + '\n');
+    this.nodes.set(goalId, { id: goalId, events: seed });
+    this.recordWrite(goalId, nodeJson); // events come from the in-memory log → bytes match the file
+    return { id: goalId, contract: parsed };
   }
 
   /** v6 archive: move the finished session's legs + the write-rev ledger to

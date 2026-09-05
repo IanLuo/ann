@@ -184,6 +184,34 @@ describe('IdeaValidationSession (flow-1 validate — interactive idea validator)
     if (!r.ok) return;
     expect(r.rounds).toBe(1); // resolved in round 1 — no re-ask
   });
+
+  it('forceRefine (goal! seed): a question the human answers is re-grilled before the verdict — ≥2 grills, the second folds the answer', async () => {
+    const { llm, calls } = fakeLlm([highQuestionGrill(), cleanGrill()]); // round 2 re-grills the ANSWERED context clean
+    const interact = new ScriptedInteractor(['markdown'], [], 'solid');
+    const r = await session(llm, interact).run({ ...base(), forceRefine: true });
+
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.rounds).toBe(2); // the answer-bearing round could not conclude — it was re-grilled
+    expect(calls.length).toBe(2);
+    expect(r.doc.resolvedQuestions).toEqual([
+      { id: 'q1', question: 'What input format must v1 accept?', answer: 'markdown', impact: 'high' },
+    ]);
+    // the re-grill was fed the answered context — round 2's prompt carries the answer
+    expect(calls[1]).toContain('markdown');
+    expect(r.doc.summary).toContain('Readable idea'); // the read reflects the REFINED round 2 grill
+  });
+
+  it('forceRefine does not defer a round that asked/answered nothing — a clean idea still converges in one grill', async () => {
+    const { llm, calls } = fakeLlm([cleanGrill()]); // no questions → nothing answered → nothing to re-grill
+    const interact = new ScriptedInteractor([], [], 'solid');
+    const r = await session(llm, interact).run({ ...base(), forceRefine: true });
+
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.rounds).toBe(1);
+    expect(calls.length).toBe(1); // forceRefine never forces a round the human contributed nothing to
+  });
 });
 
 describe('the depth signal (shaping) — one extra bounded decide, only on a solid verdict', () => {

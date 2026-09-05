@@ -64,10 +64,12 @@ const COMPOSITE_OWNED: Record<string, string> = {
   'goal-met': 'goal!', // v6 — the sealed-session verdict is owned by goal! met
 };
 
-/** The `goal! seed` EMPTY-JOURNEY guard (goal-session-design §1): a goal seeds the
- *  FIRST leg of a fresh session — a changed goal is a NEW session. L1 owns it; the
- *  driver + the CLI pre-check the SAME constant so the guard is dogfoodable (fails
- *  before any provider call) and never drifts from the L1 refusal. */
+/** The `goal! seed` FALLBACK guard text (goal-session-design §1 + the RE-SEEDABLE
+ *  rule): goal! seed runs on an EMPTY journey (fresh seed) OR on a RE-SEEDABLE goal
+ *  (goalSeedGate). This constant is the refusal for the remaining case — a non-empty
+ *  journey with no reseedable goal leg. L1 owns it; the driver + the CLI pre-check the
+ *  SAME gate (goalSeedGate) so the refusal is dogfoodable (fails before any provider
+ *  call) and never drifts from the L1 refusal. */
 export const GOAL_SEED_GUARD =
   'this journey already has a goal — goal! archive for a new session (a goal seeds the first leg of an EMPTY journey)';
 
@@ -140,6 +142,11 @@ export interface GoalView {
   structural: { exhausted: boolean; detail: string };
   verdict: 'met' | 'unconfirmed' | 'open';
   metEvent?: JourneyEvent;
+  /** RE-SEEDABLE state (goal-session-design §1 + the reseed rule): may goal! seed run
+   *  again to REPLACE this goal? YES only while fresh + unconsumed (the sole node, so
+   *  nothing spawned under/after it and nothing derived from goal.md); NO — with WHY —
+   *  once the goal is consumed by work or sealed (met). Absent when no goal is present. */
+  reseed?: { reseedable: boolean; why: string };
   legs: Array<{ id: string; status: string }>;
 }
 
@@ -509,9 +516,48 @@ export class Commands {
       ...(contract ? { contract } : {}),
       structural,
       verdict,
+      reseed: this.reseedableOf(goalId), // the surface why: fresh & unconsumed vs consumed/sealed
       ...(metEvent ? { metEvent } : {}),
       legs,
     });
+  }
+
+  /** RE-SEEDABLE (goal-session-design §1 + the reseed rule) — is this goal still safe to
+   *  REPLACE by re-running goal! seed? Precise against the store: YES only while freshly
+   *  created AND UNCONSUMED — the goal leg is the journey's SOLE node (ids() === [goalId]:
+   *  no task children, no leg spawned after it) and it carries no goal-met verdict.
+   *  Sole-node IS the no-referrer condition: with the goal as the only node, nothing else
+   *  exists to read/derive goal.md, so the doc has no consumer. Spawn the first work leg
+   *  (or a spec that derives from goal.md) and the goal is consumed → sealed → the change
+   *  path becomes goal! archive → a new goal, never a silent re-seed. */
+  reseedableOf(goalId: string): { reseedable: boolean; why: string } {
+    const ids = this.store.ids();
+    if (this.store.events(goalId).some((e) => e.type === 'goal-met')) {
+      return { reseedable: false, why: 'goal sealed (met) — the session is terminal; change the goal via goal! archive → a new goal' };
+    }
+    if (ids.length === 1 && ids[0] === goalId) {
+      return { reseedable: true, why: "fresh & unconsumed — the goal leg is the journey's only node: nothing spawned under or after it, nothing derived from goal.md yet" };
+    }
+    const consumer = ids.filter((i) => i !== goalId).sort()[0];
+    return {
+      reseedable: false,
+      why: `consumed by ${consumer} — work spawned under/after the goal derives from goal.md; change the goal via goal! archive → a new goal`,
+    };
+  }
+
+  /** The goal! seed gate — EMPTY journey (fresh seed) OR a RE-SEEDABLE goal (sole,
+   *  unconsumed → re-grill + replace). Anything else refuses with the WHY. Shared by the
+   *  L1 composite, the flow driver, and the CLI pre-check so the guard never drifts. */
+  goalSeedGate(): { allow: boolean; reseed: boolean; goalId?: string; blocker?: string } {
+    const ids = this.store.ids();
+    if (ids.length === 0) return { allow: true, reseed: false };
+    const goalId = this.store.goalLegId();
+    if (goalId) {
+      const r = this.reseedableOf(goalId);
+      if (r.reseedable) return { allow: true, reseed: true, goalId };
+      return { allow: false, reseed: false, goalId, blocker: r.why };
+    }
+    return { allow: false, reseed: false, blocker: GOAL_SEED_GUARD };
   }
 
   /** `goal! met` — the HUMAN verdict that seals the session. Guarded
@@ -585,25 +631,29 @@ export class Commands {
   /**
    * `goal! seed` — the L1 MATERIALIZE half of the goal seed (the interactive grill
    *  that AUTHORS the doc runs at SESSION scope — flow/goal-seed — on top of this
-   *  composite; L1 owns the write + its invariants). EMPTY-JOURNEY ONLY (a goal seeds
-   *  the first leg of a fresh session — a changed goal is a NEW session, goal! archive
-   *  first; goal-session-design §1/§2). seedGoal writes goal.md (authored truth) + the
-   *  generated node contract + the created/completed seed events, then the follow-on
-   *  lock! seals goal.md ON THE GOAL ROOT (the goal-root carve-out admits artifact name
-   *  'goal') so the seed is D4-clean from the first write — no orphan goal.md on disk.
-   *  seedGoal parses the doc BEFORE any write, so a malformed doc is refused with no
-   *  partial state; the guard + carve-out both run inside this composite.
+   *  composite; L1 owns the write + its invariants). Empty journey → seedGoal (a goal
+   *  seeds the first leg of a fresh session); a RE-SEEDABLE goal → reseedGoal REPLACES
+   *  the sole unconsumed goal in place (re-grill + overwrite goal.md + regenerate the
+   *  contract/events). Consumed/met → refused (goalSeedGate) — a changed goal is a NEW
+   *  session, goal! archive first (goal-session-design §1/§2 + the reseed rule). The
+   *  seed writes goal.md (authored truth) + the generated node contract + the
+   *  created/completed seed events, then the follow-on lock! seals goal.md ON THE GOAL
+   *  ROOT (the goal-root carve-out admits artifact name 'goal') so the seed is D4-clean
+   *  from the first write — no orphan goal.md on disk. Both paths parse the doc BEFORE
+   *  any write, so a malformed doc is refused with no partial state; the gate + carve-out
+   *  both run inside this composite.
    */
   goalSeed(doc: string): CommandResult<{
     id: string;
     contract: { intent: string; acceptanceCriteria: string[] };
     doc: { name: string; path: string; sha: string };
   }> {
-    if (this.store.ids().length > 0) return fail('not-empty', GOAL_SEED_GUARD);
+    const gate = this.goalSeedGate();
+    if (!gate.allow) return fail('not-empty', gate.blocker ?? GOAL_SEED_GUARD);
     let id: string;
     let contract: { intent: string; acceptanceCriteria: string[] };
     try {
-      ({ id, contract } = this.store.seedGoal(doc));
+      ({ id, contract } = gate.reseed ? this.store.reseedGoal(doc) : this.store.seedGoal(doc));
     } catch (e) {
       return fail('store-refused', (e as Error).message);
     }

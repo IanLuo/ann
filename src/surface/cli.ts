@@ -528,14 +528,17 @@ async function cmdGoalBang(op: string | undefined, rest: string[]) {
   process.exit(2);
 }
 
-/** `goal! seed '<goal>'` — the interactive goal seed. The EMPTY-JOURNEY guard runs here
- *  FIRST (before provider wiring) so the refusal is dogfoodable on this non-empty repo
- *  with no provider configured; the driver + L1 re-check the same guard at materialize.
- *  On GO the session's converged output becomes a LOCKED goal.md — the seeded goal's
- *  verdict stays UNCONFIRMED until the human records goal! met. */
+/** `goal! seed '<goal>'` — the interactive goal seed. The gate pre-check (empty journey
+ *  OR a RE-SEEDABLE sole unconsumed goal) runs here FIRST (before provider wiring) so a
+ *  refusal is dogfoodable on this non-empty repo with no provider configured; consumed/
+ *  met goals refuse with the WHY — reseeding a replaced goal is never silent. The driver
+ *  + L1 re-check the same gate at materialize. On GO the session's converged output
+ *  becomes a LOCKED goal.md — the seeded goal's verdict stays UNCONFIRMED until the
+ *  human records goal! met. */
 async function cmdGoalSeed(idea: string) {
-  if (commands.ids().length > 0) {
-    console.error(`not-empty: ${GOAL_SEED_GUARD}`);
+  const gate = commands.goalSeedGate();
+  if (!gate.allow) {
+    console.error(`not-empty: ${gate.blocker ?? GOAL_SEED_GUARD}`);
     process.exit(1);
   }
   const r = await runGoalSeed(commands, buildAbilities(getAdapter(undefined, ROOT)), { idea });
@@ -935,7 +938,7 @@ const COMMANDS: Array<{ name: string; args: string; desc: string }> = [
   { name: 'supersede!', args: '<id> <successor-id> <artifact-file> [note]', desc: 'WRITE — superseded event with a forward pointer (the one cross-task write; refuses a live locker): the successor is named by <successor-id> + its own <artifact-file>, resolved via resolveNode — never a raw path' },
   { name: 'goal!', args: 'met [feedback]', desc: 'WRITE — the HUMAN verdict that seals a structurally-exhausted session (goal-met on the goal root); refused for automated (agent) initiators, double-met, and any undecided submission' },
   { name: 'goal!', args: 'archive [--override]', desc: 'WRITE — guarded structural reset: move .ann/journey → .ann/archive/sessions/<ts>-<slug>/ for a fresh goal; refuses without a met verdict (or --override), on store-external verify drifts, and on uncommitted tracked .ann/journey changes' },
-  { name: 'goal!', args: 'seed [goal-statement]', desc: 'WRITE — grill a NEW goal at SESSION scope (EMPTY journey only): the interactive idea-validation session (grill → batch-ask → research → human verdict); on solid, synthesize goal.md (Goal:/Success criteria:) + seed the goal leg + artifact-lock goal.md on the goal root; revise/reject seeds nothing' },
+  { name: 'goal!', args: 'seed [goal-statement]', desc: 'WRITE — grill a goal at SESSION scope (EMPTY journey seeds new; a RE-SEEDABLE sole unconsumed goal is REPLACED after re-grilling — consumed/met goals refuse): the interactive idea-validation session (grill → batch-ask → research → re-grill → human verdict); on solid, synthesize goal.md (Goal:/Success criteria:) + seed/re-seed the goal leg + artifact-lock goal.md on the goal root; revise/reject seeds nothing' },
 ];
 
 const command = args[0];

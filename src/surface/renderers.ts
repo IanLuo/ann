@@ -190,6 +190,9 @@ export function renderGoal(v: GoalView): string {
       v.verdict === 'met' ? 'met — session sealed' : v.verdict === 'unconfirmed' ? 'unconfirmed — structurally complete, awaiting the HUMAN verdict' : 'open';
     out.push(`verdict: ${verdictWord}`);
     out.push(`  ${v.structural.detail}`);
+    if (v.reseed) {
+      out.push(`reseed: ${v.reseed.reseedable ? 'YES' : 'NO'} — ${v.reseed.why}`);
+    }
     if (v.goalDoc) {
       out.push(`doc: ${v.goalDoc.name} @ ${v.goalDoc.sha}`);
       out.push(`  ${v.goalDoc.path}`);

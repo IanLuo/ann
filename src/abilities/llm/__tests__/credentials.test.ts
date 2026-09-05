@@ -1,9 +1,13 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { resolveSecret, addKeychainSecret, deleteKeychainSecret } from '../credentials.js';
 import type { KeychainExec } from '../credentials.js';
+import { resetConfigCache } from '../config.js';
 
 afterEach(() => {
   vi.unstubAllEnvs();
+  resetConfigCache(); // loadConfig caches — never leak a real configured key between tests
 });
 
 const fakeKeychain = (entries: Record<string, string>): KeychainExec => (args, _input) => {
@@ -51,6 +55,11 @@ describe('resolveSecret — safe credential chain (keychain → env → literal)
 
   it('returns none when nothing resolves', () => {
     const exec = fakeKeychain({});
+    // hermetic: an env miss falls back to the user config file — point it at a
+    // path that does not exist (and clear the cache) so a REAL configured key
+    // (e.g. the developer's) cannot make this resolve from config
+    vi.stubEnv('ANN_CONFIG', join(tmpdir(), 'ann-credentials-none.json'));
+    resetConfigCache();
     expect(resolveSecret('keychain:ann/x || env:ANN_DEFINITELY_UNSET_VAR', exec, 'darwin')).toEqual({ source: 'none' });
   });
 
