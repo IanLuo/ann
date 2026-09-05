@@ -1,4 +1,5 @@
 import { TaskDetail, ResultItem } from '../store/store.js';
+import type { GoalView } from '../commands/index.js';
 
 /**
  * S8 — THE RENDERERS (functional-spec F10/F11/F12; ann-system-design §1 "Renderers":
@@ -169,6 +170,41 @@ export function renderLedger(v: LedgerView): string {
   for (const [id, n] of Object.entries(v.nodes).sort(([a], [b]) => a.localeCompare(b))) {
     out.push(`  ${id.padEnd(46)} rev ${n.lastRev} @ ${n.lastEventAt}  events ${n.eventsSha.slice(0, 7)} · node ${n.nodeSha.slice(0, 7)}`);
   }
+  return out.join('\n');
+}
+
+/* ══ the goal-session view (`ann goal`) — goal-session-design §9 ═════════════ */
+
+/** The goal-session read as text: goalId · status · verdict · structural detail ·
+ *  the LOCKED doc · the generated contract · legs. STATUS WORDS ONLY (AC5) — the
+ *  goal surface shows exhaustion as a word, never a count, so hasScalarProgress
+ *  stays false for it. */
+export function renderGoal(v: GoalView): string {
+  const out: string[] = [];
+  if (!v.present) {
+    out.push('GOAL: (none)');
+    out.push(`  ${v.structural.detail}`);
+  } else {
+    out.push(`GOAL: ${v.goalId}  [${v.goalStatus}]`);
+    const verdictWord =
+      v.verdict === 'met' ? 'met — session sealed' : v.verdict === 'unconfirmed' ? 'unconfirmed — structurally complete, awaiting the HUMAN verdict' : 'open';
+    out.push(`verdict: ${verdictWord}`);
+    out.push(`  ${v.structural.detail}`);
+    if (v.goalDoc) {
+      out.push(`doc: ${v.goalDoc.name} @ ${v.goalDoc.sha}`);
+      out.push(`  ${v.goalDoc.path}`);
+    }
+    if (v.contract) {
+      out.push('contract (generated from the doc):');
+      out.push(`  intent: ${redact(v.contract.intent)}`);
+      v.contract.acceptanceCriteria.forEach((a, i) => out.push(`  AC-${i + 1}: ${redact(a)}`));
+    }
+    if (v.metEvent) {
+      out.push(`met: ${v.metEvent.at}${v.metEvent.note ? ` — ${v.metEvent.note}` : ''}${v.metEvent.feedback ? ` · feedback: ${redact(String(v.metEvent.feedback))}` : ''}`);
+    }
+  }
+  out.push('legs:');
+  for (const l of v.legs) out.push(`  ${l.id.padEnd(6)} ${l.status}`);
   return out.join('\n');
 }
 

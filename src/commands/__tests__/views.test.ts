@@ -24,6 +24,16 @@ function writeNode(id: string, events: Array<Record<string, unknown>>, contract:
 }
 const commands = () => new Commands(new Store(root), 'test');
 
+/** v6 — the seeded goal leg: CHILDLESS, created+completed on its root → legStatus
+ *  derives done, and the first work leg's legGateMet opens. (goal-session-design §2) */
+const seedGoal = (contract: unknown = { intent: 'Build the goal', acceptanceCriteria: ['the goal is met'] }) =>
+  writeNode('01-goal', [ev('created'), ev('completed')], contract);
+/** A done work leg under the goal — a completed task derives the leg done. */
+const doneWork = (id = '02-work') => {
+  writeNode(id, []);
+  writeNode(`${id}/01-a`, [ev('created'), ev('completed')]);
+};
+
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'ann-views-'));
   mkdirSync(join(root, '.ann', 'journey', 'legs'), { recursive: true });
@@ -95,3 +105,111 @@ describe('advance — the leg gate validated from the logs, never assumed', () =
     expect(a.detail).toContain('closure');
   });
 });
+
+describe('advance — the FOUR-STATE GOAL CONSULT (goal-session-design §5)', () => {
+  it('no goal (empty journey) → none, pointing at grill & seed, never a blind "complete"', () => {
+    const a = commands().advance();
+    expect(a.action).toBe('none');
+    expect(a.detail).toContain('no goal');
+    expect(a.detail).toContain('grill & seed');
+  });
+
+  it('seeded goal with NO work spawned → open (a goal alone is never exhausted)', () => {
+    seedGoal();
+    const a = commands().advance();
+    expect(a.action).toBe('none');
+    expect(a.detail).toContain('session open');
+    expect(a.detail).not.toContain('UNCONFIRMED');
+  });
+
+  it('structurally exhausted without a verdict → the CHOICE MENU (met / subtle task / archive)', () => {
+    seedGoal();
+    doneWork();
+    const a = commands().advance();
+    expect(a.action).toBe('none');
+    expect(a.detail).toContain('UNCONFIRMED');
+    expect(a.detail).toContain('goal! met');
+    expect(a.detail).toContain('subtle task');
+    expect(a.detail).toContain('goal! archive');
+    expect(a.detail).not.toMatch(/next task:/); // matchesAdvance: exhausted proposes no task
+  });
+
+  it('met → session complete → archive & start a new goal', () => {
+    seedGoal();
+    doneWork();
+    const c = commands();
+    c.goalVerdict('met');
+    const a = c.advance();
+    expect(a.action).toBe('none');
+    expect(a.detail).toContain('session complete');
+    expect(a.detail).toContain('goal! archive');
+  });
+});
+
+describe('goal() — the goal-session read (goal-session-design §9)', () => {
+  it('present:false on an empty journey — verdict open, detail names grill & seed', () => {
+    const v = valueOf(commands().goal());
+    expect(v.present).toBe(false);
+    expect(v.verdict).toBe('open');
+    expect(v.structural.exhausted).toBe(false);
+    expect(v.structural.detail).toContain('grill & seed');
+    expect(v.legs).toEqual([]);
+  });
+
+  it('present:false on a legacy journey (work legs, no seeded goal) — detail names the legacy shape', () => {
+    writeNode('01-leg', []);
+    writeNode('01-leg/01-a', [ev('created'), ev('completed')]);
+    const v = valueOf(commands().goal());
+    expect(v.present).toBe(false);
+    expect(v.structural.detail).toContain('legacy journey');
+  });
+
+  it('present + open — the seeded goal leg derives done; a goal alone is not exhausted', () => {
+    seedGoal();
+    const v = valueOf(commands().goal());
+    expect(v.present).toBe(true);
+    expect(v.goalId).toBe('01-goal');
+    expect(v.goalStatus).toBe('done');
+    expect(v.verdict).toBe('open');
+    expect(v.structural.exhausted).toBe(false);
+  });
+
+  it('exhausted-unconfirmed once work exists and every leg derives done — the contract reads from the node', () => {
+    seedGoal({ intent: 'Build the goal session', acceptanceCriteria: ['the session archives faithfully'] });
+    doneWork();
+    const v = valueOf(commands().goal());
+    expect(v.verdict).toBe('unconfirmed');
+    expect(v.structural.exhausted).toBe(true);
+    expect(v.structural.detail).toContain('structurally complete');
+    expect(v.contract).toEqual({ intent: 'Build the goal session', acceptanceCriteria: ['the session archives faithfully'] });
+    expect(v.metEvent).toBeUndefined();
+  });
+
+  it('goalDoc appears once goal.md is artifact-locked on the GOAL ROOT', () => {
+    seedGoal();
+    mkdirSync(join(dir('01-goal'), 'artifacts'), { recursive: true });
+    writeFileSync(join(dir('01-goal'), 'artifacts', 'goal.md'), '# Goal\n\nGoal: Build the goal session\n\nSuccess criteria:\n- the session archives faithfully\n');
+    valueOf(commands().lock('01-goal', 'goal.md'));
+    const v = valueOf(commands().goal());
+    expect(v.goalDoc).toMatchObject({ name: 'goal', path: '.ann/journey/legs/01-goal/artifacts/goal.md' });
+    expect(v.goalDoc!.sha).toMatch(/^[0-9a-f]{7}$/);
+  });
+
+  it('met once a HUMAN verdict is recorded — metEvent rides the view, goal-met is status-inert', () => {
+    seedGoal();
+    doneWork();
+    const c = commands();
+    valueOf(c.goalVerdict('met', 'criteria confirmed'));
+    const v = valueOf(c.goal());
+    expect(v.verdict).toBe('met');
+    expect(v.goalStatus).toBe('done'); // goal-met does not change the status
+    expect(v.metEvent).toMatchObject({ type: 'goal-met', decision: 'met' });
+    expect(v.metEvent!.feedback).toBe('criteria confirmed');
+  });
+});
+
+/** Narrow a CommandResult to its value (a failure here means the view was refused). */
+function valueOf<T>(r: { ok: true; value: T } | { ok: false; error: { code: string } }): T {
+  if (!r.ok) throw new Error(`expected success, got ${r.error.code}`);
+  return r.value;
+}

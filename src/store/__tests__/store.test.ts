@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, appendFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, appendFileSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store, JourneyEvent } from '../store.js';
@@ -930,5 +930,128 @@ describe('Store — the write-rev ledger (store-external integrity)', () => {
   it('verify has no store-external lines on a legacy store with no ledger', () => {
     writeNode('01-leg/01-a', {}, [ev('created'), ev('completed')]);
     expect(new Store(root).verify().filter((d) => d.startsWith('store-external:'))).toEqual([]);
+  });
+});
+
+describe('Store — v6 goal session (goal-session-design §2/§4 + seed/archive)', () => {
+  beforeEach(() => { makeStore(); });
+  afterEach(() => { rmSync(root, { recursive: true, force: true }); });
+
+  const CONTRACT = { intent: 'build the goal session', acceptanceCriteria: ['it archives faithfully'] };
+  const DOC = '# Goal\n\nGoal: Build the goal session\n\nSuccess criteria:\n- goal.md locks on the goal root\n- a met verdict seals exhaustion\n';
+  const goalLock = { at: '2026-08-19', type: 'artifact-locked', artifact: { name: 'goal', path: '.ann/journey/legs/01-goal/artifacts/goal.md', lockSha: 'aaaaaaa' } };
+
+  it('the goal leg is the CHILDLESS seeded leg — a goal leg with children is ordinary', () => {
+    writeNode('01-goal', {}, [ev('created'), ev('completed')]); // legacy 01-goal shape matches the same predicate
+    expect(new Store(root).goalLegId()).toBe('01-goal');
+    expect(new Store(root).status('01-goal')).toBe('done'); // seed events make legStatus derive done
+    // a 01-goal WITH a task child is not a goal leg
+    writeNode('02-goal', {}, [ev('created'), ev('completed')]);
+    writeNode('02-goal/01-a', {}, [ev('created'), ev('completed')]);
+    expect(new Store(root).goalLegId()).toBe('01-goal'); // 02-goal: not childless, not the goal
+    expect(new Store(root).status('02-goal')).toBe('done'); // but still a derived-done ordinary leg
+  });
+
+  it('a locked goal.md alone designates a CHILDLESS leg as the goal leg', () => {
+    writeNode('01-goal', {}, [goalLock]);
+    expect(new Store(root).goalLegId()).toBe('01-goal');
+  });
+
+  it('goal-met + the goal.md lock append ONLY on the designated goal leg root — never a task or another leg', () => {
+    writeNode('01-goal', {}, [ev('created'), ev('completed')]);
+    writeNode('02-work', {}, []);
+    writeNode('02-work/01-a', {}, [ev('created')]);
+    // the frontmost seeded leg is the goal; a task under 02-work is not
+    const s = new Store(root);
+    expect(() => s.appendEvent(s.resolveNode('01-goal'), ev('goal-met', { decision: 'met' }))).not.toThrow();
+    expect(() => s.appendEvent(s.resolveNode('02-work/01-a'), ev('goal-met', { decision: 'met' }))).toThrow(/goal-root verdict/);
+    // a childless seeded leg BEHIND the goal leg carries no goal events either (leg-root guard)
+    writeNode('09-other', {}, [ev('created'), ev('completed')]);
+    const s2 = new Store(root);
+    expect(() => s2.appendEvent(s2.resolveNode('09-other'), ev('goal-met', { decision: 'met' }))).toThrow(/leg roots carry no events/);
+    // the seed is written by seedGoal only — the general writer refuses it on the goal root
+    const s3 = new Store(root);
+    expect(() => s3.appendEvent(s3.resolveNode('01-goal'), ev('completed'))).toThrow(/leg roots carry no events/);
+    // the goal.md lock rides the same goal-root carve-out
+    const s4 = new Store(root);
+    expect(() => s4.appendEvent(s4.resolveNode('01-goal'), goalLock)).not.toThrow();
+  });
+
+  it('goal-met is STATUS-INERT — the verdict never moves legStatus (the seed already derived done)', () => {
+    writeNode('01-goal', {}, [ev('created'), ev('completed')]);
+    const s = new Store(root);
+    expect(s.status('01-goal')).toBe('done');
+    s.appendEvent(s.resolveNode('01-goal'), ev('goal-met', { decision: 'met', note: 'sealed', feedback: 'confirmed' }));
+    expect(s.status('01-goal')).toBe('done');
+  });
+
+  it('goal-met shape is strict: decision must be \'met\', feedback a string, no unknown fields', () => {
+    writeNode('01-goal', {}, [ev('created'), ev('completed')]);
+    const s = new Store(root);
+    const bad = (extra: Record<string, unknown>) => () => s.appendEvent(s.resolveNode('01-goal'), ev('goal-met', extra));
+    expect(bad({ decision: 'no' })).toThrow(/goal-met.decision must be 'met'/);
+    expect(bad({})).toThrow(/goal-met.decision must be 'met'/);
+    expect(bad({ decision: 'met', feedback: 42 })).toThrow(/goal-met.feedback must be a string/);
+    expect(bad({ decision: 'met', bogus: 1 })).toThrow(/unknown field/);
+    expect(bad({ decision: 'met', feedback: 'ok' })).not.toThrow();
+  });
+
+  it('seedGoal writes goal.md + a node.json generated 1:1 from the doc + the seed events', () => {
+    const r = new Store(root).seedGoal(DOC);
+    expect(r.id).toBe('01-goal');
+    expect(r.contract).toEqual({ intent: 'Build the goal session', acceptanceCriteria: ['goal.md locks on the goal root', 'a met verdict seals exhaustion'] });
+    const node = JSON.parse(readFileSync(join(nodeDir('01-goal'), 'node.json'), 'utf8'));
+    expect(node.contract).toEqual(r.contract); // node.json mirrors the doc
+    expect(existsSync(join(nodeDir('01-goal'), 'artifacts', 'goal.md'))).toBe(true);
+    const s = new Store(root);
+    expect(s.goalLegId()).toBe('01-goal'); // the seed designates the goal
+    expect(s.status('01-goal')).toBe('done');
+    expect(s.events('01-goal').map((e) => e.type)).toEqual(['created', 'completed']);
+  });
+
+  it('seedGoal refuses a non-empty journey — a goal seeds the first leg of an EMPTY session', () => {
+    const s = new Store(root);
+    s.seedGoal(DOC);
+    expect(() => s.seedGoal(DOC)).toThrow(/not empty/); // nodes nonempty
+  });
+
+  it('seedGoal refuses a doc missing the fixed Goal:/Success criteria: sections', () => {
+    expect(() => new Store(root).seedGoal('# No structure here')).toThrow(/Goal/);
+    expect(() => new Store(root).seedGoal('# Goal\n\nGoal: x\n\nSuccess criteria:\n')).toThrow(/bullet/);
+  });
+
+  it('a spawned CHILDLESS leg records a ledger eventsContent of \'\' with no events.jsonl — verify reads it clean (ledger guard: missing file ≡ empty log)', () => {
+    const s = new Store(root);
+    s.spawn('01-leg', CONTRACT); // leg root: node.json only, ledger eventsContent ''
+    expect(existsSync(join(nodeDir('01-leg'), 'events.jsonl'))).toBe(false);
+    expect(new Store(root).verify().filter((d) => d.startsWith('store-external:'))).toEqual([]);
+    // and a task spawned under it writes cleanly (no null-vs-\'\' mismatch on the sibling entry)
+    new Store(root).spawn('01-leg/01-a', CONTRACT);
+    expect(new Store(root).verify().filter((d) => d.startsWith('store-external:'))).toEqual([]);
+  });
+
+  it('archiveJourney moves legs + the ledger to .ann/archive/sessions/<ts>-<slug>/journey and resets the live store', () => {
+    const s = new Store(root);
+    s.seedGoal(DOC);
+    s.spawn('02-work', CONTRACT);
+    s.spawn('02-work/01-a', CONTRACT);
+    s.appendEvent(s.resolveNode('01-goal'), ev('goal-met', { decision: 'met' }));
+    expect(existsSync(join(root, '.ann', 'journey', '.ledger.json'))).toBe(true);
+    const r = s.archiveJourney('goal');
+    expect(existsSync(join(r.dest, 'legs', '01-goal', 'node.json'))).toBe(true);
+    expect(existsSync(join(r.dest, 'legs', '01-goal', 'events.jsonl'))).toBe(true);
+    expect(existsSync(join(r.dest, 'legs', '02-work', '01-a', 'node.json'))).toBe(true);
+    expect(existsSync(join(r.dest, '.ledger.json'))).toBe(true);
+    expect(existsSync(join(root, '.ann', 'journey', '.ledger.json'))).toBe(false); // live ledger removed
+    expect(new Store(root).ids()).toEqual([]); // live tree reset — id reuse across sessions is safe
+    // the archived snapshot round-trips Store() through a read-only .ann/journey symlink mount
+    const mount = mkdtempSync(join(tmpdir(), 'ann-arch-'));
+    mkdirSync(join(mount, '.ann'), { recursive: true });
+    symlinkSync(r.dest, join(mount, '.ann', 'journey'), 'dir');
+    const loaded = new Store(mount);
+    expect(loaded.ids().sort()).toEqual(['01-goal', '02-work', '02-work/01-a']);
+    expect(loaded.goalLegId()).toBe('01-goal');
+    expect(loaded.events('01-goal').some((e) => e.type === 'goal-met')).toBe(true);
+    rmSync(mount, { recursive: true, force: true });
   });
 });

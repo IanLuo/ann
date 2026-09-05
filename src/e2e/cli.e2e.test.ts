@@ -3,6 +3,7 @@ import { mkdtempSync, mkdirSync, cpSync, rmSync, writeFileSync, symlinkSync, exi
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync, execFileSync } from 'node:child_process';
+import { Store } from '../store/store.js';
 
 /**
  * E2E — the real CLI binary (`node dist/surface/cli.js`) driven as a subprocess
@@ -189,5 +190,109 @@ describe('e2e — the CLI binary', () => {
     expect(out(v)).toContain('store-external:');
     expect(out(v)).toContain('class=append');
     expect(out(v)).toContain('ann wrote rev');
+  });
+});
+
+describe('e2e — the goal-session lifecycle (v6: seed → lock → work → met → archive)', () => {
+  let root: string;
+  beforeEach(() => { root = newProject(); });
+  afterEach(() => { rmSync(root, { recursive: true, force: true }); });
+
+  const GOAL = '01-goal';
+  const WORK = '02-work';
+  const TASK = '02-work/01-a';
+  /** Hand-seed the goal leg exactly as seedGoal would: node.json (the 1:1 machine
+   *  read of goal.md), the created+completed seed events, and the authored goal.md. */
+  function seedGoalLeg(r: string): void {
+    mkdirSync(join(r, '.ann', 'journey', 'legs', GOAL, 'artifacts'), { recursive: true });
+    writeFileSync(
+      join(r, '.ann', 'journey', 'legs', GOAL, 'node.json'),
+      JSON.stringify({ id: GOAL, contract: { intent: 'Land the goal session end to end', acceptanceCriteria: ['goal.md locks on the goal root', 'a met verdict seals exhaustion'] }, createdAt: '2026-08-29' }, null, 2) + '\n',
+    );
+    writeFileSync(join(r, '.ann', 'journey', 'legs', GOAL, 'events.jsonl'), [EVENT('created'), EVENT('completed')].join('\n') + '\n');
+    writeFileSync(
+      join(r, '.ann', 'journey', 'legs', GOAL, 'artifacts', 'goal.md'),
+      '# Goal\n\nGoal: Land the goal session end to end\n\nSuccess criteria:\n- goal.md locks on the goal root\n- a met verdict seals exhaustion\n',
+    );
+  }
+  /** Drive the one task through its gates to done — the session is then exhausted. */
+  function driveWorkToDone(r: string): void {
+    cli(r, ['spawn!', WORK, CONTRACT('the work leg')]);
+    cli(r, ['spawn!', TASK, CONTRACT('do the work')]);
+    expect(out(cli(r, ['submit!', TASK, 'grill']))).toContain('submitted grill');
+    expect(out(cli(r, ['gate!', TASK, 'grill', 'accept', 'grilled']))).toContain('gate grill: accept');
+    expect(out(cli(r, ['submit!', TASK, 'confirm']))).toContain('submitted confirm');
+    expect(out(cli(r, ['gate!', TASK, 'confirm', 'accept', 'done']))).toContain('gate confirm: accept');
+    expect(out(cli(r, ['append!', TASK, EVENT('completed', { note: 'finished' })]))).toContain('appended');
+    expect(out(cli(r, ['status', TASK]))).toContain('done');
+  }
+
+  it('seeds, locks goal.md, works to exhaustion, records the HUMAN verdict, refuses a dirty archive, then archives & reloads', () => {
+    // empty journey: the goal consult names grill & seed — never a blind task
+    expect(out(cli(root, ['goal']))).toContain('GOAL: (none)');
+    expect(out(cli(root, ['next']))).toContain('no goal');
+
+    // seed the goal leg by hand, exactly as seedGoal would
+    seedGoalLeg(root);
+    const seeded = out(cli(root, ['goal']));
+    expect(seeded).toContain('GOAL: 01-goal');
+    expect(seeded).toContain('[done]'); // the seed derives done — the first work leg's gate opens
+    expect(seeded).toContain('verdict: open');
+    expect(seeded).toContain('AC-2: a met verdict seals exhaustion'); // contract = the doc, machine-read
+    expect(out(cli(root, ['next']))).toContain('session open'); // a seeded goal alone is not exhausted
+
+    // seal the doc: goal.md artifact-locks on the GOAL ROOT (goalDoc rides the view)
+    expect(out(cli(root, ['lock!', GOAL, 'goal.md']))).toContain('locked goal @');
+    const locked = out(cli(root, ['goal']));
+    expect(locked).toContain('doc: goal @');
+    expect(locked).toContain('artifacts/goal.md');
+
+    // commit the seeded session so the dirty-guard below has TRACKED changes to see
+    git(root, ['add', '-A']);
+    git(root, ['commit', '-qm', 'seed the goal']);
+
+    // work → exhausted-unconfirmed
+    driveWorkToDone(root);
+    const exhausted = out(cli(root, ['goal']));
+    expect(exhausted).toContain('verdict: unconfirmed');
+    expect(out(cli(root, ['next']))).toContain('goal! met');
+    expect(out(cli(root, ['next']))).not.toMatch(/next task:/);
+
+    // the HUMAN verdict (RECORDED_BY=e2e here — the e2e actor) seals the session
+    expect(out(cli(root, ['goal!', 'met', 'criteria confirmed']))).toContain('verdict recorded @');
+    const metView = out(cli(root, ['goal']));
+    expect(metView).toContain('met — session sealed');
+    expect(metView).toContain('feedback: criteria confirmed');
+
+    // a post-met spawn is sealed off, and a DIRTY (uncommitted tracked) archive refuses
+    expect(cli(root, ['spawn!', '02-work/02-b', CONTRACT('too late')]).code).toBe(1);
+    const dirty = cli(root, ['goal!', 'archive']);
+    expect(dirty.code).toBe(1);
+    expect(out(dirty)).toContain('uncommitted');
+
+    // commit the seal → the archive succeeds
+    git(root, ['add', '-A']);
+    git(root, ['commit', '-qm', 'seal the session']);
+    const arch = cli(root, ['goal!', 'archive']);
+    expect(arch.code).toBe(0);
+    expect(out(arch)).toContain('session archived');
+    const dest = out(arch).match(/session archived → (.+)/)?.[1]?.trim() ?? '';
+    expect(dest).toBeTruthy();
+    expect(existsSync(join(dest, 'legs', GOAL, 'node.json'))).toBe(true);
+    expect(existsSync(join(dest, 'legs', TASK, 'node.json'))).toBe(true);
+    expect(existsSync(join(dest, '.ledger.json'))).toBe(true);
+
+    // the live tree reset — an empty journey ready for the next goal
+    expect(existsSync(join(root, '.ann', 'journey', 'legs', GOAL))).toBe(false);
+    expect(out(cli(root, ['goal']))).toContain('GOAL: (none)');
+
+    // the archived snapshot round-trips through a read-only .ann/journey mount
+    const mount = join(root, '_mnt');
+    mkdirSync(join(mount, '.ann'), { recursive: true });
+    symlinkSync(dest!, join(mount, '.ann', 'journey'), 'dir');
+    const loaded = new Store(mount);
+    expect(loaded.ids().sort()).toEqual([GOAL, WORK, TASK]);
+    expect(loaded.goalLegId()).toBe(GOAL);
+    expect(loaded.events(GOAL).some((e) => e.type === 'goal-met')).toBe(true);
   });
 });

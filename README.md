@@ -62,6 +62,7 @@ on recorded events (default: `agent`).
 | `chain` | `` | the project flow config as data (work-type chains, F3 view) · alias --chain |
 | `steps` | `` | the step registry — the pluggable surface future steps implement against · alias --steps |
 | `next` | `` | the run-next proposal (F5 pull): active leg, frontmost-ready, pending gates, leg gate — derived, never assumed · alias --next |
+| `goal` | `` | the goal-session view (goal-session-design §9): goalId · status · the LOCKED goal.md · the generated contract · structural state · verdict (met/unconfirmed/open) · legs (status words only) · alias --goal |
 | `flow` | `<id>` | a task's RESOLVED flow + chain validation (the data the frame will execute) · alias --flow |
 | `run!` | `<id>` | WRITE — run a task through the FRAME (materialize → grill → activate → execute → verify → confirm → commit); resumable, stops at the first block |
 | `commands` | `` | this table as markdown (the derived doc) · alias --commands |
@@ -73,13 +74,19 @@ on recorded events (default: `agent`).
 | `gate!` | `<id> grill\|confirm accept\|reject [feedback]` | WRITE — human gate decision (submit + decide; the 3-reject bound is a CONSTANT owned here) |
 | `lock!` | `<id> <artifact-file> [type]` | WRITE — thin artifact record over the producer's own file (write confinement): `<artifact-file>` is a single basename resolved inside `<id>`'s OWN `artifacts/` — an out-of-folder file is refused; records artifact-locked {name = file stem, path, lockSha, type?, version?}; never writes/stamps/symlinks the file |
 | `supersede!` | `<id> <successor-id> <artifact-file> [note]` | WRITE — superseded event with a forward pointer (the one cross-task write; refuses a live locker): the successor is named by `<successor-id>` + its OWN `<artifact-file>`, resolved via resolveNode — never a raw path |
+| `goal!` | `met [feedback]` | WRITE — the HUMAN verdict that seals a structurally-exhausted session (goal-met on the goal root); refused for automated (agent) initiators, double-met, and any undecided submission |
+| `goal!` | `archive [--override]` | WRITE — guarded structural reset: move .ann/journey → .ann/archive/sessions/<ts>-<slug>/ for a fresh goal; refuses without a met verdict (or --override), on store-external verify drifts, and on uncommitted tracked .ann/journey changes |
+| `goal!` | `seed [goal-statement]` | WRITE — grill a NEW goal at SESSION scope (EMPTY journey only): the interactive idea-validation session (grill → batch-ask → research → human verdict); on solid, synthesize goal.md (Goal:/Success criteria:) + seed the goal leg + artifact-lock goal.md on the goal root; revise/reject seeds nothing |
 
 ### When to use each
 
 **Orient — start here.** `journey` (where the journey is + what's ahead) → `next`
 (the run-next proposal: the one thing to do now) → `status [filter]` (statuses at a
 glance) → `check` (integrity + gates + hashes + the state line — run it before and
-after any change).
+after any change). In a goal session, `goal` shows the session state (goalId ·
+status · the locked `goal.md` · verdict); when `next` falls quiet and every leg is
+done, it names the choice — `goal! met` seals the verdict, `goal! archive` resets
+for a fresh goal.
 
 **Inspect a node.** `detail <id>` (full derived detail: contract · ACs · gates ·
 artifacts · blockers) · `confirm <id>` (the gate card — exactly what a human decides
@@ -199,10 +206,151 @@ can regress the status. Close via the gate + `append! completed` flow instead.
 | **GitHub binding (S7)** | ✅ built | `src/abilities/github/` |
 | **Human interface + renderers (S8)** | ✅ built (web UI = target surface) | `src/surface/renderers.ts` · `talk.ts` |
 | **Evals harness (S9)** | ✅ built | `src/evals/` |
+| **Goal-session lifecycle (v6)** — goal view · `goal! met` verdict · `goal! archive` reset | ✅ built | `src/commands/` + `src/store/store.ts` (goal leg · goal-met · seedGoal · archiveJourney) |
 | **Skills/tools/MCP (step model)** | ❌ decided, build deferred | — |
 
 The layer fold left compat symlinks in place: `src/cli.ts → surface/cli.ts`,
 `src/kernel → flow`, `src/engines/* → src/flow/*`, `src/adapters/provider → src/abilities/llm`.
+
+## Goal-scoped sessions
+
+> **Status: implemented (v6)** — `goal` · `goal! met` · `goal! archive` are in the
+> registry above. Authoritative design:
+> `.agents/artifacts/goal-session-design.html` · implementation plan:
+> `~/.claude/plans/enchanted-growing-wombat.md`.
+
+### Session lifecycle — one glance
+
+```text
+ GRILL ─► goal.md ─► 01-goal/node.json ─► WORK LEGS ─► exhausted ─► goal! met ─► goal! archive
+          locked        generated 1:1      (gated)      (unconfirmed)  guarded     │
+   ┌────────────────────── ONE SESSION (immutable) ────────────────────────┘          ▼
+   └────────── a changed goal = NEW SESSION (archive → re-grill) ◄──────── fresh goal
+```
+
+### 1 · One source of truth
+
+```text
+  grilling first                 deterministic 1:1              the machinery
+     │                                │                             │
+     ▼                                ▼                             ▼
+  goal.md                   01-goal/node.json        goal · next · goal! met · packets
+  ────────────────────      ─────────────────────        │
+   Goal:  <…>                 intent:  ← Goal:            │ reads node.json only
+   Success criteria: <…>      acs:     ← Success criteria: │ (never a hand-authored
+  ────────────────────      ─────────────────────        │  duplicate — no drift)
+  AUTHORED truth            GENERATED data              │
+  LOCKED (artifact-locked,  IMMUTABLE                   │
+  hash-checked)             never hand-edited           ▼
+     │                        │                    fixed per session —
+     └──────── changed goal ⇒ NEW SESSION (no in-place edit anywhere)
+```
+
+### 2 · The goal leg — designated SEEDED CHILDLESS leg
+
+```text
+ 01-goal/        the journey's ONE childless leg — seeded, self-evented
+  ├─ goal.md          node-owned, locked
+  ├─ node.json        generated 1:1
+  └─ events.jsonl     ← ROOT-EVENTS EXCEPTION (this leg only — id-scoped)
+       created ──────┐
+       completed ────┴─ seed events ⇒ legStatus derives done
+       artifact-locked│              ⇒ first work leg's gate (legGateMet) OPENS
+       goal-met ──────┘ protected · STATUS-INERT (no new status word)
+       ── nothing else may sit on leg roots
+       ── goal-met refused on any task id or non-frontmost leg
+
+  identity test: a 01-goal-named leg that CARRIES TASKS is an ordinary work leg, not the goal.
+  why the seed events matter: status-inert alone would hard-block all work —
+  the childless leg needs derived done for the first gate to open.
+```
+
+### 3 · The stability ladder
+
+```text
+  GOAL    goal.md + generated node      IMMUTABLE — criteria change ⇒ NEW SESSION
+   │
+  SPECS   docs-in-force                 revisable INSIDE the goal
+   │      reject rule: DEFERRED, not advertised — supersede! is content-blind today,
+   │      so "specs can't override the goal" becomes a scripted gate only when the
+   │      specs tier lands. It ships AS ONE slice (specs + reject rule + docs folder).
+   │
+  TASKS   code / small functions        MAY revise a spec · never the goal
+   │
+  RUN     the realized journey
+
+  discriminator = SUCCESS CRITERIA, not size:
+    same criteria → add a task   ·   criteria change → new goal / new session
+```
+
+### 4 · `goal! met` — guards
+
+```text
+  goal! met
+   ├─ HUMAN initiator only        refuse an automated RECORDED_BY
+   ├─ no DOUBLE-met               refuse when verdict already met
+   ├─ no UNDECIDED submissions    a done task may still hide one → refuse
+   ├─ no POST-met spawns          a stale verdict is never silently carried
+   └─ no reopen (today)           a wrong met is recoverable ONLY via the
+                                  specced archive override path
+```
+
+### 5 · `next` = four-state consult
+
+```text
+         ann next (read: frontmost leg + structural state + verdict)
+
+ ┌─────────────┬──────────────────┬────────────────────────┬────────────────────┐
+ │ no goal     │ seeded, no work  │ exhausted, unconfirmed │ met                │
+ │ (empty)     │ (goal done)      │ (all derived done)     │                    │
+ ├─────────────┼──────────────────┼────────────────────────┼────────────────────┤
+ │ grill+seed  │ open first task  │ CHOICE MENU            │ session complete → │
+ │             │                  │                         │ archive / new goal │
+ └─────────────┴──────────────────┴────────────────────────┴────────────────────┘
+
+  the choice menu (never the blind "journey goal complete"):
+   1  new goal     criteria met  → goal! met → goal! archive
+   2  add a task   spec refinement → ordinary superseding task under the same goal
+   3  subtle task  e.g. a quality gate
+  the session ends only when a HUMAN says met.
+```
+
+### 6 · `goal! archive` — guarded structural reset
+
+```text
+  goal! archive                     WRITE · significant · dogfoodable
+
+  SCOPED guard:
+    requires   verdict MET (or explicit override — so it can archive its own journey)
+    refuses    NEW check/verify problems        (NOT the repo's known 15/4 baseline)
+    refuses    uncommitted TRACKED changes      (never untracked scratch)
+
+  reset (2nd designated cross-folder writer — after supersede!):
+    .ann/journey/legs/*  +  .ledger.json
+        │  move
+        ▼
+    .ann/archive/sessions/<ts>-<slug>/journey/{legs, .ledger.json}
+        │  layout round-trips Store()  ⇒ archived session loads READ-ONLY
+        ▼
+    live ledger entry removed   ⇒ verify sees no node-deleted · id reuse safe
+    legs emptied                ⇒ back to state: no goal (MISSING)
+```
+
+### 7 · Docs-in-use = the DERIVED index
+
+```text
+  in-force docs (locked specs in journey legs/artifacts)
+        │  current() — derived, always fresh, never duplicated
+        ▼
+  "ann specs"  = THE index of in-force docs  ← docs-in-use
+        │
+        │  NO on-disk .ann/docs layer (deleted leg 07; e2e asserts it's gone —
+        │  a store-unwalked folder silently goes stale)
+        │
+        ▼  optional, generated
+  project-root docs/        browseable copy · scripted + committed (like README regen)
+                            NEVER read by the store · ship it with the specs tier?
+```
 
 ## Contract stack
 

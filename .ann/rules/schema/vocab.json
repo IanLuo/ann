@@ -19,7 +19,8 @@
     "rejected",
     "gate-revised",
     "transferred",
-    "deferred"
+    "deferred",
+    "goal-met"
   ],
   "statuses": [
     "queued",

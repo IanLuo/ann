@@ -441,3 +441,182 @@ describe('ledger — the write-rev ledger read + the store-external guard', () =
     }
   });
 });
+
+describe('goal! met — the HUMAN verdict (goal-session-design §4)', () => {
+  beforeEach(() => { makeStore(); });
+  afterEach(() => { rmSync(root, { recursive: true, force: true }); });
+
+  /** v6 — the seeded childless goal leg (created+completed on its root → done). */
+  const seedGoal = () => writeNode('01-goal', CONTRACT, [ev('created'), ev('completed')]);
+  /** A structurally-exhausted session: a done work leg under the seeded goal. */
+  const exhausted = () => {
+    seedGoal();
+    writeNode('02-work', CONTRACT);
+    writeNode('02-work/01-a', CONTRACT, [ev('created'), ev('completed')]);
+  };
+  /** The met state: an exhausted session sealed by a HUMAN verdict. */
+  const met = () => {
+    exhausted();
+    valueOf(cmds().goalVerdict('met', 'all criteria confirmed'));
+  };
+
+  it('refuses an AUTOMATED (agent) initiator — the verdict is a human call', () => {
+    exhausted();
+    const e = errorOf(new Commands(new Store(root), 'agent').goalVerdict('met'));
+    expect(e.code).toBe('human-only');
+    expect(e.blocker).toContain('RECORDED_BY');
+  });
+
+  it('refuses with no goal leg', () => {
+    writeNode('01-leg', CONTRACT);
+    expect(errorOf(cmds().goalVerdict('met')).code).toBe('no-goal');
+  });
+
+  it('refuses a double met — the verdict is immutable per session', () => {
+    met();
+    expect(errorOf(cmds().goalVerdict('met')).code).toBe('already-met');
+  });
+
+  it('refuses while an undecided submission hides anywhere (a done task can still hold one)', () => {
+    seedGoal();
+    writeNode('02-work', CONTRACT);
+    writeNode('02-work/01-a', CONTRACT, [ev('created'), ev('submitted', { gate: 'grill' })]);
+    const e = errorOf(cmds().goalVerdict('met'));
+    expect(e.code).toBe('undecided-submission');
+    expect(e.blocker).toContain('02-work/01-a');
+  });
+
+  it('refuses a verdict before structural exhaustion', () => {
+    seedGoal();
+    writeNode('02-work', CONTRACT);
+    writeNode('02-work/01-a', CONTRACT, [ev('created')]);
+    expect(errorOf(cmds().goalVerdict('met')).code).toBe('not-exhausted');
+  });
+
+  it('records goal-met on the goal root once the session is exhausted', () => {
+    exhausted();
+    const r = valueOf(cmds().goalVerdict('met', 'criteria confirmed'));
+    expect(r.verdict).toBe('met');
+    const goalMet = cmds().events('01-goal').find((e) => e.type === 'goal-met');
+    expect(goalMet).toMatchObject({ decision: 'met', feedback: 'criteria confirmed' });
+    expect(goalMet!.note).toContain('test');
+  });
+
+  it('no post-met spawns — a sealed session accepts no new work (a stale verdict is never carried)', () => {
+    met();
+    const e = errorOf(cmds().spawn('02-work/01-b', CONTRACT));
+    expect(e.code).toBe('goal-met');
+  });
+});
+
+describe('goal! archive — the guarded structural reset (goal-session-design §6)', () => {
+  beforeEach(() => { makeStore(); });
+  afterEach(() => { rmSync(root, { recursive: true, force: true }); });
+
+  const seedGoal = () => writeNode('01-goal', CONTRACT, [ev('created'), ev('completed')]);
+  const exhausted = () => {
+    seedGoal();
+    writeNode('02-work', CONTRACT);
+    writeNode('02-work/01-a', CONTRACT, [ev('created'), ev('completed')]);
+  };
+  const met = () => {
+    exhausted();
+    valueOf(cmds().goalVerdict('met'));
+  };
+
+  it('refuses when the session is not met and the journey is not empty', () => {
+    exhausted();
+    expect(errorOf(cmds().goalArchive()).code).toBe('not-met');
+  });
+
+  it('--override forces the structural reset past an un-met session', () => {
+    exhausted();
+    const r = valueOf(cmds().goalArchive(true));
+    expect(existsSync(r.dest)).toBe(true);
+    expect(new Store(root).ids()).toEqual([]);
+  });
+
+  it('an EMPTY journey archives as the placeholder session', () => {
+    const r = valueOf(cmds().goalArchive());
+    expect(r.slug).toBe('session');
+    expect(existsSync(r.dest)).toBe(true);
+  });
+
+  it('a met session archives: legs + the live ledger move; the live store reloads empty', () => {
+    met();
+    const r = valueOf(cmds().goalArchive());
+    expect(r.slug).toBe('goal'); // no locked goal.md → the fallback slug from the goal leg id
+    expect(existsSync(join(r.dest, 'legs', '01-goal', 'node.json'))).toBe(true);
+    expect(existsSync(join(r.dest, 'legs', '02-work', '01-a', 'node.json'))).toBe(true);
+    expect(existsSync(join(r.dest, '.ledger.json'))).toBe(true); // goalVerdict bootstrapped it
+    expect(existsSync(join(root, '.ann', 'journey', '.ledger.json'))).toBe(false); // live ledger removed
+    expect(existsSync(join(root, '.ann', 'journey', 'legs', '01-goal'))).toBe(false); // legs moved out
+    expect(new Store(root).ids()).toEqual([]); // reload → empty journey
+  });
+
+  it('refuses a store-external drift even when met — ann never archives a state it does not recognize (override bypasses)', () => {
+    met();
+    appendFileSync(join(nodeDir('01-goal'), 'events.jsonl'), JSON.stringify({ at: '2026-08-27', type: 'goal-met', decision: 'met', note: 'forged' }) + '\n');
+    const e = errorOf(cmds().goalArchive());
+    expect(e.code).toBe('verify');
+    expect(e.blocker).toContain('store-external');
+    expect(valueOf(cmds().goalArchive(true)).dest.length).toBeGreaterThan(0);
+  });
+});
+
+describe('goal! seed — the L1 materialize (guard → seedGoal → the goal.md lock)', () => {
+  beforeEach(() => { makeStore(); });
+  afterEach(() => { rmSync(root, { recursive: true, force: true }); });
+
+  const GOAL_DOC = `# Goal
+
+Goal: Build a working goal! seed command
+
+Success criteria:
+- The validated goal is realized: Build a working goal! seed command
+- goal.md locks on the goal root with no artifact orphan
+`;
+
+  it('GUARDS: an EMPTY journey only — a non-empty journey is refused with the archive pointer', () => {
+    writeNode('01-leg', {});
+    const e = errorOf(cmds().goalSeed(GOAL_DOC));
+    expect(e.code).toBe('not-empty');
+    expect(e.blocker).toContain('goal! archive for a new session');
+    expect(existsSync(join(nodeDir('01-goal'), 'artifacts', 'goal.md'))).toBe(false); // nothing written
+  });
+
+  it('GO: seeds the goal leg AND artifact-locks goal.md on the goal root (D4-clean — no orphan)', () => {
+    const c = cmds();
+    const r = valueOf(c.goalSeed(GOAL_DOC));
+    expect(r.id).toBe('01-goal');
+    expect(r.contract).toEqual({
+      intent: 'Build a working goal! seed command',
+      acceptanceCriteria: [
+        'The validated goal is realized: Build a working goal! seed command',
+        'goal.md locks on the goal root with no artifact orphan',
+      ],
+    });
+    // the authored doc + the generated contract land together (doc→node 1:1)
+    expect(readFileSync(join(nodeDir('01-goal'), 'artifacts', 'goal.md'), 'utf8')).toContain('Goal: Build a working goal! seed command');
+    expect(JSON.parse(readFileSync(join(nodeDir('01-goal'), 'node.json'), 'utf8')).contract.intent).toBe('Build a working goal! seed command');
+    // the goal.md LOCK sits on the goal root — the seed leaves no D4 orphan goal.md
+    const lock = c.events('01-goal').find((e) => e.type === 'artifact-locked');
+    expect(lock?.artifact).toMatchObject({ name: 'goal', type: 'goal' });
+    const verify = new Store(root).verify();
+    expect(verify.some((d) => d.includes('artifact-orphan') && d.includes('goal.md'))).toBe(false);
+    // the goal view reads the seeded session: present · generated contract · OPEN (no work spawned → not exhausted)
+    const g = valueOf(c.goal());
+    expect(g.present).toBe(true);
+    expect(g.goalId).toBe('01-goal');
+    expect(g.goalDoc).toMatchObject({ name: 'goal' });
+    expect(g.contract).toEqual(r.contract);
+    expect(g.verdict).toBe('open'); // exhaustion needs WORK — a bare seed is the open state
+  });
+
+  it('a malformed doc is refused with NO partial writes (seedGoal parses before it writes)', () => {
+    const e = errorOf(cmds().goalSeed('# Goal\n\nGoal: no success criteria here\n'));
+    expect(e.code).toBe('store-refused');
+    expect(e.blocker).toContain("seedGoal rejected");
+    expect(new Store(root).ids()).toEqual([]); // nothing half-seeded
+  });
+});

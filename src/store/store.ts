@@ -309,6 +309,9 @@ export class Store {
         case 'superseded':
           if (status !== 'done' && status !== 'failed') status = 'superseded';
           break;
+        // v6 goal session: `goal-met` is deliberately NOT here — a goal verdict is
+        // STATUS-INERT (goal-session-design §2). Only the seed (created+completed)
+        // makes the goal leg done; the verdict never moves legStatus.
       }
     }
     // v8 §3: a submitted without a confirmed/rejected at that gate = blocked
@@ -591,6 +594,109 @@ export class Store {
     return out;
   }
 
+  /* ══ v6 goal session — the designated childless goal leg ════════════════════ */
+
+  /** The goal leg (goal-session-design §2): the frontmost `/`-less leg that is
+   *  childless AND carries the goal seed/artifact — NOT any frontmost leg (a `01-goal`
+   *  with children is an ordinary leg). Undefined = this journey has no goal yet
+   *  (empty, or work legs only). The seed (`created`+`completed` root events) is what
+   *  makes the leg identifiable; legacy-shaped childless goal legs (this repo's
+   *  01-goal) match the same predicate. */
+  goalLegId(): string | undefined {
+    const legs = [...this.nodes.keys()].filter((n) => !n.includes('/')).sort();
+    return legs.find((l) => this.carriesGoalSeed(l));
+  }
+
+  /** The goal-seed predicate: a childless leg carrying the goal seed/artifact —
+   *  `created`+`completed` root events (legacy 01-goal shape → legStatus derives done,
+   *  the first work leg's gate opens) or a locked goal.md. */
+  private carriesGoalSeed(id: string): boolean {
+    if (this.tasksOf(id).length) return false; // a goal leg is CHILDLESS
+    const evs = this.events(id);
+    const seeded = evs.some((e) => e.type === 'created') && evs.some((e) => e.type === 'completed');
+    const lockedGoal = evs.some((e) => e.type === 'artifact-locked' && e.artifact?.name === 'goal');
+    return seeded || lockedGoal;
+  }
+
+  /** The id-scoped root-event exception (§2): the designated childless goal leg may
+   *  hold ONLY the goal.md lock and `goal-met` through the general writer (the seed
+   *  is written by seedGoal, never here). Nothing else on any leg root. */
+  private goalRootEvent(id: string, e: JourneyEvent): boolean {
+    if (id !== this.goalLegId()) return false;
+    if (e.type === 'goal-met') return true;
+    if (e.type === 'artifact-locked') return e.artifact?.name === 'goal';
+    return false;
+  }
+
+  /** v6 seed: a new session's goal leg. goal.md (fixed Goal:/Success criteria: sections)
+   *  is the authored truth; node.json is generated 1:1 from it (the machine reads it);
+   *  the `created`+`completed` seed events make legStatus derive done so the first work
+   *  leg's legGateMet opens. A goal seeds the FIRST leg of an EMPTY journey only (a
+   *  changed goal is a new session — archive first). The seed writes flow through the
+   *  store's own write path + ledger (recordWrite) so verify stays clean from the first
+   *  write. goal.md is NOT artifact-locked here — sealing the doc is the grill close. */
+  seedGoal(doc: string): { id: string; contract: { intent: string; acceptanceCriteria: string[] } } {
+    if (this.nodes.size) throw new Error('seedGoal rejected: the journey is not empty — a goal seeds the first leg of an empty session (archive first)');
+    if (this.goalLegId()) throw new Error('seedGoal rejected: a goal leg already exists');
+    const parsed = this.parseGoalDoc(doc);
+    const id = '01-goal';
+    const today = new Date().toISOString().slice(0, 10);
+    const dir = this.nodeFolder(id);
+    mkdirSync(join(dir, 'artifacts'), { recursive: true });
+    writeFileSync(join(dir, 'artifacts', 'goal.md'), doc);
+    const nodeJson = JSON.stringify({ id, contract: parsed, createdAt: today }, null, 2) + '\n';
+    writeFileSync(join(dir, 'node.json'), nodeJson);
+    const seed: JourneyEvent[] = [
+      { at: today, type: 'created', note: 'goal seeded — the session starts by grilling the goal' },
+      { at: today, type: 'completed', note: 'goal grilled & recorded — success criteria sealed when goal.md locks' },
+    ];
+    writeFileSync(join(dir, 'events.jsonl'), seed.map((e) => JSON.stringify(e)).join('\n') + '\n');
+    this.nodes.set(id, { id, events: seed });
+    this.recordWrite(id, nodeJson); // events come from the in-memory log → bytes match the file
+    return { id, contract: parsed };
+  }
+
+  /** v6 archive: move the finished session's legs + the write-rev ledger to
+   *  `.ann/archive/sessions/<ts>-<slug>/journey/{legs, .ledger.json}` — a faithful
+   *  snapshot that round-trips Store() for read-only loads. The LIVE ledger entry is
+   *  removed (else verify reports node-deleted) and the in-memory tree resets to an
+   *  empty journey — id reuse across sessions is then safe. */
+  archiveJourney(slug: string): { at: string; dest: string } {
+    const ts = new Date().toISOString().replace(/[:.]/g, '-'); // dir-safe ISO stamp
+    const dir = join(this.root, '.ann', 'archive', 'sessions', `${ts}-${slug}`, 'journey');
+    mkdirSync(join(dir, 'legs'), { recursive: true });
+    if (existsSync(this.legs)) {
+      for (const name of readdirSync(this.legs)) {
+        renameSync(join(this.legs, name), join(dir, 'legs', name));
+      }
+    }
+    const ledgerFile = join(this.root, '.ann', 'journey', '.ledger.json');
+    if (existsSync(ledgerFile)) renameSync(ledgerFile, join(dir, '.ledger.json'));
+    mkdirSync(this.legs, { recursive: true }); // an empty live legs root stays — Store() loads clean
+    // reset the live store: empty journey, no ledger baseline
+    this.nodes.clear();
+    this.unparseableNodes.clear();
+    this.ledger = undefined;
+    return { at: ts, dest: dir };
+  }
+
+  /** goal.md → contract (goal-session-design §1/§2): the `Goal:` line is the intent;
+   *  the bullet list under `Success criteria:` are the acceptance criteria. This is the
+   *  1:1 doc→node mapping (a doc change = a new session, so seedGoal writes both). */
+  private parseGoalDoc(doc: string): { intent: string; acceptanceCriteria: string[] } {
+    const goal = (doc.match(/^#{0,6}\s*[#*]*\s*Goal\s*[#*]*:\s*(.+)$/m) || [])[1];
+    const body = doc.split(/^#{0,6}\s*[#*]*\s*Success criteria\s*[#*]*:/m)[1] ?? '';
+    const criteria = body
+      .split('\n')
+      .map((l) => l.trim())
+      .filter((l) => /^[-*]\s+/.test(l))
+      .map((l) => l.replace(/^[-*]\s+/, '').trim())
+      .filter(Boolean);
+    if (!goal || !goal.trim()) throw new Error("seedGoal rejected: goal.md must carry a 'Goal:' line (the intent)");
+    if (!criteria.length) throw new Error("seedGoal rejected: goal.md must carry a 'Success criteria:' bullet list");
+    return { intent: goal.trim(), acceptanceCriteria: criteria };
+  }
+
   /**
    * THE single write path (LB-3): validate schema against the vocab registry,
    * gate-check the prospective log, append only when clean — fail-closed.
@@ -600,8 +706,17 @@ export class Store {
    * never aim an append at a sibling, a parent, or the store root.
    */
   appendEvent(node: NodeDir, event: JourneyEvent): void {
-    if (!node.id.includes('/')) {
+    // v6 goal session (goal-session-design §2): the designated childless goal leg is
+    // the ONE leg root that may carry events — the seed (`created`/`completed`, written
+    // by seedGoal, never through the general append), the goal.md lock, and `goal-met`.
+    // Everything else on a leg root stays refused (v8 §3).
+    if (!node.id.includes('/') && !this.goalRootEvent(node.id, event)) {
       throw new Error(`append rejected: leg roots carry no events (v8 §3) — record process facts on tasks`);
+    }
+    // goal-met is a goal-root VERDICT — never on a task id or a non-goal leg root (the
+    // leg-root guard above already refuses the latter; this catches task ids).
+    if (event.type === 'goal-met' && node.id !== this.goalLegId()) {
+      throw new Error(`append rejected: goal-met is a goal-root verdict — refused on ${node.id}`);
     }
     if (!event.at || !event.type || !getVOCAB().eventTypes.includes(event.type)) {
       throw new Error(`append rejected: bad schema (at + known type required, got ${event.type})`);
@@ -641,12 +756,16 @@ export class Store {
   }
 
   /** undefined = clean (no baseline, or disk matches the ledger); a string = why the
-   *  node's on-disk state is unrecognized. Byte comparison against what ann last wrote. */
+   *  node's on-disk state is unrecognized. Byte comparison against what ann last wrote.
+   *  A MISSING events.jsonl reads as '' — a spawned leg's ledger eventsContent is ''
+   *  (a leg has no events.jsonl at all), so the first goal-root write on a spawned leg
+   *  must not trip `null !== ''` (v6). Verify()'s separate loop keeps its own
+   *  missing-vs-empty reporting (null vs ''). */
   private ledgerDivergence(id: string): string | undefined {
     const entry = this.ledger?.nodes?.[id];
     if (!entry) return undefined; // no baseline — a first write (or fixture node) is clean
     const ev = join(this.legs, id, 'events.jsonl');
-    const evDisk = existsSync(ev) ? readFileSync(ev, 'utf8') : null;
+    const evDisk = existsSync(ev) ? readFileSync(ev, 'utf8') : '';
     if (evDisk !== entry.eventsContent) {
       return `events.jsonl differs from the ledger (ann wrote rev ${entry.lastRev} at ${entry.lastEventAt})`;
     }
@@ -715,9 +834,15 @@ export class Store {
       'gate-revised': ['at', 'type', 'note', 'gate'],
       transferred: ['at', 'type', 'note', 'target', 'scope'],
       deferred: ['at', 'type', 'note', 'reason'],
+      'goal-met': ['at', 'type', 'note', 'decision', 'feedback'],
     };
     const unknown = Object.keys(e).filter((k) => !(allowed[e.type] ?? []).includes(k));
     if (unknown.length) throw new Error(`append rejected: unknown field(s) '${unknown.join(', ')}' on ${e.type} (strict schema, format v12 §3)`);
+    if (e.type === 'goal-met') {
+      // v6 (goal-session-design §4): the verdict is 'met' only — a recorded human call.
+      if (e.decision !== 'met') throw new Error("append rejected: goal-met.decision must be 'met'");
+      if (e.feedback !== undefined && typeof e.feedback !== 'string') throw new Error('append rejected: goal-met.feedback must be a string');
+    }
     if (e.type === 'submitted' || e.type === 'confirmed' || e.type === 'rejected') {
       if (typeof e.gate !== 'string' || !getVOCAB().gates.includes(e.gate)) {
         throw new Error(`append rejected: ${e.type}.gate must be one of ${getVOCAB().gates.join('|')}`);

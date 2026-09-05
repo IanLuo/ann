@@ -40,7 +40,7 @@ import { join, basename, dirname, resolve } from 'node:path';
 import { execSync } from 'node:child_process';
 import { Store, legacyPath, logicalNameFromFile } from '../store/store.js';
 import { blobSha } from '../store/sha.js';
-import { Commands, CommandResult } from '../commands/index.js';
+import { Commands, CommandResult, GOAL_SEED_GUARD } from '../commands/index.js';
 import {
   loadProviderRegistry,
   resolveSetting,
@@ -64,11 +64,12 @@ import { runValidators, RULES, derivedRegistry } from '../flow/validators/index.
 import { buildStepRegistry } from '../flow/steps/index.js';
 import { loadProjectFlow, phaseOf, resolveChain, validateChain } from '../flow/chain.js';
 import { Frame } from '../flow/frame.js';
+import { runGoalSeed } from '../flow/goal-seed.js';
 import { buildAbilities } from '../abilities/index.js';
 import { resolveConfig } from '../flow/config.js';
 import { getAdapter } from '../abilities/llm/index.js';
 import { ProviderAdapter } from '../abilities/llm/index.js';
-import { renderStatusTree, renderGateCard, renderPlan, renderDrift, renderLedger, PlanLeg, PlanAhead } from './renderers.js';
+import { renderStatusTree, renderGateCard, renderPlan, renderDrift, renderLedger, renderGoal, PlanLeg, PlanAhead } from './renderers.js';
 
 // ── PROJECT RESOLUTION (before anything touches the store) ──────────────────────
 // ann manages MULTIPLE projects (each with its own journey), identified by PATH only.
@@ -469,6 +470,7 @@ function cmdSteps() {
 /** F5 (pull side) — the run-next proposal, derived from events (never assumed). */
 function cmdNext() {
   const lb = commands.lookBack();
+  const next = commands.advance();
   if (JSON_OUT) return console.log(JSON.stringify(lb, null, 2));
   console.log('NEXT (derived from events — the observer action)');
   if (lb.activeLeg) console.log(`  active leg: ${lb.activeLeg} (${lb.activeLegStatus})`);
@@ -480,9 +482,75 @@ function cmdNext() {
   for (const p of lb.pendingGates) console.log(`  WAITING ON YOU: ${p.task} — gate ${p.gate} submitted, undecided`);
   const lg = lb.legGate;
   console.log(`  leg gate: ${lg.met ? 'MET' : `UNMET — ${lg.blocker}`}`);
-  if (!lb.frontmostReady && !lb.pendingGates.length) console.log('  no ready action — resolve blocked tasks or close via a gated closure task');
-  const next = commands.advance();
+  // the FOUR-STATE GOAL CONSULT (goal-session-design §5): in the terminal the goal
+  // holds the next move (no goal → grill & seed · exhausted-unconfirmed → the choice
+  // menu · met → archive & start a new goal) — never a blind "no ready action".
+  if (next.action === 'none') {
+    const g = commands.goal();
+    if (g.ok && g.value.present) console.log(`  goal: ${g.value.goalId} [${g.value.goalStatus}] — verdict ${g.value.verdict}`);
+  } else if (!lb.frontmostReady && !lb.pendingGates.length) {
+    console.log('  no ready action — resolve blocked tasks or close via a gated closure task');
+  }
   console.log(`  advance: ${next.action} — ${next.detail}`);
+}
+
+/** `goal` — the goal-session read (goal-session-design §9): present · goalId ·
+ *  status · the LOCKED goal.md · the generated contract · structural state ·
+ *  verdict · legs. Status WORDS only (AC5 — the renderer never emits counts). */
+function cmdGoal() {
+  emit(commands.goal(), (v) => {
+    if (JSON_OUT) return console.log(JSON.stringify(v, null, 2));
+    console.log(renderGoal(v));
+  });
+}
+
+/** `goal! met [feedback]` / `goal! archive [--override]` / `goal! seed [statement]` —
+ *  the goal-session WRITES (goal-session-design §4/§6/§1). `met` is a HUMAN verdict —
+ *  the initiator rule lives in L1 (goalVerdict refuses RECORDED_BY=agent); `seed` runs
+ *  the interactive grilling session at SESSION scope and materializes goal.md on GO
+ *  (flow/goal-seed). Note 'goal' is a READ so it never joins the bare-name WRITES guard
+ *  below (only 'goal!' is a write marker). */
+async function cmdGoalBang(op: string | undefined, rest: string[]) {
+  if (op === 'seed') {
+    await cmdGoalSeed(rest.join(' ').trim());
+    return;
+  }
+  if (op === 'met') {
+    const feedback = rest.join(' ').trim();
+    emit(commands.goalVerdict('met', feedback), (v) => console.log(`goal! met: verdict recorded @ ${v.at}`));
+    return;
+  }
+  if (op === 'archive') {
+    emit(commands.goalArchive(rest.includes('--override')), (v) => console.log(`goal! archive: session archived → ${v.dest}`));
+    return;
+  }
+  console.error('usage: ann goal! seed [goal-statement] | ann goal! met [feedback] | ann goal! archive [--override]');
+  process.exit(2);
+}
+
+/** `goal! seed '<goal>'` — the interactive goal seed. The EMPTY-JOURNEY guard runs here
+ *  FIRST (before provider wiring) so the refusal is dogfoodable on this non-empty repo
+ *  with no provider configured; the driver + L1 re-check the same guard at materialize.
+ *  On GO the session's converged output becomes a LOCKED goal.md — the seeded goal's
+ *  verdict stays UNCONFIRMED until the human records goal! met. */
+async function cmdGoalSeed(idea: string) {
+  if (commands.ids().length > 0) {
+    console.error(`not-empty: ${GOAL_SEED_GUARD}`);
+    process.exit(1);
+  }
+  const r = await runGoalSeed(commands, buildAbilities(getAdapter(undefined, ROOT)), { idea });
+  if (!r.ok) {
+    console.error(`${r.error.code}: ${r.error.blocker}`);
+    process.exit(1);
+  }
+  if (!r.seeded) {
+    console.log(`goal! seed: NOT seeded — ${r.note}`);
+    return;
+  }
+  console.log(`goal! seed: goal seeded → ${r.goalId} (${r.contract.intent})`);
+  console.log(`  contract: ${r.contract.acceptanceCriteria.length} success criteria — goal.md locked @ ${r.sha}`);
+  console.log(`  doc: ${r.docPath}`);
+  console.log('  verdict: unconfirmed — reach structural exhaustion, then record it: goal! met');
 }
 
 /** A task's RESOLVED flow + chain validation — the data the frame will execute. */
@@ -853,6 +921,7 @@ const COMMANDS: Array<{ name: string; args: string; desc: string }> = [
   { name: 'chain', args: '', desc: 'the project flow config as data (work-type chains, F3 view) · alias --chain' },
   { name: 'steps', args: '', desc: 'the step registry — the pluggable surface future steps implement against · alias --steps' },
   { name: 'next', args: '', desc: 'the run-next proposal (F5 pull): active leg, frontmost-ready, pending gates, leg gate — derived, never assumed · alias --next' },
+  { name: 'goal', args: '', desc: 'the goal-session view (goal-session-design §9): goalId · status · the LOCKED goal.md · the generated contract · structural state · verdict (met/unconfirmed/open) · legs (status words only) · alias --goal' },
   { name: 'flow', args: '<id>', desc: 'a task\'s RESOLVED flow + chain validation (the data the frame will execute) · alias --flow' },
   { name: 'run!', args: '<id>', desc: 'WRITE — run a task through the FRAME (materialize → grill → activate → execute → verify → confirm → commit); resumable, stops at the first block' },
   { name: 'commands', args: '', desc: 'this table as markdown (the derived doc) · alias --commands' },
@@ -864,6 +933,9 @@ const COMMANDS: Array<{ name: string; args: string; desc: string }> = [
   { name: 'gate!', args: '<id> grill|confirm accept|reject [feedback]', desc: 'WRITE — human gate decision (submit + decide; the 3-reject bound is a CONSTANT owned here)' },
   { name: 'lock!', args: '<id> <artifact-file> [type]', desc: 'WRITE — thin artifact record over the producer\'s own file (write confinement): <artifact-file> is resolved inside <id>/artifacts/, hashed, and recorded as artifact-locked {name = file stem, path, lockSha, type?, version?}; an out-of-folder file is refused; never writes/stamps/symlinks the file' },
   { name: 'supersede!', args: '<id> <successor-id> <artifact-file> [note]', desc: 'WRITE — superseded event with a forward pointer (the one cross-task write; refuses a live locker): the successor is named by <successor-id> + its own <artifact-file>, resolved via resolveNode — never a raw path' },
+  { name: 'goal!', args: 'met [feedback]', desc: 'WRITE — the HUMAN verdict that seals a structurally-exhausted session (goal-met on the goal root); refused for automated (agent) initiators, double-met, and any undecided submission' },
+  { name: 'goal!', args: 'archive [--override]', desc: 'WRITE — guarded structural reset: move .ann/journey → .ann/archive/sessions/<ts>-<slug>/ for a fresh goal; refuses without a met verdict (or --override), on store-external verify drifts, and on uncommitted tracked .ann/journey changes' },
+  { name: 'goal!', args: 'seed [goal-statement]', desc: 'WRITE — grill a NEW goal at SESSION scope (EMPTY journey only): the interactive idea-validation session (grill → batch-ask → research → human verdict); on solid, synthesize goal.md (Goal:/Success criteria:) + seed the goal leg + artifact-lock goal.md on the goal root; revise/reject seeds nothing' },
 ];
 
 const command = args[0];
@@ -949,6 +1021,8 @@ try {
   else if (command === 'chain' || command === '--chain') cmdChain();
   else if (command === 'steps' || command === '--steps') cmdSteps();
   else if (command === 'next' || command === '--next') cmdNext();
+  else if (command === 'goal' || command === '--goal') cmdGoal();
+  else if (command === 'goal!') await cmdGoalBang(args[1], args.slice(2));
   else if (command === 'flow' || command === '--flow') cmdFlow(args[1]);
   else if (command === 'run!') await cmdRun(args[1]);
   else if (command === 'read' || command === '--read') cmdRead(args[1] || '');

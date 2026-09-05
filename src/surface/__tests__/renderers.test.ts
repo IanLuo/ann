@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { TaskDetail, ResultItem } from '../../store/store.js';
-import { renderStatusTree, renderGateCard, renderPlan, redact, hasSecret, hasScalarProgress, renderDrift, renderLedger } from '../renderers.js';
+import type { GoalView } from '../../commands/index.js';
+import { renderStatusTree, renderGateCard, renderPlan, renderGoal, redact, hasSecret, hasScalarProgress, renderDrift, renderLedger } from '../renderers.js';
 
 const detail = (over: Partial<TaskDetail> = {}): TaskDetail => ({
   id: '06-engine-build/09-s6-runner-reviewer',
@@ -90,6 +91,58 @@ describe('renderPlan (F12 — full plan)', () => {
     expect(text).toContain('09-s6-runner-reviewer:queued');
     expect(text).toContain('frontmost-ready: 06-engine-build/09-s6-runner-reviewer (queued)');
     expect(text).toContain('also ready: 06-engine-build/10-s7-github-binding (queued)');
+  });
+});
+
+describe('renderGoal — the goal-session view (goal-session-design §9)', () => {
+  const base: GoalView = {
+    present: true,
+    goalId: '01-goal',
+    goalStatus: 'done',
+    structural: { exhausted: true, detail: 'every leg derived done — the session is structurally complete; a HUMAN verdict seals it (goal! met)' },
+    verdict: 'unconfirmed',
+    legs: [
+      { id: '01-goal', status: 'done' },
+      { id: '02-shaping', status: 'done' },
+    ],
+  };
+
+  it('renders the goal id, status, verdict and legs — STATUS WORDS only', () => {
+    const text = renderGoal(base);
+    expect(text).toContain('GOAL: 01-goal  [done]');
+    expect(text).toContain('verdict: unconfirmed');
+    expect(text).toContain('structurally complete');
+    expect(text).toContain('02-shaping done');
+  });
+
+  it('renders the LOCKED doc + the generated contract + the met record when present', () => {
+    const text = renderGoal({
+      ...base,
+      verdict: 'met',
+      goalDoc: { name: 'goal', path: '.ann/journey/legs/01-goal/artifacts/goal.md', sha: 'abc1234' },
+      contract: { intent: 'build a goal session', acceptanceCriteria: ['it works end to end', 'archive is faithful'] },
+      metEvent: { at: '2026-09-01', type: 'goal-met', decision: 'met', note: 'goal met (ian)', feedback: 'criteria confirmed' },
+    });
+    expect(text).toContain('doc: goal @ abc1234');
+    expect(text).toContain('intent: build a goal session');
+    expect(text).toContain('AC-2: archive is faithful');
+    expect(text).toContain('met: 2026-09-01 — goal met (ian) · feedback: criteria confirmed');
+    expect(text).toContain('verdict: met — session sealed');
+  });
+
+  it('renders the no-goal state with its structural detail', () => {
+    const text = renderGoal({ present: false, structural: { exhausted: false, detail: 'no goal — the journey is empty: grill & seed a goal (goal.md + the generated contract)' }, verdict: 'open', legs: [] });
+    expect(text).toContain('GOAL: (none)');
+    expect(text).toContain('journey is empty');
+  });
+
+  it('never emits scalar progress (AC5 — the goal surface is status words only)', () => {
+    const texts = [
+      renderGoal(base),
+      renderGoal({ ...base, verdict: 'met', metEvent: { at: '2026-09-01', type: 'goal-met', decision: 'met', note: 'goal met (ian)' } }),
+      renderGoal({ present: false, structural: { exhausted: false, detail: 'no goal leg — work legs without a seeded goal (a legacy journey): archive & reseed for the goal-session shape' }, verdict: 'open', legs: [{ id: '01-leg', status: 'done' }] }),
+    ];
+    for (const t of texts) expect(hasScalarProgress(t)).toBe(false);
   });
 });
 

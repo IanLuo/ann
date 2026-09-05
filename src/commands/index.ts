@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { join, relative } from 'node:path';
-import { Store, JourneyEvent, NodeDir, ResultItem, TaskDetail } from '../store/store.js';
+import { Store, JourneyEvent, NodeDir, ResultItem, TaskDetail, legacyPath } from '../store/store.js';
 import { blobSha, stripMarkers } from '../store/sha.js';
 import { getVOCAB } from '../store/vocab.js';
 
@@ -60,7 +61,15 @@ const COMPOSITE_OWNED: Record<string, string> = {
   rejected: 'gate!',
   'artifact-locked': 'lock!',
   superseded: 'supersede!',
+  'goal-met': 'goal!', // v6 — the sealed-session verdict is owned by goal! met
 };
+
+/** The `goal! seed` EMPTY-JOURNEY guard (goal-session-design §1): a goal seeds the
+ *  FIRST leg of a fresh session — a changed goal is a NEW session. L1 owns it; the
+ *  driver + the CLI pre-check the SAME constant so the guard is dogfoodable (fails
+ *  before any provider call) and never drifts from the L1 refusal. */
+export const GOAL_SEED_GUARD =
+  'this journey already has a goal — goal! archive for a new session (a goal seeds the first leg of an EMPTY journey)';
 
 /** Excerpt bound for the read view (context-packet-spec §4 — never unbounded). */
 const READ_CHARS = 200_000;
@@ -118,6 +127,22 @@ export interface ResolvedRead {
   provenance: 'derived-from';
 }
 
+/** The goal view (goal-session-design §9 — `ann goal`). All status words, no scalar
+ *  progress (AC5): `legs` carries statuses only, exhaustion is a WORD, never a count. */
+export interface GoalView {
+  present: boolean;
+  goalId?: string;
+  goalStatus?: string;
+  /** The LOCKED goal.md on the goal root (path normalized to the current layout). */
+  goalDoc?: { name: string; path: string; sha: string };
+  /** The GENERATED node contract (intent + ACs derived 1:1 from goal.md). */
+  contract?: { intent: string; acceptanceCriteria: string[] };
+  structural: { exhausted: boolean; detail: string };
+  verdict: 'met' | 'unconfirmed' | 'open';
+  metEvent?: JourneyEvent;
+  legs: Array<{ id: string; status: string }>;
+}
+
 export class Commands {
   constructor(
     readonly store: Store,
@@ -155,6 +180,13 @@ export class Commands {
    * `node.json` + `artifacts/`).
    */
   spawn(id: string, contract: unknown): CommandResult<SpawnedNode> {
+    // v6 — NO POST-MET SPAWNS (goal-session-design §4): once the goal is sealed with a
+    // met verdict, the session is terminal until it archives (a stale verdict is never
+    // silently carried forward by more work).
+    const metGoal = this.store.goalLegId();
+    if (metGoal && this.store.events(metGoal).some((e) => e.type === 'goal-met')) {
+      return fail('goal-met', 'the goal is met — this session is sealed; no post-met spawns (goal! archive & start a new goal)');
+    }
     const segs = id.split('/');
     const last = segs[segs.length - 1];
     if (segs.includes('00')) {
@@ -429,6 +461,235 @@ export class Commands {
     return ok({ name, path });
   }
 
+  /* ══ v6 goal session — `goal` (read) · `goal! met` · `goal! archive` ════════ */
+
+  /** The goal view (goal-session-design §9): present · goalId · goalStatus ·
+   *  goalDoc (the LOCKED goal.md) · contract (the generated intent+ACs) · structural
+   *  state · verdict. `met` is exhaustion AND a recorded human verdict — structural
+   *  alone is never met. */
+  goal(): CommandResult<GoalView> {
+    const legs = this.legRows();
+    const goalId = this.store.goalLegId();
+    if (!goalId) {
+      return ok({
+        present: false,
+        structural: {
+          exhausted: false,
+          detail: legs.length
+            ? 'no goal leg — work legs without a seeded goal (a legacy journey): archive & reseed for the goal-session shape'
+            : 'no goal — the journey is empty: grill & seed a goal (goal.md + the generated contract)',
+        },
+        verdict: 'open',
+        legs,
+      });
+    }
+    const goalStatus = this.store.status(goalId);
+    const raw = this.store.contractOf(goalId) as { intent?: unknown; acceptanceCriteria?: unknown };
+    const contract =
+      raw && (raw.intent || Array.isArray(raw.acceptanceCriteria))
+        ? { intent: String(raw.intent ?? ''), acceptanceCriteria: (raw.acceptanceCriteria ?? []) as string[] }
+        : undefined;
+    const goalDoc = this.goalDocOf(goalId);
+    const metEvent = this.store.events(goalId).find((e) => e.type === 'goal-met');
+    const undone = legs.filter((l) => !['done', 'superseded'].includes(l.status)).map((l) => l.id);
+    const pending = this.undecidedEverywhere();
+    const exhausted = this.goalExhausted();
+    const structural = {
+      exhausted,
+      detail: exhausted
+        ? 'every leg derived done — the session is structurally complete; a HUMAN verdict seals it (goal! met)'
+        : `not exhausted — ${undone.length ? `undone: ${undone.join(', ')}` : 'no work spawned yet'}${pending.length ? ` · ${pending.map((p) => `${p.task}@${p.gate}`).join(', ')} undecided` : ''}`,
+    };
+    const verdict = exhausted && metEvent ? 'met' : exhausted ? 'unconfirmed' : 'open';
+    return ok({
+      present: true,
+      goalId,
+      goalStatus,
+      ...(goalDoc ? { goalDoc } : {}),
+      ...(contract ? { contract } : {}),
+      structural,
+      verdict,
+      ...(metEvent ? { metEvent } : {}),
+      legs,
+    });
+  }
+
+  /** `goal! met` — the HUMAN verdict that seals the session. Guarded
+   *  (goal-session-design §4): goal present · HUMAN initiator only (an automated
+   *  `agent` is refused — the verdict is a human call) · no double-met · no undecided
+   *  submission anywhere (a done task can still hide one) · structural exhaustion
+   *  reached. Appends `goal-met` to the goal root (status-inert). */
+  goalVerdict(decision: 'met', feedback = ''): CommandResult<{ verdict: 'met'; at: string }> {
+    if (decision !== 'met') return fail('bad-verdict', "goal! verdict must be 'met'");
+    const goalId = this.store.goalLegId();
+    if (!goalId) return fail('no-goal', 'no goal leg — seed a goal before recording a verdict');
+    if (this.who === 'agent') {
+      return fail('human-only', 'goal! met is a HUMAN verdict — refused for an automated (agent) initiator; record it as the human: RECORDED_BY=<your name> ann goal! met');
+    }
+    if (this.store.events(goalId).some((e) => e.type === 'goal-met')) {
+      return fail('already-met', 'the goal is already met — verdicts are immutable per session (a wrong met is recoverable only via the goal! archive --override path)');
+    }
+    const pending = this.undecidedEverywhere();
+    if (pending.length) {
+      return fail('undecided-submission', `cannot seal the goal while a submission is undecided: ${pending.map((p) => `${p.task}@${p.gate}`).join(', ')} — decide it first`);
+    }
+    if (!this.goalExhausted()) {
+      return fail('not-exhausted', 'the goal is not structurally exhausted — a met verdict records criteria met; finish the work (or archive) first');
+    }
+    try {
+      this.store.appendEvent(this.store.resolveNode(goalId), {
+        at: this.today,
+        type: 'goal-met',
+        decision: 'met',
+        ...(feedback ? { feedback } : {}),
+        note: `goal met (${this.who})`,
+      });
+    } catch (e) {
+      return fail('store-refused', (e as Error).message);
+    }
+    return ok({ verdict: 'met', at: this.today });
+  }
+
+  /** `goal! archive` — the guarded structural reset (goal-session-design §6). Refuses
+   *  unless the session is met (or the journey is empty) or --override; refuses on
+   *  store-external drifts (ann never archives a state it does not recognize) and on
+   *  uncommitted TRACKED changes under the moving tree (.ann/journey — never untracked
+   *  scratch). Content-level check/verify problems (this repo's known 15/4 baseline)
+   *  are NOT re-litigated here — they travel into the archive with the session. */
+  goalArchive(override = false): CommandResult<{ at: string; dest: string; slug: string }> {
+    const goalId = this.store.goalLegId();
+    const emptyJourney = this.store.ids().length === 0;
+    const met = !!goalId && this.store.events(goalId).some((e) => e.type === 'goal-met');
+    if (!override && !emptyJourney && !met) {
+      return fail('not-met', 'goal! archive refuses: no met verdict on the session (and the journey is not empty) — record goal! met first, or pass --override for a structural reset');
+    }
+    if (!override) {
+      const external = this.store.verify().filter((d) => d.startsWith('store-external'));
+      if (external.length) {
+        return fail('verify', `goal! archive refuses: ${external.length} store-external drift(s) — the store changed outside the CLI. Run 'ann verify'; pass --override to force.`);
+      }
+      const dirty = this.uncommittedJourneyChanges();
+      if (dirty.length) {
+        return fail('uncommitted', `goal! archive refuses: uncommitted tracked change(s) under .ann/journey (${dirty.map((l) => l.slice(0, 60)).join(' · ')}) — commit first, or pass --override.`);
+      }
+    }
+    const slug = goalId ? this.slugFor(goalId) : 'session';
+    try {
+      const r = this.store.archiveJourney(slug);
+      return ok({ at: r.at, dest: r.dest, slug });
+    } catch (e) {
+      return fail('store-refused', (e as Error).message);
+    }
+  }
+
+  /**
+   * `goal! seed` — the L1 MATERIALIZE half of the goal seed (the interactive grill
+   *  that AUTHORS the doc runs at SESSION scope — flow/goal-seed — on top of this
+   *  composite; L1 owns the write + its invariants). EMPTY-JOURNEY ONLY (a goal seeds
+   *  the first leg of a fresh session — a changed goal is a NEW session, goal! archive
+   *  first; goal-session-design §1/§2). seedGoal writes goal.md (authored truth) + the
+   *  generated node contract + the created/completed seed events, then the follow-on
+   *  lock! seals goal.md ON THE GOAL ROOT (the goal-root carve-out admits artifact name
+   *  'goal') so the seed is D4-clean from the first write — no orphan goal.md on disk.
+   *  seedGoal parses the doc BEFORE any write, so a malformed doc is refused with no
+   *  partial state; the guard + carve-out both run inside this composite.
+   */
+  goalSeed(doc: string): CommandResult<{
+    id: string;
+    contract: { intent: string; acceptanceCriteria: string[] };
+    doc: { name: string; path: string; sha: string };
+  }> {
+    if (this.store.ids().length > 0) return fail('not-empty', GOAL_SEED_GUARD);
+    let id: string;
+    let contract: { intent: string; acceptanceCriteria: string[] };
+    try {
+      ({ id, contract } = this.store.seedGoal(doc));
+    } catch (e) {
+      return fail('store-refused', (e as Error).message);
+    }
+    const locked = this.lock(id, 'goal.md', { type: 'goal', note: `goal.md sealed by the seed grill (${this.who})` });
+    if (!locked.ok) return fail(locked.error.code, locked.error.blocker);
+    return ok({ id, contract, doc: { name: locked.value.name, path: locked.value.path, sha: locked.value.sha } });
+  }
+
+  /* ══ goal derivations (shared by goal()/goalVerdict()/advance()) ═════════════ */
+
+  /** Every leg's status WORD (AC5 — the goal surface shows statuses, never counts). */
+  private legRows(): Array<{ id: string; status: string }> {
+    return this.store
+      .ids()
+      .filter((i) => !i.includes('/'))
+      .sort()
+      .map((id) => ({ id, status: this.store.status(id) }));
+  }
+
+  /** The goal leg's locked goal.md — read from the GOAL ROOT's own artifact-locked
+   *  event (never current('goal'): a task locking a same-named file must not shadow
+   *  the session's doc). Path normalized to the current layout. */
+  private goalDocOf(goalId: string): { name: string; path: string; sha: string } | undefined {
+    const a = this.store.events(goalId).find((e) => e.type === 'artifact-locked' && e.artifact?.name === 'goal')?.artifact;
+    if (!a?.name || !a.path) return undefined;
+    return { name: a.name, path: legacyPath(a.path), sha: a.lockSha ?? '' };
+  }
+
+  /** Exhaustion (goal-session-design §5): WORK exists (≥1 task), every leg derives
+   *  done/superseded, and no undecided submission hides anywhere. A seeded goal with
+   *  no work spawned is NOT exhausted — it is the open state. */
+  private goalExhausted(): boolean {
+    const undone = this.legRows().filter((l) => !['done', 'superseded'].includes(l.status));
+    const hasWork = this.store.ids().some((i) => i.includes('/'));
+    return hasWork && undone.length === 0 && this.undecidedEverywhere().length === 0;
+  }
+
+  /** Undecided submissions across EVERY task (including done ones — a done task can
+   *  still hide a stray submission; the verdict must not seal over it). */
+  private undecidedEverywhere(): Array<{ task: string; gate: string }> {
+    const out: Array<{ task: string; gate: string }> = [];
+    for (const id of this.store.ids()) {
+      if (!id.includes('/')) continue;
+      for (const e of this.store.events(id)) {
+        if (e.type !== 'submitted' || typeof e.gate !== 'string') continue;
+        if (!this.undecidedSubmission(id, e.gate)) continue;
+        if (!out.some((p) => p.task === id && p.gate === e.gate)) out.push({ task: id, gate: e.gate });
+      }
+    }
+    return out;
+  }
+
+  /** Uncommitted TRACKED changes under the moving tree (.ann/journey) — `??` lines
+   *  are untracked scratch and never a refusal basis. Non-git roots read clean (the
+   *  guard is about not losing tracked work, not about git being present). */
+  private uncommittedJourneyChanges(): string[] {
+    try {
+      const out = execFileSync('git', ['-C', this.store.root, 'status', '--porcelain', '--', '.ann/journey'], {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      });
+      return out.split('\n').filter((l) => l && !l.startsWith('??'));
+    } catch {
+      return [];
+    }
+  }
+
+  /** The archive slug: the goal.md `Goal:` line, slugified (dir-safe, ≤ 40 chars);
+   *  fallback to the goal leg id minus its NN- prefix. */
+  private slugFor(goalId: string): string {
+    const doc = this.goalDocOf(goalId);
+    if (doc) {
+      try {
+        const md = readFileSync(join(this.store.root, doc.path), 'utf8');
+        const g = md.match(/^#{0,6}\s*[#*]*\s*Goal\s*[#*]*:\s*(.+)$/m);
+        if (g) {
+          const s = g[1].trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
+          if (s) return s;
+        }
+      } catch {
+        /* unreadable doc → fall through to the id slug */
+      }
+    }
+    return goalId.replace(/^\d+-/, '').replace(/[^a-z0-9-]/g, '') || 'goal';
+  }
+
   /* ══ READS — the derived views ══════════════════════════════════════════════ */
 
   /**
@@ -563,9 +824,28 @@ export class Commands {
         detail: `leg gate UNMET: ${done} done, ${blocked} blocked, remaining not done — close via a gated closure task (transfer/defer, F-AC16) or resolve the blocked tasks`,
       };
     }
-    // every spawned leg derives done → the frontmost not-done leg is where the review points
+    // every spawned leg derives done → the frontmost not-done leg is where the review
+    // points; NONE not-done → the FOUR-STATE GOAL CONSULT (goal-session-design §5),
+    // never the blind "journey goal complete". action stays 'none' (nothing to run);
+    // the detail is `next task:`-free (a completed journey proposes no task).
     const front = legs.find((l) => this.store.status(l) !== 'done');
-    if (!front) return { leg: '', action: 'none', detail: 'every leg derived done — journey goal complete (or needs a closure decision)' };
+    if (!front) {
+      const g = this.goal(); // the consult never fails (reads only) — narrow for the type
+      if (!g.ok) return { leg: '', action: 'none', detail: g.error.blocker };
+      if (!g.value.present) return { leg: '', action: 'none', detail: g.value.structural.detail };
+      if (g.value.verdict === 'met') {
+        return { leg: '', action: 'none', detail: 'session complete — goal met: archive & grill a new goal (goal! archive)' };
+      }
+      if (g.value.verdict === 'unconfirmed') {
+        return {
+          leg: '',
+          action: 'none',
+          detail:
+            'journey exhausted — verdict UNCONFIRMED: the human chooses — (1) goal! met (criteria met) · (2) a subtle task (e.g. a quality gate) · (3) goal! archive & start a new goal',
+        };
+      }
+      return { leg: '', action: 'none', detail: 'session open — goal seeded, no work spawned yet: the first work leg opens the session' };
+    }
     const gate = this.store.legGateMet(front);
     if (!gate.met) return { leg: front, action: 'closure-needed', detail: `leg gate UNMET: ${gate.blocker} — close via a gated closure task (transfer/defer, F-AC16)` };
     return { leg: front, action: 'advance-leg', detail: `leg gate MET: all previous-leg tasks done — spawn tasks into ${front} carrying the epic goal` };
