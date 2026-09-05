@@ -1,0 +1,28 @@
+{
+  "id": "10-goal-record/01-implementation-goal-session-record",
+  "contract": {
+    "intent": "Author and record the two superseding amendments that form the recorded half of the landed goal-session feature: journey-format-spec v17 (a complete superseding artifact capturing the goal-leg root carve-out, the goal-met eventType, the done-without-tasks derivation, goal.md doc-SSOT with generated node.json, and goal! met|archive plus the archive layout) and resource-registry v4 (a complete superseding artifact with two new reconciliation rows in its register: goal-met plus its validateEventShape literal, and the goal-leg root-events carve-out in appendEvent). Supersede the v16 and v3 producers, lock the new artifacts, record evidence, and finish AGENTS.md as the re-pointed referrer.",
+    "acceptanceCriteria": [
+      "journey-format-spec v17 is a COMPLETE superseding artifact reusing the logical name journey-format-spec and preserving section anchors, capturing the recorded goal-session amendment: the designated childless goal leg is the single leg-root exception to the no-events rule, carrying only the seed (created+completed, written by seedGoal never the general writer), the goal.md lock, and goal-met; goal-met is the new eventType (shape, status-inert, guarded human-only); the seeded goal leg derives done without tasks so the first work leg legGateMet opens; goal.md is the doc source of truth and node.json is generated 1:1 from its Goal and Success criteria sections; goal! met and goal! archive with the archive layout",
+      "resource-registry v4 is a COMPLETE superseding artifact reusing the logical name resource-registry and preserving section anchors, its register gaining two rows phrased like the existing ones: goal-met with the store validateEventShape literal, and the goal-leg root-events carve-out with the appendEvent literal (goalLegId, goalRootEvent)",
+      "superseded events on the v16 journey-format-spec producer and the v3 resource-registry producer each carry a successor forward pointer; current(journey-format-spec) is the v17 producer and current(resource-registry) is the v4 producer after lock",
+      "AGENTS.md is accurate and re-pointed: the hot invariants already name the goal-leg exception and goal! archive from the feature commit (no duplication), and the deeper-docs rows for journey-format-spec and resource-registry cite the current v17 and v4 producers",
+      "Evidence recorded with real commit shas; both gates accepted with rationale; check and verify hold at the accepted baselines with only the intended supersede and lock deltas accounted for"
+    ],
+    "requiredInputs": [
+      "journey-format-spec",
+      "resource-registry"
+    ],
+    "expectedOutputs": [
+      "journey-format-spec v17 (superseding v16)",
+      "resource-registry v4 (superseding v3)",
+      "AGENTS.md re-pointed"
+    ],
+    "targetAreas": [
+      ".ann/journey/legs/10-goal-record/01-implementation-goal-session-record/artifacts",
+      "AGENTS.md"
+    ],
+    "workType": "implementation"
+  },
+  "createdAt": "2026-09-05"
+}

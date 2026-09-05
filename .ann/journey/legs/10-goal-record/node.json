@@ -1,0 +1,23 @@
+{
+  "id": "10-goal-record",
+  "contract": {
+    "intent": "Record the landed goal-session feature in the recorded contract stack. The code half of the goal-scoped-sessions change is already in force (goal view, goal! met|archive|seed, the goal-met event type, the designated childless goal leg, goal.md doc-SSOT). This leg records that protected change the ann way: journey-format-spec v17 (the goal-session superseding amendment), resource-registry v4 (the reconciliation rows), and AGENTS.md finished as the re-pointed referrer.",
+    "acceptanceCriteria": [
+      "journey-format-spec v17 is a COMPLETE superseding artifact (logical name journey-format-spec, section anchors preserved) capturing the goal-session amendment: the designated childless goal leg as the single leg-root exception to the no-events rule (its allowed root events), the goal-met eventType, the done-without-tasks derivation, goal.md doc-SSOT with the generated node.json, and goal! met|archive with the archive layout",
+      "resource-registry v4 is a COMPLETE superseding artifact (logical name resource-registry, section anchors preserved) carrying the two new reconciliation rows in its register (goal-met and the goal-leg root-events carve-out), phrased like the existing rows",
+      "superseded events on the v16 journey-format-spec producer and the v3 resource-registry producer carry successor forward pointers; current(journey-format-spec) resolves to the v17 producer and current(resource-registry) to the v4 producer",
+      "AGENTS.md names the goal-leg exception and goal! accurately (no duplication of the feature-commit edits) and its deeper-docs rows cite the current producers",
+      "ann check and verify hold at the accepted baselines with only the intended recorded deltas; the leg is managed through ann with rationale at its gates"
+    ],
+    "targetAreas": [
+      ".ann (the recorded contract stack: journey-format-spec, resource-registry, AGENTS.md)"
+    ],
+    "requiredInputs": [],
+    "expectedOutputs": [
+      "journey-format-spec v17",
+      "resource-registry v4",
+      "AGENTS.md re-pointed"
+    ]
+  },
+  "createdAt": "2026-09-05"
+}
