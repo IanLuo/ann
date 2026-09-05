@@ -5,3 +5,4 @@
 {"at":"2026-08-17","type":"confirmed","gate":"confirm","note":"user confirmed via gate2-confirmation report (confirm-all)"}
 {"at":"2026-08-17","type":"submitted","gate":"grill","note":"retrospective: user confirm-all (2026-08-17)"}
 {"at":"2026-08-17","type":"confirmed","gate":"grill","note":"retrospective: user confirm-all (2026-08-17)"}
+{"at":"2026-09-05","type":"goal-met","decision":"met","feedback":"checking the goal (ianluo): the framed success criteria are all realized — no remaining content in the goal; the engine/journey (store) is delivered. v1 (UI · API · server) is a separate, new goal.","note":"goal met (ianluo)"}
