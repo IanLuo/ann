@@ -140,9 +140,40 @@ describe('GoalGrillSession v4 — ANSWER → LLM RESPONSE → DISCUSS → (round
     const synthIndex = interact.presented.findIndex((p) => p.includes(synth));
     expect(synthIndex).toBeGreaterThan(-1);
     // the header carries no fixed 'of N' total — the loop is exhaustion-driven
-    expect(interact.presented.some((p) => p.includes('── Goal grill — round 1 ──'))).toBe(true);
+    expect(interact.presented.some((p) => p.includes('── Goal grill · round 1 ──'))).toBe(true);
     // the decision offered exactly the four v4 options
     everyDecisionOffersAllFour(interact);
+  });
+
+  it('the round READ is show-me: GOAL line first, ONLY concern/blocking rows shown (ok collapsed to a count), numbered questions with the frontier marked — no ground/confidence noise', async () => {
+    const concernClaim = 'the draft over-promises offline support';
+    const q = HIGH_Q();
+    const { llm } = fakeLlm([
+      grill(
+        'A v1 goal that ships web first.',
+        [
+          { verdict: 'ok', claim: 'scope is checkable', basis: [], confidence: 'high' },
+          { verdict: 'concern', claim: concernClaim, basis: [], confidence: 'high' },
+        ],
+        [q],
+      ),
+      'My call: GO — the marker settles scope and web-first bounds the draft.',
+      decision('GO', 'the scope marker is settled and web-first bounds the draft'),
+    ]);
+    const interact = new ScriptedInteractor(['a', 'sorted'], [], ['GO']);
+    const r = await session(llm, interact).run({ statement: 'Build a goal! seed command.', maxRounds: 3 });
+
+    expect(r.ok && r.verdict === 'solid').toBe(true);
+    const read = interact.presented[0]; // the round read is what the human sees first
+    expect(read).toContain('── Goal grill · round 1 ──');
+    expect(read).toContain('GOAL (as it reads): A v1 goal that ships web first.');
+    expect(read).toContain('In the way (fix these):');
+    expect(read).toContain(`  ▸ ${concernClaim}`); // the concern claim still reaches the human
+    expect(read).toContain('✓ 1 settled'); // the ok row is collapsed to a count …
+    expect(read).not.toContain('scope is checkable'); // … never shown inline
+    expect(read).not.toContain('[ok]'); // no validation-wall brackets
+    expect(read).not.toContain('ground:'); // no provenance noise in the read
+    expect(read).toContain('  1. Which v1 scope marker is acceptable?  → a  ← frontier'); // numbered, default inline, ONE frontier marker
   });
 
   it('GO on a clean read (no questions, no concerns) skips straight to the decision', async () => {
@@ -170,7 +201,7 @@ describe('GoalGrillSession v4 — ANSWER → LLM RESPONSE → DISCUSS → (round
     // decision offered EXACTLY GO/refine/skip — 'dig more' is not on the menu
     everyDecisionOffersExhausted(interact);
     // and the loop ENDED here — round 1 only, never advanced to a round 2
-    expect(interact.presented.filter((p) => p.includes('── Goal grill — round '))).toHaveLength(1);
+    expect(interact.presented.filter((p) => p.includes('── Goal grill · round '))).toHaveLength(1);
   });
 
   it('(b) after the response a human message gets ANOTHER LLM turn — the discussion is multi-turn AND bounded', async () => {

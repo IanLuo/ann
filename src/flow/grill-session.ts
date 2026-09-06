@@ -145,6 +145,40 @@ export type GrillResult =
 const oneLine = (s: string): string => s.replace(/\s*\n\s*/g, ' ').trim();
 const cap = (s: string): string => (s ? s[0].toUpperCase() + s.slice(1) : s);
 
+/** The ROUND READ — what the human sees FIRST each round, rendered SHOW-ME (the smallest
+ *  view that makes the point clear): the refined reading on top; ONLY the concern/blocking
+ *  validation rows as the 'in the way' list (no ground/confidence noise); the 'ok' rows
+ *  collapsed to a '✓ N settled' count; then the numbered answer batch with each recommended
+ *  default inline and exactly ONE '← frontier' marker on the question to answer first
+ *  (GOAL_GRILL_MODE already orders frontier-first, so that is the first listed question).
+ *  When there is nothing in the way and nothing to ask, only the header + the reading stay.
+ *  Returns the full present text including the header. */
+export const roundRead = (
+  title: string,
+  noun: string,
+  round: number,
+  subjectLine: string,
+  validation: readonly { verdict: string; claim: string }[],
+  questions: readonly GrillQuestion[],
+): string => {
+  const inTheWay = validation.filter((v) => v.verdict !== 'ok');
+  const settled = validation.length - inTheWay.length;
+  const lines = [`── ${title} · round ${round} ──`, `${noun.toUpperCase()} (as it reads): ${subjectLine}`];
+  if (inTheWay.length > 0) {
+    lines.push('', 'In the way (fix these):');
+    inTheWay.forEach((v) => lines.push(`  ▸ ${v.claim}`));
+  }
+  if (settled > 0) lines.push('', `✓ ${settled} settled`);
+  if (questions.length > 0) {
+    lines.push('', 'Answer (one word — default = my pick):');
+    questions.forEach((q, i) => {
+      const line = `  ${i + 1}. ${q.question}${q.default ? `  → ${q.default}` : ''}`;
+      lines.push(i === 0 ? `${line}  ← frontier` : line);
+    });
+  }
+  return lines.join('\n');
+};
+
 /** Answers that do not resolve anything (a skip, a pass, an empty reply). */
 const UNRESOLVED_MARKERS = ['unknown', 'skip', 'not sure', 'unsure', 'n/a', 'na', 'dont know', "don't know", ''];
 const isUnresolved = (a: string): boolean => UNRESOLVED_MARKERS.includes(a.trim().toLowerCase());
@@ -387,16 +421,11 @@ export class GrillSession {
       const okClaims = artifact.validation.filter((v) => v.verdict === 'ok').map((v) => v.claim);
       const blocking = artifact.validation.some((v) => v.verdict === 'blocking');
 
-      // the read (round N): refined reading · validation · the NEW questions to ask
+      // the read (round N): refined reading on top · only the concern/blocking rows · the
+      // 'ok' rows collapsed to a count · the NEW questions to ask (numbered, default inline,
+      // the frontier marked). Present it, then batch-ask ONLY the new questions below.
       const fresh = artifact.questions.filter((q) => !seen.has(norm(q.question)) && !isResolved(q.question));
-      const read = [
-        `${cap(noun)} (refined reading): ${subjectLine}`,
-        '',
-        ...artifact.validation.map((v) => `- [${v.verdict}] ${v.claim}${v.basis.length ? ` (ground: ${v.basis.join(', ')})` : ' (inference)'} [${v.confidence}]`),
-        ...(fresh.length ? ['', 'New open questions:'] : []),
-        ...fresh.map((q) => `- [${q.impact}] ${q.question}${q.default ? ` (recommended default: ${q.default})` : ''}`),
-      ].join('\n');
-      await this.abilities.interact.present(`── ${title} — round ${round} ──\n${read}`);
+      await this.abilities.interact.present(roundRead(this.profile.title, this.profile.noun, round, subjectLine, artifact.validation, fresh));
 
       // batch-ask ONLY the new questions — the answers fold into context + resolved
       let askedThisRound = 0;
@@ -436,7 +465,12 @@ export class GrillSession {
             '',
             reasoning,
             '',
-            `## Output\nA PROSE reply to the human (no JSON): reason about the answers against the ${noun} draft — what is now SETTLED, what CHANGED about how the ${noun} reads, what is still WEAK or OPEN — then state your recommended next move (GO / dig more / refine) and WHY.`,
+            '## Output — a PROSE reply to the human (no JSON), CONCLUSION-FIRST and SHORT',
+            `First line, as 'My call: <GO | dig more | refine> — <one-line why>': your recommended next move and the reason, in ONE line.`,
+            'Then at most a tight read-back, one short line each:',
+            "- 'Settled: …' — what the answers now settle about the draft (omit if nothing settled);",
+            "- 'Still weak: …' — what genuinely remains open or weak (omit if nothing);",
+            `Keep the WHOLE reply to a few short lines — never a paragraph dump, never a bare list of the answers. Reason only against the ${noun} draft and the grounded context.`,
           ].join('\n'),
         );
         if (!synth.ok) return synth; // model failure → fail CLOSED, nothing fabricated
@@ -455,6 +489,8 @@ export class GrillSession {
             '',
             reasoning,
             '',
+            '## Style — CONCLUSION-FIRST and SHORT',
+            'The "reply" is 1-3 short sentences max: answer the human\'s point, then if relevant ONE research ask. No transcript restatement, no build-up.',
             '## Output — strict JSON, no commentary, no fence',
             '{ "reply": "your message to the human", "research": null | { "topic": "...", "reason": "why this ONE topic, now" } }',
           ].join('\n');
@@ -502,6 +538,8 @@ export class GrillSession {
                   '',
                   reasoning,
                   '',
+                  '## Style — CONCLUSION-FIRST and SHORT',
+                  'The "reply" is 1-3 short sentences max: what the findings settle, what they leave open, your read. No restatement of the transcript.',
                   '## Output — strict JSON, no commentary, no fence',
                   '{ "reply": "your message to the human — what the findings settle, what they leave open", "research": null }',
                 ].join('\n'),
@@ -543,14 +581,16 @@ export class GrillSession {
           `## This round's reasoning/discussion transcript\n${renderHistory(history)}`,
           '',
           exhausted ? this.profile.decisionWeighIn.exhausted : this.profile.decisionWeighIn.open,
+          '## Style — CONCLUSION-FIRST and SHORT',
+          'The "reason" is one short GROUNDED sentence naming the concrete why (a second sentence only if genuinely needed — never a paragraph).',
           '## Output — strict JSON, no commentary, no fence',
-          `{ "recommendation": ${allowed}, "reason": "one short paragraph, grounded" }`,
+          `{ "recommendation": ${allowed}, "reason": "one short grounded sentence" }`,
         ].join('\n'));
         if (!a.ok) return a;
         // the model's weigh-in stands only inside this round's menu; an overreach (e.g.
         // 'dig more' on an exhausted round) falls back to the baseline call.
         recommendation = decisionOptions.includes(a.value.recommendation) ? a.value.recommendation : baseline();
-        await this.abilities.interact.present(`── Round ${round} — the grill's recommendation ──\n${a.value.reason}\n\nMy recommendation: ${recommendation}`);
+        await this.abilities.interact.present(`── Round ${round} — the grill's recommendation ──\nRecommendation: ${recommendation}\n\n${a.value.reason}`);
       }
       const actions = exhausted
         ? `Seed now (GO) · refine (reshape the ${noun} in-session) · skip`

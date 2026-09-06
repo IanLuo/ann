@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { InteractAbility, InteractAbort, LlmAbility, ResearchFinding } from '../types.js';
-import { GrillSession, GrillProfile, DECISION_OPTIONS, EXHAUSTED_OPTIONS } from '../grill-session.js';
+import { GrillSession, GrillProfile, DECISION_OPTIONS, EXHAUSTED_OPTIONS, roundRead } from '../grill-session.js';
 import { GoalGrillSession, GOAL_GRILL_MODE, GOAL_DISCUSS_MODE, GOAL_PROFILE } from '../goal-grill.js';
+import type { GrillQuestion } from '../steps/shared.js';
 
 /**
  * THE PORTABLE CORE (flow/grill-session) + THE GOAL AREA (flow/goal-grill):
@@ -151,7 +152,7 @@ describe('(c) PORTABILITY — GrillSession is area-agnostic; only the injected d
     expect(prompts[0]).toContain('architecture level');
     expect(prompts[0]).not.toContain(GOAL_GRILL_MODE);
     // the area's own copy/headers are used (not 'Goal grill')
-    expect(interact.presented.some((p) => p.includes('── System grill — round 1 ──'))).toBe(true);
+    expect(interact.presented.some((p) => p.includes('── System grill · round 1 ──'))).toBe(true);
     // exhaustion semantics are the SAME across areas: GO / refine / skip, no 'dig more'
     const decisionCalls = interact.decided.filter((d) => d.options.includes('GO'));
     expect(decisionCalls).toHaveLength(1);
@@ -176,5 +177,62 @@ describe('(c) PORTABILITY — GrillSession is area-agnostic; only the injected d
     // a NON-exhausted round offers the full four options — same as the GOAL area
     const decisionCalls = interact.decided.filter((d) => d.options.includes('GO'));
     expect(decisionCalls[0].options).toEqual([...DECISION_OPTIONS]);
+  });
+});
+
+describe('the round READ render (roundRead) — show-me: crux first, only the actionable rows', () => {
+  const q = (over: Partial<GrillQuestion> = {}): GrillQuestion => ({
+    id: 'q1',
+    question: 'Which v1 marker is acceptable?',
+    reason: 'defines scope',
+    impact: 'high',
+    default: 'a',
+    ...over,
+  });
+
+  it('prints the GOAL line first, then ONLY the concern/blocking rows, the ok count, and the numbered answer batch with ONE frontier marker', () => {
+    const text = roundRead(
+      'Goal grill',
+      'goal',
+      1,
+      'A v1 goal.',
+      [
+        { verdict: 'ok', claim: 'scope is settled' },
+        { verdict: 'ok', claim: 'a second ok' },
+        { verdict: 'concern', claim: 'offline is over-promised' },
+        { verdict: 'blocking', claim: 'no checkable outcome' },
+      ],
+      [q(), q({ id: 'q2', question: 'Which platform first?', impact: 'medium', default: 'web' })],
+    );
+    expect(text).toBe(
+      [
+        '── Goal grill · round 1 ──',
+        'GOAL (as it reads): A v1 goal.',
+        '',
+        'In the way (fix these):',
+        '  ▸ offline is over-promised',
+        '  ▸ no checkable outcome',
+        '',
+        '✓ 2 settled',
+        '',
+        'Answer (one word — default = my pick):',
+        '  1. Which v1 marker is acceptable?  → a  ← frontier',
+        '  2. Which platform first?  → web',
+      ].join('\n'),
+    );
+  });
+
+  it('omits the answer batch when nothing is open, the in-the-way list when nothing is in the way, and the settled count when there are no ok rows', () => {
+    expect(roundRead('Goal grill', 'goal', 2, 'A clean v1.', [{ verdict: 'ok', claim: 'scope is checkable' }], [])).toBe(
+      ['── Goal grill · round 2 ──', 'GOAL (as it reads): A clean v1.', '', '✓ 1 settled'].join('\n'),
+    );
+    expect(roundRead('Goal grill', 'goal', 2, 'A clean v1.', [], [])).toBe('── Goal grill · round 2 ──\nGOAL (as it reads): A clean v1.');
+  });
+
+  it('renders the area label from the noun — a stub area reads DESIGN, not GOAL', () => {
+    const text = roundRead('System grill', 'design', 1, 'An architecture.', [{ verdict: 'concern', claim: 'the split is fuzzy' }], []);
+    expect(text).toContain('── System grill · round 1 ──');
+    expect(text).toContain('DESIGN (as it reads): An architecture.');
+    expect(text).not.toContain('GOAL');
   });
 });
