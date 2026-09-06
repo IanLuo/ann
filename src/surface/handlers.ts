@@ -1,0 +1,1054 @@
+import {
+  readFileSync,
+  readdirSync,
+  existsSync,
+  writeFileSync,
+  mkdirSync,
+  statSync,
+  realpathSync,
+} from 'node:fs';
+import { join, dirname, resolve } from 'node:path';
+import { execSync } from 'node:child_process';
+import { Store, resolveStoreLocation, storeJourneyDir } from '../store/store.js';
+import type { StoreLocation } from '../store/store.js';
+import { scanDocsDir, loadDocsManifest, writeDocsManifest, docsIndexFresh, docSha } from '../store/docs.js';
+import { Commands, CommandResult, GOAL_SEED_GUARD } from '../commands/index.js';
+import {
+  loadProviderRegistry,
+  resolveSetting,
+  resolveSecret,
+  addKeychainSecret,
+  deleteKeychainSecret,
+  loadConfig,
+  setConfig,
+  maskedConfig,
+  configPath,
+  listProjects,
+  getCurrentProject,
+  setProject,
+  useProject,
+  removeProject,
+} from '../abilities/llm/index.js';
+import { getVOCAB } from '../store/vocab.js';
+import { assemblePacket } from '../flow/materialize.js';
+import { runValidators, derivedRegistry } from '../flow/validators/index.js';
+import { buildStepRegistry } from '../flow/steps/index.js';
+import { loadProjectFlow, resolveChain, validateChain } from '../flow/chain.js';
+import { Frame } from '../flow/frame.js';
+import { runGoalSeed } from '../flow/goal-seed.js';
+import { buildAbilities } from '../abilities/index.js';
+import { resolveConfig } from '../flow/config.js';
+import { getAdapter } from '../abilities/llm/index.js';
+import {
+  RENDERS,
+  DIAG,
+  renderPacketById,
+  type RenderEnv,
+  type UsageDoc,
+  type CommandRow,
+  HELP_DOC,
+  HELP_NAMING,
+  HELP_ENV,
+  HELP_FOOTER,
+  CONFIG_KEYS,
+} from './command-renderers.js';
+
+/**
+ * THE VALUE-CANONICAL CLI (surface) — handlers.ts.
+ *
+ * Every command is a PURE HANDLER of a `ctx` returning an `Outcome`; a central
+ * `runMain()` routes flag-stripping / dispatch / exits / errors. The DEFAULT text is a
+ * RENDER (command-renderers.ts) of the SAME value that `--json` emits, so default and
+ * `--json` can never diverge — and handlers are in-process testable (the parity test
+ * drives a handler on a hermetic ctx and compares its render + value against the REAL
+ * spawned binary's stdout).
+ *
+ *   ctx:      { root, args, store, commands, who, json, target(), renderEnv() } —
+ *             handlers read ROOT/WHO and the lazy store/commands OFF ctx, never globals.
+ *   Outcome:  { ok:true, value, exitCode? } | { ok:false, error:{code,message,text?}, exitCode? }
+ *   Errors:   handlers THROW CommandExit (caught at the dispatch boundary → Outcome),
+ *             so the registry reads linearly. Exit codes unchanged: 0 ok · 1 command/
+ *             store/validation error · 2 usage.
+ *
+ * These bodies are a FAITHFUL PORT of the old cli.ts command functions: each returns
+ * the value the old `--json` branch emitted (so JSON is byte-identical to before,
+ * except the intended results-listing + chain `present` value fixes), and text comes
+ * from the renderers. THE ONE carve-out: `goal! seed` is an INTERACTIVE grilling
+ * session (drives the terminal; JSON refuses up-front) — it stays non-value-canonical
+ * and writes its own stdout, exactly as before. Everything else is a value + renderer.
+ */
+
+/* ── the Outcome/exit model ─────────────────────────────────────────────────── */
+
+export type Outcome =
+  | { ok: true; value: unknown; exitCode?: number }
+  | { ok: false; error: { code: string; message: string; text?: string }; exitCode?: number };
+
+/** A thrown failure — caught at the dispatch boundary and converted to an Outcome. */
+export class CommandExit extends Error {
+  code: string;
+  text?: string;
+  exitCode: number;
+  constructor(code: string, message: string, opts: { text?: string; exitCode?: number } = {}) {
+    super(message);
+    this.name = 'CommandExit';
+    this.code = code;
+    this.text = opts.text;
+    this.exitCode = opts.exitCode ?? 1;
+  }
+}
+
+const boom = (code: string, message: string, opts?: { text?: string; exitCode?: number }): never => {
+  throw new CommandExit(code, message, opts);
+};
+
+/** A usage failure (exit 2). JSON message = first line; text keeps the full hint. */
+const usage = (message: string): never => boom('usage', message.replace(/\n.*/s, ''), { text: message, exitCode: 2 });
+
+/** Convert a CommandResult. The write shape: ok → {ok:true,value} (the serialized
+ *  CommandResult); fail → throw (text shows `${code}: ${blocker}`, JSON the blocker —
+ *  byte-identical to the old emit/reject split). */
+function writeResult<T>(r: CommandResult<T>): Outcome {
+  if (!r.ok) return boom(r.error.code, r.error.blocker, { text: `${r.error.code}: ${r.error.blocker}` });
+  return { ok: true, value: { ok: true, value: r.value } };
+}
+/** A CommandResult read as a bare view — success value unwrapped. */
+function viewResult<T>(r: CommandResult<T>): Outcome {
+  if (!r.ok) return boom(r.error.code, r.error.blocker, { text: `${r.error.code}: ${r.error.blocker}` });
+  return { ok: true, value: r.value };
+}
+
+/* ── the ctx ────────────────────────────────────────────────────────────────── */
+
+export interface CliContext {
+  /** The resolved project root (or cwd for the project-registry commands). */
+  root: string;
+  /** argv after `--project <path>` / `--json` are stripped — never the flag words. */
+  args: string[];
+  /** RECORDED_BY — provenance for the commands layer. */
+  who: string;
+  json: boolean;
+  /** The LAZY store over the RESOLVED target (env or active) — first use constructs. */
+  store: Store;
+  /** The LAZY L1 commands over ctx.store + who. */
+  commands: Commands;
+  /** Session addressing — {loc, readOnly}, resolved once, lazily. */
+  target(): { loc: StoreLocation; readOnly: boolean };
+  /** Render-time context (args/json/root + the lazy target kind) for RENDERS/DIAG. */
+  renderEnv(): RenderEnv;
+}
+
+/** Build a ctx over a resolved root — shared by runMain and the parity-test harness.
+ *  Does NOT chdir (runMain chdirs before creating the ctx). Lazy store/commands/target
+ *  so config!/cred!/project! never touch the store (bad ANN_STORE → still available). */
+export function createContext(root: string, args: string[], opts: { json?: boolean } = {}): CliContext {
+  const who = process.env.RECORDED_BY || 'agent';
+  const json = opts.json ?? false;
+  const envStore = (process.env.ANN_STORE ?? '').trim();
+  let _target: { loc: StoreLocation; readOnly: boolean } | undefined;
+  const target = (): { loc: StoreLocation; readOnly: boolean } => {
+    if (_target) return _target;
+    if (envStore) {
+      const loc = resolveStoreLocation(envStore);
+      let activeJourney: string | undefined;
+      try {
+        activeJourney = realpathSync(storeJourneyDir(resolveStoreLocation(root)));
+      } catch {
+        activeJourney = undefined; // no active legs/ baseline — any target is read-only
+      }
+      return (_target = { loc, readOnly: !activeJourney || realpathSync(storeJourneyDir(loc)) !== activeJourney });
+    }
+    return (_target = { loc: resolveStoreLocation(root), readOnly: false });
+  };
+  let _store: Store | undefined;
+  const store = new Proxy({} as Store, {
+    get(_t, prop) {
+      const s = (_store ??= new Store(target().loc, { readOnly: target().readOnly }));
+      const v = Reflect.get(s, prop as never);
+      return typeof v === 'function' ? (v as () => unknown).bind(s) : v;
+    },
+  });
+  let _commands: Commands | undefined;
+  const commands = new Proxy({} as Commands, {
+    get(_t, prop) {
+      const c = (_commands ??= new Commands(store, who));
+      const v = Reflect.get(c, prop as never);
+      return typeof v === 'function' ? (v as () => unknown).bind(c) : v;
+    },
+  });
+  const ctx: CliContext = {
+    root,
+    args,
+    who,
+    json,
+    store,
+    commands,
+    target,
+    renderEnv() {
+      let kind: 'project' | 'journey' | undefined;
+      const env: RenderEnv = {
+        args: ctx.args,
+        json: ctx.json,
+        root: ctx.root,
+        get kind() {
+          return (kind ??= ctx.target().loc.kind);
+        },
+      };
+      return env;
+    },
+  };
+  return ctx;
+}
+
+/** The resolved target's docs home — a 'project' target has its OWN docs/ manifest
+ *  home (its root); a 'journey' target (an archived session) has NONE. */
+const targetDocsHome = (ctx: CliContext): string | undefined => {
+  const t = ctx.target();
+  return t.loc.kind === 'project' ? t.loc.root : undefined;
+};
+
+const hasSuperseded = (ctx: CliContext, id: string) => ctx.store.events(id).some((e) => e.type === 'superseded');
+const display = (ctx: CliContext, id: string) => ctx.store.status(id) + (hasSuperseded(ctx, id) ? ' · artifact superseded' : '');
+
+/** Resolve a possibly-partial id: exact → last-segment → unique prefix; fail-closed
+ *  with NAMED candidates when ambiguous (never a silent pick). Reads only — writes
+ *  stay strict full-id (the `!` mutators take no shortcuts). `undefined` behaves as the
+ *  old code did (no-node 'undefined' — callers like `ann flow` pass a missing arg). */
+function resolveId(ctx: CliContext, raw: string | undefined): string {
+  const ids = ctx.store.ids();
+  if (raw !== undefined && ids.includes(raw)) return raw;
+  const last = (i: string) => i.split('/').pop()!;
+  const byLast = ids.filter((i) => last(i) === raw);
+  if (byLast.length === 1) return byLast[0];
+  if (byLast.length > 1) return boom('ambiguous-id', `ann: ambiguous id '${raw}' — matches ${byLast.join(', ')}; use the full id`);
+  // partial last segment (e.g. '05-s2' → '05-s2-envision-grilling') — undefined coerces to 'undefined' (legacy)
+  const byLastPrefix = ids.filter((i) => last(i).startsWith(raw as string));
+  if (byLastPrefix.length === 1) return byLastPrefix[0];
+  if (byLastPrefix.length > 1) return boom('ambiguous-id', `ann: ambiguous '${raw}' — matches ${byLastPrefix.join(', ')}; use more of the id`);
+  // full-id prefix (e.g. '06-engine-build/05')
+  const byPrefix = ids.filter((i) => i.startsWith(raw as string));
+  if (byPrefix.length === 1) return byPrefix[0];
+  if (byPrefix.length > 1) return boom('ambiguous-id', `ann: ambiguous prefix '${raw}' — matches ${byPrefix.join(', ')}; use more of the id`);
+  return boom('no-node', `ann: no node '${raw}'`);
+}
+
+/* ── the command table (one source — text rows, JSON rows, markdown rows) ───── */
+
+const COMMANDS: Array<{ name: string; args: string; desc: string }> = [
+  { name: '<name>', args: '', desc: 'the path for one doc (docs manifest) or a current artifact\'s logical name' },
+  { name: 'journey', args: '[id]', desc: 'the look-back (no id) · one node\'s walk (with id) · alias --journey' },
+  { name: 'status', args: '[filter]', desc: 'every node\'s derived status (+ superseded marker) · alias --status' },
+  { name: 'check', args: '', desc: 'integrity + gates + docs-manifest freshness + the journey state line · alias --check' },
+  { name: 'verify', args: '', desc: 'the DRIFT read — reconciles the log\'s recorded claims vs filesystem/git reality (D1-D5 + store-external); exits 1 on any drift · alias --verify' },
+  { name: 'ledger', args: '', desc: 'the write-rev ledger — rev + per-node last-write rev/at + hashes (the store-external integrity guard) · alias --ledger' },
+  { name: 'specs', args: '', desc: 'the docs contract stack — the manifest → docs/<name>.md @ content-sha (upstream/referrers prose from the file head) · alias --specs' },
+  { name: 'providers', args: '', desc: 'the adapter registry: providers, models, defaults (env-resolved, api key masked) · alias --providers' },
+  { name: 'config', args: '', desc: 'the user config file (~/.ann/config.json; apiKey masked) · alias --config' },
+  { name: 'config!', args: 'set <key> <value>', desc: 'WRITE — save a config value (provider|model|baseUrl|apiKey|maxTokens); chmod 600, outside the repo; apiKey never echoed' },
+  { name: 'project', args: '', desc: 'show the current project + known projects · alias --project' },
+  { name: 'project!', args: 'add|use|remove <path>', desc: 'WRITE — manage projects by PATH (each has its OWN journey); add <path> registers one' },
+  { name: 'cred!', args: 'set|delete <service> <account> [secret]', desc: 'WRITE — OS keychain (macOS, DEV-ONLY local CLI): save/remove a secret via stdin; production = server-side env (12-factor)' },
+  { name: 'branch', args: '<id>', desc: 'a node + every descendant\'s events, one walk · alias --branch' },
+  { name: 'confirm', args: '<id>', desc: 'a node\'s gate card: intent · ACs · gates · results' },
+  { name: 'detail', args: '<id>', desc: 'a node\'s full derived detail: contract · gate states · artifacts (historical only) · blockers · events tail' },
+  { name: 'results', args: '<id> [n]', desc: 'a task\'s results by kind (commit/ref/evidence/link); with n, drill into one (commit=git show, ref=file/dir, evidence=event) · alias --results' },
+  { name: 'packet', args: '<id>', desc: 'the node\'s deterministic context packet (context-packet-spec; derived on demand, never saved) · alias --packet' },
+  { name: 'validate', args: '[id]', desc: 'run the enabled validator rules (all nodes, or one node) — rule-id\'d deterministic findings · alias --validate' },
+  { name: 'rules', args: '[--write]', desc: 'the DERIVED check-rules registry (self-contained rule modules are the source) · alias --rules; --write regenerates rules/check/rules.json' },
+  { name: 'docs', args: '[--write]', desc: 'the docs→git resolution index (docs/manifest.json — generated from docs/, never hand-maintained) · alias --docs; --write regenerates the manifest' },
+  { name: 'sessions', args: '', desc: 'the archived sessions of this project (goal! archive history) — one line each: goal · status · verdict · legs; point at one read-only via ANN_STORE · alias --sessions' },
+  { name: 'chain', args: '', desc: 'the project flow config as data (work-type chains, F3 view) · alias --chain' },
+  { name: 'steps', args: '', desc: 'the step registry — the pluggable surface future steps implement against · alias --steps' },
+  { name: 'next', args: '', desc: 'the run-next proposal (F5 pull): active leg, frontmost-ready, pending gates, leg gate — derived, never assumed · alias --next' },
+  { name: 'goal', args: '', desc: 'the goal-session view (goal-session-design §9): goalId · status · the authored goal doc (docs/goal.md) · the generated contract · structural state · verdict (met/unconfirmed/open) · legs (status words only) · alias --goal' },
+  { name: 'flow', args: '<id>', desc: 'a task\'s RESOLVED flow + chain validation (the data the frame will execute) · alias --flow' },
+  { name: 'run!', args: '<id>', desc: 'WRITE — run a task through the FRAME (materialize → grill → activate → execute → verify → confirm → commit); resumable, stops at the first block' },
+  { name: 'commands', args: '', desc: 'this table as markdown (the derived doc) · alias --commands' },
+  { name: 'help', args: '', desc: 'usage · alias --help / -h' },
+  { name: 'read', args: '<name>', desc: 'the L1 CONTENT read view — marker-stripped content + path + sha; resolves via the docs manifest (the forward path), with a legacy current-artifact fallback for history · alias --read' },
+  { name: 'append!', args: '<id> \'<json>\'', desc: 'WRITE — single-writer append; REFUSES the composite-owned kinds (created/submitted/confirmed/rejected/goal-met) and the RETIRED doc-artifact vocab (artifact-locked/superseded)' },
+  { name: 'spawn!', args: '<id> \'<contract-json>\'', desc: 'WRITE — create a node; enforces the v14 contract schema + F-AC19 + id naming + the conclusion (commit-evidence)/leg gates' },
+  { name: 'submit!', args: '<id> grill|confirm [confirmedSha]', desc: 'WRITE — the resumable gate write: `submitted` alone, so an interrupted gate stays blocked (confirm records the gate② content binding)' },
+  { name: 'gate!', args: '<id> grill|confirm accept|reject [feedback]', desc: 'WRITE — human gate decision (submit + decide; the 3-reject bound is a CONSTANT owned here)' },
+  { name: 'goal!', args: 'met [feedback]', desc: 'WRITE — the HUMAN verdict that seals a structurally-exhausted session (goal-met on the goal root); refused for automated (agent) initiators, double-met, and any undecided submission' },
+  { name: 'goal!', args: 'archive [--override]', desc: 'WRITE — guarded structural reset: move .ann/journey → .ann/archive/sessions/<ts>-<slug>/ for a fresh goal; refuses without a met verdict (or --override), on store-external verify drifts, and on uncommitted tracked .ann/journey changes' },
+  { name: 'goal!', args: 'seed [goal-statement]', desc: 'WRITE — grill a goal at SESSION scope (EMPTY journey seeds new; a RE-SEEDABLE sole unconsumed goal is REPLACED after re-grilling — consumed/met goals refuse): the interactive idea-validation session (grill → batch-ask → research → re-grill → human verdict); on solid, synthesize goal.md (Goal:/Success criteria:) + seed/re-seed the goal leg + write docs/goal.md + regenerate the manifest; revise/reject seeds nothing' },
+];
+
+const commandRows = (): CommandRow[] => COMMANDS.map((c) => ({ name: c.name, args: c.args, desc: c.desc, json: true }));
+
+const usageDoc = (): UsageDoc => ({
+  doc: HELP_DOC,
+  naming: HELP_NAMING,
+  env: HELP_ENV,
+  commands: commandRows(),
+  footer: HELP_FOOTER,
+});
+
+/* ── HANDLERS — canonical command → (ctx) => Outcome ────────────────────────── */
+
+export type Handler = (ctx: CliContext) => Outcome | Promise<Outcome>;
+
+export const HANDLERS: Record<string, Handler> = {
+  /* bare ann + help + commands — the doc forms */
+  help: () => ({ ok: true, value: usageDoc() }),
+  commands: () => ({ ok: true, value: commandRows() }),
+
+  /* status — the derived status tree */
+  status: (ctx) => {
+    const filter = ctx.args.slice(1).find((a) => !a.startsWith('--'));
+    return { ok: true, value: ctx.commands.statuses(filter) };
+  },
+
+  /* journey (no id) / journeyOne (with id) */
+  journey: (ctx) => {
+    const legs = ctx.store
+      .ids()
+      .filter((i) => !i.includes('/'))
+      .sort();
+    const rows = legs.map((l) => ({
+      id: l,
+      status: ctx.store.status(l),
+      superseded: hasSuperseded(ctx, l),
+      tasks: ctx.store
+        .tasksOf(l)
+        .map((t) => ({ id: t, status: ctx.store.status(t), superseded: hasSuperseded(ctx, t) })),
+    }));
+    const lb = ctx.commands.lookBack();
+    const ahead = {
+      activeLeg: lb.activeLeg,
+      activeLegStatus: lb.activeLegStatus,
+      frontmostReady: lb.frontmostReady ? { task: lb.frontmostReady.task, status: lb.frontmostReady.status } : undefined,
+      alsoReady: lb.alsoReady.map((a) => ({ task: a.task, status: a.status })),
+      legGate: lb.legGate,
+    };
+    return { ok: true, value: { legs: rows, ahead } };
+  },
+  journeyOne: (ctx) => {
+    const id = resolveId(ctx, ctx.args[1]);
+    return { ok: true, value: { id, status: display(ctx, id), events: ctx.store.events(id) } };
+  },
+
+  /* branch — a node + every descendant's events */
+  branch: (ctx) => {
+    const rootId = resolveId(ctx, ctx.args[1] || '');
+    const ids = ctx.store
+      .ids()
+      .filter((i) => i.startsWith(rootId))
+      .sort((a, b) => (a + '/events.jsonl').localeCompare(b + '/events.jsonl'));
+    return { ok: true, value: ids.map((id) => ({ id, status: display(ctx, id), events: ctx.store.events(id) })) };
+  },
+
+  /* check — problems/warnings/notes/docs/state; exit 1 on any error (DIAG → stderr) */
+  check: (ctx) => {
+    const problems = ctx.store.check();
+    const warns: string[] = [];
+    for (const f of runValidators(ctx.store)) {
+      const line = `[${f.severity}] ${f.code}${f.nodeId ? ` ${f.nodeId}` : ''} — ${f.detail}`;
+      if (f.severity === 'error') problems.push(line);
+      else warns.push(line);
+    }
+    const notes: Array<{ sev: 'error' | 'warn' | 'info'; msg: string }> = [];
+    const dh = targetDocsHome(ctx);
+    const manifest = dh ? loadDocsManifest(dh) : {};
+    const docCount = Object.keys(manifest).length;
+    if (dh) {
+      const { fresh, missing, stale } = docsIndexFresh(dh);
+      if (!fresh) {
+        const parts = [...missing.map((n) => `'${n}' not in the manifest`), ...stale.map((n) => `'${n}' has no matching file in docs/`)];
+        notes.push({ sev: 'error', msg: `docs manifest out of sync with docs/: ${parts.join(' · ')} — run 'ann docs --write' and commit` });
+      }
+    }
+    const errors = problems.length + notes.filter((n) => n.sev === 'error').length;
+    const legs = ctx.store
+      .ids()
+      .filter((i) => !i.includes('/'))
+      .sort();
+    const states = legs.map((l) => `${l} ${ctx.store.status(l)}`).join(' · ');
+    const active =
+      legs.find((l) => ctx.store.status(l) === 'active') ??
+      (legs.length && !ctx.store.status(legs[legs.length - 1]).startsWith('done') ? legs[legs.length - 1] : undefined);
+    let state = `State: ${states}`;
+    if (active) {
+      const tasks = ctx.store.tasksOf(active);
+      const doneN = tasks.filter((t) => ctx.store.status(t).startsWith('done')).length;
+      const ready = tasks.filter((t) => ['queued', 'active'].includes(ctx.store.status(t)));
+      state += ` · ${active} in progress (${doneN}/${tasks.length} tasks done)`;
+      if (ready.length) state += ` — frontmost-ready: ${ready[0]} (${ctx.store.status(ready[0])})`;
+    }
+    return { ok: true, value: { problems, warnings: warns, notes, docs: docCount, state }, ...(errors === 0 ? {} : { exitCode: 1 }) };
+  },
+
+  /* verify — the drift read; exit 1 on any drift (DIAG → stderr) */
+  verify: (ctx) => {
+    const drifts = ctx.commands.verify();
+    return { ok: true, value: { drifts, count: drifts.length }, ...(drifts.length === 0 ? {} : { exitCode: 1 }) };
+  },
+
+  ledger: (ctx) => ({ ok: true, value: ctx.commands.ledger() }),
+
+  /* specs — archived (the legacy current-artifact set) vs project (the docs contract stack) */
+  specs: (ctx) => {
+    if (targetDocsHome(ctx) === undefined) return { ok: true, value: ctx.store.currentDocs() };
+    const dh = targetDocsHome(ctx)!;
+    const manifest = loadDocsManifest(dh);
+    const stack: Array<{ name: string; sha: string; path: string; upstream?: string; referrers?: string }> = [];
+    for (const name of Object.keys(manifest).sort()) {
+      const rel = manifest[name];
+      const full = join(dh, rel);
+      if (!existsSync(full)) {
+        stack.push({ name, sha: '(file missing)', path: rel });
+        continue;
+      }
+      let upstream = '',
+        referrers = '';
+      try {
+        const head = readFileSync(full, 'utf8')
+          .split('\n')
+          .slice(0, 10);
+        for (const line of head) {
+          const u = line.match(/\*\*upstream\*\* \(this doc relies on\): (.*)/);
+          if (u) upstream = u[1];
+          const r = line.match(/\*\*referrers\*\* \(must cite this when they change\): (.*)/);
+          if (r) referrers = r[1];
+        }
+      } catch {}
+      stack.push({ name, sha: docSha(readFileSync(full, 'utf8')), path: rel, ...(upstream ? { upstream } : {}), ...(referrers ? { referrers } : {}) });
+    }
+    return { ok: true, value: stack };
+  },
+
+  providers: (ctx) => {
+    let reg: ReturnType<typeof loadProviderRegistry>;
+    try {
+      reg = loadProviderRegistry(ctx.root);
+    } catch (e) {
+      return boom('providers', (e as Error).message);
+    }
+    return {
+      ok: true,
+      value: {
+        defaultProvider: reg.defaultProvider,
+        defaults: reg.defaults,
+        providers: reg.providers.map((p) => {
+          const base = resolveSetting(p.baseUrl, 'baseUrl');
+          const baseEnv = p.baseUrl.startsWith('env:') ? p.baseUrl.slice(4).split('||')[0].trim() : undefined;
+          const baseFromEnv = baseEnv ? !!process.env[baseEnv] : false;
+          const baseFromConfig = !baseFromEnv && !!loadConfig().baseUrl;
+          const key = p.apiKey ? resolveSecret(p.apiKey) : { source: 'none' as const };
+          const model = resolveSetting(p.defaultModel, 'model');
+          const modelEnv = p.defaultModel.startsWith('env:') ? p.defaultModel.slice(4).split('||')[0].trim() : undefined;
+          const modelFromEnv = modelEnv ? !!process.env[modelEnv] : false;
+          const modelFromConfig = !modelFromEnv && !!loadConfig().model;
+          return {
+            id: p.id,
+            kind: p.kind,
+            protocol: p.protocol,
+            baseUrl: base ?? null,
+            baseUrlSource: baseFromEnv ? 'env' : baseFromConfig ? 'config' : baseEnv ? 'fallback' : 'unresolved',
+            apiKey: key.source === 'none' ? (p.apiKey ? 'unset' : 'none') : key.source,
+            defaultModel: model ?? null,
+            defaultModelSource: modelFromEnv ? 'env' : modelFromConfig ? 'config' : modelEnv ? 'fallback' : 'unresolved',
+          };
+        }),
+      },
+    };
+  },
+
+  config: (ctx) => {
+    const resolution = resolveConfig(ctx.root);
+    return { ok: true, value: { file: configPath(), user: maskedConfig(), ...resolution } };
+  },
+
+  'config!': (ctx) => {
+    const key = ctx.args[2];
+    const value = ctx.args[3];
+    if (!CONFIG_KEYS.includes(key) || value === undefined || value === '') {
+      return usage(`usage: ann config! set <key> <value>  (keys: ${CONFIG_KEYS.join(' · ')})`);
+    }
+    if (key.includes('.')) {
+      const [group, leaf] = key.split('.');
+      const cfg = loadConfig() as Record<string, unknown>;
+      const existing = (cfg[group] as Record<string, unknown> | undefined) ?? {};
+      const v: unknown = leaf === 'verifyFailCycles' ? Number(value) : value;
+      if (leaf === 'verifyFailCycles' && !Number.isInteger(v)) return boom('config-value', 'config!: flow.verifyFailCycles must be an integer');
+      setConfig(group as 'flow' | 'preferences', { ...existing, [leaf]: v } as never);
+      const after = resolveConfig(ctx.root).problems.filter((p) => p.startsWith(`config ${key}`));
+      return { ok: true, value: { ok: true, value: { key, file: configPath(), leaf, value: v, problems: after } } };
+    }
+    let v: string | number = value;
+    if (key === 'maxTokens') {
+      const n = Number(value);
+      if (Number.isNaN(n)) return boom('config-value', 'config!: maxTokens must be a number');
+      v = n;
+    }
+    setConfig(key as 'provider' | 'model' | 'baseUrl' | 'apiKey' | 'maxTokens', v);
+    return {
+      ok: true,
+      value: { ok: true, value: { key, file: configPath(), ...(key === 'apiKey' ? { masked: true } : { value: v }) } },
+    };
+  },
+
+  project: (ctx) => {
+    const cur = getCurrentProject();
+    return {
+      ok: true,
+      value: {
+        current: cur ?? null,
+        currentStale: !!cur && !isProjectRoot(cur),
+        cwd: ctx.root,
+        projects: listProjects().map((p) => ({ path: p, stale: !isProjectRoot(p) })),
+      },
+    };
+  },
+
+  'project!': (ctx) => {
+    const op = ctx.args[1];
+    const path = ctx.args[2];
+    if (op === 'add') {
+      if (!path) return usage('usage: ann project! add <path>');
+      const abs = resolve(path);
+      if (!isProjectRoot(abs)) return boom('project-add', `project! add: ${abs} has no .ann/ — not an ann project (or init it first)`);
+      setProject(abs);
+      return { ok: true, value: { ok: true, value: { op: 'add', path: abs } } };
+    }
+    if (op === 'use') {
+      if (!path) return usage('usage: ann project! use <path>');
+      const abs = resolve(path);
+      useProject(abs);
+      return { ok: true, value: { ok: true, value: { op: 'use', path: abs } } };
+    }
+    if (op === 'remove') {
+      if (!path) return usage('usage: ann project! remove <path>');
+      removeProject(resolve(path));
+      return { ok: true, value: { ok: true, value: { op: 'remove', path: resolve(path) } } };
+    }
+    return usage('usage: ann project! add|use|remove <path>');
+  },
+
+  'cred!': (ctx) => {
+    const op = ctx.args[1];
+    const service = ctx.args[2];
+    const account = ctx.args[3];
+    const secret = ctx.args[4];
+    if ((op !== 'set' && op !== 'delete') || !service || !account) {
+      return usage('usage: ann cred! set|delete <service> <account> [secret]\n  secret: pass as arg OR pipe via stdin (echo -n "..." | ann cred! set ...) — stdin never hits argv/ps');
+    }
+    if (op === 'set') {
+      let value = secret;
+      if (value === undefined) value = readFileSync(0, 'utf8').trim();
+      if (!value) return boom('cred-empty', 'cred!: empty secret — pass as arg or pipe via stdin');
+      addKeychainSecret(service, account, value);
+      return { ok: true, value: { ok: true, value: { op: 'set', service, account } } };
+    }
+    deleteKeychainSecret(service, account);
+    return { ok: true, value: { ok: true, value: { op: 'delete', service, account } } };
+  },
+
+  packet: (ctx) => ({ ok: true, value: assemblePacket(ctx.store, resolveId(ctx, ctx.args[1])) }),
+
+  validate: (ctx) => {
+    const id = ctx.args[1];
+    const nodeId = id ? resolveId(ctx, id) : undefined;
+    return { ok: true, value: runValidators(ctx.store, nodeId) };
+  },
+
+  rules: (ctx) => {
+    const reg = derivedRegistry();
+    if (ctx.args[1] === '--write') {
+      const out = JSON.stringify(reg, null, 2) + '\n';
+      const p = join(ctx.root, 'rules', 'check', 'rules.json');
+      mkdirSync(dirname(p), { recursive: true });
+      writeFileSync(p, out);
+      return { ok: true, value: { ok: true, value: { path: p, rules: reg.rules.length } } };
+    }
+    return { ok: true, value: reg };
+  },
+
+  docs: (ctx) => {
+    const dh = targetDocsHome(ctx);
+    if (dh === undefined) {
+      const msg =
+        'ann: docs refused — ANN_STORE points at an archived journey (no docs/ home; an archived session has no manifest to index). Reads work via the legacy current-artifact path (`ann read <name>` / `ann <name>`).';
+      return boom('docs-home', msg);
+    }
+    const manifest = loadDocsManifest(dh);
+    const { fresh, missing, stale } = docsIndexFresh(dh);
+    if (ctx.args[1] === '--write') {
+      const regen = scanDocsDir(dh);
+      const p = writeDocsManifest(dh, regen);
+      return { ok: true, value: { ok: true, value: { path: p, docs: Object.keys(regen).length } } };
+    }
+    const docs = Object.keys(manifest)
+      .sort()
+      .map((n) => {
+        const rel = manifest[n];
+        const full = join(dh, rel);
+        return { name: n, path: rel, sha: existsSync(full) ? docSha(readFileSync(full, 'utf8')) : '(file missing)' };
+      });
+    return { ok: true, value: { fresh, missing, stale, docs } };
+  },
+
+  sessions: (ctx) => {
+    const sessionsDir = join(ctx.root, '.ann', 'archive', 'sessions');
+    const rows: Array<Record<string, string | number>> = [];
+    if (existsSync(sessionsDir)) {
+      for (const d of readdirSync(sessionsDir, { withFileTypes: true })) {
+        if (!d.isDirectory()) continue;
+        const p = join(sessionsDir, d.name);
+        try {
+          const st = new Store(p, { readOnly: true }); // the session dir has journey/legs → journey-kind
+          const legs = st
+            .ids()
+            .filter((i) => !i.includes('/'))
+            .sort();
+          const goal = legs[0];
+          const status = goal ? st.status(goal) : '-';
+          const met = goal ? st.events(goal).some((e) => e.type === 'goal-met') : false;
+          rows.push({ session: d.name, store: p, goal: goal ?? '(none)', status, verdict: met ? 'met' : status === 'done' ? 'done (unconfirmed)' : status, legs: legs.length });
+        } catch {
+          rows.push({ session: d.name, store: p, goal: '(unreadable store)', status: '-', verdict: '-', legs: 0 });
+        }
+      }
+    }
+    return { ok: true, value: { sessionsDir, sessions: rows } };
+  },
+
+  chain: (ctx) => {
+    const project = loadProjectFlow(ctx.root);
+    const chains: Record<string, unknown> = {};
+    if (project) {
+      for (const [workType, chain] of Object.entries(project.chains)) {
+        chains[workType] = chain.map((e) => ({ id: e.id, ...(e.at ? { at: e.at } : {}), ...(e.when ? { when: e.when } : {}) }));
+      }
+    }
+    // `present` is data the TEXT renderer reads (no-flow-file vs an empty project chain) —
+    // the value carries it so text and --json can never disagree.
+    return { ok: true, value: { present: !!project, ...(project?.template ? { template: project.template } : {}), chains } };
+  },
+
+  steps: (ctx) => ({
+    ok: true,
+    value: buildStepRegistry()
+      .all()
+      .map((s) => ({
+        id: s.id,
+        roles: s.roles.map((r) => ({ name: r.name, required: !!r.required })),
+        produces: s.produces ?? [],
+        decisions: s.decisions ?? [],
+        rules: s.rules.map((r) => r.id),
+      })),
+  }),
+
+  /* next — the FOUR-STATE GOAL CONSULT computed once, carried in the value */
+  next: (ctx) => {
+    const lb = ctx.commands.lookBack();
+    const advance = ctx.commands.advance();
+    const goalView = advance.action === 'none' ? ctx.commands.goal() : undefined;
+    return {
+      ok: true,
+      value: {
+        lookBack: lb,
+        advance,
+        ...(goalView?.ok && goalView.value.present ? { goal: goalView.value } : {}),
+      },
+    };
+  },
+
+  goal: (ctx) => viewResult(ctx.commands.goal()),
+
+  /* goal! met/archive — the value-canonical goal writes (seed is the interactive carve-out) */
+  'goal!': (ctx) => {
+    const op = ctx.args[1];
+    const rest = ctx.args.slice(2);
+    if (op === 'met') return writeResult(ctx.commands.goalVerdict('met', rest.join(' ').trim()));
+    if (op === 'archive') return writeResult(ctx.commands.goalArchive(rest.includes('--override')));
+    return usage('usage: ann goal! seed [goal-statement] | ann goal! met [feedback] | ann goal! archive [--override]');
+  },
+
+  flow: (ctx) => {
+    const node = resolveId(ctx, ctx.args[1]);
+    const flow = resolveChain(ctx.store, node, ctx.root);
+    const { config, problems: configProblems } = resolveConfig(ctx.root);
+    const problems = validateChain(buildStepRegistry(), flow.chain, assemblePacket(ctx.store, node), config);
+    const chain = flow.chain.map((e) => {
+      const dto: Record<string, unknown> = { id: e.id };
+      if (e.inputs) dto.inputs = e.inputs;
+      if (e.params) dto.params = e.params;
+      if (e.at) dto.at = e.at;
+      if (e.verdict) dto.verdict = e.verdict;
+      if (e.when) dto.when = e.when;
+      return dto;
+    });
+    return {
+      ok: true,
+      value: {
+        node,
+        chain,
+        source: flow.source,
+        workType: flow.workType ?? null,
+        template: flow.template ?? null,
+        problem: flow.problem ?? null,
+        configProblems,
+        chainProblems: problems.map((p) => ({ at: p.at, problem: p.problem })),
+        valid: problems.length === 0,
+      },
+    };
+  },
+
+  /* run! — the frame result IS the value; a non-completed stop is a non-zero exit */
+  'run!': async (ctx) => {
+    const taskId = resolveId(ctx, ctx.args[1]);
+    const frame = new Frame({
+      commands: ctx.commands,
+      root: ctx.root,
+      registry: buildStepRegistry(),
+      abilities: buildAbilities(getAdapter(undefined, ctx.root)),
+    });
+    const r = await frame.run(taskId);
+    return { ok: true, value: r, ...(r.stop === 'completed' ? {} : { exitCode: 1 }) };
+  },
+
+  read: (ctx) => viewResult(ctx.commands.read(ctx.args[1] || '')),
+
+  /* confirm / detail / results — detail-derived cards + results */
+  confirm: (ctx) => {
+    const id = resolveId(ctx, ctx.args[1]);
+    const d = ctx.commands.detail(id);
+    if (!d.contract) return boom('confirm', `confirm: no node ${id}`);
+    return { ok: true, value: { detail: d, results: ctx.store.results(id) } };
+  },
+  detail: (ctx) => {
+    const id = resolveId(ctx, ctx.args[1]);
+    const d = ctx.commands.detail(id);
+    if (!d.contract) return boom('detail', `detail: no node ${id}`);
+    return { ok: true, value: d };
+  },
+  results: (ctx) => {
+    const id = resolveId(ctx, ctx.args[1]);
+    const index = ctx.args[2];
+    const items = ctx.commands.results(id);
+    if (!ctx.store.contract(id)) return boom('results', `results: no node ${id}`);
+    const kind = id.includes('/') ? 'TASK' : 'LEG';
+    if (index === undefined) {
+      // THE RESULTS-LISTING FIX: the value carries the SAME rows text shows ({id, kind,
+      // items}) — previously JSON emitted only the bare items array, dropping the header.
+      return { ok: true, value: { id, kind, items } };
+    }
+    const n = Number(index);
+    const it = items[n - 1];
+    if (!it) return boom('results', `results: no item ${index} (1..${items.length})`);
+    const body: Record<string, unknown> = { item: it };
+    switch (it.kind) {
+      case 'commit': {
+        try {
+          body.sha = execSync(`git show -s --format='%H%n%an <%ae> %ad%n%n%s%n%n%b' ${it.sha}`, { encoding: 'utf8' }).trim();
+          body.stat = execSync(`git show --stat --format= ${it.sha}`, { encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 })
+            .trim()
+            .slice(0, 2000);
+        } catch {
+          body.commitError = `commit ${it.sha} not resolvable in git`;
+        }
+        break;
+      }
+      case 'ref': {
+        const full = join(ctx.root, it.path!);
+        if (!existsSync(full)) {
+          body.refError = `ref missing: ${it.path}`;
+          break;
+        }
+        const st = statSync(full);
+        if (st.isDirectory()) {
+          body.dir = `${it.path}/`;
+          body.entries = readdirSync(full).slice(0, 30);
+        } else {
+          body.file = it.path;
+          body.head = readFileSync(full, 'utf8')
+            .split('\n')
+            .slice(0, 60);
+        }
+        break;
+      }
+      case 'evidence': {
+        const ev = ctx.store.events(id).find((e) => e.type === 'evidence' && e.note === it.note);
+        body.event = ev ?? { note: it.note };
+        break;
+      }
+      case 'link':
+        body.url = it.url;
+        break;
+    }
+    return { ok: true, value: body };
+  },
+
+  /* the gate writes */
+  'append!': (ctx) => {
+    const raw = ctx.args.slice(2).join(' ');
+    if (!ctx.args[1] || !raw) return usage('usage: ann append! <id> \'{"at":..,"type":..}\'');
+    return writeResult(ctx.commands.append(ctx.args[1], JSON.parse(raw)));
+  },
+  'spawn!': (ctx) => {
+    const raw = ctx.args.slice(2).join(' ');
+    if (!ctx.args[1] || !raw) return usage('usage: ann spawn! <id> \'<contract-json>\'');
+    let contract: unknown;
+    try {
+      contract = JSON.parse(raw);
+    } catch (e) {
+      return boom('spawn-bad-json', `spawn rejected: bad contract JSON (${(e as Error).message})`);
+    }
+    return writeResult(ctx.commands.spawn(ctx.args[1], contract));
+  },
+  'submit!': (ctx) => {
+    if (!getVOCAB().gates.includes(ctx.args[2])) return usage('usage: ann submit! <id> grill|confirm [confirmedSha]');
+    return writeResult(ctx.commands.submit(ctx.args[1], ctx.args[2], ctx.args[3] ? { confirmedSha: ctx.args[3] } : {}));
+  },
+  'gate!': (ctx) => {
+    if (!getVOCAB().gates.includes(ctx.args[2]) || !['accept', 'reject'].includes(ctx.args[3] ?? '')) {
+      return usage('usage: ann gate! <id> grill|confirm accept|reject [feedback]');
+    }
+    return writeResult(ctx.commands.gate(ctx.args[1], ctx.args[2], ctx.args[3], ctx.args.slice(4).join(' ')));
+  },
+};
+
+/** Resolve the handler + render key for a canonical command — SHARED by runMain and
+ *  the parity test, so the in-process path always mirrors the binary's dispatch. A
+ *  `handler` of undefined means the command falls to the bare-name path map. */
+export function resolveDispatch(ctx: CliContext, canonical: string): { handler?: Handler; renderKey: string } {
+  if (canonical === 'journey' && ctx.args[1] !== undefined) {
+    // journey-with-id is a DIFFERENT command (journeyOne) than the no-id look-back
+    return { handler: HANDLERS.journeyOne, renderKey: 'journeyOne' };
+  }
+  return { handler: HANDLERS[canonical], renderKey: canonical === 'run!' ? 'run' : canonical };
+}
+
+/** The bare-name read: a DOC (via the manifest) or a current artifact's logical name. */
+export function bareNameHandler(ctx: CliContext): Outcome {
+  const name = ctx.args[0];
+  const doc = ctx.store.resolveDoc(name);
+  const cur = doc ? undefined : ctx.store.current(name);
+  if (doc) return { ok: true, value: { name, kind: 'doc', path: doc.path, sha: doc.sha } };
+  if (cur) {
+    return {
+      ok: true,
+      value: { name, kind: 'artifact', path: cur.path, ...(cur.sha ? { sha: cur.sha } : {}), ...(cur.producer ? { producer: cur.producer } : {}) },
+    };
+  }
+  return boom('no-doc', `ann: no doc/artifact for '${name}' (a docs manifest name or a current artifact's logical name)`);
+}
+
+/* ── the interactive carve-out: goal! seed (NOT value-canonical — it drives a
+ *  terminal grilling session; JSON refuses up-front). ───────────────────────── */
+async function goalSeedInteractive(ctx: CliContext): Promise<Outcome> {
+  if (ctx.json) {
+    return boom(
+      'goal-seed-interactive',
+      'goal! seed is an INTERACTIVE grilling session — it needs a terminal; JSON mode cannot drive it (run it in a terminal, or read the goal session: ann --json goal|journey|next)',
+    );
+  }
+  const idea = ctx.args.slice(2).join(' ').trim();
+  const gate = ctx.commands.goalSeedGate();
+  if (!gate.allow) return boom('goal-seed-gate', `not-empty: ${gate.blocker ?? GOAL_SEED_GUARD}`);
+  const r = await runGoalSeed(ctx.commands, buildAbilities(getAdapter(undefined, ctx.root)), { idea });
+  if (!r.ok) {
+    console.error(`${r.error.code}: ${r.error.blocker}`);
+    return { ok: false, error: { code: r.error.code, message: r.error.blocker }, exitCode: 1 };
+  }
+  if (!r.seeded) {
+    console.log(`goal! seed: NOT seeded — ${r.note}`);
+    return { ok: true, value: { seeded: false, note: r.note } };
+  }
+  console.log(`goal! seed: goal seeded → ${r.goalId} (${r.contract.intent})`);
+  console.log(`  contract: ${r.contract.acceptanceCriteria.length} success criteria`);
+  console.log(`  goal.md written to ${r.docPath} @ ${r.sha} — commit to publish`);
+  console.log('  verdict: unconfirmed — reach structural exhaustion, then record it: goal! met');
+  return { ok: true, value: { seeded: true, goalId: r.goalId } };
+}
+
+/* ── the alias map (the `--x` command forms — NOT the stripped --project/--json) ── */
+const ALIAS: Record<string, string> = {
+  '--journey': 'journey',
+  '--status': 'status',
+  '--check': 'check',
+  '--verify': 'verify',
+  '--ledger': 'ledger',
+  '--specs': 'specs',
+  '--providers': 'providers',
+  '--config': 'config',
+  '--branch': 'branch',
+  '--detail': 'detail',
+  '--results': 'results',
+  '--packet': 'packet',
+  '--validate': 'validate',
+  '--rules': 'rules',
+  '--docs': 'docs',
+  '--sessions': 'sessions',
+  '--chain': 'chain',
+  '--steps': 'steps',
+  '--next': 'next',
+  '--goal': 'goal',
+  '--flow': 'flow',
+  '--read': 'read',
+  '--help': 'help',
+  '-h': 'help',
+  '--commands': 'commands',
+};
+
+/** The journey-addressing WRITES a read-only target refuses (config!/cred!/project!
+ *  never touch the store, so they stay available). docs/rules --write refuse too. */
+const JOURNEY_REFUSED_WRITES = new Set(['append!', 'spawn!', 'submit!', 'gate!', 'goal!', 'run!']);
+/** Bare write names (no `!`) — a named hint, never silent. */
+const WRITES = ['append', 'spawn', 'submit', 'gate', 'cred'];
+
+const isProjectRoot = (dir: string): boolean => existsSync(join(dir, '.ann')) || existsSync(join(dir, 'journey'));
+
+/* ── runMain — flag strip → root resolve → ctx → dispatch → the ONE emit ────── */
+
+export async function runMain(rawArgv: string[] = process.argv.slice(2)): Promise<void> {
+  const args = rawArgv.slice();
+  // Global --project <path> / --json — extracted and STRIPPED (per-command parsing
+  // never sees them); --project works before OR after the command.
+  let projectFlag: string | undefined;
+  {
+    const flagIdx = args.indexOf('--project');
+    if (flagIdx >= 0 && args[flagIdx + 1]) {
+      projectFlag = args[flagIdx + 1];
+      args.splice(flagIdx, 2);
+    }
+  }
+  let json = false;
+  {
+    const idx = args.indexOf('--json');
+    if (idx >= 0) {
+      json = true;
+      args.splice(idx, 1);
+    }
+  }
+
+  const command = args[0];
+  const isProjectCmd = command === 'project' || command === 'project!';
+
+  // ── resolve the root BEFORE anything touches the store; chdir so relative reads
+  //  (results-ref, docs sha) resolve against the project root ──
+  let root: string;
+  try {
+    root = isProjectCmd ? process.cwd() : resolveProjectRoot(projectFlag);
+  } catch (e) {
+    emit(outcomeOf(e), json);
+    process.exitCode = 1;
+    return;
+  }
+  if (!isProjectCmd) process.chdir(root);
+
+  const ctx = createContext(root, args, { json });
+  const canonical = command === undefined ? 'help' : ALIAS[command] ?? command;
+  const env = ctx.renderEnv();
+
+  try {
+    // bare ann / help / commands are doc forms (canonical 'help' set above for bare).
+    if (canonical === 'help') {
+      emit(await HANDLERS.help(ctx), json, env, 'help');
+      return;
+    }
+    if (canonical === 'commands') {
+      emit(await HANDLERS.commands(ctx), json, env, 'commands');
+      return;
+    }
+    // a bare WRITE name refuses with a hint — the `!` is a guarantee, not advice.
+    if (WRITES.includes(command)) {
+      throw new CommandExit(
+        'write-marker',
+        `ann: writes are marked with '!' — did you mean '${command}!'? (mutator convention: reads have no marker, writes always end in !)`,
+      );
+    }
+    readOnlyRefuse(ctx, canonical);
+    // the interactive carve-out: goal! seed (never value-canonical)
+    if (canonical === 'goal!' && (args[1] ?? '') === 'seed') {
+      const out = await goalSeedInteractive(ctx);
+      if (!out.ok) throw new CommandExit(out.error.code, out.error.message, { text: out.error.text, exitCode: out.exitCode });
+      return;
+    }
+    // Resolve handler + render key through the shared dispatcher (journey-with-id is a
+    // DIFFERENT command, journeyOne, than the no-id look-back — both must follow the
+    // branch; `run!` renders under `run`). A missing handler falls to the bare-name read.
+    const { handler, renderKey } = resolveDispatch(ctx, canonical);
+    if (!handler) {
+      emit(bareNameHandler(ctx), json, env, 'bare');
+      return;
+    }
+    emit(await handler(ctx), json, env, renderKey);
+  } catch (e) {
+    emit(outcomeOf(e), json);
+  }
+}
+
+/** The single emission point: an Outcome → stderr diagnostics (DIAG) → stdout
+ *  (JSON doc, or the RENDER of the SAME value) → the exit code. */
+function emit(outcome: Outcome, json: boolean, env?: RenderEnv, renderKey?: string): void {
+  if (!outcome.ok) {
+    const text = outcome.error.text ?? outcome.error.message;
+    if (json) process.stdout.write(JSON.stringify({ error: { code: outcome.error.code, message: outcome.error.message } }, null, 2) + '\n');
+    else console.error(text);
+    process.exitCode = outcome.exitCode ?? 1;
+    return;
+  }
+  const e = env ?? ({ args: [], json, root: process.cwd(), kind: 'project' } as RenderEnv);
+  const rk = renderKey ?? '';
+  if (rk && DIAG[rk]) for (const line of DIAG[rk](outcome.value, e)) console.error(line);
+  if (json) {
+    process.stdout.write(JSON.stringify(outcome.value, null, 2) + '\n');
+  } else {
+    let text = '';
+    if (rk === 'packet') text = renderPacketById(outcome.value, e);
+    else if (rk) text = RENDERS[rk]?.(outcome.value, e) ?? '';
+    process.stdout.write(text);
+  }
+  if (outcome.exitCode !== undefined) process.exitCode = outcome.exitCode;
+}
+
+/** Normalize a thrown failure into an error Outcome (CommandExit → its shape; any
+ *  other error → the generic `error` doc, text = the message — byte-identical to the
+ *  old outer try/catch). */
+function outcomeOf(e: unknown): Outcome {
+  if (e instanceof CommandExit) {
+    return { ok: false, error: { code: e.code, message: e.message, ...(e.text ? { text: e.text } : {}) }, exitCode: e.exitCode };
+  }
+  const msg = (e as Error).message;
+  return { ok: false, error: { code: 'error', message: msg }, exitCode: 1 };
+}
+
+/** The read-only chokepoint — BEFORE dispatch. When ANN_STORE resolves to a NON-ACTIVE
+ *  journey, the journey-addressing writes refuse with a named message; config!/cred!/
+ *  project! and plain reads never trip here (resolution is deferred to the lazy proxy). */
+function readOnlyRefuse(ctx: CliContext, canonical: string): void {
+  const isJourneyWrite = JOURNEY_REFUSED_WRITES.has(canonical);
+  const isDocsOrRulesWrite = (canonical === 'docs' || canonical === 'rules') && ctx.args.includes('--write');
+  if (!isJourneyWrite && !isDocsOrRulesWrite) return;
+  const t = ctx.target();
+  if (!t.readOnly) return;
+  throw new CommandExit(
+    'read-only',
+    `ann: ${ctx.args[0]} refused: ANN_STORE points at a READ-ONLY journey (${t.loc.kind === 'project' ? join(t.loc.root, '.ann', 'journey') : t.loc.root}) — not the active session. Reads work; unset ANN_STORE to write the active session.`,
+  );
+}
+
+function resolveProjectRoot(projectFlag: string | undefined): string {
+  const explicit = projectFlag ? resolve(projectFlag) : process.env.ANN_PROJECT ? resolve(process.env.ANN_PROJECT) : undefined;
+  if (explicit) {
+    if (isProjectRoot(explicit)) return explicit;
+    throw new CommandExit(
+      'not-project',
+      `ann: '${explicit}' is not an ann project (no .ann/ or journey/). Run from a project or: ann project! add <path>`,
+    );
+  }
+  // cwd discovery: walk up looking for .ann/ (v12 marker) — legacy journey/ accepted
+  let dir = process.cwd();
+  for (;;) {
+    if (isProjectRoot(dir)) return dir;
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  const cur = getCurrentProject();
+  if (cur && isProjectRoot(cur)) return cur;
+  throw new CommandExit('no-project', 'ann: no project found — run from a project (a dir containing .ann/), or register one: ann project! add <path>');
+}
