@@ -139,6 +139,7 @@ describe('runGoalSeed — the goal! seed materialize path (flow/goal-seed)', () 
     const { llm, calls } = fakeLlm([
       r1,
       'The bound is settled at three; the goal should also fold reseeding in — I recommend refining before GO.',
+      JSON.stringify({ recommendation: 'refine', reason: 'fold reseeding into the draft before GO' }),
       r2,
     ]);
     const interact = new ScriptedInteractor(['3', 'sorted', 'the goal should also cover reseeding a sole unconsumed goal'], [], ['refine', 'GO']);
@@ -178,6 +179,7 @@ describe('runGoalSeed — the goal! seed materialize path (flow/goal-seed)', () 
       'The bound is the only open edge; a dig would settle it.',
       discussAdvice,
       discussAfter,
+      JSON.stringify({ recommendation: 'GO', reason: 'the bound is now grounded by the docs — seedable' }),
     ]);
     const interact = new ScriptedInteractor(
       ['skip', 'Pull the docs.', 'sorted'], // skipped → stays open → the LLM advises research DURING discussion → the human agrees

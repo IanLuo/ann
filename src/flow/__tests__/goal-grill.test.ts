@@ -78,6 +78,9 @@ const clean = (summary: string, claim = 'the goal is scoped and buildable') =>
 /** An in-discussion LLM reply — strict JSON with an OPTIONAL research recommendation. */
 const discuss = (reply: string, research?: unknown) => JSON.stringify({ reply, ...(research ? { research } : {}) });
 
+/** A DECISION turn — strict JSON: the grill's grounded recommendation the human decides against. */
+const decision = (recommendation: string, reason: string) => JSON.stringify({ recommendation, reason });
+
 const HIGH_Q = () => ({
   question: 'Which v1 scope marker is acceptable?',
   reason: 'defines v1 scope',
@@ -99,7 +102,11 @@ describe('GoalGrillSession v4 — ANSWER → LLM RESPONSE → DISCUSS → (round
   it('(a) batch answers → an LLM RESPONSE (synthesis) happens before any decision, and GO returns the read', async () => {
     const q = HIGH_Q();
     const synth = 'The bound of three reads cleanly and "a" as the v1 marker settles scope. My recommendation: GO.';
-    const { llm, prompts } = fakeLlm([grill('A v1 goal with a fixed scope marker.', [{ verdict: 'ok', claim: 'scope is checkable', basis: [], confidence: 'high' }], [q]), synth]);
+    const { llm, prompts } = fakeLlm([
+      grill('A v1 goal with a fixed scope marker.', [{ verdict: 'ok', claim: 'scope is checkable', basis: [], confidence: 'high' }], [q]),
+      synth,
+      decision('GO', 'the marker and the bound are settled — the goal is seedable'),
+    ]);
     const interact = new ScriptedInteractor(['a', 'sorted'], [], ['GO']);
     const r = await session(llm, interact).run({ statement: 'Build a goal! seed command.', maxRounds: 3 });
 
@@ -107,9 +114,10 @@ describe('GoalGrillSession v4 — ANSWER → LLM RESPONSE → DISCUSS → (round
     if (!r.ok || r.verdict !== 'solid') return;
     expect(r.resolved).toEqual([{ id: 'q1', question: q.question, answer: 'a', impact: 'high' }]);
     expect(r.okClaims).toEqual(['scope is checkable']);
-    // TWO model calls before the decision: the grill, then the RESPONSE (synthesis) —
-    // a bare list of answers is never what the human sees before deciding
-    expect(prompts).toHaveLength(2);
+    // the model calls before the decision: the grill, then the RESPONSE (synthesis),
+    // then the DECISION turn that weighs the round — a bare list of answers is never
+    // what the human sees before deciding
+    expect(prompts).toHaveLength(3);
     expect(prompts[0]).toContain('Goal-mode instructions');
     expect(prompts[0]).toContain(GOAL_GRILL_MODE);
     expect(prompts[1]).toContain(GOAL_DISCUSS_MODE);
@@ -142,6 +150,7 @@ describe('GoalGrillSession v4 — ANSWER → LLM RESPONSE → DISCUSS → (round
       synth,
       discuss('I can tighten that into a checkable success criterion.', null),
       discuss('The offline case is out of v1 scope — the goal should not promise it.', null),
+      decision('GO', 'the bound fired and the criterion is checkable — seedable'),
     ]);
     // maxDiscussTurns 2: the human never says 'sorted', so the bound itself must end the
     // discussion and reach the DECISION (had it kept asking, the FIFO would abort).
@@ -149,8 +158,8 @@ describe('GoalGrillSession v4 — ANSWER → LLM RESPONSE → DISCUSS → (round
     const r = await session(llm, interact).run({ statement: 'Build a goal! seed command.', maxRounds: 3, maxDiscussTurns: 2 });
 
     expect(r.ok && r.verdict === 'solid').toBe(true);
-    // grill + synthesis + two discussion turns — no third discuss turn past the bound
-    expect(prompts).toHaveLength(4);
+    // grill + synthesis + two discussion turns + the decision turn — no third discuss turn past the bound
+    expect(prompts).toHaveLength(5);
     expect(interact.presented.some((p) => p.includes('I can tighten that into a checkable success criterion.'))).toBe(true);
     expect(interact.presented.some((p) => p.includes('The offline case is out of v1 scope'))).toBe(true);
     // reaching the DECISION (solid GO) without the human ever saying 'sorted' proves the bound fired
@@ -162,7 +171,14 @@ describe('GoalGrillSession v4 — ANSWER → LLM RESPONSE → DISCUSS → (round
     const q2 = { question: 'Which platform ships first?', reason: 'sequencing', impact: 'medium' as const, options: ['ios', 'web'], default: 'web' };
     const round1 = grill('A scoped v1 goal.', [{ verdict: 'ok', claim: 'v1 scope marker matters', basis: [], confidence: 'high' }], [q1]);
     const round2 = grill('A scoped v1 goal with a first platform.', [{ verdict: 'ok', claim: 'sequencing is settled', basis: [], confidence: 'high' }], [q1, q2]); // re-raises q1 — must NOT re-ask
-    const { llm, prompts } = fakeLlm([round1, 'Round 1 read-back.', round2, 'Round 2 read-back.']);
+    const { llm, prompts } = fakeLlm([
+      round1,
+      'Round 1 read-back.',
+      decision('dig more', 'the v1 marker is settled but the platform is open'),
+      round2,
+      'Round 2 read-back.',
+      decision('GO', 'both open items are settled — seedable'),
+    ]);
     const interact = new ScriptedInteractor(['a', 'sorted', 'web', 'sorted'], [], ['dig more', 'GO']);
     const r = await session(llm, interact).run({ statement: 'Build a goal! seed command.', maxRounds: 3 });
 
@@ -178,8 +194,8 @@ describe('GoalGrillSession v4 — ANSWER → LLM RESPONSE → DISCUSS → (round
     expect(interact.asked.filter((a) => a.includes(q2.question))).toHaveLength(1);
     // two grills; the SECOND grill was fed the round-1 answer AND the refined reading
     expect(prompts[0]).toContain('Build a goal! seed command.'); // round 1 grills the raw statement
-    expect(prompts[2]).toContain('A scoped v1 goal.'); // round 2 grills the refined draft
-    expect(prompts[2]).toContain('user input]: a'); // the round-1 answer is grounded context it must build on, not re-ask
+    expect(prompts[3]).toContain('A scoped v1 goal.'); // round 2 grills the refined draft
+    expect(prompts[3]).toContain('user input]: a'); // the round-1 answer is grounded context it must build on, not re-ask
     // every DECISION (round 1 + round 2) offered exactly the four options
     everyDecisionOffersAllFour(interact);
     expect(decisionCalls(interact)).toHaveLength(2);
@@ -189,7 +205,7 @@ describe('GoalGrillSession v4 — ANSWER → LLM RESPONSE → DISCUSS → (round
     const refined = 'A goal that also ships offline on day one.';
     const round1 = grill('A v1 goal.', [{ verdict: 'ok', claim: 'scope marker needed', basis: [], confidence: 'high' }], [HIGH_Q()]);
     const round2 = clean('A v1 goal that ships offline on day one.');
-    const { llm, prompts } = fakeLlm([round1, 'Read-back one.', round2]);
+    const { llm, prompts } = fakeLlm([round1, 'Read-back one.', decision('refine', 'the draft must not over-promise scope'), round2]);
     const interact = new ScriptedInteractor(['a', 'sorted', refined], [], ['refine', 'GO']);
     const r = await session(llm, interact).run({ statement: 'Build a goal! seed command.', maxRounds: 3 });
 
@@ -198,7 +214,7 @@ describe('GoalGrillSession v4 — ANSWER → LLM RESPONSE → DISCUSS → (round
     expect(r.goal).toBe('A v1 goal that ships offline on day one.');
     expect(r.rounds).toBe(2);
     // the second grill grills the human's OWN words, not the previous reading
-    expect(prompts[2]).toContain('ships offline on day one');
+    expect(prompts[3]).toContain('ships offline on day one');
     expect(interact.asked).toContain('What should change about the goal? Refine the goal statement in your own words — the next round grills what you say here.');
   });
 
@@ -209,6 +225,7 @@ describe('GoalGrillSession v4 — ANSWER → LLM RESPONSE → DISCUSS → (round
       'Read-back one.',
       discuss('The open high-impact item is the scope marker — let me dig the workshop.', { topic: q.question, reason: 'to settle v1 scope' }),
       discuss('The workshop confirms the "a" marker — v1 scope is now settled.', null),
+      decision('GO', 'the scope marker is grounded by the workshop finding — seedable'),
     ]);
     const interact = new ScriptedInteractor(
       ['skip', 'Please dig it.', 'sorted'], // skipped → q stays open → discussion → research advised → human agrees
@@ -224,8 +241,8 @@ describe('GoalGrillSession v4 — ANSWER → LLM RESPONSE → DISCUSS → (round
     expect(r.researchLog).toEqual([{ topic: q.question, findings: 'v1 accepts only the "a" marker.', sources: ['workshop'] }]);
     // the finding RESOLVED the skipped open question and became a grounded constraint
     expect(r.resolved).toEqual([{ id: 'q1', question: q.question, answer: 'v1 accepts only the "a" marker.', impact: 'high' }]);
-    // the LLM responded AGAIN to the findings (grill + synthesis + advise-turn + follow-up)
-    expect(prompts).toHaveLength(4);
+    // the LLM responded AGAIN to the findings (grill + synthesis + advise-turn + follow-up + decision)
+    expect(prompts).toHaveLength(5);
     expect(prompts[3]).toContain('v1 accepts only the "a" marker.'); // the follow-up reasoned over the folded finding
     expect(interact.presented.some((p) => p.includes('The workshop confirms the "a" marker'))).toBe(true);
   });
@@ -236,6 +253,7 @@ describe('GoalGrillSession v4 — ANSWER → LLM RESPONSE → DISCUSS → (round
       grill('A v1 goal.', [], [q]),
       'Read-back one.',
       discuss('I would research the marker, but it can wait.', { topic: q.question, reason: 'optional' }),
+      decision('GO', 'the marker stays open but does not block a seedable v1'),
     ]);
     const interact = new ScriptedInteractor(['skip', 'No, skip the dig.', 'sorted'], [], ['no', 'GO']);
     const r = await session(llm, interact).run({ statement: 'Build a goal! seed command.', maxRounds: 3 });

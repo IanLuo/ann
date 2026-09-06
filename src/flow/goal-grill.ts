@@ -189,6 +189,24 @@ interface DiscussReply {
 /** An in-discussion LLM reply — strict-JSON, parsed deterministically. */
 type ReasoningTurn = { ok: true; value: DiscussReply } | { ok: false; error: AdapterError };
 
+/** A DECISION recommendation — strict-JSON, parsed deterministically (same honesty
+ *  layer). The recommendation the human decides against is the LLM's weigh-in on the
+ *  WHOLE round, never a bare rule. */
+type DecisionReply = { recommendation: (typeof DECISION_OPTIONS)[number]; reason: string };
+const parseDecision = (text: string): { ok: true; value: DecisionReply } | { ok: false; blocker: string } => {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(unquote(text));
+  } catch {
+    return { ok: false, blocker: 'the decision turn returned unparseable output — treated as failure, never fabricated' };
+  }
+  const o = parsed as Record<string, unknown> | null;
+  if (!o || !(DECISION_OPTIONS as readonly string[]).includes(o.recommendation as string) || typeof o.reason !== 'string' || o.reason.trim().length === 0) {
+    return { ok: false, blocker: 'the decision turn output violated the shape contract ({recommendation, reason}) — treated as failure' };
+  }
+  return { ok: true, value: { recommendation: o.recommendation as DecisionReply['recommendation'], reason: o.reason.trim() } };
+};
+
 const renderHistory = (h: { who: string; text: string }[]): string => h.map((e) => `${e.who}: ${e.text}`).join('\n') || '(none yet)';
 
 /** Deterministic parse of the discuss turn's strict-JSON reply (the honesty layer —
@@ -315,6 +333,15 @@ export class GoalGrillSession {
       const c = await llmText(prompt);
       if (!c.ok) return c;
       const p = parseDiscuss(c.value);
+      if (!p.ok) return { ok: false, error: { code: 'bad-response', blocker: `goal grill: ${p.blocker}` } };
+      return { ok: true, value: p.value };
+    };
+    /** One DECISION turn: a strict-JSON weigh-in ({recommendation, reason}) — the LLM's
+     *  grounded recommendation the human decides against. Same honesty layer. */
+    const decisionTurn = async (prompt: string): Promise<{ ok: true; value: DecisionReply } | { ok: false; error: AdapterError }> => {
+      const c = await llmText(prompt);
+      if (!c.ok) return c;
+      const p = parseDecision(c.value);
       if (!p.ok) return { ok: false, error: { code: 'bad-response', blocker: `goal grill: ${p.blocker}` } };
       return { ok: true, value: p.value };
     };
@@ -473,9 +500,30 @@ export class GoalGrillSession {
         }
       }
 
-      // 4 — DECISION (after each resolved discussion — GO is ONLY the human's call here)
+      // 4 — DECISION (after each resolved discussion — GO is ONLY the human's call here).
+      // The recommendation is the LLM's, grounded in the whole round — never a bare rule:
+      // when this round produced reasoning (answers/discussion), one final assessment turn
+      // weighs the goal draft + every answer + the discussion and states WHY before the
+      // menu. A clean read (nothing to reason about) recommends GO directly.
       const openNow = [...open.values()];
-      const recommendation = blocking ? 'refine' : openNow.some((q) => q.impact !== 'low') ? 'dig more' : 'GO';
+      let recommendation: (typeof DECISION_OPTIONS)[number] = blocking ? 'refine' : openNow.some((q) => q.impact !== 'low') ? 'dig more' : 'GO';
+      if (history.length > 0) {
+        const a = await decisionTurn([
+          'You are the DECISION advisor at the end of a goal-grill round. Weigh the WHOLE round — the goal draft, everything the human answered, and the discussion — and recommend ONE next move.',
+          '',
+          `## Current goal draft\n${goal}`,
+          `## Grounded context (cite ONLY these labels; never invent)\n${renderContext(context)}`,
+          `## Contract constraints\n${renderConstraints(constraints)}`,
+          `## This round's reasoning/discussion transcript\n${renderHistory(history)}`,
+          '',
+          'Be honest, never session-shortening: GO only if the goal is genuinely seedable now (a reader can tell when it is done and no meaningful unknown blocks a checkable criterion); dig more if a meaningful unknown still blocks that; refine if the DRAFT itself is weak. Ground the reason in the transcript/context.',
+          '## Output — strict JSON, no commentary, no fence',
+          '{ "recommendation": "GO" | "dig more" | "refine" | "skip", "reason": "one short paragraph, grounded" }',
+        ].join('\n'));
+        if (!a.ok) return a;
+        recommendation = a.value.recommendation;
+        await this.abilities.interact.present(`── Round ${round} — the grill's recommendation ──\n${a.value.reason}\n\nMy recommendation: ${a.value.recommendation}`);
+      }
       const c = await decide(
         `Round ${round} decision — resolved so far: ${resolved.length} · still open: ${openNow.length}. Seed now (GO) · dig more (next round, new questions) · refine (reshape the goal in-session) · skip. (recommendation: ${recommendation})`,
         [...DECISION_OPTIONS],
