@@ -1,0 +1,12 @@
+# Goal
+
+Goal: Ann is to gain a server and API layer that will later serve a UI, alongside continued store improvements including session and archive access, with the existing engine core treated as settled.
+
+Success criteria:
+- Ann is to gain a server and API layer that will later serve a UI, alongside continued store improvements including session and archive access, with the existing engine core treated as settled.
+- The goal to build a server and API for a future UI is a clear product-level outcome, distinct from implementation details.
+- Treating the engine core as built and archived (met) appropriately focuses the current goal on the server/API and store increments.
+- What is the primary purpose of the server and API at this stage — to prove the journey-of-legs flow can be driven remotely, or to establish a stable contract that the future UI will consume? → 1. a web UI will use it, 2. normal people don't have tech background, can use it to gradually craft well controled product. 3. api tests
+- What specific user need does session/archive access serve — e.g., resuming an interrupted journey, auditing past journeys, or sharing a journey state? → active session is the current ongoing task, archived sessions are historical sessions, which contains meanning full information will need to be checked from time to time
+- What is the checkable outcome for 'continued store work' — is it a defined set of capabilities (e.g., list, retrieve, delete sessions) or a performance/scale target? → capability set
+- Who is the intended consumer of the API at this stage — only the future UI, or also external developers or automated tools? → a web UI
