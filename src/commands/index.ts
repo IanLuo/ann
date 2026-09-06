@@ -1,14 +1,13 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join, relative } from 'node:path';
-import { Store, JourneyEvent, NodeDir, ResultItem, TaskDetail, legacyPath } from '../store/store.js';
+import { Store, JourneyEvent, NodeDir, ResultItem, TaskDetail } from '../store/store.js';
 import { blobSha, stripMarkers } from '../store/sha.js';
 import { getVOCAB } from '../store/vocab.js';
 
 /** A producer artifact's LOGICAL NAME from its file — the stem (last extension
- *  stripped). The goal-root seal takes the artifacts-relative FILE and records this
- *  as the artifact name: the thin model names an artifact by the file that carries it
- *  (goal.md → goal). Retired surface (D3) — this survives only for goal! seed. */
+ *  stripped): the thin model names an artifact by the file that carries it
+ *  (goal.md → goal). Retired surface (D3) — this survives only for lock(). */
 const artifactNameOf = (file: string): string => file.replace(/\.[^./]*$/, '');
 
 /**
@@ -31,11 +30,11 @@ const artifactNameOf = (file: string): string => file.replace(/\.[^./]*$/, '');
  *
  * DOCS ARE GIT CONTENT (the refactor): a task's deliverable is a doc STAGED to
  * <root>/docs/ and COMMITTED by the operator; conclusion is `completed` +
- * evidence.commits[]. The doc-artifact machinery is RETIRED from new writes —
- * `lock` survives ONLY as the internal GOAL-ROOT SEAL that `goal! seed` applies
- * (goal.md is still artifact-based until the goal doc moves to docs/), and
- * `current()`/superseded reads stay as LEGACY readers for archived/historical
- * nodes. Nothing forward routes through a lock.
+ * evidence.commits[]. The goal doc is docs/goal.md too — `goal! seed` writes it
+ * there and regenerates the manifest (no goal-root artifact-lock). The doc-artifact
+ * machinery is RETIRED from new writes; `lock` and `current()`/superseded reads
+ * survive only as LEGACY surface for archived/historical nodes. Nothing forward
+ * routes through a lock.
  *
  * MULTI-CLIENT = multiple IN-PROCESS initiators (the flow, the validators, the
  * adapters). The CLI is a BINDING, not an initiator.
@@ -71,11 +70,11 @@ const COMPOSITE_OWNED: Record<string, string> = {
 /** The RETIRED doc-artifact kinds (the docs-as-git refactor, D3) — refused on the
  *  general append: a fresh `artifact-locked`/`superseded` through the write surface
  *  would be a NEW write in a retired model. Artifact-locked still EXISTS in the log
- *  as legacy/history and as goal! seed's goal-root seal (that lock writes through the
- *  composite, not append!); it is simply no longer a general task write. */
+ *  as legacy/history only (the goal doc lives at docs/goal.md — no goal-root lock);
+ *  it is simply no longer a general write of any kind. */
 const RETIRED_KINDS: Record<string, string> = {
   'artifact-locked':
-    'retired with the docs-as-git refactor (D3) — a task deliverable is now a doc staged to docs/ and committed; record evidence.commits[] to conclude (only goal! seed still seals a goal.md)',
+    'retired with the docs-as-git refactor (D3) — a task deliverable is now a doc staged to docs/ and committed; record evidence.commits[] to conclude (the goal doc is docs/goal.md)',
   superseded: 'retired with the docs-as-git refactor (D3) — a rework re-writes the staged docs/<name>.md; there is no lock to supersede',
 };
 
@@ -150,7 +149,8 @@ export interface GoalView {
   present: boolean;
   goalId?: string;
   goalStatus?: string;
-  /** The LOCKED goal.md on the goal root (path normalized to the current layout). */
+  /** The authored goal doc — docs/goal.md, resolved through the docs manifest
+   *  (present after `goal! seed`; absent across the archive gap). */
   goalDoc?: { name: string; path: string; sha: string };
   /** The GENERATED node contract (intent + ACs derived 1:1 from goal.md). */
   contract?: { intent: string; acceptanceCriteria: string[] };
@@ -387,15 +387,16 @@ export class Commands {
   }
 
   /**
-   * `lock` — the GOAL-ROOT SEAL (goal-session-design §2): an artifact-locked record
-   * `{name, path, lockSha, type?, version?}` sealing goal.md ON THE GOAL ROOT. Docs-as-git
-   * (D3) retired the general artifact surface — this composite survives ONLY as the
-   * follow-on seal `goal! seed` applies (the goal doc is still artifact-based until it
-   * moves to docs/), and goalDocOf reads the same record. Caller names the file (a
-   * single artifacts-relative segment, AC-3); ann resolves it INSIDE the node's own
-   * artifacts/ dir (never a free path), VERIFIES it exists, hashes the raw bytes
-   * (marker-tolerant), derives the version from THE LOG, and records the event. It NEVER
-   * writes, copies, or stamps the file — the bytes on disk are untouched (AC1).
+   * `lock` — LEGACY ONLY (docs-as-git D3): an artifact-locked record
+   * `{name, path, lockSha, type?, version?}` for a node's OWN artifacts/ producer file.
+   * The goal doc moved to docs/goal.md and `goal! seed` no longer locks, so this method
+   * has NO forward caller — it survives mechanically (its unit tests exercise the
+   * retired record→lock model + the legacy current() reader); nothing routes forward
+   * through a lock. Caller names the file (a single artifacts-relative segment, AC-3);
+   * ann resolves it INSIDE the node's own artifacts/ dir (never a free path), VERIFIES
+   * it exists, hashes the raw bytes (marker-tolerant), derives the version from THE LOG,
+   * and records the event. It NEVER writes, copies, or stamps the file — the bytes on
+   * disk are untouched (AC1).
    */
   lock(id: string, artifactFile: string, opts: { type?: string; note?: string } = {}): CommandResult<LockedArtifact> {
     if (!this.store.ids().includes(id)) return fail('no-node', `no node ${id}`);
@@ -469,7 +470,7 @@ export class Commands {
       raw && (raw.intent || Array.isArray(raw.acceptanceCriteria))
         ? { intent: String(raw.intent ?? ''), acceptanceCriteria: (raw.acceptanceCriteria ?? []) as string[] }
         : undefined;
-    const goalDoc = this.goalDocOf(goalId);
+    const goalDoc = this.goalDocOf();
     const metEvent = this.store.events(goalId).find((e) => e.type === 'goal-met');
     const undone = legs.filter((l) => !['done', 'superseded'].includes(l.status)).map((l) => l.id);
     const pending = this.undecidedEverywhere();
@@ -606,15 +607,14 @@ export class Commands {
    *  that AUTHORS the doc runs at SESSION scope — flow/goal-seed — on top of this
    *  composite; L1 owns the write + its invariants). Empty journey → seedGoal (a goal
    *  seeds the first leg of a fresh session); a RE-SEEDABLE goal → reseedGoal REPLACES
-   *  the sole unconsumed goal in place (re-grill + overwrite goal.md + regenerate the
+   *  the sole unconsumed goal in place (re-grill + overwrite the doc + regenerate the
    *  contract/events). Consumed/met → refused (goalSeedGate) — a changed goal is a NEW
    *  session, goal! archive first (goal-session-design §1/§2 + the reseed rule). The
-   *  seed writes goal.md (authored truth) + the generated node contract + the
-   *  created/completed seed events, then the follow-on lock! seals goal.md ON THE GOAL
-   *  ROOT (the goal-root carve-out admits artifact name 'goal') so the seed is D4-clean
-   *  from the first write — no orphan goal.md on disk. Both paths parse the doc BEFORE
-   *  any write, so a malformed doc is refused with no partial state; the gate + carve-out
-   *  both run inside this composite.
+   *  seed writes docs/goal.md (authored truth, git content) + regenerates the manifest,
+   *  the generated node contract, and the created/completed seed events — there is NO
+   *  goal-root artifact-lock (docs-as-git D7). Both paths parse the doc BEFORE any
+   *  write, so a malformed doc is refused with no partial state; the gate runs inside
+   *  this composite.
    */
   goalSeed(doc: string): CommandResult<{
     id: string;
@@ -630,9 +630,9 @@ export class Commands {
     } catch (e) {
       return fail('store-refused', (e as Error).message);
     }
-    const locked = this.lock(id, 'goal.md', { type: 'goal', note: `goal.md sealed by the seed grill (${this.who})` });
-    if (!locked.ok) return fail(locked.error.code, locked.error.blocker);
-    return ok({ id, contract, doc: { name: locked.value.name, path: locked.value.path, sha: locked.value.sha } });
+    const docRef = this.goalDocOf();
+    if (!docRef) return fail('no-goal-doc', 'goal seeded but docs/goal.md did not resolve — run ann docs --write');
+    return ok({ id, contract, doc: docRef });
   }
 
   /* ══ goal derivations (shared by goal()/goalVerdict()/advance()) ═════════════ */
@@ -646,13 +646,12 @@ export class Commands {
       .map((id) => ({ id, status: this.store.status(id) }));
   }
 
-  /** The goal leg's locked goal.md — read from the GOAL ROOT's own artifact-locked
-   *  event (never current('goal'): a task locking a same-named file must not shadow
-   *  the session's doc). Path normalized to the current layout. */
-  private goalDocOf(goalId: string): { name: string; path: string; sha: string } | undefined {
-    const a = this.store.events(goalId).find((e) => e.type === 'artifact-locked' && e.artifact?.name === 'goal')?.artifact;
-    if (!a?.name || !a.path) return undefined;
-    return { name: a.name, path: legacyPath(a.path), sha: a.lockSha ?? '' };
+  /** The goal leg's doc — docs/goal.md, resolved through the docs manifest (the
+   *  forward doc path; D7). Tolerates its absence (an archived gap: the goal leg can
+   *  outlive docs/goal.md between archive and a re-seed) — the caller treats
+   *  undefined as "no authored doc right now". */
+  private goalDocOf(): { name: string; path: string; sha: string } | undefined {
+    return this.store.resolveDoc('goal');
   }
 
   /** Exhaustion (goal-session-design §5): WORK exists (≥1 task), every leg derives
@@ -697,7 +696,7 @@ export class Commands {
   /** The archive slug: the goal.md `Goal:` line, slugified (dir-safe, ≤ 40 chars);
    *  fallback to the goal leg id minus its NN- prefix. */
   private slugFor(goalId: string): string {
-    const doc = this.goalDocOf(goalId);
+    const doc = this.goalDocOf();
     if (doc) {
       try {
         const md = readFileSync(join(this.store.root, doc.path), 'utf8');

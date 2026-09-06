@@ -565,7 +565,7 @@ describe('goal! archive — the guarded structural reset (goal-session-design §
   });
 });
 
-describe('goal! seed — the L1 materialize (guard → seedGoal → the goal.md lock)', () => {
+describe('goal! seed — the L1 materialize (guard → seedGoal → docs/goal.md named by the manifest)', () => {
   beforeEach(() => { makeStore(); });
   afterEach(() => { rmSync(root, { recursive: true, force: true }); });
 
@@ -575,7 +575,7 @@ Goal: Build a working goal! seed command
 
 Success criteria:
 - The validated goal is realized: Build a working goal! seed command
-- goal.md locks on the goal root with no artifact orphan
+- docs/goal.md is the authored goal doc, named by the committed manifest
 `;
 
   it('GUARDS: an EMPTY journey only — a non-empty journey is refused with the archive pointer', () => {
@@ -583,10 +583,10 @@ Success criteria:
     const e = errorOf(cmds().goalSeed(GOAL_DOC));
     expect(e.code).toBe('not-empty');
     expect(e.blocker).toContain('goal! archive for a new session');
-    expect(existsSync(join(nodeDir('01-goal'), 'artifacts', 'goal.md'))).toBe(false); // nothing written
+    expect(existsSync(join(root, 'docs', 'goal.md'))).toBe(false); // nothing written
   });
 
-  it('GO: seeds the goal leg AND artifact-locks goal.md on the goal root (D4-clean — no orphan)', () => {
+  it('GO: seeds the goal leg AND writes docs/goal.md — the manifest names it, no goal-root lock (D7)', () => {
     const c = cmds();
     const r = valueOf(c.goalSeed(GOAL_DOC));
     expect(r.id).toBe('01-goal');
@@ -594,28 +594,28 @@ Success criteria:
       intent: 'Build a working goal! seed command',
       acceptanceCriteria: [
         'The validated goal is realized: Build a working goal! seed command',
-        'goal.md locks on the goal root with no artifact orphan',
+        'docs/goal.md is the authored goal doc, named by the committed manifest',
       ],
     });
-    // the authored doc + the generated contract land together (doc→node 1:1)
-    expect(readFileSync(join(nodeDir('01-goal'), 'artifacts', 'goal.md'), 'utf8')).toContain('Goal: Build a working goal! seed command');
+    // the authored doc lands in docs/ (git content) — node.json holds only the parsed contract
+    expect(readFileSync(join(root, 'docs', 'goal.md'), 'utf8')).toContain('Goal: Build a working goal! seed command');
     expect(JSON.parse(readFileSync(join(nodeDir('01-goal'), 'node.json'), 'utf8')).contract.intent).toBe('Build a working goal! seed command');
-    // the goal.md LOCK sits on the goal root — the seed leaves no D4 orphan goal.md
-    const lock = c.events('01-goal').find((e) => e.type === 'artifact-locked');
-    expect(lock?.artifact).toMatchObject({ name: 'goal', type: 'goal' });
-    const verify = new Store(root).verify();
-    expect(verify.some((d) => d.includes('artifact-orphan') && d.includes('goal.md'))).toBe(false);
+    // the doc resolves through the committed manifest — no goal-root artifact-lock, no orphan doc
+    expect(new Store(root).resolveDoc('goal')).toMatchObject({ name: 'goal', path: 'docs/goal.md' });
+    expect(c.events('01-goal').some((e) => e.type === 'artifact-locked')).toBe(false);
+    expect(new Store(root).verify()).toEqual([]); // D2/D4-clean — docs/ is not an artifact orphan
     // the goal view reads the seeded session: present · generated contract · OPEN (no work spawned → not exhausted)
     const g = valueOf(c.goal());
     expect(g.present).toBe(true);
     expect(g.goalId).toBe('01-goal');
-    expect(g.goalDoc).toMatchObject({ name: 'goal' });
+    expect(g.goalDoc).toMatchObject({ name: 'goal', path: 'docs/goal.md' });
+    expect(g.goalDoc!.sha).toMatch(/^[0-9a-f]{7}$/);
     expect(g.contract).toEqual(r.contract);
     expect(g.verdict).toBe('open'); // exhaustion needs WORK — a bare seed is the open state
     expect(g.reseed).toMatchObject({ reseedable: true, why: expect.stringContaining('fresh & unconsumed') }); // the sole goal is re-seedable
   });
 
-  it('RE-SEED: a sole UNCONSUMED goal is REPLACED in place — goal.md overwritten, node contract + seed events + lock regenerated', () => {
+  it('RE-SEED: a sole UNCONSUMED goal is REPLACED in place — docs/goal.md overwritten, node contract + manifest entry regenerated', () => {
     const c = cmds();
     valueOf(c.goalSeed(GOAL_DOC)); // first seed — the journey's only node
     const GOAL_DOC_2 = `# Goal
@@ -624,7 +624,7 @@ Goal: Build a RE-SEEDABLE goal! seed command
 
 Success criteria:
 - The validated goal is realized: Build a RE-SEEDABLE goal! seed command
-- re-seeding replaces goal.md + the regenerated contract + the re-sealed lock
+- re-seeding overwrites docs/goal.md and regenerates the manifest entry
 `;
     const r = valueOf(c.goalSeed(GOAL_DOC_2)); // goal! seed again on the same sole goal
     expect(r.id).toBe('01-goal'); // replaced IN PLACE — not a second leg
@@ -632,19 +632,19 @@ Success criteria:
       intent: 'Build a RE-SEEDABLE goal! seed command',
       acceptanceCriteria: [
         'The validated goal is realized: Build a RE-SEEDABLE goal! seed command',
-        're-seeding replaces goal.md + the regenerated contract + the re-sealed lock',
+        're-seeding overwrites docs/goal.md and regenerates the manifest entry',
       ],
     });
     // the new doc is on disk, the old doc is gone; the node contract regenerated 1:1
-    const md = readFileSync(join(nodeDir('01-goal'), 'artifacts', 'goal.md'), 'utf8');
+    const md = readFileSync(join(root, 'docs', 'goal.md'), 'utf8');
     expect(md).toContain('Goal: Build a RE-SEEDABLE goal! seed command');
     expect(md).not.toContain('Build a working goal! seed command');
     expect(JSON.parse(readFileSync(join(nodeDir('01-goal'), 'node.json'), 'utf8')).contract.intent).toBe('Build a RE-SEEDABLE goal! seed command');
-    // the lock re-sealed at the NEW sha — the reseed stays D2/D4-clean (goal.md named by a matching lock)
-    const lock = c.events('01-goal').find((e) => e.type === 'artifact-locked');
-    expect(lock?.artifact).toMatchObject({ name: 'goal', type: 'goal', lockSha: r.doc.sha });
-    const verify = new Store(root).verify();
-    expect(verify.some((d) => (d.includes('artifact-orphan') || d.includes('locksha')) && d.includes('goal'))).toBe(false);
+    // the reseed re-names the doc at the NEW sha — doc + manifest + the goal view agree
+    expect(r.doc).toMatchObject({ name: 'goal', path: 'docs/goal.md' });
+    expect(r.doc.sha).toMatch(/^[0-9a-f]{7}$/);
+    expect(valueOf(c.goal()).goalDoc?.sha).toBe(r.doc.sha); // the view resolves the doc the reseed just wrote
+    expect(new Store(root).verify()).toEqual([]); // D2/D4-clean — no orphan doc, no lock
     expect(new Store(root).ids()).toEqual(['01-goal']); // still exactly one leg — nothing leaked
   });
 
@@ -661,7 +661,7 @@ Success criteria:
     const g = valueOf(c.goal());
     expect(g.reseed).toMatchObject({ reseedable: false, why: expect.stringContaining('consumed by 02-work') });
     // the original doc was NOT touched by the refused reseed
-    expect(readFileSync(join(nodeDir('01-goal'), 'artifacts', 'goal.md'), 'utf8')).toContain('Goal: Build a working goal! seed command');
+    expect(readFileSync(join(root, 'docs', 'goal.md'), 'utf8')).toContain('Goal: Build a working goal! seed command');
   });
 
   it('RE-SEED GUARD: a met goal never re-seeds — the sealed session is terminal', () => {

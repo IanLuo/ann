@@ -9,7 +9,7 @@ import { GoalGrillSession, GoalResolvedQuestion } from './goal-grill.js';
  * This runs the GOAL GRILL at SESSION scope on the user's goal — a dedicated goal-mode
  * loop (src/flow/goal-grill) that grinds the rough goal into a sharp one — then, on a
  * HUMAN `GO`, synthesizes goal.md deterministically and seeds it through L1
- * (goalSeed = seedGoal + the goal.md artifact-lock on the goal root).
+ * (goalSeed = seedGoal writing docs/goal.md + the regenerated manifest — docs-as-git).
  *
  * The grill is NOT the task idea-validate session (whose 'revise' is terminal — right for
  * a task idea, wrong for a goal): the v4 loop is ANSWER → LLM RESPONSE → DISCUSS →

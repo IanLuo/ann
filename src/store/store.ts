@@ -1,9 +1,9 @@
-import { readdirSync, readFileSync, appendFileSync, existsSync, statSync, lstatSync, mkdirSync, writeFileSync, renameSync } from 'node:fs';
+import { readdirSync, readFileSync, appendFileSync, existsSync, statSync, lstatSync, mkdirSync, writeFileSync, renameSync, rmSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join, basename, resolve, sep } from 'node:path';
 import { getVOCAB } from './vocab.js';
 import { blobSha, stripMarkers } from './sha.js';
-import { loadDocsManifest } from './docs.js';
+import { loadDocsManifest, scanDocsDir, writeDocsManifest } from './docs.js';
 
 export interface JourneyEvent {
   at: string;
@@ -620,25 +620,24 @@ export class Store {
     return legs.find((l) => this.carriesGoalSeed(l));
   }
 
-  /** The goal-seed predicate: a childless leg carrying the goal seed/artifact —
-   *  `created`+`completed` root events (legacy 01-goal shape → legStatus derives done,
-   *  the first work leg's gate opens) or a locked goal.md. */
+  /** The goal-seed predicate: a childless leg carrying the goal seed —
+   *  `created`+`completed` root events (the v6 goal shape → legStatus derives done,
+   *  the first work leg's gate opens). The doc itself lives at docs/goal.md (git
+   *  content, docs-as-git) and is NOT part of the predicate — a goal leg with no
+   *  docs/goal.md yet (archive gap, pre-migration) is still the goal leg. */
   private carriesGoalSeed(id: string): boolean {
     if (this.tasksOf(id).length) return false; // a goal leg is CHILDLESS
     const evs = this.events(id);
-    const seeded = evs.some((e) => e.type === 'created') && evs.some((e) => e.type === 'completed');
-    const lockedGoal = evs.some((e) => e.type === 'artifact-locked' && e.artifact?.name === 'goal');
-    return seeded || lockedGoal;
+    return evs.some((e) => e.type === 'created') && evs.some((e) => e.type === 'completed');
   }
 
   /** The id-scoped root-event exception (§2): the designated childless goal leg may
-   *  hold ONLY the goal.md lock and `goal-met` through the general writer (the seed
-   *  is written by seedGoal, never here). Nothing else on any leg root. */
+   *  hold ONLY `goal-met` (and the one-off migration meta record, D) through the
+   *  general writer (the seed is written by seedGoal, never here). Nothing else on
+   *  any leg root. docs-as-git: there is no goal-root artifact-lock for the doc. */
   private goalRootEvent(id: string, e: JourneyEvent): boolean {
     if (id !== this.goalLegId()) return false;
-    if (e.type === 'goal-met') return true;
-    if (e.type === 'artifact-locked') return e.artifact?.name === 'goal';
-    return false;
+    return e.type === 'goal-met';
   }
 
   /** v6 seed: a new session's goal leg. goal.md (fixed Goal:/Success criteria: sections)
@@ -648,7 +647,9 @@ export class Store {
    *  changed goal is a new session — archive first; re-seeding a SOLE UNCONSUMED goal is
    *  reseedGoal below, never seedGoal). The seed writes flow through the store's own
    *  write path + ledger (recordWrite) so verify stays clean from the first write.
-   *  goal.md is NOT artifact-locked here — sealing the doc is the grill close. */
+   *  docs-as-git (D7): the authored doc is written to docs/goal.md (git content) + the
+   *  manifest regenerated — there is NO goal-root artifact-lock; publishing the doc is
+   *  the operator's git commit. */
   seedGoal(doc: string): { id: string; contract: { intent: string; acceptanceCriteria: string[] } } {
     if (this.nodes.size) throw new Error('seedGoal rejected: the journey is not empty — a goal seeds the first leg of an empty session (archive first)');
     if (this.goalLegId()) throw new Error('seedGoal rejected: a goal leg already exists');
@@ -656,13 +657,13 @@ export class Store {
     const id = '01-goal';
     const today = new Date().toISOString().slice(0, 10);
     const dir = this.nodeFolder(id);
-    mkdirSync(join(dir, 'artifacts'), { recursive: true });
-    writeFileSync(join(dir, 'artifacts', 'goal.md'), doc);
+    this.writeGoalDoc(doc);
+    mkdirSync(dir, { recursive: true }); // the goal leg's own folder (no artifacts/ subdir)
     const nodeJson = JSON.stringify({ id, contract: parsed, createdAt: today }, null, 2) + '\n';
     writeFileSync(join(dir, 'node.json'), nodeJson);
     const seed: JourneyEvent[] = [
       { at: today, type: 'created', note: 'goal seeded — the session starts by grilling the goal' },
-      { at: today, type: 'completed', note: 'goal grilled & recorded — success criteria sealed when goal.md locks' },
+      { at: today, type: 'completed', note: 'goal grilled & recorded — success criteria sealed when the operator commits docs/goal.md' },
     ];
     writeFileSync(join(dir, 'events.jsonl'), seed.map((e) => JSON.stringify(e)).join('\n') + '\n');
     this.nodes.set(id, { id, events: seed });
@@ -671,12 +672,12 @@ export class Store {
   }
 
   /** v6 re-seed (the RE-SEEDABLE rule): REPLACE the freshly-seeded, UNCONSUMED goal leg
-   *  IN PLACE — goal.md is overwritten with the new doc, node.json is regenerated 1:1
-   *  from it, and the seed events are rewritten (the old goal.md lock dies with the doc
-   *  it sealed — the caller re-locks the new sha). Refused unless the goal leg is the
-   *  journey's ONLY node and carries no goal-met verdict — the guard that makes this
-   *  immutability break safe: nothing has spawned under/after the goal and nothing has
-   *  derived from goal.md, so replacing it orphans nothing (goal-session-design §1/§2). */
+   *  IN PLACE — docs/goal.md is overwritten with the new doc + the manifest regenerated,
+   *  node.json is regenerated 1:1 from it, and the seed events are rewritten. Refused
+   *  unless the goal leg is the journey's ONLY node and carries no goal-met verdict —
+   *  the guard that makes this immutability break safe: nothing has spawned under/after
+   *  the goal and nothing has derived from the doc, so replacing it orphans nothing
+   *  (goal-session-design §1/§2). */
   reseedGoal(doc: string): { id: string; contract: { intent: string; acceptanceCriteria: string[] } } {
     const goalId = this.goalLegId();
     if (!goalId || this.nodes.size !== 1 || !this.nodes.has(goalId)) {
@@ -688,18 +689,28 @@ export class Store {
     const parsed = this.parseGoalDoc(doc);
     const today = new Date().toISOString().slice(0, 10);
     const dir = this.nodeFolder(goalId);
-    mkdirSync(join(dir, 'artifacts'), { recursive: true });
-    writeFileSync(join(dir, 'artifacts', 'goal.md'), doc);
+    this.writeGoalDoc(doc);
+    mkdirSync(dir, { recursive: true }); // the goal leg's own folder (no artifacts/ subdir)
     const nodeJson = JSON.stringify({ id: goalId, contract: parsed, createdAt: today }, null, 2) + '\n';
     writeFileSync(join(dir, 'node.json'), nodeJson);
     const seed: JourneyEvent[] = [
       { at: today, type: 'created', note: 'goal re-seeded — the goal was replaced by a fresh grill' },
-      { at: today, type: 'completed', note: 'goal re-grilled & recorded — success criteria sealed when goal.md locks' },
+      { at: today, type: 'completed', note: 'goal re-grilled & recorded — success criteria sealed when the operator commits docs/goal.md' },
     ];
     writeFileSync(join(dir, 'events.jsonl'), seed.map((e) => JSON.stringify(e)).join('\n') + '\n');
     this.nodes.set(goalId, { id: goalId, events: seed });
     this.recordWrite(goalId, nodeJson); // events come from the in-memory log → bytes match the file
     return { id: goalId, contract: parsed };
+  }
+
+  /** docs-as-git (D7): the authored goal doc lives at docs/goal.md (git content) —
+   *  write it and regenerate the manifest so resolveDoc('goal') serves it. No
+   *  goal-root artifact-lock (the write path itself stays the node.json/events one). */
+  private writeGoalDoc(doc: string): void {
+    const dir = join(this.root, 'docs');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'goal.md'), doc);
+    writeDocsManifest(this.root, scanDocsDir(this.root));
   }
 
   /** v6 archive: move the finished session's legs + the write-rev ledger to
@@ -719,6 +730,13 @@ export class Store {
     const ledgerFile = join(this.root, '.ann', 'journey', '.ledger.json');
     if (existsSync(ledgerFile)) renameSync(ledgerFile, join(dir, '.ledger.json'));
     mkdirSync(this.legs, { recursive: true }); // an empty live legs root stays — Store() loads clean
+    // docs-as-git (D7): the archived session's goal doc leaves the LIVE docs/ home (git
+    // history + the archive keep it) and the manifest is regenerated so the next seed
+    // starts clean — resolveDoc('goal') resolves nothing until the next seed writes it.
+    if (existsSync(join(this.root, 'docs', 'goal.md'))) {
+      rmSync(join(this.root, 'docs', 'goal.md'));
+      writeDocsManifest(this.root, scanDocsDir(this.root));
+    }
     // reset the live store: empty journey, no ledger baseline
     this.nodes.clear();
     this.unparseableNodes.clear();
@@ -754,8 +772,9 @@ export class Store {
   appendEvent(node: NodeDir, event: JourneyEvent): void {
     // v6 goal session (goal-session-design §2): the designated childless goal leg is
     // the ONE leg root that may carry events — the seed (`created`/`completed`, written
-    // by seedGoal, never through the general append), the goal.md lock, and `goal-met`.
-    // Everything else on a leg root stays refused (v8 §3).
+    // by seedGoal, never through the general append) and `goal-met`. Everything else on
+    // a leg root stays refused (v8 §3). docs-as-git: the goal doc is docs/goal.md, so a
+    // leg root never holds an artifact-lock (there is no goal-root seal).
     if (!node.id.includes('/') && !this.goalRootEvent(node.id, event)) {
       throw new Error(`append rejected: leg roots carry no events (v8 §3) — record process facts on tasks`);
     }

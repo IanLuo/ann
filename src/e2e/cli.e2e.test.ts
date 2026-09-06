@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync, execFileSync } from 'node:child_process';
 import { Store } from '../store/store.js';
+import { scanDocsDir, writeDocsManifest } from '../store/docs.js';
 
 /**
  * E2E — the real CLI binary (`node dist/surface/cli.js`) driven as a subprocess
@@ -210,7 +211,7 @@ describe('e2e — the CLI binary', () => {
   });
 });
 
-describe('e2e — the goal-session lifecycle (v6: seed → lock → work → met → archive)', () => {
+describe('e2e — the goal-session lifecycle (v6: seed → docs/goal.md → work → met → archive)', () => {
   let root: string;
   beforeEach(() => { root = newProject(); });
   afterEach(() => { rmSync(root, { recursive: true, force: true }); });
@@ -219,25 +220,19 @@ describe('e2e — the goal-session lifecycle (v6: seed → lock → work → met
   const WORK = '02-work';
   const TASK = '02-work/01-a';
   /** Hand-seed the goal leg exactly as seedGoal would: node.json (the 1:1 machine
-   *  read of goal.md), the created+completed seed events, the authored goal.md, and —
-   *  because goal! seed seals goal.md with a goal-root artifact-lock — that seal
-   *  record too (lock! is retired; the seal rides the seed). */
+   *  read of the doc), the created+completed seed events, and the authored doc at
+   *  docs/goal.md + the regenerated manifest (docs-as-git — no goal-root lock). */
   function seedGoalLeg(r: string): void {
-    mkdirSync(join(r, '.ann', 'journey', 'legs', GOAL, 'artifacts'), { recursive: true });
+    mkdirSync(join(r, '.ann', 'journey', 'legs', GOAL), { recursive: true });
     writeFileSync(
       join(r, '.ann', 'journey', 'legs', GOAL, 'node.json'),
-      JSON.stringify({ id: GOAL, contract: { intent: 'Land the goal session end to end', acceptanceCriteria: ['goal.md locks on the goal root', 'a met verdict seals exhaustion'] }, createdAt: '2026-08-29' }, null, 2) + '\n',
+      JSON.stringify({ id: GOAL, contract: { intent: 'Land the goal session end to end', acceptanceCriteria: ['the seeded goal is realized: docs/goal.md in the manifest', 'a met verdict seals exhaustion'] }, createdAt: '2026-08-29' }, null, 2) + '\n',
     );
-    const seedEvents = [
-      EVENT('created'),
-      EVENT('completed'),
-      JSON.stringify({ at: '2026-08-29', type: 'artifact-locked', artifact: { name: 'goal', path: '.ann/journey/legs/01-goal/artifacts/goal.md', lockSha: 'abc1234', type: 'goal', version: 1 }, note: 'goal.md sealed by the seed grill (e2e)' }),
-    ];
-    writeFileSync(join(r, '.ann', 'journey', 'legs', GOAL, 'events.jsonl'), seedEvents.join('\n') + '\n');
-    writeFileSync(
-      join(r, '.ann', 'journey', 'legs', GOAL, 'artifacts', 'goal.md'),
-      '# Goal\n\nGoal: Land the goal session end to end\n\nSuccess criteria:\n- goal.md locks on the goal root\n- a met verdict seals exhaustion\n',
-    );
+    writeFileSync(join(r, '.ann', 'journey', 'legs', GOAL, 'events.jsonl'), [EVENT('created'), EVENT('completed')].join('\n') + '\n');
+    const doc = '# Goal\n\nGoal: Land the goal session end to end\n\nSuccess criteria:\n- the seeded goal is realized: docs/goal.md in the manifest\n- a met verdict seals exhaustion\n';
+    mkdirSync(join(r, 'docs'), { recursive: true });
+    writeFileSync(join(r, 'docs', 'goal.md'), doc);
+    writeDocsManifest(r, scanDocsDir(r));
   }
   /** Drive the one task through its gates to done — the session is then exhausted. */
   function driveWorkToDone(r: string): void {
@@ -252,7 +247,7 @@ describe('e2e — the goal-session lifecycle (v6: seed → lock → work → met
     expect(out(cli(r, ['status', TASK]))).toContain('done');
   }
 
-  it('seeds, locks goal.md, works to exhaustion, records the HUMAN verdict, refuses a dirty archive, then archives & reloads', () => {
+  it('seeds, writes docs/goal.md, works to exhaustion, records the HUMAN verdict, refuses a dirty archive, then archives & reloads', () => {
     // empty journey: the goal consult names grill & seed — never a blind task
     expect(out(cli(root, ['goal']))).toContain('GOAL: (none)');
     expect(out(cli(root, ['next']))).toContain('no goal');
@@ -264,9 +259,9 @@ describe('e2e — the goal-session lifecycle (v6: seed → lock → work → met
     expect(seeded).toContain('[done]'); // the seed derives done — the first work leg's gate opens
     expect(seeded).toContain('verdict: open');
     expect(seeded).toContain('AC-2: a met verdict seals exhaustion'); // contract = the doc, machine-read
-    // the seal rode the seed: goal.md artifact-locks on the GOAL ROOT (goalDoc rides the view)
+    // the doc rides the goal view at its git home: docs/goal.md (docs-as-git — no root lock)
     expect(seeded).toContain('doc: goal @');
-    expect(seeded).toContain('artifacts/goal.md');
+    expect(seeded).toContain('docs/goal.md');
     expect(out(cli(root, ['next']))).toContain('session open'); // a seeded goal alone is not exhausted
 
     // commit the seeded session so the dirty-guard below has TRACKED changes to see
@@ -304,8 +299,10 @@ describe('e2e — the goal-session lifecycle (v6: seed → lock → work → met
     expect(existsSync(join(dest, 'legs', TASK, 'node.json'))).toBe(true);
     expect(existsSync(join(dest, '.ledger.json'))).toBe(true);
 
-    // the live tree reset — an empty journey ready for the next goal
+    // the live tree reset — an empty journey ready for the next goal; the archived
+    // session's goal doc left the live docs/ home (git history + the archive keep it)
     expect(existsSync(join(root, '.ann', 'journey', 'legs', GOAL))).toBe(false);
+    expect(existsSync(join(root, 'docs', 'goal.md'))).toBe(false);
     expect(out(cli(root, ['goal']))).toContain('GOAL: (none)');
 
     // the archived snapshot round-trips through a read-only .ann/journey mount

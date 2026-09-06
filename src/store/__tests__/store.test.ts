@@ -954,7 +954,7 @@ describe('Store — v6 goal session (goal-session-design §2/§4 + seed/archive)
   afterEach(() => { rmSync(root, { recursive: true, force: true }); });
 
   const CONTRACT = { intent: 'build the goal session', acceptanceCriteria: ['it archives faithfully'] };
-  const DOC = '# Goal\n\nGoal: Build the goal session\n\nSuccess criteria:\n- goal.md locks on the goal root\n- a met verdict seals exhaustion\n';
+  const DOC = '# Goal\n\nGoal: Build the goal session\n\nSuccess criteria:\n- the seeded goal is realized: docs/goal.md named by the manifest\n- a met verdict seals exhaustion\n';
   const goalLock = { at: '2026-08-19', type: 'artifact-locked', artifact: { name: 'goal', path: '.ann/journey/legs/01-goal/artifacts/goal.md', lockSha: 'aaaaaaa' } };
 
   it('the goal leg is the CHILDLESS seeded leg — a goal leg with children is ordinary', () => {
@@ -968,12 +968,14 @@ describe('Store — v6 goal session (goal-session-design §2/§4 + seed/archive)
     expect(new Store(root).status('02-goal')).toBe('done'); // but still a derived-done ordinary leg
   });
 
-  it('a locked goal.md alone designates a CHILDLESS leg as the goal leg', () => {
-    writeNode('01-goal', {}, [goalLock]);
-    expect(new Store(root).goalLegId()).toBe('01-goal');
+  it('the SEED designates the goal leg — a legacy goal.md artifact-lock alone no longer does (docs-as-git)', () => {
+    writeNode('01-goal', {}, [goalLock]); // legacy shape: goal.md locked, but no created+completed seed
+    expect(new Store(root).goalLegId()).toBeUndefined(); // not seeded → not the current goal
+    writeNode('02-goal', {}, [ev('created'), ev('completed')]); // the v6 seed designates
+    expect(new Store(root).goalLegId()).toBe('02-goal');
   });
 
-  it('goal-met + the goal.md lock append ONLY on the designated goal leg root — never a task or another leg', () => {
+  it('goal-met appends ONLY on the designated goal leg root — never a task or another leg (and there is no goal-root lock)', () => {
     writeNode('01-goal', {}, [ev('created'), ev('completed')]);
     writeNode('02-work', {}, []);
     writeNode('02-work/01-a', {}, [ev('created')]);
@@ -988,9 +990,10 @@ describe('Store — v6 goal session (goal-session-design §2/§4 + seed/archive)
     // the seed is written by seedGoal only — the general writer refuses it on the goal root
     const s3 = new Store(root);
     expect(() => s3.appendEvent(s3.resolveNode('01-goal'), ev('completed'))).toThrow(/leg roots carry no events/);
-    // the goal.md lock rides the same goal-root carve-out
+    // docs-as-git: there is NO goal-root artifact-lock — the doc lives at docs/goal.md,
+    // so an artifact-locked write to the goal root is refused like any other leg-root event
     const s4 = new Store(root);
-    expect(() => s4.appendEvent(s4.resolveNode('01-goal'), goalLock)).not.toThrow();
+    expect(() => s4.appendEvent(s4.resolveNode('01-goal'), goalLock)).toThrow(/leg roots carry no events/);
   });
 
   it('goal-met is STATUS-INERT — the verdict never moves legStatus (the seed already derived done)', () => {
@@ -1015,10 +1018,13 @@ describe('Store — v6 goal session (goal-session-design §2/§4 + seed/archive)
   it('seedGoal writes goal.md + a node.json generated 1:1 from the doc + the seed events', () => {
     const r = new Store(root).seedGoal(DOC);
     expect(r.id).toBe('01-goal');
-    expect(r.contract).toEqual({ intent: 'Build the goal session', acceptanceCriteria: ['goal.md locks on the goal root', 'a met verdict seals exhaustion'] });
+    expect(r.contract).toEqual({ intent: 'Build the goal session', acceptanceCriteria: ['the seeded goal is realized: docs/goal.md named by the manifest', 'a met verdict seals exhaustion'] });
     const node = JSON.parse(readFileSync(join(nodeDir('01-goal'), 'node.json'), 'utf8'));
     expect(node.contract).toEqual(r.contract); // node.json mirrors the doc
-    expect(existsSync(join(nodeDir('01-goal'), 'artifacts', 'goal.md'))).toBe(true);
+    // the authored doc is git content: docs/goal.md + the regenerated manifest — no goal-root lock
+    expect(existsSync(join(root, 'docs', 'goal.md'))).toBe(true);
+    expect(new Store(root).resolveDoc('goal')).toMatchObject({ name: 'goal', path: 'docs/goal.md' });
+    expect(new Store(root).verify()).toEqual([]);
     const s = new Store(root);
     expect(s.goalLegId()).toBe('01-goal'); // the seed designates the goal
     expect(s.status('01-goal')).toBe('done');

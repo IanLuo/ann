@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store } from '../../store/store.js';
 import { Commands } from '../index.js';
+import { scanDocsDir, writeDocsManifest } from '../../store/docs.js';
 
 /**
  * THE L1 DERIVED VIEWS (core-design §1) — frontmostReady · lookBack · advance.
@@ -185,13 +186,13 @@ describe('goal() — the goal-session read (goal-session-design §9)', () => {
     expect(v.metEvent).toBeUndefined();
   });
 
-  it('goalDoc appears once goal.md is artifact-locked on the GOAL ROOT', () => {
+  it('goalDoc appears once the goal doc is written to docs/ and named by the manifest', () => {
     seedGoal();
-    mkdirSync(join(dir('01-goal'), 'artifacts'), { recursive: true });
-    writeFileSync(join(dir('01-goal'), 'artifacts', 'goal.md'), '# Goal\n\nGoal: Build the goal session\n\nSuccess criteria:\n- the session archives faithfully\n');
-    valueOf(commands().lock('01-goal', 'goal.md'));
+    mkdirSync(join(root, 'docs'), { recursive: true });
+    writeFileSync(join(root, 'docs', 'goal.md'), '# Goal\n\nGoal: Build the goal session\n\nSuccess criteria:\n- the session archives faithfully\n');
+    writeDocsManifest(root, scanDocsDir(root));
     const v = valueOf(commands().goal());
-    expect(v.goalDoc).toMatchObject({ name: 'goal', path: '.ann/journey/legs/01-goal/artifacts/goal.md' });
+    expect(v.goalDoc).toMatchObject({ name: 'goal', path: 'docs/goal.md' });
     expect(v.goalDoc!.sha).toMatch(/^[0-9a-f]{7}$/);
   });
 

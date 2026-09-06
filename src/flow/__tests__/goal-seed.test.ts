@@ -85,7 +85,7 @@ const BOUND_Q = 'What round bound must the grill honor?';
 
 let root: string;
 const legs = () => join(root, '.ann', 'journey', 'legs');
-const goalDoc = () => join(legs(), '01-goal', 'artifacts', 'goal.md');
+const goalDoc = () => join(root, 'docs', 'goal.md'); // the authored doc — docs/goal.md (git content, docs-as-git)
 
 /** A fresh EMPTY store-backed command surface (a goal seeds the first leg only). */
 const fresh = (): Commands => {
@@ -115,14 +115,16 @@ describe('runGoalSeed — the goal! seed materialize path (flow/goal-seed)', () 
     // … then the validated-ok commitment the realized goal must keep true
     expect(r.contract.acceptanceCriteria).toContain('goal.md locks on the goal root when the human confirms');
 
-    // the authored doc is on disk + the LOCK is on the goal root (no D4 orphan goal.md)
+    // the authored doc is GIT content: docs/goal.md on disk + the manifest resolves it
+    // (resolveDoc('goal')) — and there is NO goal-root artifact-lock (docs-as-git D7)
     const md = readFileSync(goalDoc(), 'utf8');
     expect(md).toContain('Goal: A working goal! seed command.');
     expect(md).toContain('- goal.md locks on the goal root when the human confirms');
-    const lock = commands.events('01-goal').find((e) => e.type === 'artifact-locked');
-    expect(lock?.artifact).toMatchObject({ name: 'goal' });
-    const verify = new Store(root).verify();
-    expect(verify.some((d) => d.includes('artifact-orphan') && d.includes('goal.md'))).toBe(false);
+    expect(commands.events('01-goal').some((e) => e.type === 'artifact-locked')).toBe(false);
+    const reloaded = new Store(root);
+    expect(reloaded.resolveDoc('goal')?.path).toBe('docs/goal.md');
+    expect(reloaded.resolveDoc('goal')?.sha).toMatch(/^[0-9a-f]{7}$/);
+    expect(reloaded.verify()).toEqual([]); // D2/D4-clean — no goal-root lock, no orphan doc
 
     const g = commands.goal();
     expect(g.ok && g.value.present && g.value.verdict === 'open').toBe(true);

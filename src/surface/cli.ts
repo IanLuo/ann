@@ -452,8 +452,9 @@ function cmdNext() {
 }
 
 /** `goal` — the goal-session read (goal-session-design §9): present · goalId ·
- *  status · the LOCKED goal.md · the generated contract · structural state ·
- *  verdict · legs. Status WORDS only (AC5 — the renderer never emits counts). */
+ *  status · the authored goal doc (docs/goal.md) · the generated contract ·
+ *  structural state · verdict · legs. Status WORDS only (AC5 — the renderer never
+ *  emits counts). */
 function cmdGoal() {
   emit(commands.goal(), (v) => {
     if (JSON_OUT) return console.log(JSON.stringify(v, null, 2));
@@ -490,8 +491,8 @@ async function cmdGoalBang(op: string | undefined, rest: string[]) {
  *  refusal is dogfoodable on this non-empty repo with no provider configured; consumed/
  *  met goals refuse with the WHY — reseeding a replaced goal is never silent. The driver
  *  + L1 re-check the same gate at materialize. On GO the session's converged output
- *  becomes a LOCKED goal.md — the seeded goal's verdict stays UNCONFIRMED until the
- *  human records goal! met. */
+ *  is synthesized to docs/goal.md (git content — commit to publish); the seeded
+ *  goal's verdict stays UNCONFIRMED until the human records goal! met. */
 async function cmdGoalSeed(idea: string) {
   const gate = commands.goalSeedGate();
   if (!gate.allow) {
@@ -508,8 +509,8 @@ async function cmdGoalSeed(idea: string) {
     return;
   }
   console.log(`goal! seed: goal seeded → ${r.goalId} (${r.contract.intent})`);
-  console.log(`  contract: ${r.contract.acceptanceCriteria.length} success criteria — goal.md locked @ ${r.sha}`);
-  console.log(`  doc: ${r.docPath}`);
+  console.log(`  contract: ${r.contract.acceptanceCriteria.length} success criteria`);
+  console.log(`  goal.md written to ${r.docPath} @ ${r.sha} — commit to publish`);
   console.log('  verdict: unconfirmed — reach structural exhaustion, then record it: goal! met');
 }
 
@@ -889,19 +890,19 @@ const COMMANDS: Array<{ name: string; args: string; desc: string }> = [
   { name: 'chain', args: '', desc: 'the project flow config as data (work-type chains, F3 view) · alias --chain' },
   { name: 'steps', args: '', desc: 'the step registry — the pluggable surface future steps implement against · alias --steps' },
   { name: 'next', args: '', desc: 'the run-next proposal (F5 pull): active leg, frontmost-ready, pending gates, leg gate — derived, never assumed · alias --next' },
-  { name: 'goal', args: '', desc: 'the goal-session view (goal-session-design §9): goalId · status · the LOCKED goal.md · the generated contract · structural state · verdict (met/unconfirmed/open) · legs (status words only) · alias --goal' },
+  { name: 'goal', args: '', desc: 'the goal-session view (goal-session-design §9): goalId · status · the authored goal doc (docs/goal.md) · the generated contract · structural state · verdict (met/unconfirmed/open) · legs (status words only) · alias --goal' },
   { name: 'flow', args: '<id>', desc: 'a task\'s RESOLVED flow + chain validation (the data the frame will execute) · alias --flow' },
   { name: 'run!', args: '<id>', desc: 'WRITE — run a task through the FRAME (materialize → grill → activate → execute → verify → confirm → commit); resumable, stops at the first block' },
   { name: 'commands', args: '', desc: 'this table as markdown (the derived doc) · alias --commands' },
   { name: 'help', args: '', desc: 'usage · alias --help / -h' },
   { name: 'read', args: '<name>', desc: 'the L1 CONTENT read view — marker-stripped content + path + sha; resolves via the docs manifest (the forward path), with a legacy current-artifact fallback for history · alias --read' },
   { name: 'append!', args: '<id> \'<json>\'', desc: 'WRITE — single-writer append; REFUSES the composite-owned kinds (created/submitted/confirmed/rejected/goal-met) and the RETIRED doc-artifact vocab (artifact-locked/superseded)' },
-  { name: 'spawn!', args: '<id> \'<contract-json>\'', desc: 'WRITE — create a node; enforces the v14 contract schema + F-AC19 + id naming + the artifact/leg gates' },
+  { name: 'spawn!', args: '<id> \'<contract-json>\'', desc: 'WRITE — create a node; enforces the v14 contract schema + F-AC19 + id naming + the conclusion (commit-evidence)/leg gates' },
   { name: 'submit!', args: '<id> grill|confirm [confirmedSha]', desc: 'WRITE — the resumable gate write: `submitted` alone, so an interrupted gate stays blocked (confirm records the gate② content binding)' },
   { name: 'gate!', args: '<id> grill|confirm accept|reject [feedback]', desc: 'WRITE — human gate decision (submit + decide; the 3-reject bound is a CONSTANT owned here)' },
   { name: 'goal!', args: 'met [feedback]', desc: 'WRITE — the HUMAN verdict that seals a structurally-exhausted session (goal-met on the goal root); refused for automated (agent) initiators, double-met, and any undecided submission' },
   { name: 'goal!', args: 'archive [--override]', desc: 'WRITE — guarded structural reset: move .ann/journey → .ann/archive/sessions/<ts>-<slug>/ for a fresh goal; refuses without a met verdict (or --override), on store-external verify drifts, and on uncommitted tracked .ann/journey changes' },
-  { name: 'goal!', args: 'seed [goal-statement]', desc: 'WRITE — grill a goal at SESSION scope (EMPTY journey seeds new; a RE-SEEDABLE sole unconsumed goal is REPLACED after re-grilling — consumed/met goals refuse): the interactive idea-validation session (grill → batch-ask → research → re-grill → human verdict); on solid, synthesize goal.md (Goal:/Success criteria:) + seed/re-seed the goal leg + artifact-lock goal.md on the goal root; revise/reject seeds nothing' },
+  { name: 'goal!', args: 'seed [goal-statement]', desc: 'WRITE — grill a goal at SESSION scope (EMPTY journey seeds new; a RE-SEEDABLE sole unconsumed goal is REPLACED after re-grilling — consumed/met goals refuse): the interactive idea-validation session (grill → batch-ask → research → re-grill → human verdict); on solid, synthesize goal.md (Goal:/Success criteria:) + seed/re-seed the goal leg + write docs/goal.md + regenerate the manifest; revise/reject seeds nothing' },
 ];
 
 const command = args[0];
