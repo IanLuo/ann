@@ -1,0 +1,36 @@
+{
+  "id": "04-grilling-architecture/01-implementation-portable-areas",
+  "contract": {
+    "intent": "Implement portable grill areas on the existing core and land the DESIGN grill area: make the shared engine and session loop area-neutral (goal-language leaks fixed), extract the duplicated session mechanics into a shared module (fixing the idea-validate provenance-label collision), and add DESIGN_PROFILE + a session-scope driver that grinds a UI design direction into an actionable design brief — proving two real areas (goal + design) run on one portable core with goal behavior unchanged.",
+    "acceptanceCriteria": [
+      "Area-neutral core: the engine instructions append (steps/idea-validate/grilling.ts) and the session decision-menu verb (grill-session.ts) are no longer goal-branded — the label and verb come from the profile or neutral copy; goal-grill + goal-seed suites stay green unchanged",
+      "Shared mechanics extracted to one module both loops use (unresolved markers, counter-deduped provenance labeling, fail-closed channel wrappers) with NO semantic change to either loop; the answer:qN provenance-label collision is fixed and a test proves a multi-round session grounds a later round citation on that round answer, not an earlier duplicate",
+      "DESIGN_PROFILE exists with the DESIGN boundary directives (grilling · reasoning · decisionWeighIn · refineAsk — what a design grill may ask within, what it defers) and a session-scope driver on the existing portable core",
+      "The design-brief output landing (leg open question design-brief-landing) is decided and implemented — the converged brief lands in a decided, recorded home",
+      "Portability proven: a scripted design-grill session converges to solid on the same test doubles the goal area uses, the goal suites stay green, and the full suite passes",
+      "Committed with evidence"
+    ],
+    "workType": "implementation",
+    "targetAreas": [
+      "src/flow/grill-session.ts",
+      "src/flow/steps/idea-validate/",
+      "src/flow/goal-grill.ts",
+      "src/flow/goal-seed.ts"
+    ]
+  },
+  "openQuestions": [
+    {
+      "id": "design-brief-landing",
+      "question": "Where does the converged design brief land? Options: (a) a docs/<name>.md authored doc in this repo (committed, manifest-indexed) — but docs/ is the contract-stack home; (b) a companion doc outside the manifest; (c) the brief seeds the requiredInputs of a future spec/design task under a UI leg. Which, and why?",
+      "impact": "high",
+      "default": "to be decided at the grill gate"
+    },
+    {
+      "id": "session-vs-gate",
+      "question": "Session-scope driver (goal! seed-like, refine-in-session) is the recommendation — confirm the design grill is NOT a task gate① binding in this iteration.",
+      "impact": "medium",
+      "default": "session-scope"
+    }
+  ],
+  "createdAt": "2026-09-06"
+}

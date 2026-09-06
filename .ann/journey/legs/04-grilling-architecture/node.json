@@ -1,0 +1,28 @@
+{
+  "id": "04-grilling-architecture",
+  "contract": {
+    "intent": "Make grill AREAS first-class and cheap to add, and land the first non-goal area — a session-scope DESIGN grill (refine-in-session) that grinds a UI design direction into an actionable design brief — proving the portable-core claim: fix the goal-language leaks in the shared engine/loop, extract the duplicated session mechanics (including the idea-validate provenance-label collision), and leave goal-grill behavior unchanged.",
+    "acceptanceCriteria": [
+      "The shared engine and session loop carry NO goal-specific language: the engine instructions append and the decision-menu verb are area-neutral (profile-driven); goal-grill/goal-seed suites stay green unchanged",
+      "The duplicated session mechanics are extracted to a shared module (unresolved markers, counter-deduped provenance labeling, fail-closed channel wrappers) with NO semantic change to either loop; the idea-validate provenance-label collision is fixed so multi-round sessions ground later citations on the right answer",
+      "A DESIGN grill area exists on the existing portable core: DESIGN_PROFILE (grill + reasoning + decision directives) and a session-scope driver; a scripted design-grill session converges to a solid verdict on the same test doubles used for the goal area",
+      "Portability is proven with TWO real areas — the design grill runs and the goal suites stay green — and a fresh area is visibly cheap to add (the registry/hygiene touches are in place)",
+      "Committed with evidence"
+    ],
+    "targetAreas": [
+      "src/flow/grill-session.ts",
+      "src/flow/goal-grill.ts",
+      "src/flow/goal-seed.ts",
+      "src/flow/steps/idea-validate/"
+    ]
+  },
+  "openQuestions": [
+    {
+      "id": "design-brief-landing",
+      "question": "Where does a converged design brief land? goal.md is the one doc-SSOT slot; a design brief has no current L1 home outside task artifacts. Decide the output target before authoring the profile.",
+      "impact": "high",
+      "default": "TBD at the first task grill gate"
+    }
+  ],
+  "createdAt": "2026-09-06"
+}
