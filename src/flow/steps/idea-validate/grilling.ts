@@ -35,9 +35,12 @@ export interface GrillingRequest {
   context?: GroundingInput[];
   /** Contract constraints: ACs, scope, non-negotiables. */
   constraints?: string[];
-  /** EXTRA ENGINE DIRECTIVE, appended to the grill prompt (goal! seed mode only). The
-   *  task idea-validate flow never sets it — when absent the prompt is byte-identical
-   *  to before, so the task flow is unchanged. */
+  /** EXTRA ENGINE DIRECTIVE, appended to the grill prompt — the SESSION-scope areas
+   *  (goal! seed / the design brief) append their own grill directive here; the task
+   *  idea-validate flow never sets it — when absent the prompt is byte-identical to
+   *  before, so the task flow is unchanged. The header below is AREA-NEUTRAL (it names
+   *  no area or command); the directive TEXT carries whatever area boundary the caller
+   *  needs. */
   instructions?: string;
 }
 
@@ -173,7 +176,7 @@ export class DefaultGrillingEngine {
       .replace('{context}', renderContext(req.context))
       .replace('{constraints}', renderConstraints(req.constraints));
     const finalPrompt = req.instructions
-      ? `${prompt}\n\n## Goal-mode instructions (goal! seed)\n${req.instructions.trim()}`
+      ? `${prompt}\n\n## Session-mode instructions\n${req.instructions.trim()}`
       : prompt;
 
     const completion = await this.adapter.complete(finalPrompt, this.options);

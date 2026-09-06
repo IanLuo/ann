@@ -99,6 +99,7 @@ export const GOAL_PROFILE: GrillProfile = {
   title: 'Goal grill',
   noun: 'goal',
   seedVerb: 'goal! seed',
+  goAction: 'Seed now',
   focus:
     'Grill a rough goal at PRODUCT level into a checkable one-line goal + success criteria — WHAT and WHY only; any HOW is deferred to spec / system-design / implementation.',
   grilling: GOAL_GRILL_MODE,

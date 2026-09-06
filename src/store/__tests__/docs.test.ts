@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store } from '../store.js';
 import { blobSha, stripMarkers } from '../sha.js';
-import { docNameFromFile, scanDocsDir, loadDocsManifest, writeDocsManifest, docsIndexFresh, docSha, MANIFEST_FILE } from '../docs.js';
+import { docNameFromFile, scanDocsDir, loadDocsManifest, writeDocsManifest, docsIndexFresh, docSha, MANIFEST_FILE, DESIGN_HOME } from '../docs.js';
 
 // Fixture helpers: a disposable repo (store legs + optional docs/).
 let root: string;
@@ -45,12 +45,45 @@ describe('docs.ts — scanDocsDir (the manifest source of truth)', () => {
     writeFileSync(join(root, 'docs', 'goal.md'), GOAL_MD);
     writeFileSync(join(root, 'docs', 'companion-guide.html'), '<h1>guide</h1>');
     writeFileSync(join(root, 'docs', MANIFEST_FILE), '{}');
-    mkdirSync(join(root, 'docs', 'nested')); // subdirs are not docs
+    mkdirSync(join(root, 'docs', 'nested')); // subdirs other than docs/design are not docs
     writeFileSync(join(root, 'docs', 'nested', 'x.md'), 'x');
     expect(scanDocsDir(root)).toEqual({
       goal: 'docs/goal.md',
       'companion-guide': 'docs/companion-guide.html',
     });
+  });
+
+  it('indexes the docs/design home (the decided design-brief landing) under design/<stem> — namespaced, never colliding with top-level docs', () => {
+    mkdirSync(join(root, 'docs'), { recursive: true });
+    writeFileSync(join(root, 'docs', 'goal.md'), GOAL_MD);
+    mkdirSync(join(root, 'docs', DESIGN_HOME), { recursive: true });
+    writeFileSync(join(root, 'docs', DESIGN_HOME, 'ann-ui.md'), '# design');
+    writeFileSync(join(root, 'docs', DESIGN_HOME, 'moodboard.png'), 'img');
+    // a same-stem top-level doc does NOT collide with the design brief: the design
+    // brief resolves as design/ann-ui, the top-level doc stays ann-ui
+    writeFileSync(join(root, 'docs', 'ann-ui.md'), '# top-level ann-ui');
+    mkdirSync(join(root, 'docs', DESIGN_HOME, 'nested')); // deeper than one level → not a doc
+    writeFileSync(join(root, 'docs', DESIGN_HOME, 'nested', 'deep.md'), 'x');
+    expect(scanDocsDir(root)).toEqual({
+      'ann-ui': 'docs/ann-ui.md',
+      goal: 'docs/goal.md',
+      'design/ann-ui': 'docs/design/ann-ui.md',
+      'design/moodboard': 'docs/design/moodboard.png',
+    });
+  });
+
+  it('a design brief is reachable by the repo resolution conventions: the manifest regenerates from the dir and resolveDoc serves it', () => {
+    makeDocs({ 'goal.md': GOAL_MD });
+    mkdirSync(join(root, 'docs', DESIGN_HOME), { recursive: true });
+    const brief = '# Design Brief\n\nBrief: a portable design grill area.\n';
+    writeFileSync(join(root, 'docs', DESIGN_HOME, 'grill-area.md'), brief);
+    // a design brief added WITHOUT regen is reported missing (the `ann docs --write` state)
+    expect(docsIndexFresh(root)).toMatchObject({ fresh: false, missing: ['design/grill-area'] });
+    writeDocsManifest(root, scanDocsDir(root)); // regen (as `ann docs --write` does) → resolvable + fresh
+    expect(docsIndexFresh(root).fresh).toBe(true);
+    const s = new Store(root);
+    expect(s.resolveDoc('design/grill-area')).toMatchObject({ name: 'design/grill-area', path: 'docs/design/grill-area.md' });
+    expect(loadDocsManifest(root)['design/grill-area']).toBe('docs/design/grill-area.md');
   });
 
   it('returns {} when docs/ is absent', () => {

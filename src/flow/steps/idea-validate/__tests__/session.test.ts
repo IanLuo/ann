@@ -214,6 +214,63 @@ describe('IdeaValidationSession (flow-1 validate — interactive idea validator)
   });
 });
 
+describe('provenance-label dedupe (the answer:qN collision fix — AC-2)', () => {
+  // The grilling engine restarts question ids at q1 on EVERY engine call. Round 1's
+  // answer therefore labels `answer:q1` and — WITHOUT dedupe — round 2's fresh q1
+  // would label `answer:q1` AGAIN, shadowing round 1's in the grounding map: a later
+  // round that cites `answer:q1` would bind to the WRONG (round-2) answer. These tests
+  // prove the session counter-dedupes so every label is unique across rounds and a
+  // later citation resolves to the round it names.
+  it('a multi-round session labels each round answer uniquely and grounds a later citation on THAT round answer', async () => {
+    // R1 asks "format?" (id q1) → answered 'markdown'; R2 asks "platform?" (id q1 AGAIN
+    // — the engine restarted) → answered 'web'; R3 is the concluding clean read, whose
+    // validated claim CITES round 2's answer by its rendered label.
+    const r1 = grillOk([], [{ question: 'What input format must v1 accept?', reason: 'defines scope', impact: 'high', options: ['markdown', 'txt'], default: 'markdown' }]);
+    const r2 = grillOk([], [{ question: 'Which platform ships first?', reason: 'sequencing', impact: 'high', options: ['ios', 'web'], default: 'web' }]);
+    const r3 = grillOk([{ verdict: 'ok', claim: 'web-first is the grounded call', basis: ['answer:q1-2'], confidence: 'high' }]);
+    const { llm, calls } = fakeLlm([r1, r2, r3]);
+    const interact = new ScriptedInteractor(['markdown', 'web'], [], 'solid');
+    const r = await session(llm, interact).run({ ...base(), forceRefine: true, maxRounds: 3 });
+
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.rounds).toBe(3); // each answered round was re-grilled before the clean concluding read
+    expect(calls.length).toBe(3);
+    // the ROUND-3 grill prompt carries BOTH answers under DISTINCT labels — round 2's
+    // answer did not shadow round 1's under a duplicate `answer:q1`
+    expect(calls[2]).toContain('answer:q1 [user input]: markdown');
+    expect(calls[2]).toContain('answer:q1-2 [user input]: web');
+    // the round-3 model CITED the deduped round-2 label and the engine resolved it —
+    // the claim survives WITH its basis (pre-fix the label did not exist: the citation
+    // would have been dropped as unknown and the claim demoted to inference)
+    expect(r.doc.validatedAssumptions).toContainEqual(
+      expect.objectContaining({ claim: 'web-first is the grounded call', basis: ['answer:q1-2'], sourceType: 'user input', confidence: 'high' }),
+    );
+    expect(r.doc.validatedAssumptions.some((v) => v.claim === 'web-first is the grounded call' && v.basis.length === 0)).toBe(false);
+  });
+
+  it('a later round cannot silently re-cite round 1 as if it were round 2: the EARLIER label keeps round 1 answer', async () => {
+    // Same two answered rounds; the concluding read cites BOTH labels — round 1's
+    // answer under `answer:q1`, round 2's under `answer:q1-2`.
+    const r1 = grillOk([], [{ question: 'What input format must v1 accept?', reason: 'defines scope', impact: 'high', options: ['markdown', 'txt'], default: 'markdown' }]);
+    const r2 = grillOk([], [{ question: 'Which platform ships first?', reason: 'sequencing', impact: 'high', options: ['ios', 'web'], default: 'web' }]);
+    const r3 = grillOk([
+      { verdict: 'ok', claim: 'the format markdown is settled', basis: ['answer:q1'], confidence: 'high' },
+      { verdict: 'ok', claim: 'the platform web is settled', basis: ['answer:q1-2'], confidence: 'high' },
+    ]);
+    const { llm } = fakeLlm([r1, r2, r3]);
+    const interact = new ScriptedInteractor(['markdown', 'web'], [], 'solid');
+    const r = await session(llm, interact).run({ ...base(), forceRefine: true, maxRounds: 3 });
+
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    // the two citations resolve to their OWN round answers — never both to the last `answer:q1`
+    expect(r.doc.validatedAssumptions).toContainEqual(expect.objectContaining({ claim: 'the format markdown is settled', basis: ['answer:q1'], sourceType: 'user input' }));
+    expect(r.doc.validatedAssumptions).toContainEqual(expect.objectContaining({ claim: 'the platform web is settled', basis: ['answer:q1-2'], sourceType: 'user input' }));
+    expect(r.doc.validatedAssumptions.filter((v) => v.basis.length === 0)).toEqual([]); // neither citation was dropped
+  });
+});
+
 describe('the depth signal (shaping) — one extra bounded decide, only on a solid verdict', () => {
   it('a clean solid idea recommends LIGHT; the human routing decides needsVision and the doc records the depth', async () => {
     const { llm } = fakeLlm([cleanGrill()]);

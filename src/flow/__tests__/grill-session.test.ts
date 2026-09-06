@@ -82,6 +82,7 @@ const STUB_PROFILE: GrillProfile = {
   title: 'System grill',
   noun: 'design',
   seedVerb: 'design! seed',
+  goAction: 'Save now',
   focus: 'Grill a rough system design at architecture level; defer anything below.',
   grilling:
     'You are grilling a SYSTEM DESIGN at architecture level only — the components, their responsibilities, and the contracts between them. NEVER ask for code, libraries, or implementation minutiae — those belong to a later stage.',
@@ -157,6 +158,9 @@ describe('(c) PORTABILITY — GrillSession is area-agnostic; only the injected d
     const decisionCalls = interact.decided.filter((d) => d.options.includes('GO'));
     expect(decisionCalls).toHaveLength(1);
     expect(decisionCalls[0].options).toEqual([...EXHAUSTED_OPTIONS]);
+    // the GO verb comes from the PROFILE — the stub area's own copy, never the goal's 'Seed now'
+    expect(decisionCalls[0].question).toContain('Save now (GO)');
+    expect(decisionCalls[0].question).not.toContain('Seed now');
   });
 
   it('the reasoning path is area-neutral too: a question round on the stub uses the stub reasoning directive, not GOAL_DISCUSS_MODE', async () => {

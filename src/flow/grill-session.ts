@@ -1,8 +1,9 @@
 import { DefaultGrillingEngine } from './steps/idea-validate/grilling.js';
 import { AdapterError } from '../abilities/llm/index.js';
 import { GroundingInput, GrillQuestion, renderContext, renderConstraints, unquote } from './steps/shared.js';
-import { Abilities, InteractAbort, ResearchFinding } from './types.js';
+import { Abilities, ResearchFinding } from './types.js';
 import { adapterFromAbility } from './steps/engine-adapter.js';
+import { isUnresolved, makeDedupeLabeler, humanChannel } from './session-shared.js';
 
 /**
  * THE PORTABLE GRILLING ENGINE (the grilling loop extracted from the goal grill, made
@@ -75,6 +76,10 @@ export interface GrillProfile {
   noun: string;
   /** The seed command phrase the close-out/abort copy points at ('goal! seed'). */
   seedVerb: string;
+  /** The GO action copy in the decision menu ('Seed now') — what a GO lands for THIS
+   *  area. The decision OPTION itself stays the area-neutral 'GO'; only the verb the
+   *  human reads before it comes from the profile. */
+  goAction: string;
   /** ONE LINE on the area + the boundary it grills within (documentation; never read by
    *  the loop). */
   focus: string;
@@ -179,13 +184,8 @@ export const roundRead = (
   return lines.join('\n');
 };
 
-/** Answers that do not resolve anything (a skip, a pass, an empty reply). */
-const UNRESOLVED_MARKERS = ['unknown', 'skip', 'not sure', 'unsure', 'n/a', 'na', 'dont know', "don't know", ''];
-const isUnresolved = (a: string): boolean => UNRESOLVED_MARKERS.includes(a.trim().toLowerCase());
 const norm = (s: string): string => s.trim().toLowerCase();
 
-/** A discussion message the human uses to say the current point is sorted → the DECISION.
- *  Everything else is a real message the LLM must answer. */
 const DISCUSS_DONE = new Set([
   'sorted',
   'move on',
@@ -206,6 +206,9 @@ const DISCUSS_DONE = new Set([
   'proceed',
   'go',
 ]);
+/** A discussion message the human uses to say the current point is sorted → the DECISION.
+ *  Everything else is a real message the LLM must answer. (The unresolved-answer markers
+ *  + isUnresolved live in the shared session mechanics — session-shared.ts.) */
 const isDiscussionDone = (msg: string): boolean => {
   const t = msg.trim().toLowerCase().replace(/[.?!]+$/, '');
   return t === '' || isUnresolved(t) || DISCUSS_DONE.has(t);
@@ -306,13 +309,7 @@ export class GrillSession {
     const seen = new Set<string>(); // asked question texts — NEVER ask twice
     const researched = new Set<string>(); // research topics already run — no repeat digging
     const open = new Map<string, GrillQuestion>(); // asked + still-open questions (text → q)
-    const usedLabels = new Set(context.map((c) => c.label)); // unique provenance labels
-    const label = (base: string): string => {
-      let l = base;
-      for (let i = 2; usedLabels.has(l); i++) l = `${base}-${i}`;
-      usedLabels.add(l);
-      return l;
-    };
+    const label = makeDedupeLabeler(context.map((c) => c.label)); // unique provenance labels
     const isResolved = (text: string): boolean => resolved.some((r) => norm(r.question) === norm(text));
 
     const foldResearch = (findings: ResearchFinding[]): void => {
@@ -335,33 +332,13 @@ export class GrillSession {
       context.push({ label: label(`answer:${q.id}`), text: answer, sourceType: 'user input' });
     };
 
-    /* --- the human channels — every outcome a VALUE (abort / channel failure / value) --- */
-    const gateError = (what: string, e: unknown): Gate<never> =>
-      e instanceof InteractAbort
-        ? { kind: 'abort' }
-        : { kind: 'error', error: { code: 'provider-unavailable', blocker: `${noun} grill: ${what} failed — ${(e as Error).message}` } };
-
-    const ask = async (q: string): Promise<Gate<string>> => {
-      try {
-        return { kind: 'value', value: await this.abilities.interact.ask(q) };
-      } catch (e) {
-        return gateError('the human channel', e);
-      }
-    };
-    const decide = async (q: string, options: string[]): Promise<Gate<string>> => {
-      try {
-        return { kind: 'value', value: await this.abilities.interact.decide(q, options) };
-      } catch (e) {
-        return gateError('the decision channel', e);
-      }
-    };
-    const research = async (topics: string[]): Promise<Gate<ResearchFinding[]>> => {
-      try {
-        return { kind: 'value', value: await this.abilities.interact.research(topics) };
-      } catch (e) {
-        return gateError('the research channel', e);
-      }
-    };
+    /* --- the human channels — every outcome a VALUE (abort / channel failure / value);
+     * the fail-closed wrapper is the shared session mechanics (session-shared.ts) --- */
+    const ask = async (q: string): Promise<Gate<string>> => humanChannel(`${noun} grill: the human channel failed`, () => this.abilities.interact.ask(q));
+    const decide = async (q: string, options: string[]): Promise<Gate<string>> =>
+      humanChannel(`${noun} grill: the decision channel failed`, () => this.abilities.interact.decide(q, options));
+    const research = async (topics: string[]): Promise<Gate<ResearchFinding[]>> =>
+      humanChannel(`${noun} grill: the research channel failed`, () => this.abilities.interact.research(topics));
     /** A bare LLM completion (prose or strict JSON) — provider failures fail CLOSED. */
     const llmText = async (prompt: string): Promise<ModelCall> => {
       try {
@@ -592,9 +569,10 @@ export class GrillSession {
         recommendation = decisionOptions.includes(a.value.recommendation) ? a.value.recommendation : baseline();
         await this.abilities.interact.present(`── Round ${round} — the grill's recommendation ──\nRecommendation: ${recommendation}\n\n${a.value.reason}`);
       }
+      const go = `${this.profile.goAction} (GO)`; // the GO verb is the AREA's — the option stays neutral
       const actions = exhausted
-        ? `Seed now (GO) · refine (reshape the ${noun} in-session) · skip`
-        : `Seed now (GO) · dig more (next round, new questions) · refine (reshape the ${noun} in-session) · skip`;
+        ? `${go} · refine (reshape the ${noun} in-session) · skip`
+        : `${go} · dig more (next round, new questions) · refine (reshape the ${noun} in-session) · skip`;
       const c = await decide(
         `Round ${round} decision — resolved so far: ${resolved.length} · still open: ${openNow.length}. ${actions}. (recommendation: ${recommendation})`,
         decisionOptions,

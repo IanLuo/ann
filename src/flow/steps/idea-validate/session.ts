@@ -3,6 +3,7 @@ import { AdapterError, CompletionUsage } from '../../../abilities/llm/index.js';
 import { GroundingInput, GrillQuestion } from '../shared.js';
 import { Abilities, InteractAbort } from '../../types.js';
 import { adapterFromAbility } from '../engine-adapter.js';
+import { isUnresolved, makeDedupeLabeler, humanChannel } from '../../session-shared.js';
 
 /**
  * The interactive idea-validation session (flow-1 `validate` step — finalized
@@ -82,9 +83,6 @@ export type SessionResult =
   | { ok: false; error: AdapterError };
 
 const DEFAULT_MAX_ROUNDS = 3;
-const UNRESOLVED_MARKERS = ['unknown', 'skip', 'not sure', 'unsure', 'n/a', 'na', 'dont know', "don't know", ''];
-
-const isUnresolved = (a: string): boolean => UNRESOLVED_MARKERS.includes(a.trim().toLowerCase());
 
 export class IdeaValidationSession {
   constructor(
@@ -102,6 +100,11 @@ export class IdeaValidationSession {
     const seen = new Set<string>(); // question dedupe across rounds (never ask twice)
     const pending: GrillQuestion[] = []; // asked and NOT resolved — accumulates across rounds
     const context: GroundingInput[] = [...(opts.context ?? [])];
+    // COUNTER-DEDUPED provenance labels (session-shared): the grilling engine restarts
+    // question ids at q1 on EVERY engine call, so round N's fresh `answer:q1` would
+    // otherwise shadow round 1's in the grounding map — a later citation could bind to
+    // the WRONG answer. Dedupe keeps every label unique across the whole session.
+    const label = makeDedupeLabeler(context.map((c) => c.label));
     const resolved: ResolvedQuestion[] = [];
     const researchLog: ResearchFinding[] = [];
     let usage: CompletionUsage = { inputTokens: 0, outputTokens: 0 };
@@ -127,16 +130,15 @@ ${read}`);
         if (seen.has(key)) continue;
         seen.add(key);
         pending.push(q); // asked this round — stays pending until resolved
-        let answer: string;
-        try {
-          answer = await this.abilities.interact.ask(q.default ? `${q.question} (default: ${q.default})` : q.question);
-        } catch (e) {
-          if (e instanceof InteractAbort) return this.finish('reject', opts, context, resolved, researchLog, lastArtifact, pending, usage, round);
-          return { ok: false, error: { code: 'provider-unavailable', blocker: `idea validation: interactor failed — ${(e as Error).message}` } };
-        }
+        const asked = await humanChannel('idea validation: interactor failed', () =>
+          this.abilities.interact.ask(q.default ? `${q.question} (default: ${q.default})` : q.question),
+        );
+        if (asked.kind === 'abort') return this.finish('reject', opts, context, resolved, researchLog, lastArtifact, pending, usage, round);
+        if (asked.kind === 'error') return { ok: false, error: asked.error };
+        const answer = asked.value;
         if (isUnresolved(answer)) continue; // still open → research topic below
         resolved.push({ id: q.id, question: q.question, answer, impact: q.impact });
-        context.push({ label: `answer:${q.id}`, text: answer, sourceType: 'user input' });
+        context.push({ label: label(`answer:${q.id}`), text: answer, sourceType: 'user input' });
         answeredThisRound = true; // a substantive answer — forceRefine re-grills it before concluding
       }
 
@@ -145,15 +147,13 @@ ${read}`);
       let findings: Array<{ topic: string; findings: string; sources?: string[] }> = [];
       if (openHigh.length) {
         const topics = openHigh.map((q) => q.question);
-        try {
-          findings = await this.abilities.interact.research(topics);
-        } catch (e) {
-          if (e instanceof InteractAbort) return this.finish('reject', opts, context, resolved, researchLog, lastArtifact, pending, usage, round);
-          return { ok: false, error: { code: 'provider-unavailable', blocker: `idea validation: research channel failed — ${(e as Error).message}` } };
-        }
+        const found = await humanChannel('idea validation: research channel failed', () => this.abilities.interact.research(topics));
+        if (found.kind === 'abort') return this.finish('reject', opts, context, resolved, researchLog, lastArtifact, pending, usage, round);
+        if (found.kind === 'error') return { ok: false, error: found.error };
+        findings = found.value;
         for (const f of findings) {
           researchLog.push(f);
-          context.push({ label: `research:${f.topic.slice(0, 40)}`, text: f.findings, sourceType: 'web source' });
+          context.push({ label: label(`research:${f.topic.slice(0, 40)}`), text: f.findings, sourceType: 'web source' });
           // a finding on an open question RESOLVES it (provenance: the research) —
           // it must not survive as a remaining unknown.
           const q = g.artifact.questions.find((x) => x.question === f.topic);

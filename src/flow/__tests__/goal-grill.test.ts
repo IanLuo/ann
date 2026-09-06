@@ -133,7 +133,7 @@ describe('GoalGrillSession v4 — ANSWER → LLM RESPONSE → DISCUSS → (round
     // then the DECISION turn that weighs the round — a bare list of answers is never
     // what the human sees before deciding
     expect(prompts).toHaveLength(3);
-    expect(prompts[0]).toContain('Goal-mode instructions');
+    expect(prompts[0]).toContain('Session-mode instructions'); // the appended header is AREA-NEUTRAL (no goal! seed brand) — the directive below stays the GOAL one
     expect(prompts[0]).toContain(GOAL_GRILL_MODE);
     expect(prompts[1]).toContain(GOAL_DISCUSS_MODE);
     // the synthesis was PRESENTED to the human before the DECISION
@@ -143,6 +143,10 @@ describe('GoalGrillSession v4 — ANSWER → LLM RESPONSE → DISCUSS → (round
     expect(interact.presented.some((p) => p.includes('── Goal grill · round 1 ──'))).toBe(true);
     // the decision offered exactly the four v4 options
     everyDecisionOffersAllFour(interact);
+    // the GOAL area keeps its own byte-compatible GO verb copy ('Seed now') — the core
+    // reads it from GOAL_PROFILE.goAction, never a hard-coded 'Seed now' in the loop
+    const decisionCall = decisionCalls(interact)[0];
+    expect(decisionCall.question).toContain('Seed now (GO)');
   });
 
   it('the round READ is show-me: GOAL line first, ONLY concern/blocking rows shown (ok collapsed to a count), numbered questions with the frontier marked — no ground/confidence noise', async () => {

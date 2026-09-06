@@ -16,22 +16,37 @@ import { blobSha, stripMarkers } from './sha.js';
 /** The manifest filename — never scanned as a doc itself. */
 export const MANIFEST_FILE = 'manifest.json';
 
+/** The DESIGN home — the subfolder of docs/ where DESIGN-area content lands (converged
+ *  design briefs + the design resources they cite; docs-as-git like the top level).
+ *  docs/design/* files are indexed in the manifest under `design/<stem>` logical names,
+ *  so a design brief is reachable by the repo's own resolution conventions (`ann read`,
+ *  requiredInputs, the manifest) and a brief can never collide with a top-level doc of
+ *  the same stem. */
+export const DESIGN_HOME = 'design';
+
 /** Logical name from a docs/ filename — the STEM (last extension stripped): goal.md →
  *  goal, companion-guide.html → companion-guide. Versioning is git's job, so a docs/
  *  file never carries a -vN suffix (unlike the retired per-task artifact filenames). */
 export const docNameFromFile = (f: string): string => f.replace(/\.[^./]*$/, '');
 
-/** Scan docs/ (top-level only — the docs home is FLAT): every file except the manifest
- *  itself → {logical name: repo-root-relative path}. Absent docs/ dir → empty. This is
- *  the SOURCE of truth the manifest is generated from. */
+/** Scan docs/ (the flat top level + the DESIGN_HOME subfolder): every file except the
+ *  manifest itself → {logical name: repo-root-relative path}. A top-level file maps to
+ *  its stem; a design brief under docs/design/ maps to `design/<stem>` (namespaced — it
+ *  can never shadow a top-level doc of the same stem). No other subfolder is a doc.
+ *  Absent docs/ dir → empty. This is the SOURCE of truth the manifest is generated from. */
 export function scanDocsDir(root: string): Record<string, string> {
   const dir = join(root, 'docs');
   if (!existsSync(dir)) return {};
   const out: Record<string, string> = {};
-  for (const f of readdirSync(dir).sort()) {
-    if (f === MANIFEST_FILE) continue;
-    if (!statSync(join(dir, f)).isFile()) continue; // subdirs are not docs
-    out[docNameFromFile(f)] = 'docs/' + f;
+  const addFile = (name: string, rel: string, f: string): void => {
+    if (f === MANIFEST_FILE) return;
+    if (!statSync(join(dir, rel, f)).isFile()) return; // subdirs are not docs
+    out[name] = rel ? `docs/${rel}/${f}` : `docs/${f}`;
+  };
+  for (const f of readdirSync(dir).sort()) addFile(docNameFromFile(f), '', f);
+  const designDir = join(dir, DESIGN_HOME);
+  if (existsSync(designDir) && statSync(designDir).isDirectory()) {
+    for (const f of readdirSync(designDir).sort()) addFile(`design/${docNameFromFile(f)}`, DESIGN_HOME, f);
   }
   return out;
 }
