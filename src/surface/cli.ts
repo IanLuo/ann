@@ -9,8 +9,8 @@
  *   ann <name>             → path for one doc (manifest) or a current artifact's logical name
  *   ann --journey          → the look-back (where we are + what's ahead)
  *   ann --status [filter]  → every node's derived status
- *   ann --check            → integrity + gates + artifact hashes
- *   ann --specs            → the locked contract stack
+ *   ann --check            → integrity + gates + docs-manifest freshness
+ *   ann --specs            → the docs contract stack (docs manifest → docs/<name>.md)
  *   ann --docs [--write]   → the docs→git resolution index (docs/manifest.json; --write regenerates)
  *   ann --providers        → the adapter registry (providers · models · defaults · key state)
  *   ann project / project! add|use|remove <path>  → multi-project by PATH (own journey each)
@@ -20,12 +20,11 @@
  *   ann journey <id>       → one node's full event walk
  *   ann confirm <id>       → a node's gate card (intent · ACs · gates · results)
  *   ann detail <id>        → full derived detail (contract · gates · artifacts · blockers)
- *   ann results <id> [n]   → results by kind; drill (doc/commit/ref/evidence/link)
+ *   ann results <id> [n]   → results by kind; drill (commit/ref/evidence/link)
  *   ann append <id> '{"at":..,"type":..}'   → single-writer append (LB-3)
  *   ann spawn <id> '<contract-json>'        → create a node (validated)
  *   ann gate <id> grill|confirm accept|reject [feedback]
- *   ann lock <id> <artifact-file> [type]             → thin artifact record over the node's own file
- *   ann supersede <id> <successor-id> <artifact-file> [note]   → the one cross-task write
+ *   ann read <name>        → marker-stripped content + path + sha (docs manifest name, or a legacy current artifact)
  */
 import {
   readFileSync,
@@ -37,10 +36,9 @@ import {
   lstatSync,
   statSync,
 } from 'node:fs';
-import { join, basename, dirname, resolve } from 'node:path';
+import { join, dirname, resolve } from 'node:path';
 import { execSync } from 'node:child_process';
-import { Store, legacyPath, logicalNameFromFile } from '../store/store.js';
-import { blobSha } from '../store/sha.js';
+import { Store } from '../store/store.js';
 import { scanDocsDir, loadDocsManifest, writeDocsManifest, docsIndexFresh, docSha, MANIFEST_FILE } from '../store/docs.js';
 import { Commands, CommandResult, GOAL_SEED_GUARD } from '../commands/index.js';
 import {
@@ -155,27 +153,6 @@ let _commands: Commands | undefined;
 
 const hasSuperseded = (id: string) => store.events(id).some((e) => e.type === 'superseded');
 const display = (id: string) => store.status(id) + (hasSuperseded(id) ? ' · artifact superseded' : '');
-const nameOf = (e: { artifact?: { name?: string }; note?: string; path?: string }) => {
-  const filename = e.path ?? String(e.note ?? '').match(/([\w.-]+\.md)/)?.[1] ?? '';
-  return e.artifact?.name ?? String(e.note ?? '').match(/logical name:\s*([\w.-]+)/)?.[1] ?? logicalNameFromFile(filename);
-};
-const lockShaOf = (id: string): { name: string; path: string; sha: string; type: string }[] => {
-  const out: Array<{ name: string; path: string; sha: string; type: string }> = [];
-  for (const e of store.events(id)) {
-    if (e.type !== 'artifact-locked') continue;
-    const a = e.artifact;
-    const filename = a?.path ? basename(a.path) : String(e.note ?? '').match(/([\w.-]+\.md)/)?.[1] ?? '';
-    out.push({
-      name: nameOf(e),
-      // normalize legacy recorded paths (tree/rounds → journey/legs, /00/ → flat)
-      path: legacyPath(a?.path ?? `journey/legs/${id}/artifacts/${filename}`),
-      sha: a?.lockSha ?? String(e.note ?? '').match(/@\s*([0-9a-f]{7,})/)?.[1] ?? '',
-      // type is an optional free-form tag on the log event (thin model, leg 07)
-      type: typeof a?.type === 'string' ? a.type : '',
-    });
-  }
-  return out;
-};
 
 // ---- READ / DERIVE ----
 function cmdJourney() {
@@ -220,52 +197,15 @@ function cmdCheck() {
     else warns.push(line);
   }
   for (const p of problems) console.error(p);
-  // Artifact integrity: marker-stripped blob vs recorded lock sha.
-  const notes: Array<{ sev: 'error' | 'warn' | 'ok' | 'info'; msg: string }> = [];
-  const currents = new Map<string, { path: string; sha: string }>();
-  for (const id of store.ids()) {
-    for (const l of lockShaOf(id)) {
-      const cur = store.current(l.name);
-      if (cur?.producer === id && legacyPath(l.path) === cur.path) currents.set(l.name, l);
-    }
-  }
-  for (const [name, l] of currents) {
-    const full = join(ROOT, l.path);
-    if (!existsSync(full)) continue;
-    const content = readFileSync(full, 'utf8');
-    const stripped = content.replace(/^<!-- specs:locked:[^\n]* -->\n?/, '').replace(/^<!-- draft[^\n]* -->\n?/, '');
-    const h = blobSha(stripped).slice(0, 7);
-    const markerSha = (content.match(/specs:locked:([0-9a-f]{7,})/) || [])[1] || l.sha || '';
-    if (markerSha && h === markerSha.slice(0, 7)) continue;
-    let kind = '';
-    try { kind = execSync(`git cat-file -t ${markerSha}`, { encoding: 'utf8' }).trim(); } catch {}
-    if (kind === 'commit') {
-      try {
-        const hit = execSync(`git ls-tree -r --name-only ${markerSha} | grep -F "${basename(l.path)}" | head -1`, { encoding: 'utf8' }).trim();
-        if (hit) {
-          let at = execSync(`git show ${markerSha}:${hit}`, { encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 });
-          at = at.replace(/^<!-- specs:locked:[^\n]* -->\n?/, '');
-          if (blobSha(at).slice(0, 7) === h) notes.push({ sev: 'ok', msg: `${name}: verified vs lock commit ${markerSha.slice(0, 7)}` });
-          else notes.push({ sev: 'warn', msg: `${name}: edited after lock commit ${markerSha.slice(0, 7)} (pre-integrity era; see 'git log -- ${l.path}'); re-lock via 'ann lock' if intentional` });
-        } else notes.push({ sev: 'info', msg: `${name}: lock commit ${markerSha.slice(0, 7)} — basename not found (unverified)` });
-      } catch {
-        notes.push({ sev: 'info', msg: `${name}: legacy lock commit ${markerSha.slice(0, 7)} unverified` });
-      }
-    } else if (kind === 'blob') {
-      notes.push({ sev: 'info', msg: `${name}: legacy blob stamp (draft-marker era) — not hash-verified; re-lock via 'ann lock' for a verifying sha` });
-    } else {
-      notes.push({ sev: 'error', msg: `${name}: lockSha ${markerSha || '(none)'} is neither commit nor blob` });
-    }
-  }
-  for (const [name, l] of currents) {
-    try { execSync(`git diff --quiet HEAD -- "${l.path}"`); } catch {
-      notes.push({ sev: 'error', msg: `${name}: uncommitted modification on disk (${l.path})` });
-    }
-  }
   // docs manifest freshness — a doc file with no manifest entry is invisible to
   // resolution; a manifest entry with no file points at nothing. Report when the
-  // committed index disagrees with docs/ (docs/ absent → silent).
+  // committed index disagrees with docs/ (docs/ absent → silent). Docs are git
+  // content (the doc-artifact integrity era — marker-stripped blob vs lock sha — was
+  // retired with the refactor, D3: integrity now = the manifest + git's own record).
+  const notes: Array<{ sev: 'error' | 'warn' | 'info'; msg: string }> = [];
   const { fresh, missing, stale } = docsIndexFresh(ROOT);
+  const manifest = loadDocsManifest(ROOT);
+  const docCount = Object.keys(manifest).length;
   if (!fresh) {
     const parts = [
       ...missing.map((n) => `'${n}' not in the manifest`),
@@ -276,9 +216,9 @@ function cmdCheck() {
   for (const w of warns) console.log(`  [rule-warn] ${w}`);
   const errors = problems.length + notes.filter((n) => n.sev === 'error').length;
   for (const n of notes) {
-    if (n.sev === 'error') console.error(`  [hash] ${n.msg}`);
-    else if (n.sev === 'warn') console.log(`  [hash-warn] ${n.msg}`);
-    else console.log(`  [hash] ${n.msg}`);
+    if (n.sev === 'error') console.error(`  [docs] ${n.msg}`);
+    else if (n.sev === 'warn') console.log(`  [docs-warn] ${n.msg}`);
+    else console.log(`  [docs] ${n.msg}`);
   }
   // Journey state line — the check says WHERE we are, not just that nothing broke.
   const legs = store.ids().filter((i) => !i.includes('/')).sort();
@@ -292,9 +232,9 @@ function cmdCheck() {
     state += ` · ${active} in progress (${doneN}/${tasks.length} tasks done)`;
     if (ready.length) state += ` — frontmost-ready: ${ready[0]} (${store.status(ready[0])})`;
   }
-  console.log(errors === 0 ? `OK — ${currents.size} current artifacts, no gate gaps.` : `${errors} problem(s).`);
+  console.log(errors === 0 ? `OK — ${docCount} docs in the manifest, no gate gaps.` : `${errors} problem(s).`);
   console.log(state);
-  if (JSON_OUT) console.log(JSON.stringify({ problems, warnings: warns, notes, currents: currents.size, state }, null, 2));
+  if (JSON_OUT) console.log(JSON.stringify({ problems, warnings: warns, notes, docs: docCount, state }, null, 2));
   process.exit(errors === 0 ? 0 : 1);
 }
 
@@ -317,32 +257,36 @@ function cmdLedger() {
 }
 
 function cmdSpecs() {
-  const stack: Array<{ name: string; type: string; sha: string; path: string; producer: string; upstream?: string; referrers?: string }> = [];
-  for (const id of store.ids().sort()) {
-    for (const l of lockShaOf(id)) {
-      if (store.current(l.name)?.producer !== id) continue;
-      // thin model (leg 07): type + sha come from the LOG EVENT; only the upstream/
-      // referrers prose is still read from the file head (it is content, not claim).
-      let type = l.type,
-        sha = l.sha,
-        upstream = '',
-        referrers = '';
-      try {
-        const head = readFileSync(join(ROOT, l.path), 'utf8').split('\n').slice(0, 10);
-        for (const line of head) {
-          const u = line.match(/\*\*upstream\*\* \(this doc relies on\): (.*)/);
-          if (u) upstream = u[1];
-          const r = line.match(/\*\*referrers\*\* \(must cite this when they change\): (.*)/);
-          if (r) referrers = r[1];
-        }
-      } catch {}
-      stack.push({ name: l.name, type: type || '?', sha, path: l.path, producer: id, ...(upstream ? { upstream } : {}), ...(referrers ? { referrers } : {}) });
+  // THE DOCS CONTRACT STACK — docs are git content: the "locked" set is the docs
+  // manifest + the file at HEAD (the doc-artifact lock records are legacy/history).
+  // Iterate the manifest (the forward path); upstream/referrers prose still reads
+  // from the file head (it is content, not claim); sha = docSha over the file.
+  const manifest = loadDocsManifest(ROOT);
+  const stack: Array<{ name: string; sha: string; path: string; upstream?: string; referrers?: string }> = [];
+  for (const name of Object.keys(manifest).sort()) {
+    const rel = manifest[name];
+    const full = join(ROOT, rel);
+    if (!existsSync(full)) {
+      stack.push({ name, sha: '(file missing)', path: rel });
+      continue;
     }
+    let upstream = '',
+      referrers = '';
+    try {
+      const head = readFileSync(full, 'utf8').split('\n').slice(0, 10);
+      for (const line of head) {
+        const u = line.match(/\*\*upstream\*\* \(this doc relies on\): (.*)/);
+        if (u) upstream = u[1];
+        const r = line.match(/\*\*referrers\*\* \(must cite this when they change\): (.*)/);
+        if (r) referrers = r[1];
+      }
+    } catch {}
+    stack.push({ name, sha: docSha(readFileSync(full, 'utf8')), path: rel, ...(upstream ? { upstream } : {}), ...(referrers ? { referrers } : {}) });
   }
   if (JSON_OUT) return console.log(JSON.stringify(stack, null, 2));
   const rows: string[] = [];
   for (const s of stack) {
-    rows.push(`${s.name}  [${s.type}]  @ ${s.sha}`);
+    rows.push(`${s.name}  @ ${s.sha}`);
     rows.push(`  path:      ${s.path}`);
     if (s.upstream) rows.push(`  upstream:  ${s.upstream}`);
     if (s.referrers) rows.push(`  referrers: ${s.referrers}`);
@@ -602,7 +546,6 @@ async function cmdRun(id: string) {
     for (const f of o.ruleFindings) console.log(`    [${f.severity}] ${f.code} — ${f.detail}`);
   }
   for (const p of r.problems) console.log(`  problem: ${p}`);
-  if (r.committed?.locked.length) console.log(`  locked: ${r.committed.locked.map((l) => `${l.name} → ${l.contentPath}`).join(', ')}`);
   if (r.committed?.spawned.length) console.log(`  spawned: ${r.committed.spawned.join(', ')}`);
   if (r.advance) console.log(`  advance: ${r.advance}`);
   if (r.stop !== 'completed') process.exitCode = 1;
@@ -830,14 +773,6 @@ function cmdResults(id: string, index: string | undefined) {
   console.log(`${String(it.kind).toUpperCase()}: ${it.label}`);
   if (it.at) console.log(`  at: ${it.at}`);
   switch (it.kind) {
-    case 'doc': {
-      const full = join(ROOT, it.path!);
-      if (!existsSync(full)) { console.error(`  (file missing: ${it.path})`); break; }
-      console.log(`  path: ${it.path}`);
-      console.log('---');
-      console.log(readFileSync(full, 'utf8'));
-      break;
-    }
     case 'commit': {
       try {
         console.log(execSync(`git show -s --format='%H%n%an <%ae> %ad%n%n%s%n%n%b' ${it.sha}`, { encoding: 'utf8' }).trim());
@@ -918,20 +853,6 @@ function cmdSubmit(id: string, gate: string, sha: string | undefined) {
   );
 }
 
-function cmdLock(id: string, artifactFile: string, type: string) {
-  emit(commands.lock(id, artifactFile, type ? { type } : {}), (v) => {
-    console.log(`locked ${v.name} @ ${v.sha} → ${id}`);
-    console.log(`  content: ${v.path}`);
-    console.log(`  ref:     ${v.contentPath}`);
-  });
-}
-
-function cmdSupersede(id: string, successorId: string, artifactFile: string, note: string) {
-  emit(commands.supersede(id, successorId, artifactFile, note), (v) => {
-    console.log(`superseded ${v.name} → ${v.path} on ${id}`);
-  });
-}
-
 function cmdRead(name: string) {
   emit(commands.read(name), (v) => {
     if (JSON_OUT) return console.log(JSON.stringify(v, null, 2));
@@ -947,10 +868,10 @@ const COMMANDS: Array<{ name: string; args: string; desc: string }> = [
   { name: '<name>', args: '', desc: 'the path for one doc (docs manifest) or a current artifact\'s logical name' },
   { name: 'journey', args: '[id]', desc: 'the look-back (no id) · one node\'s walk (with id) · alias --journey' },
   { name: 'status', args: '[filter]', desc: 'every node\'s derived status (+ superseded marker) · alias --status' },
-  { name: 'check', args: '', desc: 'integrity + gates + hashes + the journey state line · alias --check' },
+  { name: 'check', args: '', desc: 'integrity + gates + docs-manifest freshness + the journey state line · alias --check' },
   { name: 'verify', args: '', desc: 'the DRIFT read — reconciles the log\'s recorded claims vs filesystem/git reality (D1-D5 + store-external); exits 1 on any drift · alias --verify' },
   { name: 'ledger', args: '', desc: 'the write-rev ledger — rev + per-node last-write rev/at + hashes (the store-external integrity guard) · alias --ledger' },
-  { name: 'specs', args: '', desc: 'the locked contract stack (name · type · @sha · path) · alias --specs' },
+  { name: 'specs', args: '', desc: 'the docs contract stack — the manifest → docs/<name>.md @ content-sha (upstream/referrers prose from the file head) · alias --specs' },
   { name: 'providers', args: '', desc: 'the adapter registry: providers, models, defaults (env-resolved, api key masked) · alias --providers' },
   { name: 'config', args: '', desc: 'the user config file (~/.ann/config.json; apiKey masked) · alias --config' },
   { name: 'config!', args: 'set <key> <value>', desc: 'WRITE — save a config value (provider|model|baseUrl|apiKey|maxTokens); chmod 600, outside the repo; apiKey never echoed' },
@@ -958,9 +879,9 @@ const COMMANDS: Array<{ name: string; args: string; desc: string }> = [
   { name: 'project!', args: 'add|use|remove <path>', desc: 'WRITE — manage projects by PATH (each has its OWN journey); add <path> registers one' },
   { name: 'cred!', args: 'set|delete <service> <account> [secret]', desc: 'WRITE — OS keychain (macOS, DEV-ONLY local CLI): save/remove a secret via stdin; production = server-side env (12-factor)' },
   { name: 'branch', args: '<id>', desc: 'a node + every descendant\'s events, one walk · alias --branch' },
-  { name: 'confirm', args: '<id>', desc: 'a node\'s gate card: intent · ACs · artifacts · gates' },
-  { name: 'detail', args: '<id>', desc: 'a node\'s full derived detail: contract · gate states · artifacts (current/superseded) · blockers · events tail' },
-  { name: 'results', args: '<id> [n]', desc: 'a task\'s results by kind (doc/commit/ref/evidence/link); with n, drill into one (doc=content, commit=git show, ref=file/dir, evidence=event) · alias --results' },
+  { name: 'confirm', args: '<id>', desc: 'a node\'s gate card: intent · ACs · gates · results' },
+  { name: 'detail', args: '<id>', desc: 'a node\'s full derived detail: contract · gate states · artifacts (historical only) · blockers · events tail' },
+  { name: 'results', args: '<id> [n]', desc: 'a task\'s results by kind (commit/ref/evidence/link); with n, drill into one (commit=git show, ref=file/dir, evidence=event) · alias --results' },
   { name: 'packet', args: '<id>', desc: 'the node\'s deterministic context packet (context-packet-spec; derived on demand, never saved) · alias --packet' },
   { name: 'validate', args: '[id]', desc: 'run the enabled validator rules (all nodes, or one node) — rule-id\'d deterministic findings · alias --validate' },
   { name: 'rules', args: '[--write]', desc: 'the DERIVED check-rules registry (self-contained rule modules are the source) · alias --rules; --write regenerates rules/check/rules.json' },
@@ -973,13 +894,11 @@ const COMMANDS: Array<{ name: string; args: string; desc: string }> = [
   { name: 'run!', args: '<id>', desc: 'WRITE — run a task through the FRAME (materialize → grill → activate → execute → verify → confirm → commit); resumable, stops at the first block' },
   { name: 'commands', args: '', desc: 'this table as markdown (the derived doc) · alias --commands' },
   { name: 'help', args: '', desc: 'usage · alias --help / -h' },
-  { name: 'read', args: '<name>', desc: 'the L1 CONTENT read view — a doc (via the manifest) or current artifact\'s marker-stripped content + path + sha (core-design §5) · alias --read' },
-  { name: 'append!', args: '<id> \'<json>\'', desc: 'WRITE — single-writer append; REFUSES the composite-owned kinds (created/submitted/confirmed/rejected/artifact-locked/superseded)' },
+  { name: 'read', args: '<name>', desc: 'the L1 CONTENT read view — marker-stripped content + path + sha; resolves via the docs manifest (the forward path), with a legacy current-artifact fallback for history · alias --read' },
+  { name: 'append!', args: '<id> \'<json>\'', desc: 'WRITE — single-writer append; REFUSES the composite-owned kinds (created/submitted/confirmed/rejected/goal-met) and the RETIRED doc-artifact vocab (artifact-locked/superseded)' },
   { name: 'spawn!', args: '<id> \'<contract-json>\'', desc: 'WRITE — create a node; enforces the v14 contract schema + F-AC19 + id naming + the artifact/leg gates' },
   { name: 'submit!', args: '<id> grill|confirm [confirmedSha]', desc: 'WRITE — the resumable gate write: `submitted` alone, so an interrupted gate stays blocked (confirm records the gate② content binding)' },
   { name: 'gate!', args: '<id> grill|confirm accept|reject [feedback]', desc: 'WRITE — human gate decision (submit + decide; the 3-reject bound is a CONSTANT owned here)' },
-  { name: 'lock!', args: '<id> <artifact-file> [type]', desc: 'WRITE — thin artifact record over the producer\'s own file (write confinement): <artifact-file> is resolved inside <id>/artifacts/, hashed, and recorded as artifact-locked {name = file stem, path, lockSha, type?, version?}; an out-of-folder file is refused; never writes/stamps/symlinks the file' },
-  { name: 'supersede!', args: '<id> <successor-id> <artifact-file> [note]', desc: 'WRITE — superseded event with a forward pointer (the one cross-task write; refuses a live locker): the successor is named by <successor-id> + its own <artifact-file>, resolved via resolveNode — never a raw path' },
   { name: 'goal!', args: 'met [feedback]', desc: 'WRITE — the HUMAN verdict that seals a structurally-exhausted session (goal-met on the goal root); refused for automated (agent) initiators, double-met, and any undecided submission' },
   { name: 'goal!', args: 'archive [--override]', desc: 'WRITE — guarded structural reset: move .ann/journey → .ann/archive/sessions/<ts>-<slug>/ for a fresh goal; refuses without a met verdict (or --override), on store-external verify drifts, and on uncommitted tracked .ann/journey changes' },
   { name: 'goal!', args: 'seed [goal-statement]', desc: 'WRITE — grill a goal at SESSION scope (EMPTY journey seeds new; a RE-SEEDABLE sole unconsumed goal is REPLACED after re-grilling — consumed/met goals refuse): the interactive idea-validation session (grill → batch-ask → research → re-grill → human verdict); on solid, synthesize goal.md (Goal:/Success criteria:) + seed/re-seed the goal leg + artifact-lock goal.md on the goal root; revise/reject seeds nothing' },
@@ -1034,7 +953,7 @@ try {
     console.log('\nEnv: `RECORDED_BY=<name>` — provenance on recorded events (default: agent).');
     process.exit(0);
   }
-  const WRITES = ['append', 'spawn', 'submit', 'gate', 'lock', 'supersede', 'cred'];
+  const WRITES = ['append', 'spawn', 'submit', 'gate', 'cred'];
   if (WRITES.includes(command)) {
     console.error(`ann: writes are marked with '!' — did you mean '${command}!'? (mutator convention: reads have no marker, writes always end in !)`);
     process.exit(1);
@@ -1084,8 +1003,6 @@ try {
     if (!args[1] || !raw) { console.error('usage: ann spawn! <id> \'<contract-json>\''); process.exit(2); }
     cmdSpawn(args[1], raw);
   } else if (command === 'gate!') cmdGate(args[1], args[2], args[3], args.slice(4).join(' '));
-  else if (command === 'lock!') cmdLock(args[1], args[2] || '', args[3] || '');
-  else if (command === 'supersede!') cmdSupersede(args[1], args[2], args[3] || '', args.slice(4).join(' '));
   else {
     // bare-name read: a DOC (via the manifest — the forward path) OR a current
     // artifact's logical name (legacy). Path map for one name; `read <name>` for content.

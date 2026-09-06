@@ -106,7 +106,7 @@ export interface TaskDetail {
 }
 
 export interface ResultItem {
-  kind: 'doc' | 'commit' | 'ref' | 'evidence' | 'link';
+  kind: 'commit' | 'ref' | 'evidence' | 'link';
   label: string;
   path?: string;
   sha?: string;
@@ -438,9 +438,10 @@ export class Store {
   /* Result kinds: doc (locked artifact) · commit · ref · evidence · link. */
   /* ---------------------------------------------------------------- */
 
-  /** Gather a task's results from its log — one item per artifact lock, per structured
-   *  commit, per ref, per evidence event (format v10 §3/§14). Order: docs, then
-   *  commits, then refs, then evidence. Machine-derived; never prose-parsed. */
+  /** Gather a task's results from its log — one item per structured commit, per ref,
+   *  per evidence event (format v10 §3/§14). Order: commits, then refs, then evidence.
+   *  Machine-derived; never prose-parsed. (Docs are git content — a task's output doc
+   *  resolves via the manifest + `read`, never through results.) */
   results(id: string): ResultItem[] {
     const out: ResultItem[] = [];
     const seen = new Set<string>();
@@ -451,17 +452,6 @@ export class Store {
       out.push(it);
     };
     const evs = this.events(id);
-    // docs — locked artifacts (with role)
-    for (const e of evs) {
-      if (e.type !== 'artifact-locked') continue;
-      const a = e.artifact;
-      const nm = a?.name ?? String(e.note ?? '').match(/logical name:\s*([\w.-]+)/)?.[1] ?? '';
-      if (!nm) continue;
-      const filename = a?.path ? basename(a.path) : String(e.note ?? '').match(/([\w.-]+\.md)/)?.[1] ?? '';
-      const path = legacyPath(a?.path ?? `journey/legs/${id}/artifacts/${filename}`);
-      const cur = this.current(nm);
-      const role = cur?.producer === id ? 'current' : cur ? 'superseded' : 'historical';
-      out.push({ kind: 'doc', label: `${nm} @ ${a?.lockSha ?? '(no sha)'} [${role}]`, path, sha: a?.lockSha, at: e.at });    }
     // commits — structured evidence.commits[]
     for (const e of evs) {
       if (e.type !== 'evidence') continue;
@@ -489,14 +479,12 @@ export class Store {
     return out;
   }
 
-  /** Artifact gate (v10, format §4/§14): a parent may spawn children only after it
-   *  has CONCLUDED — a locked artifact OR structured commit evidence
-   *  (evidence.commits[] non-empty). Machine-truth; never prose-parsed. */
+  /** Conclusion gate (v10/F-AC18): a parent may spawn children only after it has
+   *  CONCLUDED — structured commit evidence (evidence.commits[] non-empty). Docs are
+   *  git content: the evidence IS the publish of the staged doc, so the lock is gone.
+   *  Machine-truth; never prose-parsed. */
   parentConcluded(parent: string): boolean {
-    return (
-      this.events(parent).some((e) => e.type === 'artifact-locked') ||
-      this.events(parent).some((e) => e.type === 'evidence' && Array.isArray(e.commits) && e.commits.length > 0)
-    );
+    return this.events(parent).some((e) => e.type === 'evidence' && Array.isArray(e.commits) && e.commits.length > 0);
   }
 
   /* ---------------------------------------------------------------- */
@@ -517,7 +505,9 @@ export class Store {
     };
     // unwrap the contract (defensive: legacy double-nested {contract:{contract:{…}}})
     const contract = this.contractOf(id);
-    // artifacts: every lock with its derived role (current / superseded / historical)
+    // artifacts — HISTORY ONLY (the record→disk files a retired flow left): docs are
+    // git content now, so a lock is never a task's live output. Roles no longer derive
+    // current/superseded — nothing forward reads an artifact.
     const artifacts: ArtifactRef[] = [];
     for (const e of evs) {
       if (e.type !== 'artifact-locked') continue;
@@ -526,9 +516,7 @@ export class Store {
       if (!nm) continue;
       const filename = a?.path ? basename(a.path) : String(e.note ?? '').match(/([\w.-]+\.md)/)?.[1] ?? '';
       const path = legacyPath(a?.path ?? `journey/legs/${id}/artifacts/${filename}`);
-      const cur = this.current(nm);
-      const role: ArtifactRef['role'] = cur?.producer === id ? 'current' : cur ? 'superseded' : 'historical';
-      artifacts.push({ name: nm, path, sha: a?.lockSha ?? '', role });
+      artifacts.push({ name: nm, path, sha: a?.lockSha ?? '', role: 'historical' });
     }
     const blockers = evs
       .filter(
@@ -1026,8 +1014,10 @@ export class Store {
     // Write confinement (AC-1/AC-2): the folder derives from the store's own legs
     // root (nodeFolder normalizes + refuses an escape), and the `created` event flows
     // through the single writer on a handle — spawn itself never joins a raw id+path.
+    // The node's own folder is created here (a fresh id has no folder yet); only the
+    // `artifacts/` subdir is not pre-made — outputs are docs at the repo's docs/ home.
     const dir = this.nodeFolder(id);
-    mkdirSync(join(dir, 'artifacts'), { recursive: true });
+    mkdirSync(dir, { recursive: true });
     const nodeJson =
       JSON.stringify(
         { id, contract: contractFields, ...(openQuestions ? { openQuestions } : {}), createdAt: new Date().toISOString().slice(0, 10) },
@@ -1086,10 +1076,12 @@ export class Store {
     return problems;
   }
 
-  /** Integrity check: gate gaps + closure integrity (F-AC16) + missing current-artifact
-   *  files + orphan names. Leg-level events are INERT by design (v8): they are parsed
-   *  for display and resolution only, never read for status and never policed — the
-   *  write path (spawn) is what keeps new leg roots free of events. */
+  /** Integrity check: gate gaps + closure integrity (F-AC16) + F-AC18 conclusion +
+   *  commit-traceability + contract self-sufficiency (F-AC19). Leg-level events are
+   *  INERT by design (v8): they are parsed for display and resolution only, never read
+   *  for status and never policed — the write path (spawn) is what keeps new leg roots
+   *  free of events. (Doc integrity is check's commit traceability + the manifest
+   *  freshness read — artifact files are no longer policed.) */
   check(): string[] {
     const problems: string[] = [];
     // THE CUTOFF grandfathers the legacy prose-gate era at CHECK-REPORTING only
@@ -1122,16 +1114,17 @@ export class Store {
         if (!allIds.has(t)) problems.push(`${id}: transferred target '${t}' does not exist (F-AC16)`);
       }
     }
-    // F-AC18 (v9; v10 amended): every task SPAWNED under v9 that completes must have
-    // concluded — a locked artifact OR structured commit evidence (evidence.commits[],
-    // format v10 §3/§14). Grandfathered: tasks spawned before the v9 migration
-    // (createdAt < cutoff) are exempt — the one-time hot fix, never a live rule on history.
+    // F-AC18 (v9; v10/this leg amended): every task SPAWNED under v9 that completes must
+    // have concluded — structured commit evidence (evidence.commits[], format v10 §3/§14).
+    // Docs are git content: the commit evidence IS the conclusion (the lock is retired).
+    // Grandfathered: tasks spawned before the v9 migration (createdAt < cutoff) are
+    // exempt — the one-time hot fix, never a live rule on history.
     for (const [id, node] of this.nodes) {
       if (!id.includes('/')) continue;
       if (!node.events.some((e) => e.type === 'completed')) continue;
       if (this.parentConcluded(id)) continue;
       if (!this.grandfathered(id)) {
-        problems.push(`F-AC18: ${id} — completed without an artifact-locked record or structured commit evidence (v10: document artifact or evidence.commits[] required)`);
+        problems.push(`F-AC18: ${id} — completed without structured commit evidence (evidence.commits[]; docs are git content — commit the staged doc + record the evidence)`);
       }
     }
     // F-AC18 traceability (format v10 §9/§14): structured commits[] must RESOLVE in
@@ -1144,23 +1137,6 @@ export class Store {
       if (this.grandfathered(id)) continue;
       for (const p of this.contractProblems(this.contractOf(id))) problems.push(`F-AC19: ${id} — ${p}`);
     }
-    const lockersByName = new Map<string, string[]>();
-    for (const [id, node] of this.nodes) {
-      for (const e of node.events) {
-        if (e.type === 'artifact-locked' && e.artifact?.name) {
-          const nm = e.artifact.name;
-          if (!lockersByName.has(nm)) lockersByName.set(nm, []);
-          lockersByName.get(nm)!.push(id);
-          const path = e.artifact.path;
-          if (path && !existsSync(join(this.root, legacyPath(path)))) problems.push(`MISSING: ${nm} → ${path}`);
-        }
-      }
-    }
-    for (const [nm, producers] of lockersByName) {
-      if (this.current(nm)) continue;
-      const allSuperseded = producers.every((p) => this.supersededLocks(nm).has(p));
-      if (!allSuperseded) problems.push(`NO CURRENT: ${nm} (locked but never superseded and not current — orphan)`);
-    }
     return problems;
   }
 
@@ -1168,21 +1144,8 @@ export class Store {
   /* verify() — the DRIFT reconciliation (`ann verify`). READ-ONLY.     */
   /* Internal drift is impossible (ONE writer, LB-3) — drift is always  */
   /* log-vs-filesystem/git: a recorded claim whose on-disk reality      */
-  /* changed. Five checks, two directions (record→disk, disk→record).   */
+  /* changed. Doc-artifact checks retired — see the verify() doc.       */
   /* ---------------------------------------------------------------- */
-
-  /** The logical name + derived filename an artifact-locked event claims —
-   *  the same fallbacks current()/lockers() use (structured → note marker → filename). */
-  private claimedName(e: JourneyEvent): string {
-    const a = e.artifact;
-    const filename = a?.path ? basename(a.path) : String(e.note ?? '').match(/([\w.-]+\.md)/)?.[1] ?? '';
-    return a?.name ?? String(e.note ?? '').match(/logical name:\s*([\w.-]+)/)?.[1] ?? logicalNameFromFile(filename);
-  }
-
-  /** Repo-root-relative path (`.ann/docs/…`) — the message vocabulary. */
-  private rel(p: string): string {
-    return p.startsWith(this.root + '/') ? p.slice(this.root.length + 1) : p;
-  }
 
   /** Every subdir under a root (not following symlinks) — the disk walk for D4. */
   private walkDirs(dir: string, acc: string[] = []): string[] {
@@ -1199,53 +1162,20 @@ export class Store {
   /**
    * Drift reconciliation — the LOG's claims vs filesystem/git reality. One string
    * per drift, prefixed with the check kind; empty = the store and the disk agree.
-   * D1 record→disk existence (kept from check's MISSING) · D2 event lockSha vs file
-   * content · D3 the docs/ symlink layer · D4 filesystem orphans · D5 version/type
-   * coherence. Never writes — reports only (the single writer stays the only mutator).
+   * KEPT: the legs/-tree shape (node-orphan, node-id-mismatch) · store-external
+   * (write-rev ledger) · unparseable-events. RETIRED with the doc-artifact flow:
+   * record→disk existence, lockSha-vs-file, and the artifacts/-orphan checks — docs
+   * are git content at docs/ now, and their drift is the operator's own commit, which
+   * check()'s commit-traceability + the manifest-freshness read name. Never writes.
    */
   verify(): string[] {
     const problems: string[] = [];
     const root = this.root;
-    // THE CURRENT LOCK PER LOGICAL NAME: the artifact-locked event whose producer
-    // IS current(name).producer — the claims a healthy store must still hold.
-    const currentEvents = new Map<string, { id: string; event: JourneyEvent }>();
-    for (const [id, node] of this.nodes) {
-      for (const e of node.events) {
-        if (e.type !== 'artifact-locked') continue;
-        const nm = this.claimedName(e);
-        if (!nm) continue;
-        if (this.current(nm)?.producer !== id) continue; // only the CURRENT producer's lock
-        currentEvents.set(nm, { id, event: e });
-      }
-    }
-    // D1 — record → disk existence (the store's MISSING check, kept verbatim shape)
-    for (const [id, node] of this.nodes) {
-      for (const e of node.events) {
-        if (e.type !== 'artifact-locked' || !e.artifact?.name) continue;
-        const p = e.artifact.path;
-        if (p && !existsSync(join(root, legacyPath(p)))) problems.push(`missing-file: ${e.artifact.name} → ${p} vs no such file on disk`);
-      }
-    }
-    // D2 — the RECORDED event lockSha vs the ACTUAL file content (blob over
-    // marker-stripped). The artifact-hash validator only cross-checks the file's
-    // own marker — this compares the log's claim to the bytes, and reports the gap.
-    for (const [nm, { event }] of currentEvents) {
-      const a = event.artifact;
-      const rec = typeof a?.lockSha === 'string' && a.lockSha ? a.lockSha : '';
-      if (!rec) continue; // no recorded sha — nothing claimed (prose-era locks)
-      const cur = this.current(nm)!;
-      const full = join(root, cur.path);
-      if (!existsSync(full)) continue; // D1 already reports the missing file
-      const actual = blobSha(stripMarkers(readFileSync(full, 'utf8')));
-      if (!actual.startsWith(rec)) problems.push(`locksha: ${nm} — recorded lockSha ${rec} vs file content ${actual.slice(0, 7)}`);
-    }
-    // D3 + D5 are GONE with the artifact collapse (leg 07): the docs/ symlink layer
-    // (placement + version coherence) and the marker type coherence no longer exist.
-    // An artifact is a thin log record over the producer's own file — verify's disk
-    // direction (D4 below) + the hash check (D2 above) are the whole story now.
-    // D4 — filesystem orphans (the MIRROR direction: walk the disk, not the store).
-    // Store.load() keys on node.json ONLY — a bare events.jsonl dir is invisible to
-    // the store today, so this walk must not rely on ids() alone.
+    // D4 (kept scope) — the MIRROR direction: walk the disk, not the store, for the
+    // node.json/events.jsonl shape. Store.load() keys on node.json ONLY — a bare
+    // events.jsonl dir is invisible to the store today, so this walk must not rely on
+    // ids() alone. artifacts/ subdirs are INERT to it (left by the retired flow, never
+    // policed — their docs moved to docs/).
     for (const d of this.walkDirs(this.legs)) {
       const rel = d.slice(this.legs.length + 1);
       const hasNode = existsSync(join(d, 'node.json'));
@@ -1258,36 +1188,6 @@ export class Store {
           id = String((JSON.parse(readFileSync(join(d, 'node.json'), 'utf8')) as { id?: unknown }).id ?? '');
         } catch { /* unparseable node.json — the id mismatch below reports it */ }
         if (id !== rel) problems.push(`node-id-mismatch: ${rel} — node.json id '${id}' vs directory path`);
-      }
-      // every .md under artifacts/ must be named by an artifact-locked event of this node
-      const adir = join(d, 'artifacts');
-      if (!existsSync(adir)) continue;
-      let events = this.nodes.get(rel)?.events;
-      if (!events) {
-        const ef = join(d, 'events.jsonl');
-        try {
-          events = existsSync(ef) ? this.parse(ef) : [];
-        } catch {
-          events = []; // corrupt orphan log — the walk still reports the missing node.json
-        }
-      }
-      const claimed = new Set<string>();
-      for (const e of events) {
-        if (e.type === 'artifact-locked') {
-          const filename = e.artifact?.path ? basename(e.artifact.path) : String(e.note ?? '').match(/([\w.-]+\.md)/)?.[1] ?? '';
-          if (filename) claimed.add(filename);
-        }
-        // F4 (leg 07 collapse): an evidence-cited file claims its basename — a
-        // fixture cited as evidence in artifacts/ is accounted for, not an orphan.
-        if (e.type === 'evidence' && Array.isArray(e.refs)) {
-          for (const r of e.refs) {
-            if (typeof r === 'string' && r) claimed.add(basename(r));
-          }
-        }
-      }
-      for (const f of readdirSync(adir)) {
-        if (!f.endsWith('.md')) continue;
-        if (!claimed.has(f)) problems.push(`artifact-orphan: ${rel}/artifacts/${f} vs no artifact-locked event of this node names it`);
       }
     }
     /* ══ store-external — the write-rev ledger integrity: a node's on-disk

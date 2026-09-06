@@ -1,9 +1,9 @@
 import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { recording } from '../abilities/recording.js';
 import { Commands, CommandError, LookBack } from '../commands/index.js';
 import { assemblePacket, ContextPacket } from './materialize.js';
 import { RuleFinding } from './validators/types.js';
-import { blobSha, stripMarkers } from '../store/sha.js';
 import { JourneyEvent } from '../store/store.js';
 import { ChainEntry, executionOrder, phaseOf, resolveChain, StepLookup, validateChain, Phase } from './chain.js';
 import { GeneralConfig, resolveConfig, VERIFY_FAIL_CYCLES_CEILING } from './config.js';
@@ -25,7 +25,8 @@ import { Abilities, ReadView, Step, StepContext, StepOutput, StepVerdict } from 
  *                                  never the step)
  *   2. `submitted` undecided     → block and wait
  *   3. last `rejected`           → the rework rung runs; the gate IS re-obtained
- *   4. `waiting`, no later commit evidence → block and wait (the empty-chain verify-wait)
+ *   4. `waiting`, no later commit evidence → block and wait (the verify-wait: an empty
+ *      chain waits at verify, a chain that staged a doc waits after its confirm gate)
  *
  * `execute` is NEVER SKIPPED; its replay safety is intent idempotence + the transcript.
  * FRAME-WRITE IDEMPOTENCE: `activated`/`completed`/`failed` already in the tail are not
@@ -130,14 +131,14 @@ export class Frame {
     const result: FrameResult = { ...base, chain: flow.chain };
     const transcript = new Transcript(this.commands, taskId);
 
-    // ONE translator for the whole run: a grill-bound step's deferred lock must reach
-    // the SAME commit as the execute steps' — a per-phase translator silently drops it.
-    // Deferral is keyed by artifact name and spawn id, so a rework cycle REPLACES rather
-    // than accumulates, which is what makes reusing it across cycles safe.
+    // ONE translator for the whole run: a grill-bound step's staged doc must land in the
+    // SAME docs/ as the execute steps' — a per-phase translator silently drops it.
+    // The staged set is keyed by doc name and the spawn deferral by id, so a rework cycle
+    // REPLACES rather than accumulates, which is what makes reusing it across cycles safe.
     const translator = new IntentTranslator(this.commands, taskId);
 
     /* ── GATE · grill ───────────────────────────────────────────────────────── */
-    const grill = await this.gate('grill', taskId, flow.chain, packet, transcript, result, {}, translator);
+    const grill = await this.gate('grill', taskId, flow.chain, packet, transcript, result, translator);
     if (grill) return grill;
 
     /* ── validate + activate (the frame's own write, idempotent on replay) ──── */
@@ -211,7 +212,6 @@ export class Frame {
     packet: ContextPacket,
     transcript: Transcript,
     result: FrameResult,
-    submitOpts: { confirmedSha?: string } = {},
     translator?: IntentTranslator,
   ): Promise<FrameResult | undefined> {
     result.phase = `gate:${gate}`;
@@ -249,7 +249,7 @@ export class Frame {
         decision = await this.present(taskId, gate, current);
       }
 
-      const s = this.commands.submit(taskId, gate, submitOpts);
+      const s = this.commands.submit(taskId, gate);
       if (!s.ok && s.error.code !== 'already-submitted') return this.stopFailed(taskId, result, s.error);
       const g = this.commands.gate(taskId, gate, decision.decision, decision.feedback ?? '');
       if (!g.ok) {
@@ -416,25 +416,28 @@ export class Frame {
 
   /**
    * OUTPUTS PRODUCED + ACs + step rules. Judgment stays with the runner.
-   * Events record at COMMIT, so verify checks OUTPUTS — the materialized working files
-   * and the observed `evidence.commits[]` — never the acceptance events.
+   * Verify checks OUTPUTS — the staged docs/ files and the observed
+   * `evidence.commits[]` — never the acceptance events. A staged doc (or commit
+   * evidence) is the "work was produced" proof; CONCLUSION is the commit-boundary's
+   * call (evidence present), so verify itself only fails on missing/empty bytes.
    */
   private verify(taskId: string, chain: ChainEntry[], translator: IntentTranslator, result: FrameResult): string[] {
     const findings: string[] = [];
     const acs = this.commands.contractOf(taskId).acceptanceCriteria;
     if (!Array.isArray(acs) || !acs.length) findings.push('no acceptanceCriteria declared — ACs are the verification target (F-AC19)');
 
-    const locks = translator.deferred.locks;
-    for (const l of locks) {
-      if (!existsSync(l.workingPath)) findings.push(`declared artifact '${l.name}' has no working file at ${l.workingPath}`);
-      else if (!stripMarkers(readFileSync(l.workingPath, 'utf8')).trim()) findings.push(`artifact '${l.name}' is empty`);
+    const staged = translator.deferred.docs;
+    for (const d of staged) {
+      const file = join(this.root, d.path);
+      if (!existsSync(file)) findings.push(`staged doc '${d.name}' has no file at ${d.path}`);
+      else if (!readFileSync(file, 'utf8').trim()) findings.push(`staged doc '${d.name}' is empty`);
     }
 
     const committed = this.commitEvidence(taskId);
-    if (!locks.length && !committed.length) {
+    if (!staged.length && !committed.length) {
       findings.push(
         chain.length
-          ? 'the chain produced no artifact and no commit evidence — a task concludes with a locked artifact or evidence.commits[]'
+          ? 'the chain produced no staged doc and no commit evidence — a task concludes with a staged doc (docs/<name>.md) or evidence.commits[]'
           : 'waiting for the runner: no evidence.commits[] recorded since activation (empty chain — the runner does the work)',
       );
     }
@@ -468,20 +471,37 @@ export class Frame {
     translator: IntentTranslator,
     result: FrameResult,
   ): Promise<FrameResult> {
-    // THE GATE② CONTENT BINDING: submit!(confirm) records the working artifact's sha
-    const primary = translator.deferred.locks[0];
-    const confirmedSha = primary && existsSync(primary.workingPath) ? blobSha(stripMarkers(readFileSync(primary.workingPath, 'utf8'))).slice(0, 7) : undefined;
-
-    const stop = await this.gate('confirm', taskId, chain, packet, transcript, result, confirmedSha ? { confirmedSha } : {}, translator);
+    const stop = await this.gate('confirm', taskId, chain, packet, transcript, result, translator);
     if (stop) return stop;
     if (this.gateState(taskId, 'confirm') !== 'confirmed') {
       // rejected → RE-EXECUTE from the feedback (LOCKED routing — never supersede)
       return { ...result, stop: 'blocked-at-gate', phase: 'gate:confirm', problems: [this.latestRejection(taskId, 'confirm') ?? 'rejected at confirm'] };
     }
 
-    /* ── commit — the deferred intents RECORD here; every task concludes ─────── */
+    /* ── the TWO-PHASE conclusion (F-AC18): a task completes only on commit evidence ─ */
+    if (!this.commitEvidence(taskId).length) {
+      // A chain that STAGED a doc has real bytes for the confirm gate to review, but
+      // concluding is the OPERATOR's move: `git commit` the docs/ change + record
+      // `evidence.commits[]`. Until then — `waiting` (tail state 4, written once); the
+      // release is the evidence, and a re-run then concludes. Docs are git content.
+      result.phase = 'verify';
+      if (!this.pendingWait(taskId)) {
+        const w = this.commands.append(
+          taskId,
+          {
+            at: today(),
+            type: 'waiting',
+            note: 'the staged doc is confirmed but uncommitted — `git commit` the docs/ change and `append! evidence.commits[]` to conclude (two-phase)',
+          } as unknown as JourneyEvent,
+        );
+        if (!w.ok) return this.stopFailed(taskId, result, w.error);
+      }
+      return { ...result, stop: 'blocked-waiting' };
+    }
+
+    /* ── commit — the deferred intents RECORD here (spawns); every task concludes ── */
     result.phase = 'commit';
-    const recorded = translator.commit(confirmedSha ? { confirmedSha: this.submittedSha(taskId) ?? confirmedSha } : {});
+    const recorded = translator.commit();
     if (!recorded.ok) return this.stopFailed(taskId, result, recorded.error);
     result.committed = recorded.value;
 
@@ -522,13 +542,7 @@ export class Frame {
     return last ? (last.feedback as string | undefined) ?? (last.note as string | undefined) : undefined;
   }
 
-  /** The sha the confirm gate actually bound to (the L1 record), if any. */
-  private submittedSha(taskId: string): string | undefined {
-    const submissions = this.commands.events(taskId).filter((e) => e.type === 'submitted' && e.gate === 'confirm');
-    return submissions[submissions.length - 1]?.confirmedSha as string | undefined;
-  }
-
-  /** Commit evidence OBSERVED since activation — the empty-chain flow's outcome channel. */
+  /** Commit evidence OBSERVED since activation — the two-phase outcome channel. */
   private commitEvidence(taskId: string): JourneyEvent[] {
     const evs = this.commands.events(taskId);
     const from = evs.map((e) => e.type).lastIndexOf('activated');

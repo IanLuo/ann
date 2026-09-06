@@ -3,8 +3,6 @@ import {
   gate1,
   gate2,
   closureIntegrity,
-  oneCurrent,
-  resolutionFiles,
   eventSchema,
   roundGate,
   depthBudget,
@@ -13,7 +11,6 @@ import {
   registryIntegrity,
   distanceToGoal,
   redaction,
-  artifactHash,
   highImpactDefaulted,
 } from './rules.js';
 
@@ -30,8 +27,6 @@ export const RULES: RuleModule[] = [
   gate1,
   gate2,
   closureIntegrity,
-  oneCurrent,
-  resolutionFiles,
   eventSchema,
   roundGate,
   depthBudget,
@@ -40,7 +35,6 @@ export const RULES: RuleModule[] = [
   registryIntegrity,
   distanceToGoal,
   redaction,
-  artifactHash,
   highImpactDefaulted,
 ];
 

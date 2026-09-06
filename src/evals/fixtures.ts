@@ -118,30 +118,32 @@ export const NAV_FIXTURES: EvalFixture[] = [
 
 /* ══ K5 flow fixtures ══════════════════════════════════════════════════════ */
 
-/** A spec step: locks an artifact — the first-pass completion shape. */
-export const specStep = (id = 'spec', artifactName = 'spec'): FlowFixture['steps'][number] => ({
-  id,
-  execute: async (ctx) => ({
-    ok: true,
-    artifact: `${id} artifact`,
-    intents: [{ kind: 'lock-artifact', name: artifactName, content: `# ${artifactName}\n\nproduced by ${id}\n`, type: 'record' }],
-  }),
-});
-
-/** A multi-artifact step: locks `artifact-<id>` — a second first-pass shape. */
-export const lockStep = (id: string, artifactName: string): FlowFixture['steps'][number] => ({
+/** A spec step: STAGES a doc to docs/<name>.md — the first-pass completion shape
+ *  (docs-as-git: the deliverable is a staged doc; the operator's commit evidence
+ *  concludes it — no artifact lock, no artifacts/ file). */
+export const specStep = (id = 'spec', docName = 'spec'): FlowFixture['steps'][number] => ({
   id,
   execute: async () => ({
     ok: true,
     artifact: `${id} artifact`,
-    intents: [{ kind: 'lock-artifact', name: artifactName, content: `# ${artifactName}\n\nproduced by ${id}\n`, type: 'record' }],
+    intents: [{ kind: 'stage-doc', name: docName, content: `# ${docName}\n\nproduced by ${id}\n` }],
+  }),
+});
+
+/** A multi-doc step: STAGES `docs/<docName>.md` — a second first-pass shape. */
+export const lockStep = (id: string, docName: string): FlowFixture['steps'][number] => ({
+  id,
+  execute: async () => ({
+    ok: true,
+    artifact: `${id} artifact`,
+    intents: [{ kind: 'stage-doc', name: docName, content: `# ${docName}\n\nproduced by ${id}\n` }],
   }),
 });
 
 export const FLOW_FIXTURES: FlowFixture[] = [
   {
     id: 'flow-spec',
-    name: 'a spec chain completes on FIRST PASS — ACs met, artifact locked, no rework',
+    name: 'a spec chain first-passes — ACs met, doc staged + operator-committed (no rework)',
     chain: ['spec'],
     steps: [specStep('spec', 'spec-result')],
     interactAnswers: ['accept', 'accept'],
@@ -149,7 +151,7 @@ export const FLOW_FIXTURES: FlowFixture[] = [
   },
   {
     id: 'flow-multi',
-    name: 'a two-step chain completes on FIRST PASS — both artifacts locked',
+    name: 'a two-step chain first-passes — both docs staged + operator-committed',
     chain: ['step-a', 'step-b'],
     steps: [lockStep('step-a', 'artifact-a'), lockStep('step-b', 'artifact-b')],
     interactAnswers: ['accept', 'accept'],

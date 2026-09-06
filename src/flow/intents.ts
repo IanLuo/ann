@@ -1,54 +1,55 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join, relative, basename } from 'node:path';
-import { Commands, CommandError, CommandResult, LockedArtifact } from '../commands/index.js';
-import { blobSha, stripMarkers } from '../store/sha.js';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { Commands, CommandError, CommandResult } from '../commands/index.js';
 import { JourneyEvent } from '../store/store.js';
-import { CloseIntent, Intent, LockArtifactIntent, ProposeSpawnIntent, Step, SupersedeIntent } from './types.js';
+import { CloseIntent, Intent, ProposeSpawnIntent, StageDocIntent, Step } from './types.js';
 
 /**
  * L2 — INTENT TRANSLATION (core-design §3).
  *
- * THE MECHANISM: *files are working state, events are acceptance.*
- *   - `lock-artifact` materializes the WORKING FILE immediately (task-local, in
- *     `artifacts/`); the `artifact-locked` EVENT records only at COMMIT, once the
- *     task's gates are accepted. A rework re-writes the file and never double-locks,
- *     so NO `superseded` is ever written on a live node.
- *   - `propose-spawn` DEFERS TO COMMIT alongside it, so a child's `requiredInputs`
- *     resolve through `current()` — lock-before-spawn holds BY CONSTRUCTION.
- *   - `evidence`, `supersede` and `close` are immediate; each is idempotent on replay.
+ * THE MECHANISM: *docs are git content, events are acceptance.*
+ *   - `stage-doc` writes the doc IMMEDIATELY at `<root>/docs/<name>.md` — the working
+ *     file IS the deliverable; no task-local `artifacts/` file and no defer record. A
+ *     rework re-writes the file; there is no `artifact-locked` to supersede. Conclusion
+ *     is the operator's: `git commit` the staged doc + record `evidence.commits[]`
+ *     (F-AC18) — the two-phase the frame enforces.
+ *   - `propose-spawn` DEFERS TO COMMIT, so a child's `requiredInputs` resolve through
+ *     the docs manifest / current() — doc-before-spawn holds BY CONSTRUCTION.
+ *   - `evidence` and `close` are immediate; each is idempotent on replay.
  *
  * The translator REFUSES an intent the step did not declare in `produces?[]` (its
  * absence means "produces NOTHING") — so the declaration the confirm-bound deadlock
  * check reads cannot drift from what `execute` actually does.
  *
- * DEFERRALS ARE PER-RUN, IN MEMORY. That is the design, not an omission: on resume the
- * chain RE-RUNS from the transcript and re-declares the same intents, so a crash before
- * commit loses nothing that the transcript cannot reproduce.
+ * THE STAGED-DOC SET IS PER-RUN, IN MEMORY. That is the design, not an omission: on
+ * resume the chain RE-RUNS from the transcript and re-declares the same intents, so a
+ * crash before commit loses nothing that the transcript cannot reproduce.
  */
 
-export interface DeferredLock {
+export interface StagedDoc {
   name: string;
-  type: string;
-  /** The task-local working file the event will record at commit. */
-  workingPath: string;
+  /** The git-home file (root-relative) the doc was written to. */
+  path: string;
 }
 
 export interface Deferred {
-  locks: DeferredLock[];
+  /** Docs staged this run — already on disk at docs/<name>.md (git content). */
+  docs: StagedDoc[];
   spawns: ProposeSpawnIntent[];
 }
 
 export interface CommitRecord {
-  locked: LockedArtifact[];
   spawned: string[];
 }
 
 const ok = <T>(value: T): CommandResult<T> => ({ ok: true, value });
 const fail = (code: string, blocker: string): CommandResult<never> => ({ ok: false, error: { code, blocker } });
 const today = (): string => new Date().toISOString().slice(0, 10);
+/** A doc name becomes a file stem under docs/ — refuse anything that would escape it. */
+const DOC_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 export class IntentTranslator {
-  readonly deferred: Deferred = { locks: [], spawns: [] };
+  readonly deferred: Deferred = { docs: [], spawns: [] };
 
   constructor(
     private readonly commands: Commands,
@@ -72,12 +73,10 @@ export class IntentTranslator {
     switch (intent.kind) {
       case 'evidence':
         return this.evidence(intent);
-      case 'lock-artifact':
-        return this.lockArtifact(step, intent);
+      case 'stage-doc':
+        return this.stageDoc(step, intent);
       case 'propose-spawn':
         return this.proposeSpawn(intent);
-      case 'supersede':
-        return this.supersede(intent);
       case 'close':
         return this.close(intent);
     }
@@ -97,33 +96,25 @@ export class IntentTranslator {
     return this.commands.append(this.taskId, event as unknown as JourneyEvent);
   }
 
-  /* ── lock-artifact — the FILE now, the EVENT at commit (defer-record) ── */
+  /* ── stage-doc — the doc file NOW, at the repo's git docs/ home ── */
 
-  private lockArtifact(step: Step, intent: LockArtifactIntent): CommandResult<undefined> {
-    const type = intent.type ?? 'record';
-    // Write confinement (AC-2): the working file derives from the node's canonical
-    // folder (resolveNode) — never re-derived from a raw legs/ id join here.
-    const dir = join(this.commands.store.resolveNode(this.taskId).dir, 'artifacts');
-    const file = join(dir, `${intent.name}.md`);
-    let content: string;
-    if (typeof intent.content === 'string') content = intent.content;
-    else if (intent.path) {
-      const src = join(this.commands.store.root, intent.path);
-      if (!existsSync(src)) return fail('no-source', `step '${step.id}' locked '${intent.name}' from ${intent.path}, which does not exist`);
-      content = readFileSync(src, 'utf8');
-    } else {
-      return fail('empty-lock', `step '${step.id}' declared lock-artifact '${intent.name}' with neither content nor path`);
+  private stageDoc(step: Step, intent: StageDocIntent): CommandResult<undefined> {
+    if (!DOC_NAME.test(intent.name)) {
+      return fail('stage-doc-name', `step '${step.id}' staged a doc named '${intent.name}' — docs live at top level of docs/ as <name>.md, and that name would not make a safe file stem`);
     }
+    // Write confinement (AC-2): the doc derives from the repo's canonical docs/ folder
+    // (root/docs) — never a caller-supplied path. It is git content, not a task artifact.
+    const dir = join(this.commands.store.root, 'docs');
+    const file = join(dir, `${intent.name}.md`);
     mkdirSync(dir, { recursive: true });
     // idempotent by bytes: a replay re-writes the same content, a rework re-writes fresh
-    writeFileSync(file, content);
-    const already = this.deferred.locks.find((l) => l.name === intent.name);
-    if (already) already.type = type;
-    else this.deferred.locks.push({ name: intent.name, type, workingPath: file });
+    writeFileSync(file, intent.content);
+    const already = this.deferred.docs.find((d) => d.name === intent.name);
+    if (!already) this.deferred.docs.push({ name: intent.name, path: `docs/${intent.name}.md` });
     return ok(undefined);
   }
 
-  /* ── propose-spawn — deferred to commit, beside the locks ── */
+  /* ── propose-spawn — deferred to commit ── */
 
   private proposeSpawn(intent: ProposeSpawnIntent): CommandResult<undefined> {
     if (intent.id.split('/').length !== 2) {
@@ -131,30 +122,6 @@ export class IntentTranslator {
     }
     if (this.commands.ids().includes(intent.id)) return ok(undefined); // no-op if the id exists
     if (!this.deferred.spawns.some((s) => s.id === intent.id)) this.deferred.spawns.push(intent);
-    return ok(undefined);
-  }
-
-  /* ── supersede — the ONE cross-task write; refuses a live locker ── */
-
-  private supersede(intent: SupersedeIntent): CommandResult<undefined> {
-    const current = this.commands.store.current(intent.name);
-    if (!current) return fail('no-current', `nothing current for '${intent.name}' — there is nothing to supersede`);
-    const locker = current.producer;
-    // The successor is THIS task's own artifact file for the same name (write
-    // confinement): the deferred lock's working file when one was materialized beside
-    // the supersede, else the canonical artifacts/<name>.md the flow would write. The
-    // supersede record never names a caller-supplied path — commands.supersede derives
-    // the successor path from resolveNode(this.taskId) + this file.
-    const deferred = this.deferred.locks.find((l) => l.name === intent.name);
-    const dir = join(this.commands.store.resolveNode(this.taskId).dir, 'artifacts');
-    const working = deferred ? deferred.workingPath : join(dir, `${intent.name}.md`);
-    const recordPath = relative(this.commands.store.root, working);
-    const identical = this.commands
-      .events(locker)
-      .some((e) => e.type === 'superseded' && e.successor?.name === intent.name && e.successor?.path === recordPath);
-    if (identical) return ok(undefined); // no-op on the identical event
-    const r = this.commands.supersede(locker, this.taskId, basename(working), intent.note ?? `superseded by ${this.taskId}`);
-    if (!r.ok) return r;
     return ok(undefined);
   }
 
@@ -183,37 +150,14 @@ export class IntentTranslator {
     return this.commands.append(this.taskId, { at: today(), type: 'gate-revised', gate: 'confirm', note } as unknown as JourneyEvent);
   }
 
-  /* ── the commit phase's record: LOCKS FIRST, THEN SPAWNS ── */
+  /* ── the commit phase's record: spawns only (docs were staged immediately) ── */
 
   /**
-   * Record the deferred intents. Ordering is locks-before-spawns, which is what makes
-   * lock-before-spawn hold BY CONSTRUCTION (§3 rule 2) — a child's `requiredInputs`
-   * resolve through `current()` because the parent's artifacts are already current.
-   *
-   * THE GATE②-TO-COMMIT CONTENT BINDING: when `submit!(confirm)` recorded a sha, one of
-   * the deferred working files must still hash to it (marker-stripped). A mismatch is
-   * REFUSED, named — the frame turns that into `failed`.
+   * Record the deferred intents at the commit boundary. Only `propose-spawn` defers:
+   * a child's `requiredInputs` resolve through the docs manifest / current() because
+   * the parent's staged doc is already on disk.
    */
-  commit(opts: { confirmedSha?: string } = {}): CommandResult<CommitRecord> {
-    if (opts.confirmedSha && this.deferred.locks.length) {
-      const shas = this.deferred.locks.map((l) => blobSha(stripMarkers(readFileSync(l.workingPath, 'utf8'))).slice(0, 7));
-      if (!shas.includes(opts.confirmedSha.slice(0, 7))) {
-        return fail(
-          'content-drift',
-          `the confirm gate decided on ${opts.confirmedSha.slice(0, 7)} but the working file(s) now hash to ${shas.join(', ')} — the artifact changed after the gate (commit refuses)`,
-        );
-      }
-    }
-    const locked: LockedArtifact[] = [];
-    for (const l of this.deferred.locks) {
-      const already = this.commands.store.current(l.name);
-      if (already?.producer === this.taskId) continue; // idempotent on replay — already recorded
-      // Confinement (AC-3): the working file lives in this task's own artifacts/ dir —
-      // commit names its basename, and lock! resolves it there. No path string crosses.
-      const r = this.commands.lock(this.taskId, basename(l.workingPath), { type: l.type });
-      if (!r.ok) return r;
-      locked.push(r.value);
-    }
+  commit(): CommandResult<CommitRecord> {
     const spawned: string[] = [];
     for (const s of this.deferred.spawns) {
       if (this.commands.ids().includes(s.id)) continue; // no-op if the id exists
@@ -221,7 +165,7 @@ export class IntentTranslator {
       if (!r.ok) return r;
       spawned.push(s.id);
     }
-    return ok({ locked, spawned });
+    return ok({ spawned });
   }
 }
 

@@ -24,31 +24,22 @@ export interface EvidenceIntent {
   answers?: Array<{ id: string; answer: string; provenance?: string }>;
 }
 
-/** DEFER-RECORD: the working FILE writes immediately; the `artifact-locked` EVENT
- *  records at COMMIT, once the task's gates are accepted (§3, §4). */
-export interface LockArtifactIntent {
-  kind: 'lock-artifact';
+/** STAGE-DOC: the doc WRITES IMMEDIATELY as git content at `<root>/docs/<name>.md`
+ *  — no defer record, no task-local `artifacts/` file. The staged bytes are real for
+ *  the confirm gate to review; CONCLUSION still needs the operator to `git commit`
+ *  the doc + record `evidence.commits[]` (F-AC18) — the two-phase stage → done (§4). */
+export interface StageDocIntent {
+  kind: 'stage-doc';
   name: string;
-  content?: string;
-  path?: string;
-  type?: string;
+  content: string;
 }
 
-/** A leg SIBLING (depth 2 — schedulable by frontmostReady/tasksOf). DEFERS TO COMMIT
- *  alongside `lock-artifact`, so the child's requiredInputs resolve via `current()`. */
+/** A leg SIBLING (depth 2 — schedulable by frontmostReady/tasksOf). DEFERS TO COMMIT,
+ *  so the child's requiredInputs resolve via the docs manifest / current(). */
 export interface ProposeSpawnIntent {
   kind: 'propose-spawn';
   id: string;
   contract: unknown;
-}
-
-/** `superseded` on the OLD LOCKER's node — the ONLY cross-task write (AC-7). The
- *  successor is THIS task's own artifact file for `name` (derived by the translator,
- *  never a caller-supplied path) — supersede! resolves it inside this task's node. */
-export interface SupersedeIntent {
-  kind: 'supersede';
-  name: string;
-  note?: string;
 }
 
 /** F-AC16 closure. */
@@ -59,10 +50,10 @@ export interface CloseIntent {
   'gate-revised'?: { old: string; new: string };
 }
 
-export type Intent = EvidenceIntent | LockArtifactIntent | ProposeSpawnIntent | SupersedeIntent | CloseIntent;
+export type Intent = EvidenceIntent | StageDocIntent | ProposeSpawnIntent | CloseIntent;
 export type IntentKind = Intent['kind'];
 
-export const INTENT_KINDS: IntentKind[] = ['evidence', 'lock-artifact', 'propose-spawn', 'supersede', 'close'];
+export const INTENT_KINDS: IntentKind[] = ['evidence', 'stage-doc', 'propose-spawn', 'close'];
 
 /* ---------------- the abilities (L3 implements, L2 defines) ---------------- */
 

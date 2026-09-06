@@ -16,7 +16,7 @@ import { Intent, Step, StepContext, StepOutput, StepRole } from '../types.js';
  * a cross-task committed input would arrive through `read` instead.
  */
 
-/** Co-located verify rule: an empty spec is not an artifact — fail. */
+/** Co-located verify rule: an empty spec is not a doc — fail. */
 export const specArtifactRule: RuleModule = {
   id: 'spec-artifact',
   definition: 'the spec step result must be a non-empty markdown document (F9: detailed specs from the vision)',
@@ -28,7 +28,7 @@ export const specArtifactRule: RuleModule = {
     if (!r || !r.ok) return [{ severity: 'error', code: 'spec-artifact', detail: 'spec step did not produce a result' }];
     const spec = r.artifact as string | undefined;
     if (typeof spec !== 'string' || !spec.trim()) {
-      return [{ severity: 'error', code: 'spec-artifact', detail: 'spec step returned an empty spec — nothing to lock as an artifact (F9)' }];
+      return [{ severity: 'error', code: 'spec-artifact', detail: 'spec step returned an empty spec — nothing to stage as a doc (F9)' }];
     }
     return [];
   },
@@ -66,7 +66,7 @@ export class SpecStep implements Step {
    *  straight to a LIGHT spec with no vision), so the role must tolerate resolving to
    *  nothing. When it does, the spec grounds on the idea + grounded context only. */
   readonly roles: StepRole[] = [{ name: 'vision', required: false, description: 'the product vision the spec expands (F8 → F9) — absent when the grill routes the idea clear (light spec)' }];
-  readonly produces = ['lock-artifact' as const];
+  readonly produces = ['stage-doc' as const];
   readonly rules: RuleModule[] = [specArtifactRule];
 
   async execute(ctx: StepContext): Promise<StepOutput> {
@@ -84,7 +84,7 @@ export class SpecStep implements Step {
       .replace('{acs}', acs.map((a, i) => `${i + 1}. ${a}`).join('\n') || '(none declared)');
 
     const spec = await ctx.abilities.llm.complete({ prompt });
-    const intents: Intent[] = [{ kind: 'lock-artifact', name: 'spec', content: spec, type: 'spec' }];
+    const intents: Intent[] = [{ kind: 'stage-doc', name: 'spec', content: spec }];
     return { ok: true, artifact: spec, intents };
   }
 }

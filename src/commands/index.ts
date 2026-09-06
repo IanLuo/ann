@@ -6,9 +6,9 @@ import { blobSha, stripMarkers } from '../store/sha.js';
 import { getVOCAB } from '../store/vocab.js';
 
 /** A producer artifact's LOGICAL NAME from its file — the stem (last extension
- *  stripped). lock!/supersede! take the artifacts-relative FILE and record this as
- *  the artifact name: the thin model names an artifact by the file that carries it
- *  (my-spec.md → my-spec, companion-guide.html → companion-guide, tool.js → tool). */
+ *  stripped). The goal-root seal takes the artifacts-relative FILE and records this
+ *  as the artifact name: the thin model names an artifact by the file that carries it
+ *  (goal.md → goal). Retired surface (D3) — this survives only for goal! seed. */
 const artifactNameOf = (file: string): string => file.replace(/\.[^./]*$/, '');
 
 /**
@@ -17,19 +17,25 @@ const artifactNameOf = (file: string): string => file.replace(/\.[^./]*$/, '');
  * CLI binding) reads and writes through here; nothing above ever touches L0.
  *
  * READS are derived views (status · packet · flow · results · look-back · specs ·
- * check · read). WRITES are the six mutators — `spawn!` · `submit!` · `gate!` ·
- * `append!` · `lock!` · `supersede!` — COMPLETE over the event vocabulary. The
- * composite mutators ENCODE THE INVARIANTS the design assigns to L1:
+ * check · read). WRITES are the mutators — `spawn!` · `submit!` · `gate!` ·
+ * `append!` — COMPLETE over the event vocabulary (docs-as-git retired the
+ * artifact surface). The composite mutators ENCODE THE INVARIANTS the design
+ * assigns to L1:
  *
  *   spawn!      the v14 node.json contract schema + F-AC19 + id naming + the
- *               artifact gate + the leg gate  (moved here from the CLI)
+ *               commit-evidence conclusion gate + the leg gate  (from the CLI)
  *   gate!       the reject bound (3/gate, a CONSTANT) + the two-write sequence
  *   submit!     the other half of that sequence + the gate② content binding
- *   append!     refuses the composite-owned kinds and `created`
- *   lock!       one-current-per-name + versioning (thin record over the node's own
- *               producer file — confined to the node's artifacts/ dir, AC-3)
- *   supersede!  the one cross-task write (successor named by node id + artifact file,
- *               resolved via resolveNode — never a raw path, AC-4)
+ *   append!     refuses the composite-owned kinds, `created`, and the RETIRED
+ *               doc-artifact vocab (artifact-locked / superseded — D3)
+ *
+ * DOCS ARE GIT CONTENT (the refactor): a task's deliverable is a doc STAGED to
+ * <root>/docs/ and COMMITTED by the operator; conclusion is `completed` +
+ * evidence.commits[]. The doc-artifact machinery is RETIRED from new writes —
+ * `lock` survives ONLY as the internal GOAL-ROOT SEAL that `goal! seed` applies
+ * (goal.md is still artifact-based until the goal doc moves to docs/), and
+ * `current()`/superseded reads stay as LEGACY readers for archived/historical
+ * nodes. Nothing forward routes through a lock.
  *
  * MULTI-CLIENT = multiple IN-PROCESS initiators (the flow, the validators, the
  * adapters). The CLI is a BINDING, not an initiator.
@@ -59,9 +65,18 @@ const COMPOSITE_OWNED: Record<string, string> = {
   submitted: 'submit!',
   confirmed: 'gate!',
   rejected: 'gate!',
-  'artifact-locked': 'lock!',
-  superseded: 'supersede!',
   'goal-met': 'goal!', // v6 — the sealed-session verdict is owned by goal! met
+};
+
+/** The RETIRED doc-artifact kinds (the docs-as-git refactor, D3) — refused on the
+ *  general append: a fresh `artifact-locked`/`superseded` through the write surface
+ *  would be a NEW write in a retired model. Artifact-locked still EXISTS in the log
+ *  as legacy/history and as goal! seed's goal-root seal (that lock writes through the
+ *  composite, not append!); it is simply no longer a general task write. */
+const RETIRED_KINDS: Record<string, string> = {
+  'artifact-locked':
+    'retired with the docs-as-git refactor (D3) — a task deliverable is now a doc staged to docs/ and committed; record evidence.commits[] to conclude (only goal! seed still seals a goal.md)',
+  superseded: 'retired with the docs-as-git refactor (D3) — a rework re-writes the staged docs/<name>.md; there is no lock to supersede',
 };
 
 /** The `goal! seed` FALLBACK guard text (goal-session-design §1 + the RE-SEEDABLE
@@ -208,11 +223,12 @@ export class Commands {
     if (segs.length > 1) {
       const parent = segs.slice(0, -1).join('/');
       if (!this.store.ids().includes(parent)) return fail('no-parent', `parent ${parent} does not exist`);
-      // The ARTIFACT GATE (format v14 §4/§14): a parent TASK may spawn children only
-      // after it has concluded. A leg parent carries no events by design — depth-2
+      // The CONCLUSION GATE (format v14 §4/§14, docs-as-git): a parent TASK may spawn
+      // children only after it has CONCLUDED — structured commit evidence
+      // (evidence.commits[]). A leg parent carries no events by design — depth-2
       // spawns are not gated on it (which is what makes deferred `propose-spawn` work).
       if (parent.split('/').length >= 2 && !this.store.parentConcluded(parent)) {
-        return fail('artifact-gate', `parent task ${parent} has no artifact-locked or commit evidence (format v14 §4)`);
+        return fail('conclusion-gate', `parent task ${parent} has no commit evidence (evidence.commits[]) — conclude it (docs are git content; commit the staged doc + record evidence) before spawning children`);
       }
       const sibs = this.store.tasksOf(parent).map((t) => t.split('/').pop()!);
       if (sibs.includes(last)) return fail('sibling-clash', `sibling ${last} already exists`);
@@ -348,10 +364,16 @@ export class Commands {
   /**
    * `append!` — the general single-writer append, for the kinds no composite owns
    * (the frame's lifecycle writes, evidence, closure, `waiting`, `extended`). It
-   * REFUSES the composite-owned kinds and `created`: those carry invariants, and an
-   * append that bypassed them would be a hole in every one of them.
+   * REFUSES the composite-owned kinds, `created`, and the RETIRED doc-artifact
+   * vocab (artifact-locked / superseded): those carry invariants — or, for the
+   * retired kinds, a retired model — and an append that bypassed them would be a
+   * hole in every one of them.
    */
   append(id: string, event: JourneyEvent): CommandResult {
+    const retired = RETIRED_KINDS[event?.type];
+    if (retired) {
+      return fail('retired-kind', `'${event.type}' ${retired}`);
+    }
     const owner = COMPOSITE_OWNED[event?.type];
     if (owner) {
       return fail('composite-owned', `'${event.type}' is owned by ${owner} — use it (the composite encodes the invariant; append! would bypass it)`);
@@ -365,16 +387,15 @@ export class Commands {
   }
 
   /**
-   * `lock!` — record an artifact (the COLLAPSED model, leg 07): a THIN named-artifact
-   * RECORD `{name, path, lockSha, type?, version?}` over the producer's OWN file.
-   * The caller names the file (a single artifacts-relative segment, AC-3); ann resolves
-   * it INSIDE the addressed node's own artifacts/ dir (never a free path), VERIFIES it
-   * exists, hashes the raw bytes (marker-tolerant — a no-op on unstamped files), derives
-   * the version from THE LOG, and records the event. The recorded `name` is the file's
-   * stem (the thin model names an artifact by the file that carries it). It NEVER
-   * writes, copies, stamps, or symlinks the file — the bytes on disk are untouched (AC1).
-   * `type` is an optional free-form tag with zero placement semantics (F2/F3 gone): any
-   * file type locks.
+   * `lock` — the GOAL-ROOT SEAL (goal-session-design §2): an artifact-locked record
+   * `{name, path, lockSha, type?, version?}` sealing goal.md ON THE GOAL ROOT. Docs-as-git
+   * (D3) retired the general artifact surface — this composite survives ONLY as the
+   * follow-on seal `goal! seed` applies (the goal doc is still artifact-based until it
+   * moves to docs/), and goalDocOf reads the same record. Caller names the file (a
+   * single artifacts-relative segment, AC-3); ann resolves it INSIDE the node's own
+   * artifacts/ dir (never a free path), VERIFIES it exists, hashes the raw bytes
+   * (marker-tolerant), derives the version from THE LOG, and records the event. It NEVER
+   * writes, copies, or stamps the file — the bytes on disk are untouched (AC1).
    */
   lock(id: string, artifactFile: string, opts: { type?: string; note?: string } = {}): CommandResult<LockedArtifact> {
     if (!this.store.ids().includes(id)) return fail('no-node', `no node ${id}`);
@@ -418,54 +439,6 @@ export class Commands {
       }
     }
     return max + 1;
-  }
-
-  /**
-   * `supersede!` — the ONLY cross-task write: `superseded` on the OLD LOCKER's node.
-   * Write confinement (AC-4): the successor is named by NODE ID + an artifacts-relative
-   * file — resolved via resolveNode(successorId) into that node's own artifacts/ dir —
-   * never a raw caller-supplied path. The recorded successor {name, path} therefore
-   * always points at a REAL producer file inside the successor node's folder; `name` is
-   * that file's stem (the artifact it replaces carries the same logical name — rework
-   * never renames). The frame REFUSES to supersede a locker that is not `done`
-   * (core-design §3): the status collapse applies to any non-done/failed node carrying
-   * `superseded`, so superseding a live locker in its commit window would silently kill
-   * it — checked BEFORE the successor is resolved, so a live locker is refused even when
-   * its replacement file is not yet materialized.
-   */
-  supersede(id: string, successorId: string, artifactFile: string, note = ''): CommandResult<{ name: string; path: string }> {
-    if (!this.store.ids().includes(id)) return fail('no-node', `no node ${id}`);
-    const status = this.store.status(id);
-    if (!['done', 'failed', 'superseded'].includes(status)) {
-      return fail(
-        'live-locker',
-        `refusing to supersede ${id}: it is '${status}', not done — a 'superseded' event collapses a live node's status (core-design §3)`,
-      );
-    }
-    let successorNode: NodeDir;
-    try {
-      successorNode = this.store.resolveNode(successorId);
-    } catch (e) {
-      return fail('no-successor-node', (e as Error).message);
-    }
-    const full = this.nodeArtifactFile(successorNode, artifactFile);
-    if (!full) {
-      return fail('outside-artifacts', `'${artifactFile}' is not a file inside ${successorId}/artifacts/ — the successor must be the node's own producer file (write confinement)`);
-    }
-    if (!existsSync(full)) return fail('no-successor', `successor file not found: ${successorId}/artifacts/${artifactFile}`);
-    const name = artifactNameOf(artifactFile);
-    const path = relative(this.store.root, full);
-    try {
-      this.store.appendEvent(this.store.resolveNode(id), {
-        at: this.today,
-        type: 'superseded',
-        successor: { name, path },
-        note: note || `${name} superseded → ${path} (${this.who})`,
-      });
-    } catch (e) {
-      return fail('store-refused', (e as Error).message);
-    }
-    return ok({ name, path });
   }
 
   /* ══ v6 goal session — `goal` (read) · `goal! met` · `goal! archive` ════════ */

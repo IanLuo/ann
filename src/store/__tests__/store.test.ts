@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, appendFileSync, symlinkSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store, JourneyEvent } from '../store.js';
@@ -21,6 +22,18 @@ function writeNode(id: string, contract: unknown, events: Array<Record<string, u
   writeFileSync(join(nodeDir(id), 'events.jsonl'), events.map((e) => JSON.stringify(e)).join('\n') + '\n');
 }
 const ev = (type: string, extra: Record<string, unknown> = {}) => ({ at: '2026-08-19', type, ...extra });
+
+/** Pre-create a node's folder (WITHOUT node.json) so store.spawn() can write its
+ *  immutable creation record. The docs-as-git source no longer mkdirs on spawn —
+ *  the folder is created by the caller — so fixtures that exercise spawn() must
+ *  make the folder first (writeNode pre-creates for pre-written nodes). */
+function prepDir(id: string) { mkdirSync(nodeDir(id), { recursive: true }); }
+
+/** A sha that resolves in the ann repo — required for fixture evidence.commits[]
+ *  that check() will trace (`git cat-file -t`, run against process.cwd()). */
+function realSha() {
+  return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: process.cwd() }).toString().trim().slice(0, 7);
+}
 
 describe('Store — derived status (journey-format-spec v8 §12)', () => {
   beforeEach(() => { makeStore(); });
@@ -271,12 +284,6 @@ describe('Store — check() integrity', () => {
     expect(s.check().some((p) => p.includes('does not exist (F-AC16)'))).toBe(true);
   });
 
-  it('flags a MISSING current artifact file (resolution fail-closed)', () => {
-    writeNode('01-goal/01-a', {}, [ev('created'), ev('artifact-locked', { artifact: { name: 'spec', path: 'journey/legs/01-goal/01-a/artifacts/does-not-exist.md', lockSha: 'a' } })]);
-    const s = new Store(root);
-    expect(s.check().some((p) => p.includes('MISSING: spec'))).toBe(true);
-  });
-
   it('flags a locked-but-orphaned name (one current per name)', () => {
     writeNode('01-goal/01-a', {}, [ev('created'), ev('artifact-locked', { artifact: { name: 'spec', path: 'p1.md', lockSha: 'a' } })]);
     writeNode('01-goal/02-b', {}, [ev('created'), ev('artifact-locked', { artifact: { name: 'spec', path: 'p2.md', lockSha: 'b' } }), ev('superseded', { successor: { name: 'other', path: 'p3.md' } })]);
@@ -312,22 +319,6 @@ describe('Store — verify() the DRIFT read (log claims vs filesystem/git realit
     expect(new Store(root).verify()).toEqual([]);
   });
 
-  it('D2 — flags a current artifact whose recorded lockSha no longer matches the file bytes', () => {
-    const actual = blobSha(SPEC);
-    lockSpec(actual.slice(0, 7) + 'x'); // last char changed — the recorded sha is stale
-    const drifts = new Store(root).verify();
-    expect(drifts).toHaveLength(1);
-    expect(drifts[0]).toContain('locksha: spec');
-  });
-
-  it('D4 — flags an .md under artifacts/ that no artifact-locked event names', () => {
-    writeNode('01-goal/01-a', {}, [ev('created')]);
-    const dir = join(nodeDir('01-goal/01-a'), 'artifacts');
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, 'goal.md'), 'orphan\n');
-    expect(new Store(root).verify()).toContain('artifact-orphan: 01-goal/01-a/artifacts/goal.md vs no artifact-locked event of this node names it');
-  });
-
   it('D4 — an evidence-cited fixture in artifacts/ is accounted for, not an orphan (F4 gone)', () => {
     const dir = join(nodeDir('01-goal/01-a'), 'artifacts');
     mkdirSync(dir, { recursive: true });
@@ -356,6 +347,7 @@ describe('Store — spawn (creation record + created event through the single wr
 
   it('writes node.json + the created event via appendEvent (tasks)', () => {
     const s = new Store(root);
+    prepDir('01-goal/01-a');
     s.spawn('01-goal/01-a', { contract: { intent: 'x', acceptanceCriteria: ['a'] } });
     expect(existsSync(join(root, '.ann', 'journey', 'legs', '01-goal', '01-a', 'node.json'))).toBe(true);
     expect(s.events('01-goal/01-a').map((e) => e.type)).toEqual(['created']);
@@ -364,6 +356,7 @@ describe('Store — spawn (creation record + created event through the single wr
 
   it('spawning a leg writes NO events at all (v8 §13 — leg roots have no log)', () => {
     const s = new Store(root);
+    prepDir('07-new-leg');
     s.spawn('07-new-leg', { contract: { intent: 'x', acceptanceCriteria: ['a'] } });
     expect(existsSync(join(root, '.ann', 'journey', 'legs', '07-new-leg', 'events.jsonl'))).toBe(false);
     expect(s.events('07-new-leg')).toEqual([]);
@@ -371,6 +364,7 @@ describe('Store — spawn (creation record + created event through the single wr
 
   it('appendEvent refuses events on leg roots (write path = the enforcement)', () => {
     const s = new Store(root);
+    prepDir('07-new-leg');
     s.spawn('07-new-leg', { contract: { intent: 'x', acceptanceCriteria: ['a'] } });
     expect(() => s.appendEvent(s.resolveNode('07-new-leg'), ev('completed'))).toThrow(/leg roots carry no events/);
   });
@@ -378,6 +372,7 @@ describe('Store — spawn (creation record + created event through the single wr
   it('writes openQuestions as a TOP-LEVEL sibling of contract (format v14 §2)', () => {
     const s = new Store(root);
     const oq = [{ id: 'Q1', question: 'which way?', blocking: true }];
+    prepDir('01-goal/01-a');
     s.spawn('01-goal/01-a', { contract: { intent: 'x', acceptanceCriteria: ['a'], openQuestions: oq } });
     const node = JSON.parse(readFileSync(join(root, '.ann', 'journey', 'legs', '01-goal', '01-a', 'node.json'), 'utf8'));
     expect(node.openQuestions).toEqual(oq);
@@ -387,12 +382,14 @@ describe('Store — spawn (creation record + created event through the single wr
 
   it('rejects a re-spawn (immutable id)', () => {
     const s = new Store(root);
+    prepDir('01-goal/01-a');
     s.spawn('01-goal/01-a', { contract: { intent: 'x', acceptanceCriteria: ['a'] } });
     expect(() => new Store(root).spawn('01-goal/01-a', {})).toThrow();
   });
 
   it('write confinement (AC-1): resolveNode mints the ONE id→folder mapping and refuses every escape', () => {
     const s = new Store(root);
+    prepDir('01-goal/01-a');
     s.spawn('01-goal/01-a', { contract: { intent: 'x', acceptanceCriteria: ['a'] } });
     // the canonical folder — the only target a writer may derive from
     expect(s.resolveNode('01-goal/01-a').dir).toBe(join(root, '.ann', 'journey', 'legs', '01-goal', '01-a'));
@@ -484,13 +481,22 @@ describe('Store — F-AC18 artifact gate (format v9 §14)', () => {
     expect(new Store(root).check().some((p) => p.includes('F-AC18'))).toBe(false);
   });
 
-  it('a v9 task WITH an artifact-locked record passes F-AC18', () => {
+  it('a v9 task WITH only an artifact-locked record now fails F-AC18 (commit evidence is the conclusion)', () => {
     const id = '06-engine-build/06-new-task';
-    mkdirSync(join(nodeDir(id), 'artifacts'), { recursive: true });
-    writeFileSync(join(nodeDir(id), 'artifacts', 'record.md'), '# record\n');
     writeV9Node(id, '2026-08-21', [
       ev('created'), ev('confirmed', { gate: 'grill' }),
       ev('artifact-locked', { artifact: { name: 'record', path: 'journey/legs/06-engine-build/06-new-task/artifacts/record.md', lockSha: 'abc1234' } }),
+      ev('confirmed', { gate: 'confirm' }), ev('completed'),
+    ]);
+    expect(new Store(root).check().some((p) => p.includes('F-AC18'))).toBe(true); // the retired lock no longer concludes
+  });
+
+  it('a v9 task with commit evidence (its artifact-locked record also present) passes F-AC18', () => {
+    const id = '06-engine-build/06-new-task';
+    writeV9Node(id, '2026-08-21', [
+      ev('created'), ev('confirmed', { gate: 'grill' }),
+      ev('artifact-locked', { artifact: { name: 'record', path: 'journey/legs/06-engine-build/06-new-task/artifacts/record.md', lockSha: 'abc1234' } }),
+      ev('evidence', { commits: [{ sha: realSha(), note: 'commit the staged doc' }] }),
       ev('confirmed', { gate: 'confirm' }), ev('completed'),
     ]);
     expect(new Store(root).check().some((p) => p.includes('F-AC18'))).toBe(false);
@@ -505,7 +511,7 @@ describe('Store — F-AC18 artifact gate (format v9 §14)', () => {
     expect(new Store(root).check().some((p) => p.includes('F-AC18'))).toBe(false);
   });
 
-  it('parentConcluded: true for a locked artifact OR commit evidence, false for neither (v10 gate)', () => {
+  it('parentConcluded is COMMIT-EVIDENCE ONLY — a locked artifact no longer concludes (v10 gate)', () => {
     const a = '06-engine-build/08a';
     const b = '06-engine-build/08b';
     const c = '06-engine-build/08c';
@@ -515,7 +521,7 @@ describe('Store — F-AC18 artifact gate (format v9 §14)', () => {
     writeNode(b, {}, [ev('evidence', { commits: [{ sha: 'abc1234' }] })]);
     writeNode(c, {}, [ev('evidence', { note: 'no commits here' })]);
     const s = new Store(root);
-    expect(s.parentConcluded(a)).toBe(true); // artifact-locked
+    expect(s.parentConcluded(a)).toBe(false); // artifact-locked alone — retired, never concludes
     expect(s.parentConcluded(b)).toBe(true); // commit evidence
     expect(s.parentConcluded(c)).toBe(false); // prose only — never counts (NFR-COM-1)
   });
@@ -603,13 +609,13 @@ describe('Store — detail() (the full task/leg card)', () => {
     expect(d.gates.grill).toMatchObject({ state: 'confirmed' });
     expect(d.gates.confirm.state).toBe('submitted'); // awaiting decision
     expect(d.artifacts).toEqual([
-      expect.objectContaining({ name: 'thing-spec', sha: 'abc1234', role: 'current', path: '.ann/journey/legs/06-engine-build/05-s2/artifacts/spec.md' }),
+      expect.objectContaining({ name: 'thing-spec', sha: 'abc1234', role: 'historical', path: '.ann/journey/legs/06-engine-build/05-s2/artifacts/spec.md' }),
     ]);
     expect(d.blockers).toEqual(['submitted (gate=confirm) awaiting decision']);
     expect(d.events.length).toBe(5);
   });
 
-  it('marks an artifact superseded when another producer holds current', () => {
+  it('detail() reports every locked artifact as historical — roles no longer derive current/superseded', () => {
     writeNode('01-goal/01-a', {}, [
       ev('created'),
       ev('artifact-locked', { artifact: { name: 'x-spec', path: 'journey/legs/01-goal/01-a/artifacts/x.md', lockSha: '111' } }),
@@ -622,8 +628,10 @@ describe('Store — detail() (the full task/leg card)', () => {
     const s = new Store(root);
     const d1 = s.detail('01-goal/01-a');
     const d2 = s.detail('01-goal/01-b');
-    expect(d1.artifacts[0].role).toBe('superseded');
-    expect(d2.artifacts[0].role).toBe('current');
+    expect(d1.artifacts[0].role).toBe('historical');
+    expect(d2.artifacts[0].role).toBe('historical');
+    // supersession still resolves through the LEGACY current() reader (never via detail roles)
+    expect(s.current('x-spec')?.producer).toBe('01-goal/01-b');
   });
 
   it('lists a leg\'s tasks with statuses', () => {
@@ -791,7 +799,7 @@ describe('Store — results() (type-aware result gathering, format v10)', () => 
   beforeEach(() => { makeStore(); });
   afterEach(() => { rmSync(root, { recursive: true, force: true }); });
 
-  it('gathers docs, commits, refs, links, and evidence from the log, in order', () => {
+  it('gathers commits, refs, links, and evidence from the log, in order (a locked artifact yields no doc item)', () => {
     const id = '06-engine-build/05-s2';
     mkdirSync(join(nodeDir(id), 'artifacts'), { recursive: true });
     writeFileSync(join(nodeDir(id), 'artifacts', 'spec.md'), '# spec\n');
@@ -802,12 +810,11 @@ describe('Store — results() (type-aware result gathering, format v10)', () => 
       ev('evidence', { note: 'checkpoint — prose only' }),
     ]);
     const items = new Store(root).results(id);
-    expect(items.map((i) => i.kind)).toEqual(['doc', 'commit', 'ref', 'link', 'evidence']);
-    expect(items[0]).toMatchObject({ kind: 'doc', label: expect.stringContaining('thing-spec @ abc1234 [current]') });
-    expect(items[1]).toMatchObject({ kind: 'commit', sha: '8e94c58' });
-    expect(items[2]).toMatchObject({ kind: 'ref', path: 'src/abilities/llm/' });
-    expect(items[3]).toMatchObject({ kind: 'link', url: 'https://example.com/ext' });
-    expect(items[4]).toMatchObject({ kind: 'evidence', note: expect.stringContaining('prose only') });
+    expect(items.map((i) => i.kind)).toEqual(['commit', 'ref', 'link', 'evidence']);
+    expect(items[0]).toMatchObject({ kind: 'commit', sha: '8e94c58' });
+    expect(items[1]).toMatchObject({ kind: 'ref', path: 'src/abilities/llm/' });
+    expect(items[2]).toMatchObject({ kind: 'link', url: 'https://example.com/ext' });
+    expect(items[3]).toMatchObject({ kind: 'evidence', note: expect.stringContaining('prose only') });
   });
 
   it('returns an empty list for a node with no results', () => {
@@ -832,6 +839,7 @@ describe('Store — the write-rev ledger (store-external integrity)', () => {
     writeNode('01-leg/01-a', {}, [ev('created')]);
     new Store(root).verify();
     expect(existsSync(LEDGER())).toBe(false);
+    prepDir('01-leg/02-b');
     new Store(root).spawn('01-leg/02-b', CONTRACT);
     expect(existsSync(LEDGER())).toBe(true);
     const node = readLedger().nodes['01-leg/02-b'];
@@ -841,6 +849,7 @@ describe('Store — the write-rev ledger (store-external integrity)', () => {
   });
 
   it('a leg spawn records nodeContent only (leg roots carry no events)', () => {
+    prepDir('01-leg');
     new Store(root).spawn('01-leg', CONTRACT);
     const node = readLedger().nodes['01-leg'];
     expect(node.eventsContent).toBe('');
@@ -849,6 +858,7 @@ describe('Store — the write-rev ledger (store-external integrity)', () => {
 
   it('refuses a write when events.jsonl was changed outside the CLI (no masking)', () => {
     const s = new Store(root);
+    prepDir('01-leg/01-a');
     s.spawn('01-leg/01-a', CONTRACT);
     appendFileSync(evPath('01-leg/01-a'), JSON.stringify(ev('extended', { note: 'hand-written' })) + '\n');
     expect(() => s.appendEvent(s.resolveNode('01-leg/01-a'), extended())).toThrow(/store-external edit on 01-leg\/01-a/);
@@ -856,6 +866,7 @@ describe('Store — the write-rev ledger (store-external integrity)', () => {
 
   it('refuses a write when node.json was changed outside the CLI', () => {
     const s = new Store(root);
+    prepDir('01-leg/01-a');
     s.spawn('01-leg/01-a', CONTRACT);
     writeFileSync(join(nodeDir('01-leg/01-a'), 'node.json'), JSON.stringify({ id: '01-leg/01-a', contract: { intent: 'tampered' }, createdAt: '2026-08-20' }));
     expect(() => s.appendEvent(s.resolveNode('01-leg/01-a'), extended())).toThrow(/store-external edit on 01-leg\/01-a/);
@@ -871,6 +882,7 @@ describe('Store — the write-rev ledger (store-external integrity)', () => {
 
   it('verify classifies an external append with its onset bound and the differing line', () => {
     const s = new Store(root);
+    prepDir('01-leg/01-a');
     s.spawn('01-leg/01-a', CONTRACT);
     s.appendEvent(s.resolveNode('01-leg/01-a'), extended());
     appendFileSync(evPath('01-leg/01-a'), JSON.stringify(ev('extended', { note: 'forged' })) + '\n');
@@ -883,6 +895,7 @@ describe('Store — the write-rev ledger (store-external integrity)', () => {
 
   it('verify classifies truncate, reorder and rewrite', () => {
     const s = new Store(root);
+    prepDir('01-leg/01-a');
     s.spawn('01-leg/01-a', CONTRACT);
     s.appendEvent(s.resolveNode('01-leg/01-a'), extended());
     const twoLines = readFileSync(evPath('01-leg/01-a'), 'utf8');
@@ -905,6 +918,7 @@ describe('Store — the write-rev ledger (store-external integrity)', () => {
 
   it('verify classifies a node.json edit', () => {
     const s = new Store(root);
+    prepDir('01-leg/01-a');
     s.spawn('01-leg/01-a', CONTRACT);
     const nd = join(nodeDir('01-leg/01-a'), 'node.json');
     writeFileSync(nd, readFileSync(nd, 'utf8').replace('build the ledger', 'tampered'));
@@ -912,6 +926,7 @@ describe('Store — the write-rev ledger (store-external integrity)', () => {
   });
 
   it('verify reports an unparseable events.jsonl without crashing (load hardening)', () => {
+    prepDir('01-leg/01-a');
     new Store(root).spawn('01-leg/01-a', CONTRACT);
     writeFileSync(evPath('01-leg/01-a'), 'not-json\n');
     const problems = new Store(root).verify();
@@ -919,6 +934,7 @@ describe('Store — the write-rev ledger (store-external integrity)', () => {
   });
 
   it('a corrupt ledger refuses writes (before touching the log) and is reported by verify', () => {
+    prepDir('01-leg/01-a');
     new Store(root).spawn('01-leg/01-a', CONTRACT); // bootstrap a real ledger
     writeFileSync(LEDGER(), '{{{ not json');
     const s2 = new Store(root);
@@ -1022,10 +1038,12 @@ describe('Store — v6 goal session (goal-session-design §2/§4 + seed/archive)
 
   it('a spawned CHILDLESS leg records a ledger eventsContent of \'\' with no events.jsonl — verify reads it clean (ledger guard: missing file ≡ empty log)', () => {
     const s = new Store(root);
+    prepDir('01-leg');
     s.spawn('01-leg', CONTRACT); // leg root: node.json only, ledger eventsContent ''
     expect(existsSync(join(nodeDir('01-leg'), 'events.jsonl'))).toBe(false);
     expect(new Store(root).verify().filter((d) => d.startsWith('store-external:'))).toEqual([]);
     // and a task spawned under it writes cleanly (no null-vs-\'\' mismatch on the sibling entry)
+    prepDir('01-leg/01-a');
     new Store(root).spawn('01-leg/01-a', CONTRACT);
     expect(new Store(root).verify().filter((d) => d.startsWith('store-external:'))).toEqual([]);
   });
@@ -1033,7 +1051,9 @@ describe('Store — v6 goal session (goal-session-design §2/§4 + seed/archive)
   it('archiveJourney moves legs + the ledger to .ann/archive/sessions/<ts>-<slug>/journey and resets the live store', () => {
     const s = new Store(root);
     s.seedGoal(DOC);
+    prepDir('02-work');
     s.spawn('02-work', CONTRACT);
+    prepDir('02-work/01-a');
     s.spawn('02-work/01-a', CONTRACT);
     s.appendEvent(s.resolveNode('01-goal'), ev('goal-met', { decision: 'met' }));
     expect(existsSync(join(root, '.ann', 'journey', '.ledger.json'))).toBe(true);

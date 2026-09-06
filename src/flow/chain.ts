@@ -325,11 +325,11 @@ export function validateChain(lookup: StepLookup, chain: ChainEntry[], packet: C
 
   // THE CONFIRM-BOUND DEADLOCK, rejected at VALIDATION (§3 rule 8) — via the step's
   // declared produces?[] (absence = "produces NOTHING", fail-closed).
-  const producers = chain.filter((e) => lookup.has(e.id) && (lookup.get(e.id).produces ?? []).includes('lock-artifact'));
+  const producers = chain.filter((e) => lookup.has(e.id) && (lookup.get(e.id).produces ?? []).includes('stage-doc'));
   if (producers.length && producers.every((e) => phaseOf(e) === 'confirm')) {
     problems.push({
       at: producers.map((e) => e.id).join(', '),
-      problem: `every artifact-producing step is confirm-bound — the confirm gate would decide on work that has not run yet (deadlock)`,
+      problem: `every doc-staging step is confirm-bound — the confirm gate would decide on work that has not run yet (deadlock)`,
     });
   }
 

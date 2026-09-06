@@ -1,8 +1,3 @@
-import { readFileSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
-import { createHash } from 'node:crypto';
-import { basename } from 'node:path';
-import { execFileSync } from 'node:child_process';
 import { RuleFinding, ValidatorContext } from './types.js';
 
 /** The nodes a rule should check: one node (ann validate <id>) or all tasks. */
@@ -61,38 +56,6 @@ export const closureIntegrity = {
     const out: RuleFinding[] = [];
     for (const p of ctx.store.check()) {
       if (p.includes('gate-revised') || p.includes('transferred')) out.push({ severity: 'error', code: 'closure-integrity', detail: p });
-    }
-    return out;
-  },
-};
-
-/** one-current-per-name — no two non-superseded artifacts share a logical name. */
-export const oneCurrent = {
-  id: 'one-current-per-name',
-  definition: 'no two non-superseded artifacts share a logical name',
-  severity: 'error' as const,
-  enabled: true,
-  params: {},
-  run(ctx: ValidatorContext): RuleFinding[] {
-    const out: RuleFinding[] = [];
-    for (const p of ctx.store.check()) {
-      if (p.includes('NO CURRENT') || p.includes('MISSING')) out.push({ severity: 'error', code: 'one-current-per-name', detail: p });
-    }
-    return out;
-  },
-};
-
-/** resolution-files-exist — every current artifact's file exists on disk. */
-export const resolutionFiles = {
-  id: 'resolution-files-exist',
-  definition: "every current artifact's file exists on disk",
-  severity: 'error' as const,
-  enabled: true,
-  params: {},
-  run(ctx: ValidatorContext): RuleFinding[] {
-    const out: RuleFinding[] = [];
-    for (const p of ctx.store.check()) {
-      if (p.includes('MISSING:')) out.push({ severity: 'error', code: 'resolution-files-exist', detail: p });
     }
     return out;
   },
@@ -260,66 +223,6 @@ export const redaction = {
     return out;
   },
 };
-
-/** artifact-hash-integrity — marker-stripped blob vs recorded lockSha. Fast path: the blob
- *  matches the marker → verified. Mismatch: resolve the marker in git — if the lock commit's
- *  file matches the current blob → verified vs lock commit; else → pre-integrity-era edit
- *  (WARNING, grandfathered — never "tampered" without proof). Unresolvable marker → warning. */
-export const artifactHash = {
-  id: 'artifact-hash-integrity',
-  definition: 'marker-stripped blob vs recorded lockSha — fail-closed on new locks',
-  severity: 'error' as const,
-  enabled: true,
-  params: {},
-  run(ctx: ValidatorContext): RuleFinding[] {
-    const out: RuleFinding[] = [];
-    const seen = new Set<string>();
-    for (const id of ctx.store.ids()) {
-      for (const e of ctx.store.events(id)) {
-        if (e.type !== 'artifact-locked') continue;
-        const a = e.artifact;
-        if (!a?.name || !a.lockSha || seen.has(a.name)) continue;
-        const cur = ctx.store.current(a.name);
-        if (cur?.producer !== id) continue;
-        seen.add(a.name);
-        const full = join(ctx.store.root, cur.path);
-        if (!existsSync(full)) {
-          out.push({ severity: 'error', code: 'artifact-hash-integrity', detail: `${a.name}: file missing at ${cur.path}`, nodeId: id });
-          continue;
-        }
-        const content = readFileSync(full, 'utf8').replace(/^<!-- (?:specs:locked|draft)[^\n]* -->\n?/, '');
-        const h = blobSha(content).slice(0, 7);
-        const raw = readFileSync(full, 'utf8');
-        const markerSha = (raw.match(/specs:locked:([0-9a-f]{7,})/) || [])[1] || a.lockSha;
-        if (markerSha && h === markerSha.slice(0, 7)) continue; // fast path: verified
-        // slow path — resolve the marker in git (mirrors cmdCheck: never call legit history "tampered")
-        try {
-          const kind = execFileSync('git', ['cat-file', '-t', markerSha], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-          if (kind === 'commit') {
-            const hit = execFileSync('git', ['ls-tree', '-r', '--name-only', markerSha], { encoding: 'utf8' })
-              .split('\n').find((p) => p.endsWith('/' + basename(cur.path)));
-            if (hit) {
-              const at = execFileSync('git', ['show', `${markerSha}:${hit}`], { encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 }).replace(/^<!-- (?:specs:locked|draft)[^\n]* -->\n?/, '');
-              if (blobSha(at).slice(0, 7) === h) continue; // matches the lock commit → verified
-            }
-            out.push({ severity: 'warning', code: 'artifact-hash-integrity', detail: `${a.name}: edited after lock commit ${markerSha.slice(0, 7)} (pre-integrity era — re-lock if intentional)`, nodeId: id });
-          } else if (kind === 'blob') {
-            out.push({ severity: 'warning', code: 'artifact-hash-integrity', detail: `${a.name}: legacy blob stamp (draft-marker era) — not hash-verified`, nodeId: id });
-          } else {
-            out.push({ severity: 'error', code: 'artifact-hash-integrity', detail: `${a.name}: lockSha ${markerSha} is neither commit nor blob`, nodeId: id });
-          }
-        } catch {
-          out.push({ severity: 'warning', code: 'artifact-hash-integrity', detail: `${a.name}: lock sha ${markerSha} unresolvable in git (legacy)`, nodeId: id });
-        }
-      }
-    }
-    return out;
-  },
-};
-
-function blobSha(c: string): string {
-  return createHash('sha1').update('blob ' + Buffer.byteLength(c) + '\n' + c).digest('hex');
-}
 
 /** high-impact-defaulted — a blocking open question resolved on a completed node must carry answer provenance. */
 export const highImpactDefaulted = {

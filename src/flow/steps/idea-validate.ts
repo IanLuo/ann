@@ -1,6 +1,6 @@
 import { RuleModule } from '../validators/types.js';
 import { GroundingInput } from './shared.js';
-import { Intent, Step, StepContext, StepOutput, fail } from '../types.js';
+import { Step, StepContext, StepOutput, fail } from '../types.js';
 import { IdeaValidationDoc, IdeaValidationSession } from './idea-validate/session.js';
 
 /**
@@ -63,7 +63,7 @@ export class IdeaValidateStep implements Step {
   readonly id = 'idea-validate';
   /** Consumes the task contract + packet only — no earlier-step binding. */
   readonly roles = [];
-  readonly produces = ['lock-artifact' as const];
+  // no `produces` — the validation is a verdict + in-memory doc (spec stages the doc)
   /** DEPTH IS THE DECISION (shaping): clear/ambiguous both accept at the grill gate but
    *  route different depths downstream; revise/reject reject. */
   readonly decisions = ['clear', 'ambiguous', 'revise', 'reject'];
@@ -84,12 +84,10 @@ export class IdeaValidateStep implements Step {
     if (!r.ok) return fail(r.error.code, r.error.blocker);
 
     const decision = foldDepth(r.doc);
-    const intents: Intent[] = [{ kind: 'lock-artifact', name: 'idea-validation', content: r.doc.markdown, type: 'validation' }];
     return {
       ok: true,
       artifact: { doc: r.doc, markdown: r.doc.markdown },
       verdict: { decision, ...(r.doc.guidance.length ? { feedback: r.doc.guidance.join(' · ') } : {}) },
-      intents,
     };
   }
 }

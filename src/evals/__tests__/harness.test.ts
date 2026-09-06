@@ -83,7 +83,7 @@ describe('measureK4 — advance correctness', () => {
 });
 
 describe('measureK5 — completion success on first pass', () => {
-  it('the positive fixtures (spec, multi) complete on FIRST PASS — verified by locked work', async () => {
+  it('the positive fixtures (spec, multi) first-pass — staged doc + commit evidence, concluded two-phase', async () => {
     for (const fixture of FLOW_FIXTURES.filter((f) => f.expectedFirstPass)) {
       const k = await measureK5(fixture);
       expect(k.pass, `${fixture.id}: ${k.detail}`).toBe(true);
@@ -99,13 +99,14 @@ describe('measureK5 — completion success on first pass', () => {
     }
   });
 
-  it('NEVER counts unverified ACs as passes — an empty locked artifact is not first-pass', async () => {
-    // The frame itself fails verify on an empty artifact, so stop ≠ completed; and even
-    // the eval's own `verified` gate (artifact file non-empty OR evidence.commits[]) is
-    // false. Either layer alone is enough — together they prove the honesty guarantee.
-    const emptyArtifact: FlowFixture = {
-      id: 'flow-empty-artifact',
-      name: 'an empty artifact is NOT verifiable work',
+  it('NEVER counts unverified ACs as passes — an empty staged doc is not first-pass', async () => {
+    // A stage-doc with only whitespace bytes: the frame itself fails verify on an empty
+    // doc (no staged bytes to conclude), so stop ≠ completed; and even the eval's own
+    // `verified` gate (a non-empty docs/<name>.md AND evidence.commits[]) is false.
+    // Either layer alone is enough — together they prove the honesty guarantee.
+    const emptyDoc: FlowFixture = {
+      id: 'flow-empty-doc',
+      name: 'an empty staged doc is NOT verifiable work',
       chain: ['spec'],
       steps: [
         {
@@ -113,14 +114,14 @@ describe('measureK5 — completion success on first pass', () => {
           execute: async () => ({
             ok: true,
             artifact: 'spec artifact',
-            intents: [{ kind: 'lock-artifact', name: 'spec-result', content: '   \n  ', type: 'record' }],
+            intents: [{ kind: 'stage-doc', name: 'spec-result', content: '   \n  ' }],
           }),
         },
       ],
       interactAnswers: ['accept', 'accept'],
       expectedFirstPass: false,
     };
-    const k = await measureK5(emptyArtifact);
+    const k = await measureK5(emptyDoc);
     expect(k.pass, k.detail).toBe(true);
     expect(k.detail).toContain('NOT counted');
   });

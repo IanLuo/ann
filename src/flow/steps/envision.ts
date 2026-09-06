@@ -1,6 +1,6 @@
 import { RuleModule } from '../validators/types.js';
 import { DefaultEnvisionEngine, VisionArtifact } from './envision-engine.js';
-import { Intent, Step, StepContext, StepOutput, fail } from '../types.js';
+import { Step, StepContext, StepOutput, fail } from '../types.js';
 import { adapterFromAbility } from './engine-adapter.js';
 import { groundingFrom } from './idea-validate.js';
 
@@ -9,10 +9,9 @@ import { groundingFrom } from './idea-validate.js';
  * The engine is WRAPPED, not rewritten: its honesty layer (every claim carries its
  * basis and confidence) is the reason the step exists at all.
  *
- * The vision leaves twice, deliberately: as the in-memory ARTIFACT the chain binds to
- * a later step's role (`spec` consumes it as `vision`), and as a locked markdown
- * DOCUMENT a human can read. The first is how the chain flows; the second is what the
- * journey keeps.
+ * The vision is INTERMEDIATE: it leaves as the in-memory ARTIFACT the chain binds to a
+ * later step's role (`spec` consumes it as `vision`) — the spec is the doc the journey
+ * keeps. Envision stages no doc of its own (its claims live on inside the spec).
  */
 
 /** Co-located verify rule: an empty vision cannot be built from — fail. */
@@ -33,24 +32,10 @@ export const envisionArtifactRule: RuleModule = {
   },
 };
 
-/** The readable vision — each claim keeps the basis and confidence it was made with. */
-export const renderVision = (idea: string, v: VisionArtifact): string => {
-  const claims = (label: string, list: VisionArtifact['usage']) =>
-    list.length ? [`\n## ${label}`, ...list.map((c) => `- ${c.claim} (ground: ${c.basis.join(', ') || 'inference'}, ${c.confidence})`)] : [];
-  return [
-    '# Product Vision',
-    `\n**Idea:** ${idea}`,
-    `\n${v.summary}`,
-    ...claims('Usage', v.usage),
-    ...claims('Look', v.look),
-    ...(v.questions.length ? ['\n## Open questions', ...v.questions.map((q) => `- [${q.impact}] ${q.question} — ${q.reason}`)] : []),
-  ].join('\n');
-};
-
 export class EnvisionStep implements Step {
   readonly id = 'envision';
   readonly roles = [];
-  readonly produces = ['lock-artifact' as const];
+  // no `produces` — the vision is an in-memory role artifact only (spec stages the doc)
   readonly rules: RuleModule[] = [envisionArtifactRule];
 
   async execute(ctx: StepContext): Promise<StepOutput> {
@@ -63,7 +48,6 @@ export class EnvisionStep implements Step {
     });
     if (!r.ok) return fail(r.error.code, r.error.blocker);
 
-    const intents: Intent[] = [{ kind: 'lock-artifact', name: 'vision', content: renderVision(idea, r.artifact), type: 'vision' }];
-    return { ok: true, artifact: r.artifact, intents };
+    return { ok: true, artifact: r.artifact };
   }
 }

@@ -12,8 +12,12 @@ import { buildStepRegistry } from '../index.js';
  * THE REAL STEPS, THROUGH THE REAL FRAME, ON THE PROJECT'S REAL CHAIN DATA — only the
  * abilities are fakes. This is where the pieces meet: the grill gate takes its decision
  * from `idea-validate`'s verdict, `spec` gets the vision through its declared ROLE, the
- * three locks record together at commit, and a RE-RUN replays from the transcript
- * instead of re-interviewing the human.
+ * SPEC is the one staged doc (docs/spec.md — git content), and a RE-RUN replays from the
+ * transcript instead of re-interviewing the human.
+ *
+ * TWO-PHASE CONCLUSION (F-AC18): a run that STAGES a doc stops `blocked-waiting` once the
+ * confirm gate is decided accept but no commit evidence exists; the task concludes on a
+ * RE-RUN after the operator records `evidence.commits[]`.
  */
 
 let root: string;
@@ -107,31 +111,48 @@ const runFrame = (c: Commands, human: Human) => {
   return new Frame({ commands: c, root, registry: buildStepRegistry(), abilities: a.abilities }).run(TASK).then((r) => ({ r, prompts: a.prompts }));
 };
 
-const artifact = (name: string) => readFileSync(join(root, '.ann', 'journey', 'legs', TASK, 'artifacts', `${name}.md`), 'utf8');
+/** A staged doc lives at the repo's git home — <root>/docs/<name>.md. */
+const docPath = (name: string) => join(root, 'docs', `${name}.md`);
+const doc = (name: string) => readFileSync(docPath(name), 'utf8');
+
+/** The OPERATOR's half of the two-phase conclusion: the staged doc is `git commit`ed and
+ *  the commit is recorded as structured evidence (evidence.commits[]). The sha is a
+ *  placeholder — only store.check() resolves shas in git, and these tests never call it. */
+function recordCommitEvidence(c: Commands): void {
+  const r = c.append(TASK, { at: '2026-08-27', type: 'evidence', note: 'the staged doc is committed', commits: [{ sha: 'abc1234', note: 'spec staged' }] });
+  expect(r.ok).toBe(true);
+}
 
 describe('the real shaping chain: idea-validate@grill → [vision] → spec', () => {
-  it("an AMBIGUOUS idea routes the full path: vision runs, its claims reach the spec by ROLE, and all three lock at commit", async () => {
+  it("an AMBIGUOUS idea routes the full path: vision runs, its claims reach the spec by ROLE, and the staged spec concludes in two phases", async () => {
     const c = setup();
     const human = new Human('solid', 'vision');
-    const { r, prompts } = await runFrame(c, human);
+    const { r: first, prompts } = await runFrame(c, human);
 
-    expect(r.problems).toEqual([]);
-    expect(r.stop).toBe('completed');
+    // run 1 — the spec is STAGED, the confirm gate is decided accept, but with no commit
+    // evidence the frame stops blocked-waiting (F-AC18 two-phase conclusion)
+    expect(first.problems).toEqual([]);
+    expect(first.stop).toBe('blocked-waiting');
     // the grill gate was decided by the STEP — the human was asked for a verdict, not a gate
     expect(c.events(TASK).some((e) => e.type === 'confirmed' && e.gate === 'grill')).toBe(true);
     expect(human.decided.some((q) => q.includes('solid enough to proceed'))).toBe(true);
 
-    // the spec prompt carries the vision claims — the role bound to envision's artifact
+    // the spec prompt carries the vision claims — the role bound to envision's in-memory artifact
     const specPrompt = prompts.find((p) => p.includes('spec-expansion step'))!;
     expect(specPrompt).toContain('The user runs it');
 
-    expect(r.committed?.locked.map((l) => l.name).sort()).toEqual(['idea-validation', 'spec', 'vision']);
-    expect(artifact('vision')).toContain('# Product Vision');
-    // the thin model (leg 07): the working file stays the step's own bytes — lock!
-    // records the log event and never stamps or rewrites the file
-    expect(artifact('spec')).toContain(SPEC);
-    expect(artifact('spec')).not.toMatch(/^<!-- specs:locked:/);
-    expect(artifact('idea-validation')).toContain('# Idea Validation Doc');
+    // ONLY the spec is staged as a doc — the validation + vision are in-memory role
+    // artifacts (idea-validate produces nothing; envision declares no produces)
+    expect(doc('spec')).toContain(SPEC);
+    expect(doc('spec')).not.toMatch(/^<!-- specs:locked:/);
+    expect(existsSync(docPath('idea-validation'))).toBe(false);
+    expect(existsSync(docPath('vision'))).toBe(false);
+
+    // run 2 — commit evidence recorded: the re-run concludes
+    recordCommitEvidence(c);
+    const { r: second } = await runFrame(c, new Human('solid'));
+    expect(second.problems).toEqual([]);
+    expect(second.stop).toBe('completed');
   });
 
   it('a `revise` verdict routes the grill gate to REJECT and the rework rung re-runs the validator', async () => {
@@ -148,51 +169,66 @@ describe('the real shaping chain: idea-validate@grill → [vision] → spec', ()
 });
 
 describe('depth routing (shaping AC-2/AC-3) — the vision is CONDITIONAL on the grill verdict', () => {
-  it('a CLEAR solid idea (route: light) runs straight to a LIGHT spec — NO vision runs, NO vision artifact', async () => {
+  it('a CLEAR solid idea (route: light) runs straight to a LIGHT spec — NO vision runs, NO vision doc', async () => {
     const c = setup();
     const human = new Human('solid', 'light');
-    const { r, prompts } = await runFrame(c, human);
+    const { r: first, prompts } = await runFrame(c, human);
 
-    expect(r.problems).toEqual([]);
-    expect(r.stop).toBe('completed');
-    expect(r.outcomes.find((o) => o.step === 'envision')?.ran).toBe(false); // skipped
+    expect(first.problems).toEqual([]);
+    expect(first.stop).toBe('blocked-waiting'); // staged spec — the two-phase conclusion
+    expect(first.outcomes.find((o) => o.step === 'envision')?.ran).toBe(false); // skipped
     // the skip is RECORDED as a frame-phase trace
     const skips = c.events(TASK).map((e) => e.trace as { kind?: string; stepId?: string; condition?: string } | undefined).filter((t) => t?.kind === 'skip');
     expect(skips).toContainEqual({ kind: 'skip', stepId: 'envision', condition: 'verdict:idea-validate=ambiguous', evaluated: false });
-    // the light path locked idea-validation + spec only — the vision NEVER ran (its
-    // prompt was never asked) and no vision artifact exists
-    expect(r.committed?.locked.map((l) => l.name).sort()).toEqual(['idea-validation', 'spec']);
+    // the light path staged spec only — the vision NEVER ran (its prompt was never asked)
     expect(prompts.some((p) => p.includes('envision engine'))).toBe(false); // no VISION completion
     expect(prompts.find((p) => p.includes('spec-expansion step'))).toContain('no vision bound');
-    // the spec still locked a real (light) document
-    expect(artifact('spec')).toContain(SPEC);
-    expect(existsSync(join(root, '.ann', 'journey', 'legs', TASK, 'artifacts', 'vision.md'))).toBe(false);
+    // the spec still staged a real (light) document
+    expect(doc('spec')).toContain(SPEC);
+    expect(existsSync(docPath('vision'))).toBe(false);
+
+    // conclude on the re-run once the operator records commit evidence
+    recordCommitEvidence(c);
+    const { r: second } = await runFrame(c, new Human('solid'));
+    expect(second.problems).toEqual([]);
+    expect(second.stop).toBe('completed');
   });
 
   it('an AMBIGUOUS solid idea (route: vision) still runs vision then spec (the full path survives)', async () => {
     const c = setup();
-    const { r, prompts } = await runFrame(c, new Human('solid', 'vision'));
-    expect(r.problems).toEqual([]);
-    expect(r.stop).toBe('completed');
-    expect(r.outcomes.find((o) => o.step === 'envision')?.ran).toBe(true);
-    expect(r.committed?.locked.map((l) => l.name).sort()).toEqual(['idea-validation', 'spec', 'vision']);
-    expect(existsSync(join(root, '.ann', 'journey', 'legs', TASK, 'artifacts', 'vision.md'))).toBe(true);
+    const { r: first, prompts } = await runFrame(c, new Human('solid', 'vision'));
+    expect(first.problems).toEqual([]);
+    expect(first.stop).toBe('blocked-waiting'); // staged spec — the two-phase conclusion
+    expect(first.outcomes.find((o) => o.step === 'envision')?.ran).toBe(true);
+    // the vision is IN-MEMORY — its claims reach the spec by role, but no vision doc is staged
+    expect(existsSync(docPath('spec'))).toBe(true);
+    expect(existsSync(docPath('vision'))).toBe(false);
     // the spec prompt still carries the vision claims (role-bound)
     expect(prompts.find((p) => p.includes('spec-expansion step'))).toContain('The user runs it');
+
+    // conclude on the re-run once the operator records commit evidence
+    recordCommitEvidence(c);
+    const { r: second } = await runFrame(c, new Human('solid'));
+    expect(second.problems).toEqual([]);
+    expect(second.stop).toBe('completed');
   });
 });
 
 describe('replay — the transcript, not the feedback, decides', () => {
-  it('a re-run after an undecided confirm gate REPLAYS: the human is never re-interviewed', async () => {
+  it('a re-run after the two-phase wait REPLAYS: the human is never re-interviewed', async () => {
     const c = setup();
     const human = new Human('solid');
-    await runFrame(c, human);
+    const { r: first } = await runFrame(c, human);
+    expect(first.stop).toBe('blocked-waiting'); // the spec was staged; waiting on commit evidence
     const askedFirst = [...human.asked];
     const decidedFirst = [...human.decided];
     expect(decidedFirst.length).toBeGreaterThan(0);
 
-    // re-run the SAME completed task: every gate is decided, so the frame re-runs the
-    // steps and every recordable call is served from the transcript
+    // release the wait — the operator commits the staged doc (structured commit evidence)
+    recordCommitEvidence(c);
+
+    // re-run the SAME task: every gate is decided, so the frame replays the steps and
+    // every recordable call is served from the transcript
     const second = new Human('solid');
     const { r, prompts } = await runFrame(c, second);
     expect(r.problems).toEqual([]);

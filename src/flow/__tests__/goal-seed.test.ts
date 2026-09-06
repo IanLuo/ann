@@ -318,6 +318,9 @@ describe('runGoalSeed — the goal! seed materialize path (flow/goal-seed)', () 
     const r1 = await runGoalSeed(commands, { llm, interact: new ScriptedInteractor([], [], ['GO']) }, { idea: GOAL_IDEA });
     expect(r1.ok && r1.seeded).toBe(true);
 
+    // store.spawn writes node.json INTO the target folder (docs-as-git: node dirs are
+    // pre-created by the initiator) — pre-create the work leg folder so the spawn lands.
+    mkdirSync(join(legs(), '02-work'), { recursive: true });
     expect(commands.spawn('02-work', { intent: 'build a work leg', acceptanceCriteria: ['it is done'] }).ok).toBe(true);
 
     const { llm: l2, calls } = throwingLlm('should never be reached');

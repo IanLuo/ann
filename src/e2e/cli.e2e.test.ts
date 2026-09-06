@@ -12,6 +12,11 @@ import { Store } from '../store/store.js';
  * argv parsing, the `!` write-marker, id/decision validation, project resolution, and
  * a full task lifecycle ending in a clean `check`.
  *
+ * Docs-as-git (Stage B): a task's deliverable is a DOC staged to docs/<name>.md and
+ * committed; a task concludes via structured `evidence.commits[]`. The suite mirrors
+ * that — gates through the CLI, the doc committed in the temp project, and the
+ * conclusion recorded as commit evidence.
+ *
  * `npm run build` first (npm pretest does it) — dist/surface/cli.js is what we spawn.
  */
 
@@ -59,9 +64,12 @@ function newProject(): string {
   return root;
 }
 
-function writeDraft(root: string, id: string, name: string, content: string): void {
-  mkdirSync(join(root, '.ann', 'journey', 'legs', id, 'artifacts'), { recursive: true });
-  writeFileSync(join(root, '.ann', 'journey', 'legs', id, 'artifacts', `${name}.md`), content);
+/** The docs-as-git store no longer pre-creates a spawned node's folder (outputs are
+ *  docs at the repo docs/ home, not per-task artifacts/), so the fixture pre-creates
+ *  the folder a `spawn!` will write node.json into. Without it store.spawn's
+ *  node.json write would land in a missing directory. */
+function prep(root: string, ...ids: string[]): void {
+  for (const id of ids) mkdirSync(join(root, '.ann', 'journey', 'legs', id), { recursive: true });
 }
 
 const LEG = '01-leg';
@@ -76,6 +84,7 @@ describe('e2e — the CLI binary', () => {
   afterEach(() => { rmSync(root, { recursive: true, force: true }); });
 
   it('drives a task through the full lifecycle and check stays clean', () => {
+    prep(root, LEG, TASK);
     expect(out(cli(root, ['spawn!', LEG, CONTRACT('the first leg')]))).toContain('spawned 01-leg (leg)');
     expect(out(cli(root, ['spawn!', TASK, CONTRACT('do the thing')]))).toContain('spawned 01-leg/01-a (task)');
     expect(out(cli(root, ['status']))).toContain('queued');
@@ -88,24 +97,28 @@ describe('e2e — the CLI binary', () => {
     expect(bare.code).toBe(1);
     expect(out(bare)).toContain("writes are marked with '!'");
 
-    // evidence with a resolvable ref (F-AC18 traceability) — a fixture in artifacts/
-    // that the collapse's D4 rework claims (F4: evidence-cited files are not orphans)
-    mkdirSync(join(root, '.ann', 'journey', 'legs', TASK, 'artifacts'), { recursive: true });
-    writeFileSync(join(root, '.ann', 'journey', 'legs', TASK, 'artifacts', 'analysis.md'), '# Analysis\n');
-    expect(out(cli(root, ['append!', TASK, JSON.stringify({ at: '2026-08-29', type: 'evidence', refs: ['.ann/journey/legs/01-leg/01-a/artifacts/analysis.md'] })]))).toContain('appended');
-
     // gate ①: submit alone blocks, the decision releases it
     expect(out(cli(root, ['submit!', TASK, 'grill']))).toContain('submitted grill');
     expect(out(cli(root, ['status', TASK]))).toContain('blocked');
     expect(out(cli(root, ['gate!', TASK, 'grill', 'accept', 'looks right']))).toContain('gate grill: accept');
     expect(out(cli(root, ['status', TASK]))).not.toContain('blocked');
 
-    // the deliverable: draft on disk, then lock! the producer's own file (thin record)
-    writeDraft(root, TASK, 'thing', 'the actual deliverable\n');
-    expect(out(cli(root, ['lock!', TASK, 'thing.md', 'spec']))).toContain('locked thing @');
-    // the thin model records the producer's own file — NO docs/<name>-v<N>.md symlink appears
-    expect(existsSync(join(root, '.ann', 'docs', 'specs', 'thing-v1.md'))).toBe(false);
+    // the deliverable: a doc staged to docs/<name>.md at the repo docs/ home (docs are
+    // git content — a real run! stages it via stage-doc; here we write the bytes), then
+    // the generated manifest resolves it
+    mkdirSync(join(root, 'docs'), { recursive: true });
+    writeFileSync(join(root, 'docs', 'thing.md'), '# Thing\n\nthe actual deliverable\n');
+    expect(out(cli(root, ['docs', '--write']))).toContain('regenerated');
+    // the doc resolves via the manifest — no per-task artifacts/ file, no docs/-vN symlink
+    expect(existsSync(join(root, '.ann', 'journey', 'legs', TASK, 'artifacts', 'thing.md'))).toBe(false);
     expect(out(cli(root, ['read', 'thing']))).toContain('the actual deliverable');
+
+    // commit the staged doc in the temp project (git is the archive); the commit sha is
+    // the traceability the conclusion evidence cites (F-AC18)
+    git(root, ['add', '-A']);
+    git(root, ['commit', '-qm', 'stage the deliverable']);
+    const sha = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+    expect(out(cli(root, ['append!', TASK, JSON.stringify({ at: '2026-08-29', type: 'evidence', note: 'the thing is committed', commits: [{ sha, note: 'deliverable' }] })]))).toContain('appended');
 
     // gate ②: confirm is not 'done' on its own — completed event closes it
     expect(out(cli(root, ['submit!', TASK, 'confirm']))).toContain('submitted confirm');
@@ -114,16 +127,17 @@ describe('e2e — the CLI binary', () => {
     expect(out(cli(root, ['append!', TASK, EVENT('completed', { note: 'finished' })]))).toContain('appended');
     expect(out(cli(root, ['status', TASK]))).toContain('done');
 
-    // commit the produced artifact so the hash-integrity path resolves, then check clean
+    // commit the whole tree so the check's manifest-freshness + traceability read a clean git
     git(root, ['add', '-A']);
     git(root, ['commit', '-qm', 'close 01-leg/01-a']);
     const chk = cli(root, ['check']);
     expect(chk.code).toBe(0);
-    expect(out(chk)).toContain('OK — 1 current artifacts');
+    expect(out(chk)).toContain('OK — 1 docs in the manifest, no gate gaps.');
     expect(out(chk)).toContain('State: 01-leg done');
   });
 
   it('enforces the write discipline and the gates through the CLI', () => {
+    prep(root, LEG, TASK);
     cli(root, ['spawn!', LEG, CONTRACT('l')]);
     cli(root, ['spawn!', TASK, CONTRACT('t')]);
 
@@ -134,19 +148,20 @@ describe('e2e — the CLI binary', () => {
     expect(out(cli(root, ['spawn!', '01-leg/9', CONTRACT('x')]))).toContain('id-naming');
     expect(out(cli(root, ['spawn!', '01-leg/01-b', CONTRACT('x')]))).toContain('prefix-clash');
 
+    // a bare write name is refused with a hint — the `!` is a guarantee, not advice
+    expect(cli(root, ['submit', TASK, 'grill']).code).toBe(1);
+    expect(out(cli(root, ['submit', TASK, 'grill']))).toContain("writes are marked with '!'");
+
     // a composite-owned event kind cannot be appended around the mutator
     expect(out(cli(root, ['append!', TASK, EVENT('confirmed', { gate: 'grill' })]))).toContain('composite-owned');
 
-    // lock! requires a decided grill gate (the store's gateProblems refuse the write). With
-    // the grill confirmed the gate gap surfaces first; the caller names an artifacts-relative
-    // FILE (write confinement) — no free path.
-    writeDraft(root, TASK, 'thing', 'x\n');
-    expect(out(cli(root, ['lock!', TASK, 'thing.md', 'spec']))).toContain('GATE-1 GAP');
-    cli(root, ['spawn!', '01-leg/02-a', CONTRACT('x')]);
-    // write confinement (AC-5): an out-of-folder target is refused before any file check,
-    // and a file that does not exist inside artifacts/ is refused outright (no-file)
-    expect(out(cli(root, ['lock!', '01-leg/02-a', '../escape.md']))).toContain('outside-artifacts');
-    expect(out(cli(root, ['lock!', '01-leg/02-a', 'ghost.md']))).toContain('no-file');
+    // the RETIRED doc-artifact kinds are refused on the general append (D3)
+    expect(out(cli(root, ['append!', TASK, JSON.stringify({ at: '2026-08-29', type: 'artifact-locked', artifact: { name: 'x', path: '.ann/journey/legs/01-leg/01-a/artifacts/x.md', lockSha: 'aaaaaaa' } })]))).toContain('retired-kind');
+    expect(out(cli(root, ['append!', TASK, EVENT('superseded')]))).toContain('retired-kind');
+
+    // the STORE's gate enforcement through the write surface: a completed without the
+    // confirm gate is refused (GATE-2 GAP), never a silent skip
+    expect(out(cli(root, ['append!', TASK, EVENT('completed', { note: 'nope' })]))).toContain('GATE-2 GAP');
 
     // gate! validates its decision vocabulary
     expect(cli(root, ['gate!', TASK, 'grill', 'maybe']).code).toBe(2);
@@ -154,6 +169,7 @@ describe('e2e — the CLI binary', () => {
   });
 
   it('run! fails closed with no reachable provider', () => {
+    prep(root, LEG, '01-leg/02-a');
     cli(root, ['spawn!', LEG, CONTRACT('l')]);
     cli(root, ['spawn!', '01-leg/02-a', CONTRACT('run me')]);
 
@@ -165,6 +181,7 @@ describe('e2e — the CLI binary', () => {
   });
 
   it('detects a store change made outside the CLI, refuses to write over it, and reasons about it', () => {
+    prep(root, LEG, TASK);
     expect(out(cli(root, ['spawn!', LEG, CONTRACT('l')]))).toContain('spawned');
     expect(out(cli(root, ['spawn!', TASK, CONTRACT('do the thing')]))).toContain('spawned');
 
@@ -202,14 +219,21 @@ describe('e2e — the goal-session lifecycle (v6: seed → lock → work → met
   const WORK = '02-work';
   const TASK = '02-work/01-a';
   /** Hand-seed the goal leg exactly as seedGoal would: node.json (the 1:1 machine
-   *  read of goal.md), the created+completed seed events, and the authored goal.md. */
+   *  read of goal.md), the created+completed seed events, the authored goal.md, and —
+   *  because goal! seed seals goal.md with a goal-root artifact-lock — that seal
+   *  record too (lock! is retired; the seal rides the seed). */
   function seedGoalLeg(r: string): void {
     mkdirSync(join(r, '.ann', 'journey', 'legs', GOAL, 'artifacts'), { recursive: true });
     writeFileSync(
       join(r, '.ann', 'journey', 'legs', GOAL, 'node.json'),
       JSON.stringify({ id: GOAL, contract: { intent: 'Land the goal session end to end', acceptanceCriteria: ['goal.md locks on the goal root', 'a met verdict seals exhaustion'] }, createdAt: '2026-08-29' }, null, 2) + '\n',
     );
-    writeFileSync(join(r, '.ann', 'journey', 'legs', GOAL, 'events.jsonl'), [EVENT('created'), EVENT('completed')].join('\n') + '\n');
+    const seedEvents = [
+      EVENT('created'),
+      EVENT('completed'),
+      JSON.stringify({ at: '2026-08-29', type: 'artifact-locked', artifact: { name: 'goal', path: '.ann/journey/legs/01-goal/artifacts/goal.md', lockSha: 'abc1234', type: 'goal', version: 1 }, note: 'goal.md sealed by the seed grill (e2e)' }),
+    ];
+    writeFileSync(join(r, '.ann', 'journey', 'legs', GOAL, 'events.jsonl'), seedEvents.join('\n') + '\n');
     writeFileSync(
       join(r, '.ann', 'journey', 'legs', GOAL, 'artifacts', 'goal.md'),
       '# Goal\n\nGoal: Land the goal session end to end\n\nSuccess criteria:\n- goal.md locks on the goal root\n- a met verdict seals exhaustion\n',
@@ -217,6 +241,7 @@ describe('e2e — the goal-session lifecycle (v6: seed → lock → work → met
   }
   /** Drive the one task through its gates to done — the session is then exhausted. */
   function driveWorkToDone(r: string): void {
+    prep(r, WORK, TASK);
     cli(r, ['spawn!', WORK, CONTRACT('the work leg')]);
     cli(r, ['spawn!', TASK, CONTRACT('do the work')]);
     expect(out(cli(r, ['submit!', TASK, 'grill']))).toContain('submitted grill');
@@ -239,13 +264,10 @@ describe('e2e — the goal-session lifecycle (v6: seed → lock → work → met
     expect(seeded).toContain('[done]'); // the seed derives done — the first work leg's gate opens
     expect(seeded).toContain('verdict: open');
     expect(seeded).toContain('AC-2: a met verdict seals exhaustion'); // contract = the doc, machine-read
+    // the seal rode the seed: goal.md artifact-locks on the GOAL ROOT (goalDoc rides the view)
+    expect(seeded).toContain('doc: goal @');
+    expect(seeded).toContain('artifacts/goal.md');
     expect(out(cli(root, ['next']))).toContain('session open'); // a seeded goal alone is not exhausted
-
-    // seal the doc: goal.md artifact-locks on the GOAL ROOT (goalDoc rides the view)
-    expect(out(cli(root, ['lock!', GOAL, 'goal.md']))).toContain('locked goal @');
-    const locked = out(cli(root, ['goal']));
-    expect(locked).toContain('doc: goal @');
-    expect(locked).toContain('artifacts/goal.md');
 
     // commit the seeded session so the dirty-guard below has TRACKED changes to see
     git(root, ['add', '-A']);

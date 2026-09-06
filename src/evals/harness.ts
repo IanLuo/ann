@@ -1,4 +1,5 @@
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, rmSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store } from '../store/store.js';
@@ -16,13 +17,19 @@ import { writeNode, ev } from './fixtures.js';
  *   measureK2 — locate ease:       status + history in ≤ 2 interactions
  *   measureK3 — advance ease:      correct next action in ≤ 1 interaction
  *   measureK4 — advance correctness: proposed next action right per the flow rules, ≥ 95%
- *   measureK5 — completion success:  ACs met + evidence/artifacts locked ON FIRST PASS, ≥ 85%
+ *   measureK5 — completion success:  ACs met + a staged doc committed ON FIRST PASS, ≥ 85%
+ *
+ * CONCLUSION IS TWO-PHASE (F-AC18, docs-as-git): a chain that stages a doc stops
+ * `blocked-waiting` after its confirm gate — the doc is confirmed but uncommitted. The
+ * harness simulates the OPERATOR's `git commit`: it records evidence.commits[] on the
+ * node, then re-runs the frame, which concludes `completed`. A chain that staged NO doc
+ * (the empty chain) is left waiting — the frame never fabricates the runner's work.
  *
  * HONESTY (ann-system-design §1 "Eval harness" NEVER column — "Count unverified ACs as
- * passes"): a first-pass completion is verified by the WORK — the locked artifact file
- * exists and is non-empty, or the evidence.commits[] are on the node — never by the
- * frame's `completed` word alone. The negative controls (fixtures whose expectedFirstPass
- * is false) assert the harness does NOT count rework or waits as passes.
+ * passes"): a first-pass completion is verified by the WORK — the staged docs/<name>.md
+ * file exists and is non-empty, recorded with evidence.commits[] — never by the frame's
+ * `completed` word alone. The negative controls (fixtures whose expectedFirstPass is
+ * false) assert the harness does NOT count rework or waits as passes.
  */
 
 const today = (): string => new Date().toISOString().slice(0, 10);
@@ -159,6 +166,29 @@ const abilities = (interact: ScriptedInteract): Abilities => ({
   interact,
 });
 
+/** A real sha from the ann repo (cwd) — commit traceability only needs the sha to
+ *  resolve if store.check() is ever called; a real HEAD sha resolves everywhere. */
+let _headSha: string | undefined;
+function headSha(): string {
+  if (!_headSha) {
+    try {
+      _headSha = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    } catch {
+      _headSha = 'abc1234'; // frame.test.ts idiom — never traced, so any 7-hex stands in
+    }
+  }
+  return _headSha;
+}
+
+/** The staged docs under <root>/docs — the task's staged deliverable (git content). */
+function stagedDocsUnder(root: string): Array<{ name: string; path: string; nonEmpty: boolean }> {
+  const docsDir = join(root, 'docs');
+  if (!existsSync(docsDir)) return [];
+  return readdirSync(docsDir)
+    .filter((f) => f.endsWith('.md'))
+    .map((f) => ({ name: f.replace(/\.md$/, ''), path: `docs/${f}`, nonEmpty: readFileSync(join(docsDir, f), 'utf8').trim().length > 0 }));
+}
+
 /** Run one flow fixture through the FRAME and decide first-pass honestly. */
 async function runFlowFixture(fixture: FlowFixture): Promise<{ firstPass: boolean; verified: boolean; stop: string; detail: string }> {
   const root = tempJourney();
@@ -169,28 +199,46 @@ async function runFlowFixture(fixture: FlowFixture): Promise<{ firstPass: boolea
     const registry: StepLookup = { has: (id) => steps.some((s) => s.id === id), get: (id) => steps.find((s) => s.id === id)! };
     const interact = new ScriptedInteract(fixture.interactAnswers);
     const frame = new Frame({ commands, root, registry, abilities: abilities(interact) });
-    const r = await frame.run('01-leg/01-a');
+    const taskId = '01-leg/01-a';
+    let r = await frame.run(taskId);
 
-    // NEVER count unverified ACs as passes: the WORK must be verifiable —
-    // a locked artifact file exists + non-empty, OR evidence.commits[] on the node.
-    const artifactDir = join(root, '.ann', 'journey', 'legs', '01-leg', '01-a', 'artifacts');
-    const artifacts = existsSync(artifactDir) ? (await import('node:fs')).readdirSync(artifactDir).filter((f) => f.endsWith('.md')) : [];
-    const artifactVerified = artifacts.some((f) => (readFileSync(join(artifactDir, f), 'utf8') ?? '').trim().length > 0);
+    // TWO-PHASE CONCLUSION (F-AC18): a chain that STAGED a doc stops `blocked-waiting`
+    // after its confirm gate — concluding is the OPERATOR's move (`git commit` the
+    // docs/ change + record evidence.commits[]). Simulate that commit, then re-run so
+    // the frame concludes `completed`. A chain that staged NO doc (the empty chain) is
+    // left waiting — the frame never fabricates the runner's work for a fake pass.
+    const staged = stagedDocsUnder(root);
+    if (r.stop === 'blocked-waiting' && staged.some((d) => d.nonEmpty)) {
+      const commit = commands.append(taskId, {
+        at: today(),
+        type: 'evidence',
+        note: 'eval: operator committed the staged doc',
+        commits: [{ sha: headSha(), note: 'eval commit' }],
+      });
+      if (!commit.ok) {
+        return { firstPass: false, verified: false, stop: r.stop, detail: `operator-commit refused: ${commit.error.code}: ${commit.error.blocker}` };
+      }
+      r = await frame.run(taskId); // the re-run concludes on the commit evidence
+    }
+
+    // NEVER count unverified ACs as passes: the WORK is the staged docs/ files
+    // (existing + non-empty) recorded with evidence.commits[] — docs are git content.
+    const docVerified = staged.some((d) => d.nonEmpty);
     const evidenceCommitted = commands
-      .events('01-leg/01-a')
+      .events(taskId)
       .some((e) => e.type === 'evidence' && Array.isArray(e.commits) && (e.commits as unknown[]).length > 0);
-    const verified = artifactVerified || evidenceCommitted;
+    const verified = docVerified && evidenceCommitted;
     // Rework is a GATE event, not a verify problem: a grill rejection re-materializes the
     // flow (frame.ts) and lands a `rejected` event on the node. Count it by the event tail
     // — rejections never populate `problems`, so the old string check missed rework.
-    const noRework = r.verifyCycles === 0 && !commands.events('01-leg/01-a').some((e) => e.type === 'rejected');
+    const noRework = r.verifyCycles === 0 && !commands.events(taskId).some((e) => e.type === 'rejected');
     const firstPass = r.stop === 'completed' && verified && noRework;
 
     return {
       firstPass,
       verified,
       stop: r.stop,
-      detail: `${r.stop} · artifactVerified=${artifactVerified} · evidenceCommitted=${evidenceCommitted} · rework=${!noRework}`,
+      detail: `${r.stop} · docVerified=${docVerified} · evidenceCommitted=${evidenceCommitted} · rework=${!noRework}`,
     };
   } finally {
     rmSync(root, { recursive: true, force: true });

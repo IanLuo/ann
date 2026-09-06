@@ -14,6 +14,15 @@ import { scanDocsDir, writeDocsManifest } from '../../store/docs.js';
 let root: string;
 const nodeDir = (id: string) => join(root, '.ann', 'journey', 'legs', id);
 
+/** store.spawn writes node.json INTO a node folder that must already exist on disk — the
+ *  docs-as-git refactor stopped pre-creating node folders (only fixture writeNode makes
+ *  them). A test that SPAWNS a live node pre-creates its folder first, exactly the way a
+ *  fixture node's folder exists before its files are written. */
+const mkNodeDir = (id: string) => {
+  mkdirSync(nodeDir(id), { recursive: true });
+  return id;
+};
+
 function makeStore(): string {
   root = mkdtempSync(join(tmpdir(), 'ann-cmd-'));
   mkdirSync(join(root, '.ann', 'journey', 'legs'), { recursive: true });
@@ -58,6 +67,7 @@ describe('spawn! — the contract schema gate (core-design §1, §8:289)', () =>
   });
 
   it('accepts the v14 optional fields, and openQuestions as a TOP-LEVEL sibling', () => {
+    mkNodeDir('01-leg/01-a');
     const r = cmds().spawn('01-leg/01-a', {
       contract: { ...CONTRACT, workType: 'implementation', model: 'm', targetAreas: ['src/'] },
       openQuestions: [{ id: 'Q1', question: 'which?' }],
@@ -76,19 +86,22 @@ describe('spawn! — the contract schema gate (core-design §1, §8:289)', () =>
   it('enforces id naming, sibling and prefix uniqueness', () => {
     expect(errorOf(cmds().spawn('01-leg/nope', CONTRACT)).code).toBe('id-naming');
     expect(errorOf(cmds().spawn('01-leg/01-this-segment-is-way-too-long-for-the-cap-now', CONTRACT)).code).toBe('id-naming');
+    mkNodeDir('01-leg/01-a');
     valueOf(cmds().spawn('01-leg/01-a', CONTRACT));
     expect(errorOf(cmds().spawn('01-leg/01-a', CONTRACT)).code).toBe('exists');
     expect(errorOf(cmds().spawn('01-leg/01-b', CONTRACT)).code).toBe('prefix-clash');
   });
 
   it('allows grammar-named worktype segments up to the 40-char cap (v15: <NN>-<worktype>-<slug>)', () => {
+    mkNodeDir('01-leg/27-implementation-journey-format-v15');
     valueOf(cmds().spawn('01-leg/27-implementation-journey-format-v15', CONTRACT)); // 35 chars, worktype-tagged — the v15 grammar name spawns
     expect(errorOf(cmds().spawn('01-leg/27-implementation-journey-format-v15', CONTRACT)).code).toBe('exists');
   });
 
-  it('holds the artifact gate on a TASK parent, and does not consult it at depth 2', () => {
+  it('holds the conclusion gate on a TASK parent (commit evidence), and does not consult it at depth 2', () => {
+    mkNodeDir('01-leg/01-a');
     valueOf(cmds().spawn('01-leg/01-a', CONTRACT)); // depth 2: the leg parent is never gated
-    expect(errorOf(cmds().spawn('01-leg/01-a/01-child', CONTRACT)).code).toBe('artifact-gate');
+    expect(errorOf(cmds().spawn('01-leg/01-a/01-child', CONTRACT)).code).toBe('conclusion-gate');
   });
 
   it('holds the leg gate on a new leg', () => {
@@ -96,7 +109,8 @@ describe('spawn! — the contract schema gate (core-design §1, §8:289)', () =>
     expect(errorOf(cmds().spawn('02-next', CONTRACT)).code).toBe('leg-gate');
   });
 
-  it('retires the description.md write (v13: a node dir is node.json + artifacts/)', () => {
+  it('retires the description.md write (v13: a node dir is node.json — no description.md)', () => {
+    mkNodeDir('01-leg/01-a');
     valueOf(cmds().spawn('01-leg/01-a', CONTRACT));
     expect(existsSync(join(nodeDir('01-leg/01-a'), 'description.md'))).toBe(false);
   });
@@ -185,12 +199,20 @@ describe('append! — refuses what the composites own (§8:289)', () => {
       ['submitted', 'submit!'],
       ['confirmed', 'gate!'],
       ['rejected', 'gate!'],
-      ['artifact-locked', 'lock!'],
-      ['superseded', 'supersede!'],
+      ['goal-met', 'goal!'],
     ]) {
       const e = errorOf(c.append('01-leg/01-a', ev(type) as JourneyEvent));
       expect(e.code).toBe('composite-owned');
       expect(e.blocker).toContain(owner);
+    }
+  });
+
+  it('refuses the RETIRED doc-artifact kinds (artifact-locked / superseded) as retired-kind (D3)', () => {
+    const c = cmds();
+    for (const type of ['artifact-locked', 'superseded']) {
+      const e = errorOf(c.append('01-leg/01-a', ev(type) as JourneyEvent));
+      expect(e.code).toBe('retired-kind');
+      expect(e.blocker).toContain('retired with the docs-as-git refactor');
     }
   });
 
@@ -268,19 +290,28 @@ describe('lock! — the THIN artifact record (one current per name; any file; ne
   });
 
   it('derives N from the LOG — one current per name; the next version follows the recorded locks', () => {
-    // 01-leg/01-a produces my-spec (v1) and concludes (both gates + completed)
+    // 01-leg/01-a produces my-spec (v1) and concludes (both gates + completed); the v1
+    // lock is fixture-written history — the same artifact-locked event a live lock! writes.
     writeNode('01-leg/01-a', CONTRACT, [
       ev('created'), ev('submitted', { gate: 'grill' }), ev('confirmed', { gate: 'grill' }),
       ev('submitted', { gate: 'confirm' }), ev('confirmed', { gate: 'confirm' }), ev('completed'),
+      ev('artifact-locked', { artifact: { name: 'my-spec', path: '.ann/journey/legs/01-leg/01-a/artifacts/my-spec.md', lockSha: 'aaaaaaa', version: 1 } }),
     ]);
     deliverable('01-leg/01-a', 'my-spec.md', 'v1\n');
-    valueOf(cmds().lock('01-leg/01-a', 'my-spec.md'));
     writeNode('01-leg/02-b', CONTRACT, [ev('created'), ev('submitted', { gate: 'grill' }), ev('confirmed', { gate: 'grill' })]);
     deliverable('01-leg/02-b', 'my-spec.md', 'v2\n');
-    // the old locker must step aside first — one current per name
-    expect(errorOf(cmds().lock('01-leg/02-b', 'my-spec.md')).code).toBe('already-current');
-    // supersede! (AC-4) steps the done locker aside, naming the successor by node id + file
-    valueOf(new Commands(new Store(root), 'test').supersede('01-leg/01-a', '01-leg/02-b', 'my-spec.md'));
+    // one current per name — the successor must wait for the old locker to step aside
+    expect(errorOf(new Commands(new Store(root), 'test').lock('01-leg/02-b', 'my-spec.md')).code).toBe('already-current');
+    // step the DONE locker aside via a recorded `superseded` — written as LOG HISTORY
+    // (the docs-as-git refactor retired the supersede! command, so no live write produces
+    // this; the resolver still reads a historical supersession to drop the old producer
+    // from `current`, which is how an archived session's version chain stays coherent).
+    writeNode('01-leg/01-a', CONTRACT, [
+      ev('created'), ev('submitted', { gate: 'grill' }), ev('confirmed', { gate: 'grill' }),
+      ev('submitted', { gate: 'confirm' }), ev('confirmed', { gate: 'confirm' }), ev('completed'),
+      ev('artifact-locked', { artifact: { name: 'my-spec', path: '.ann/journey/legs/01-leg/01-a/artifacts/my-spec.md', lockSha: 'aaaaaaa', version: 1 } }),
+      ev('superseded', { successor: { name: 'my-spec', path: '.ann/journey/legs/01-leg/02-b/artifacts/my-spec.md' } }),
+    ]);
     const locked = valueOf(new Commands(new Store(root), 'test').lock('01-leg/02-b', 'my-spec.md'));
     expect(locked.contentPath).toBe('.ann/journey/legs/01-leg/02-b/artifacts/my-spec.md');
     // the version is recorded on the lock event — N is deterministic from the log
@@ -321,10 +352,11 @@ describe('verify — the DRIFT read (the mirror direction of check)', () => {
     expect(cmds().verify()).toEqual([]);
   });
 
-  it('surfaces a filesystem artifact the log never claimed', () => {
+  it('treats a stray artifacts/ file as INERT — the doc-artifact drifts retired with docs-as-git (D4 gone)', () => {
     writeNode('01-leg/01-a', CONTRACT, [ev('created')]);
     writeFileSync(join(nodeDir('01-leg/01-a'), 'artifacts', 'stray.md'), 'x\n');
-    expect(cmds().verify()).toContain('artifact-orphan: 01-leg/01-a/artifacts/stray.md vs no artifact-locked event of this node names it');
+    // verify() no longer reconciles record→disk artifact files — outputs are docs at docs/
+    expect(cmds().verify()).toEqual([]);
   });
 
   it('surfaces an events.jsonl dir the store does not key (node.json is the load key)', () => {
@@ -335,63 +367,9 @@ describe('verify — the DRIFT read (the mirror direction of check)', () => {
   });
 });
 
-describe('supersede! — the ONE cross-task write (successor named by node id + artifact file)', () => {
-  beforeEach(() => {
-    makeStore();
-    writeNode('01-leg', {});
-  });
-  afterEach(() => { rmSync(root, { recursive: true, force: true }); });
-
-  /** Write the successor's own producer file inside its node's artifacts/ dir. */
-  const deliverable = (id: string, name: string, body: string): string => {
-    const p = join(nodeDir(id), 'artifacts', name);
-    mkdirSync(join(nodeDir(id), 'artifacts'), { recursive: true });
-    writeFileSync(p, body);
-    return p;
-  };
-  /** A done locker: full gates + completed. */
-  const doneLocker = (id: string): void => {
-    writeNode(id, CONTRACT, [
-      ev('created'), ev('submitted', { gate: 'grill' }), ev('confirmed', { gate: 'grill' }),
-      ev('submitted', { gate: 'confirm' }), ev('confirmed', { gate: 'confirm' }), ev('completed'),
-    ]);
-  };
-
-  it('REFUSES a live locker — superseded collapses a non-done node (core-design §3)', () => {
-    writeNode('01-leg/01-a', CONTRACT, [ev('created'), ev('activated')]);
-    writeNode('01-leg/02-b', CONTRACT, [ev('created')]);
-    deliverable('01-leg/02-b', 'my-spec.md', 'v2\n');
-    // checked BEFORE the successor is resolved — refused even when it exists
-    expect(errorOf(cmds().supersede('01-leg/01-a', '01-leg/02-b', 'my-spec.md')).code).toBe('live-locker');
-  });
-
-  it('allows superseding a done locker, naming the successor by node id + artifact file', () => {
-    doneLocker('01-leg/01-a');
-    writeNode('01-leg/02-b', CONTRACT, [ev('created'), ev('submitted', { gate: 'grill' }), ev('confirmed', { gate: 'grill' })]);
-    const path = deliverable('01-leg/02-b', 'my-spec.md', 'v2\n');
-    const r = valueOf(new Commands(new Store(root), 'test').supersede('01-leg/01-a', '01-leg/02-b', 'my-spec.md'));
-    // the recorded successor {name, path} is DERIVED from the successor node's own file —
-    // never a caller-supplied path (AC-4)
-    expect(r).toEqual({ name: 'my-spec', path: '.ann/journey/legs/01-leg/02-b/artifacts/my-spec.md' });
-    expect(readFileSync(path, 'utf8')).toBe('v2\n'); // the successor file is untouched
-    // the `superseded` record lands on the OLD locker's node
-    const superseded = new Store(root).events('01-leg/01-a').find((e) => e.type === 'superseded');
-    expect(superseded!.successor).toEqual({ name: 'my-spec', path: '.ann/journey/legs/01-leg/02-b/artifacts/my-spec.md' });
-  });
-
-  it('write confinement (AC-4): the successor file is confined to the successor node\'s artifacts/', () => {
-    doneLocker('01-leg/01-a');
-    writeNode('01-leg/02-b', CONTRACT, [ev('created')]);
-    const c = cmds();
-    // a separator / `..` cannot smuggle the successor path out of the successor's folder
-    expect(errorOf(c.supersede('01-leg/01-a', '01-leg/02-b', '../escape.md')).code).toBe('outside-artifacts');
-    expect(errorOf(c.supersede('01-leg/01-a', '01-leg/02-b', '/abs/escape.md')).code).toBe('outside-artifacts');
-    // an unknown successor node is refused by resolveNode — there is no raw path to aim at
-    expect(errorOf(c.supersede('01-leg/01-a', '01-leg/zzz', 'x.md')).code).toBe('no-successor-node');
-    // a file the successor node never produced is refused (inside the folder, but absent)
-    expect(errorOf(c.supersede('01-leg/01-a', '01-leg/02-b', 'ghost.md')).code).toBe('no-successor');
-  });
-});
+// supersede! is DELETED in the docs-as-git refactor (D3): a rework re-writes the staged
+// docs/<name>.md — there is no lock to supersede. Its one remaining trace in the log is
+// history read by the legacy current() resolver (exercised in the lock! N-derivation test).
 
 describe('read — the L1 content view (core-design §5)', () => {
   beforeEach(() => {
@@ -434,7 +412,11 @@ describe('read — the L1 content view (core-design §5)', () => {
 });
 
 describe('ledger — the write-rev ledger read + the store-external guard', () => {
-  beforeEach(() => { makeStore(); writeNode('01-leg', {}); });
+  beforeEach(() => {
+    makeStore();
+    writeNode('01-leg', {});
+    mkNodeDir('01-leg/01-a'); // the store writes a spawn into a folder that already exists
+  });
   afterEach(() => { rmSync(root, { recursive: true, force: true }); });
 
   it('exposes the rev + per-node last-write after a CLI write', () => {
@@ -669,6 +651,7 @@ Success criteria:
   it('RE-SEED GUARD: once a work leg spawns AFTER the goal, re-seeding refuses with the consumer + the archive path', () => {
     const c = cmds();
     valueOf(c.goalSeed(GOAL_DOC));
+    mkNodeDir('02-work'); // the store writes a spawn into a folder that already exists
     valueOf(c.spawn('02-work', CONTRACT)); // the first work leg after the goal — goal.md is now consumed
     const e = errorOf(c.goalSeed(GOAL_DOC));
     expect(e.code).toBe('not-empty');

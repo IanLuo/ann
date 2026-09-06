@@ -4,24 +4,30 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store } from '../../store/store.js';
 import { Commands, CommandResult } from '../../commands/index.js';
-import { blobSha, stripMarkers } from '../../store/sha.js';
+import { scanDocsDir, writeDocsManifest } from '../../store/docs.js';
 import { IntentTranslator } from '../intents.js';
-import { Intent, Step, StepOutput } from '../types.js';
+import { Intent, ProposeSpawnIntent, StageDocIntent, Step, StepOutput } from '../types.js';
 
 /**
- * INTENT TRANSLATION (core-design §3) — *files are working state, events are acceptance.*
- * These tests pin DEFER-RECORD: the lock file appears immediately, the `artifact-locked`
- * EVENT appears only at commit; a rework re-writes the file and NEVER supersedes a live
- * node; spawns defer beside the locks so lock-before-spawn holds by construction.
+ * INTENT TRANSLATION (core-design §3) — *docs are git content, events are acceptance.*
+ * These tests pin DOCS-AS-GIT: a `stage-doc` writes docs/<name>.md IMMEDIATELY at the
+ * repo's docs/ home — no event, no task-local artifacts/ file, no `artifact-locked`
+ * (and thus nothing to supersede). `propose-spawn` defers to commit, so a child's
+ * requiredInputs resolve through the docs manifest because the staged doc is already
+ * on disk. `evidence` + `close` are immediate and idempotent on replay; the commit
+ * record is `{ spawned }` only. The translator REFUSES an intent the step did not
+ * declare in produces?[] (absence = produces NOTHING).
  */
 
 let root: string;
 const TASK = '01-leg/01-a';
 const CONTRACT = { intent: 'do the thing', acceptanceCriteria: ['it is done'] };
 
+const nodeDir = (id: string) => join(root, '.ann', 'journey', 'legs', id);
+
 const node = (id: string, contract: unknown, events: Array<Record<string, unknown>> = []) => {
-  const dir = join(root, '.ann', 'journey', 'legs', id);
-  mkdirSync(join(dir, 'artifacts'), { recursive: true });
+  const dir = nodeDir(id);
+  mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, 'node.json'), JSON.stringify({ id, contract, createdAt: '2026-08-27' }));
   if (events.length) writeFileSync(join(dir, 'events.jsonl'), events.map((e) => JSON.stringify(e)).join('\n') + '\n');
 };
@@ -43,6 +49,15 @@ const step = (produces: Step['produces']): Step => ({
   execute: async (): Promise<StepOutput> => ({ ok: true }),
 });
 
+/** The git-home file a staged doc lives at — <store root>/docs/<name>.md. */
+const docFile = (name: string) => join(root, 'docs', `${name}.md`);
+/** The operator's post-commit regen (`ann docs --write`) — the manifest is DERIVED from
+ *  scanDocsDir, so a staged doc on disk becomes manifest-served (resolveDoc/F-AC19). */
+const regenDocs = () => writeDocsManifest(root, scanDocsDir(root));
+
+const stageDoc = (name: string, content: string): StageDocIntent => ({ kind: 'stage-doc', name, content });
+const proposeSpawn = (id: string, contract: unknown): ProposeSpawnIntent => ({ kind: 'propose-spawn', id, contract });
+
 const must = <T>(r: CommandResult<T>): T => {
   if (!r.ok) throw new Error(`${r.error.code}: ${r.error.blocker}`);
   return r.value;
@@ -52,18 +67,12 @@ const errorOf = <T>(r: CommandResult<T>) => {
   return r.error;
 };
 
-const GATED = [ev('created'), ev('submitted', { gate: 'grill' }), ev('confirmed', { gate: 'grill' })];
-const workingFile = (name: string) => join(root, '.ann', 'journey', 'legs', TASK, 'artifacts', `${name}.md`);
-const lockIntent = (name: string, content: string, type = 'spec'): Intent => ({ kind: 'lock-artifact', name, content, type });
-/** The lock-time hash, over marker-stripped content — the same bytes the gate binds. */
-const shaOf = (content: string): string => blobSha(stripMarkers(content)).slice(0, 7);
-
 afterEach(() => rmSync(root, { recursive: true, force: true }));
 
 describe('the translator refuses what the step did not declare', () => {
   it('an intent absent from produces[] is REFUSED — the declaration cannot drift from execute', () => {
     const t = new IntentTranslator(setup(), TASK);
-    const e = errorOf(t.translate(step(['evidence']), [lockIntent('x', '# x\n')]));
+    const e = errorOf(t.translate(step(['evidence']), [stageDoc('x', '# x\n')]));
     expect(e.code).toBe('undeclared-intent');
     expect(e.blocker).toContain('produces[]');
   });
@@ -74,96 +83,108 @@ describe('the translator refuses what the step did not declare', () => {
   });
 });
 
-describe('lock-artifact — DEFER-RECORD (the file now, the event at commit)', () => {
-  it('writes the WORKING FILE immediately and records NO event', () => {
-    const c = setup(GATED);
+describe('stage-doc — the doc file NOW at the repo git docs/ home', () => {
+  it('writes docs/<name>.md immediately, records it on deferred.docs, and appends NO event', () => {
+    const c = setup();
     const t = new IntentTranslator(c, TASK);
-    must(t.translate(step(['lock-artifact']), [lockIntent('my-spec', '# body\n')]));
-    expect(readFileSync(workingFile('my-spec'), 'utf8')).toBe('# body\n');
-    expect(c.events(TASK).some((e) => e.type === 'artifact-locked')).toBe(false);
+    const before = c.events(TASK).length;
+    must(t.translate(step(['stage-doc']), [stageDoc('my-spec', '# body\n')]));
+    expect(readFileSync(docFile('my-spec'), 'utf8')).toBe('# body\n'); // the file is REAL now
+    expect(t.deferred.docs).toEqual([{ name: 'my-spec', path: 'docs/my-spec.md' }]);
+    expect(c.events(TASK)).toHaveLength(before); // no event appended
+    // docs are git content: no task artifacts/ file, no artifact-locked event — ever
+    expect(existsSync(join(nodeDir(TASK), 'artifacts'))).toBe(false);
+    expect(c.events(TASK).some((e) => e.type === 'artifact-locked' || e.type === 'superseded')).toBe(false);
     expect(c.store.current('my-spec')).toBeUndefined();
-    expect(t.deferred.locks).toEqual([{ name: 'my-spec', type: 'spec', workingPath: workingFile('my-spec') }]);
   });
 
-  it('a REWORK re-writes the file, still records nothing, and NEVER supersedes a live node', () => {
-    const c = setup(GATED);
+  it('is idempotent by bytes on replay — re-declaring the same doc records one deferred entry', () => {
+    const c = setup();
+    const t = new IntentTranslator(c, TASK);
+    const s = step(['stage-doc']);
+    must(t.translate(s, [stageDoc('my-spec', '# body\n')]));
+    const bytes = readFileSync(docFile('my-spec'), 'utf8');
+    must(t.translate(s, [stageDoc('my-spec', '# body\n')])); // replay from the transcript
+    expect(readFileSync(docFile('my-spec'), 'utf8')).toBe(bytes);
+    expect(t.deferred.docs).toEqual([{ name: 'my-spec', path: 'docs/my-spec.md' }]);
+    expect(c.events(TASK).map((e) => e.type)).toEqual(['created']);
+  });
+
+  it('a REWORK re-writes the same file fresh — still no event, no lock to supersede', () => {
+    const c = setup();
     const first = new IntentTranslator(c, TASK);
-    must(first.translate(step(['lock-artifact']), [lockIntent('my-spec', '# draft\n')]));
+    must(first.translate(step(['stage-doc']), [stageDoc('my-spec', '# draft\n')]));
     const rework = new IntentTranslator(c, TASK);
-    must(rework.translate(step(['lock-artifact']), [lockIntent('my-spec', '# revised\n')]));
-    expect(readFileSync(workingFile('my-spec'), 'utf8')).toBe('# revised\n');
-    expect(c.events(TASK).some((e) => e.type === 'superseded' || e.type === 'artifact-locked')).toBe(false);
-  });
-
-  it('the EVENT lands at commit, and commit is idempotent on replay', () => {
-    const c = setup(GATED);
-    const t = new IntentTranslator(c, TASK);
-    must(t.translate(step(['lock-artifact']), [lockIntent('my-spec', '# body\n')]));
-    const r = must(t.commit());
-    expect(r.locked.map((l) => l.contentPath)).toEqual(['.ann/journey/legs/01-leg/01-a/artifacts/my-spec.md']);
-    expect(c.store.current('my-spec')?.producer).toBe(TASK);
-    expect(must(t.commit()).locked).toEqual([]); // already recorded — no double lock
-    expect(c.events(TASK).filter((e) => e.type === 'artifact-locked')).toHaveLength(1);
-  });
-
-  it('refuses a lock with neither content nor path', () => {
-    const t = new IntentTranslator(setup(GATED), TASK);
-    expect(errorOf(t.translate(step(['lock-artifact']), [{ kind: 'lock-artifact', name: 'x' }])).code).toBe('empty-lock');
+    must(rework.translate(step(['stage-doc']), [stageDoc('my-spec', '# revised\n')]));
+    expect(readFileSync(docFile('my-spec'), 'utf8')).toBe('# revised\n');
+    expect(c.events(TASK).some((e) => e.type === 'artifact-locked' || e.type === 'superseded')).toBe(false);
   });
 });
 
-describe('THE GATE②-TO-COMMIT CONTENT BINDING', () => {
-  it('commits when the working file still hashes to the sha the confirm gate decided on', () => {
-    const c = setup(GATED);
+describe('stage-doc name — a safe file stem under docs/', () => {
+  it('refuses a name that would not make a safe top-level docs/ file stem', () => {
+    const c = setup();
     const t = new IntentTranslator(c, TASK);
-    must(t.translate(step(['lock-artifact']), [lockIntent('my-spec', '# body\n')]));
-    const sha = must(c.submit(TASK, 'confirm', { confirmedSha: shaOf('# body\n') })).confirmedSha!;
-    must(c.gate(TASK, 'confirm', 'accept'));
-    expect(must(t.commit({ confirmedSha: sha })).locked).toHaveLength(1);
-  });
-
-  it('REFUSES on drift — the artifact changed after the gate', () => {
-    const c = setup(GATED);
-    const t = new IntentTranslator(c, TASK);
-    must(t.translate(step(['lock-artifact']), [lockIntent('my-spec', '# body\n')]));
-    const e = errorOf(t.commit({ confirmedSha: 'deadbee' }));
-    expect(e.code).toBe('content-drift');
-    expect(e.blocker).toContain('commit refuses');
+    const s = step(['stage-doc']);
+    for (const bad of ['../escape', 'a/b', 'my doc', '.hidden', '-dash', '']) {
+      const e = errorOf(t.translate(s, [stageDoc(bad, '# x\n')]));
+      expect(e.code).toBe('stage-doc-name');
+      expect(e.blocker).toContain('safe file stem');
+    }
+    expect(existsSync(join(root, 'docs'))).toBe(false); // refused before any write
   });
 });
 
-describe('propose-spawn — deferred to commit, beside the locks', () => {
-  it('defers, then spawns AFTER the locks so requiredInputs resolve through current()', () => {
-    const c = setup(GATED);
+describe('commit() — the deferred propose-spawn records here (docs were staged immediately)', () => {
+  it('returns { spawned } only; doc-before-spawn holds BY CONSTRUCTION so requiredInputs resolve', () => {
+    const c = setup();
     const t = new IntentTranslator(c, TASK);
     must(
-      t.translate(step(['lock-artifact', 'propose-spawn']), [
-        lockIntent('my-spec', '# body\n'),
-        { kind: 'propose-spawn', id: '01-leg/02-b', contract: { intent: 'consume it', acceptanceCriteria: ['x'], requiredInputs: ['my-spec'] } },
+      t.translate(step(['stage-doc', 'propose-spawn']), [
+        stageDoc('my-spec', '# body\n'),
+        proposeSpawn('01-leg/02-b', { intent: 'consume it', acceptanceCriteria: ['x'], requiredInputs: ['my-spec'] }),
       ]),
     );
-    expect(c.ids()).not.toContain('01-leg/02-b'); // nothing spawned yet
+    expect(c.ids()).not.toContain('01-leg/02-b'); // nothing spawned at translate
+    // the operator commits docs/my-spec.md + refreshes the manifest (the two-phase) —
+    // the staged doc is ALREADY on disk, so the child's requiredInput resolves
+    regenDocs();
+    mkdirSync(nodeDir('01-leg/02-b'), { recursive: true }); // spawn writes node.json into the node's folder
     const r = must(t.commit());
-    expect(r.spawned).toEqual(['01-leg/02-b']); // and F-AC19 passed because the lock ran first
+    expect(Object.keys(r)).toEqual(['spawned']); // no locks[], no other record
+    expect(r.spawned).toEqual(['01-leg/02-b']);
+    expect(c.status('01-leg/02-b')).toBe('queued');
+  });
+
+  it('is idempotent — a re-commit does not double-spawn', () => {
+    const c = setup();
+    const t = new IntentTranslator(c, TASK);
+    must(t.translate(step(['propose-spawn']), [proposeSpawn('01-leg/02-b', CONTRACT)]));
+    mkdirSync(nodeDir('01-leg/02-b'), { recursive: true }); // spawn writes node.json into the node's folder
+    expect(must(t.commit())).toEqual({ spawned: ['01-leg/02-b'] });
+    expect(must(t.commit())).toEqual({ spawned: [] }); // already exists — no-op
+    expect(c.ids().filter((i) => i === '01-leg/02-b')).toHaveLength(1);
     expect(c.status('01-leg/02-b')).toBe('queued');
   });
 
   it('refuses a depth-3 child — it would be invisible to frontmostReady/tasksOf', () => {
-    const t = new IntentTranslator(setup(GATED), TASK);
-    const e = errorOf(t.translate(step(['propose-spawn']), [{ kind: 'propose-spawn', id: '01-leg/01-a/01-kid', contract: CONTRACT }]));
+    const t = new IntentTranslator(setup(), TASK);
+    const e = errorOf(t.translate(step(['propose-spawn']), [proposeSpawn('01-leg/01-a/01-kid', CONTRACT)]));
     expect(e.code).toBe('spawn-depth');
   });
 
   it('no-ops when the id already exists', () => {
-    const c = setup(GATED);
+    setup();
     node('01-leg/02-b', CONTRACT, [ev('created')]);
-    const t = new IntentTranslator(new Commands(new Store(root), 'test'), TASK);
-    must(t.translate(step(['propose-spawn']), [{ kind: 'propose-spawn', id: '01-leg/02-b', contract: CONTRACT }]));
+    const c = new Commands(new Store(root), 'test');
+    const t = new IntentTranslator(c, TASK);
+    must(t.translate(step(['propose-spawn']), [proposeSpawn('01-leg/02-b', CONTRACT)]));
     expect(t.deferred.spawns).toEqual([]);
+    expect(must(t.commit())).toEqual({ spawned: [] });
   });
 });
 
-describe('evidence + close + supersede — immediate, idempotent on replay', () => {
+describe('evidence + close — immediate, idempotent on replay', () => {
   it('evidence dedups on answers[].id, on refs[], and on a bare note', () => {
     const c = setup();
     const t = new IntentTranslator(c, TASK);
@@ -175,6 +196,20 @@ describe('evidence + close + supersede — immediate, idempotent on replay', () 
     must(t.translate(s, [{ kind: 'evidence', note: 'ref', refs: ['r1'] }]));
     must(t.translate(s, [{ kind: 'evidence', note: 'ref again', refs: ['r1'] }]));
     expect(c.events(TASK).filter((e) => e.type === 'evidence')).toHaveLength(3);
+  });
+
+  it('the append path the translator uses accepts evidence carrying commits[] (F-AC18 conclusion)', () => {
+    const c = setup();
+    const t = new IntentTranslator(c, TASK);
+    must(t.translate(step(['evidence']), [{ kind: 'evidence', note: 'the spec is drafted' }]));
+    // the operator's conclusion record — evidence.commits[] is a lawful append, never
+    // refused the way the RETIRED artifact kinds are; a later replay dedups on it
+    const r = c.append(TASK, { at: '2026-08-27', type: 'evidence', note: 'committed the staged doc', commits: [{ sha: 'deadbee', note: 'spec' }] });
+    expect(r.ok).toBe(true);
+    must(t.translate(step(['evidence']), [{ kind: 'evidence', note: 'committed the staged doc' }])); // replay — dedup on the note
+    const evidenceEvents = c.events(TASK).filter((e) => e.type === 'evidence');
+    expect(evidenceEvents).toHaveLength(2);
+    expect(evidenceEvents[1].commits).toEqual([{ sha: 'deadbee', note: 'spec' }]);
   });
 
   it('close validates F-AC16: a transfer must land on a node that exists', () => {
@@ -193,57 +228,24 @@ describe('evidence + close + supersede — immediate, idempotent on replay', () 
     const t = new IntentTranslator(setup(), TASK);
     expect(errorOf(t.translate(step(['close']), [{ kind: 'close' }])).code).toBe('close-shape');
   });
-
-  it('supersede REFUSES a live locker — the status collapse would silently kill it', () => {
-    const c = setup(GATED);
-    const t = new IntentTranslator(c, TASK);
-    must(t.translate(step(['lock-artifact']), [lockIntent('my-spec', '# body\n')]));
-    must(t.commit());
-    node('01-leg/02-b', CONTRACT, [ev('created')]);
-    const c2 = new Commands(new Store(root), 'test');
-    const t2 = new IntentTranslator(c2, '01-leg/02-b');
-    // the locker (01-leg/01-a) is not done — refused (the live-locker check fires BEFORE
-    // the successor is resolved: no successor file is needed for the refusal)
-    const e = errorOf(t2.translate(step(['supersede']), [{ kind: 'supersede', name: 'my-spec' }]));
-    expect(e.code).toBe('live-locker');
-    // the thin model writes no docs/ layer
-    expect(existsSync(join(root, '.ann', 'docs'))).toBe(false);
-  });
-
-  /** A concluded locker of `my-spec` v1 (01-leg/01-a) — current for that name. */
-  const doneLockerOfMySpec = () => {
-    setup();
-    node(TASK, CONTRACT, [
-      ev('created'), ev('submitted', { gate: 'grill' }), ev('confirmed', { gate: 'grill' }),
-      ev('submitted', { gate: 'confirm' }), ev('confirmed', { gate: 'confirm' }), ev('completed'),
-    ]);
-    writeFileSync(join(root, '.ann', 'journey', 'legs', TASK, 'artifacts', 'my-spec.md'), '# v1\n');
-    must(new Commands(new Store(root), 'test').lock(TASK, 'my-spec.md'));
-  };
-
-  it('supersede REFUSES before the successor file materializes — no-successor, never a raw path', () => {
-    doneLockerOfMySpec();
-    node('01-leg/02-b', CONTRACT, [ev('created')]);
-    const t = new IntentTranslator(new Commands(new Store(root), 'test'), '01-leg/02-b');
-    // no deferred lock and no canonical artifacts/my-spec.md yet — the successor is unborn
-    const e = errorOf(t.translate(step(['supersede']), [{ kind: 'supersede', name: 'my-spec' }]));
-    expect(e.code).toBe('no-successor');
-  });
-
-  it('happy path — supersedes the DONE locker once this task has materialized its own file', () => {
-    doneLockerOfMySpec();
-    node('01-leg/02-b', CONTRACT, [ev('created')]);
-    const t = new IntentTranslator(new Commands(new Store(root), 'test'), '01-leg/02-b');
-    // lock-artifact writes the working file (deferred); the supersede beside it names it
-    must(t.translate(step(['lock-artifact', 'supersede']), [
-      lockIntent('my-spec', '# v2\n'),
-      { kind: 'supersede', name: 'my-spec', note: 'v2 supersedes v1' },
-    ]));
-    // the `superseded` record lands on the OLD locker; the successor path is DERIVED
-    // from this node's own artifacts file — never a caller-supplied path (AC-4)
-    const superseded = new Commands(new Store(root), 'test').events(TASK).find((e) => e.type === 'superseded');
-    expect(superseded!.successor).toEqual({ name: 'my-spec', path: '.ann/journey/legs/01-leg/02-b/artifacts/my-spec.md' });
-    expect(readFileSync(join(root, '.ann', 'journey', 'legs', '01-leg', '02-b', 'artifacts', 'my-spec.md'), 'utf8')).toBe('# v2\n');
-  });
 });
 
+describe('commands.append refuses the retired + composite-owned kinds', () => {
+  it('refuses the RETIRED doc-artifact kinds with retired-kind', () => {
+    const c = setup();
+    const locked = errorOf(c.append(TASK, { at: '2026-08-27', type: 'artifact-locked', note: 'seal', artifact: { name: 'x', path: 'a/x.md', lockSha: 'abc' } }));
+    expect(locked.code).toBe('retired-kind');
+    const superseded = errorOf(c.append(TASK, { at: '2026-08-27', type: 'superseded', note: 'old' }));
+    expect(superseded.code).toBe('retired-kind');
+    expect(c.events(TASK)).toHaveLength(1); // nothing landed
+  });
+
+  it('refuses the COMPOSITE-owned kinds with composite-owned', () => {
+    const c = setup();
+    for (const type of ['created', 'submitted', 'confirmed', 'rejected', 'goal-met']) {
+      const e = errorOf(c.append(TASK, { at: '2026-08-27', type }));
+      expect(e.code).toBe('composite-owned');
+    }
+    expect(c.events(TASK)).toHaveLength(1); // nothing landed
+  });
+});

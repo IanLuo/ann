@@ -11,7 +11,10 @@ import { Abilities, Intent, ResearchFinding, Step, StepContext, StepOutput } fro
 /**
  * THE FRAME (core-design §4) — the RESUMABLE COORDINATOR. These tests pin the four
  * resume tail states, frame-write idempotence, the verify-fail cycle (with its empty-
- * chain inertness), and that commit is where the deferred intents record.
+ * chain inertness), and the TWO-PHASE conclusion (F-AC18): a chain that STAGES A DOC
+ * ends run 1 in `blocked-waiting` once its confirm gate is decided — `completed` is the
+ * RE-RUN that follows the operator's `evidence.commits[]` (commit is where deferred
+ * propose-spawn children record). An empty chain concludes on its own run as before.
  */
 
 let root: string;
@@ -51,13 +54,14 @@ const abilities = (interact: ScriptedInteract, completions: string[] = []): Abil
   interact,
 });
 
-/** A step that returns whatever the script says, and declares the intents it uses. */
+/** A step that returns whatever the script says, and declares the intents it uses.
+ *  The DEFAULT stages a doc named after the step — docs are git content, written NOW. */
 const mkStep = (id: string, over: Partial<Step> & { out?: (ctx: StepContext) => StepOutput } = {}): Step => ({
   id,
   roles: [],
   rules: [],
-  produces: ['lock-artifact'],
-  execute: async (ctx) => over.out?.(ctx) ?? { ok: true, artifact: `${id} artifact`, intents: [{ kind: 'lock-artifact', name: id, content: `# ${id}\n`, type: 'record' } as Intent] },
+  produces: ['stage-doc'],
+  execute: async (ctx) => over.out?.(ctx) ?? { ok: true, artifact: `${id} artifact`, intents: [{ kind: 'stage-doc', name: id, content: `# ${id}\n` } as Intent] },
   ...(over.decisions ? { decisions: over.decisions } : {}),
   ...(over.produces ? { produces: over.produces } : {}),
   ...(over.roles ? { roles: over.roles } : {}),
@@ -78,31 +82,71 @@ const frame = (c: Commands, steps: Step[], interact: ScriptedInteract) =>
 
 const run = (c: Commands, steps: Step[], interact = new ScriptedInteract()): Promise<FrameResult> => frame(c, steps, interact).run(TASK);
 
+/** The git-home file a staged doc lives at — <store root>/docs/<name>.md. */
+const docFile = (name: string) => join(root, 'docs', `${name}.md`);
+
+/** The TWO-PHASE release (F-AC18): append the operator's commit evidence, then re-run.
+ *  Both gates were decided on run 1, so the re-run asks the human nothing (the
+ *  decided-gate path) and concludes: commit runs → `completed` is appended. */
+async function conclude(c: Commands, steps: Step[], sha = 'abc1234'): Promise<FrameResult> {
+  const a = c.append(TASK, { at: '2026-08-27', type: 'evidence', note: 'committed the staged doc (test)', commits: [{ sha }] });
+  if (!a.ok) throw new Error(`append refused: ${a.error.code}: ${a.error.blocker}`);
+  return run(c, steps);
+}
+
 describe('the frame runs the fixed frame end to end', () => {
-  it('grill → activate → execute → verify → confirm → commit, recording the deferred lock ONLY at commit', async () => {
+  it('grill → activate → execute → verify → confirm (staged) → WAIT → commit on evidence, recording the deferred spawn ONLY at commit', async () => {
     const c = setup();
     chainFile([{ id: 'envision' }]);
-    const step = mkStep('envision');
+    // the step stages its doc AND defers a leg-sibling spawn to the commit boundary
+    const envision = mkStep('envision', {
+      produces: ['stage-doc', 'propose-spawn'],
+      out: () => ({
+        ok: true,
+        artifact: 'envisioned',
+        intents: [
+          { kind: 'stage-doc', name: 'envision', content: '# envision\n' },
+          { kind: 'propose-spawn', id: '01-leg/02-a', contract: CONTRACT },
+        ] as Intent[],
+      }),
+    });
     const human = new ScriptedInteract(['accept', 'accept']);
-    const r = await run(c, [step], human);
+    const r1 = await run(c, [envision], human);
 
-    expect(r.stop).toBe('completed');
+    // RUN 1: the doc is STAGED (git content on disk) and both gates are DECIDED, but with
+    // no commit evidence the frame WAITS — concluding is the operator's `git commit`.
+    expect(r1.stop).toBe('blocked-waiting');
+    expect(c.status(TASK)).toBe('blocked');
+    expect(readFileSync(docFile('envision'), 'utf8')).toContain('# envision'); // the working file existed BEFORE the event
+    expect(c.ids()).not.toContain('01-leg/02-a'); // the spawn is DEFERRED — nothing records before commit
+
+    // the operator commits the docs/ change and records structured evidence — the release.
+    // (store.spawn writes node.json into an EXISTING node folder — the caller pre-creates
+    // the child's folder; it is not a node until node.json lands — same idiom as intents.test.)
+    mkdirSync(join(root, '.ann', 'journey', 'legs', '01-leg', '02-a'), { recursive: true });
+    const r2 = await conclude(c, [envision]);
+    expect(r2.stop).toBe('completed');
     expect(c.status(TASK)).toBe('done');
     const types = c.events(TASK).map((e) => e.type);
-    expect(types).toEqual(['created', 'submitted', 'confirmed', 'activated', 'submitted', 'confirmed', 'artifact-locked', 'completed']);
-    // the working file existed BEFORE the event — files are working state, events are acceptance
-    expect(r.committed?.locked.map((l) => l.name)).toEqual(['envision']);
+    expect(types).toEqual(['created', 'submitted', 'confirmed', 'activated', 'submitted', 'confirmed', 'waiting', 'evidence', 'completed']);
+    expect(r2.committed?.spawned).toEqual(['01-leg/02-a']); // the deferred spawn recorded HERE, at commit
+    expect(c.ids()).toContain('01-leg/02-a');
     // look-back is a DERIVED READ at L1 (§1) — the frame reads it, never assumes it
-    expect(r.lookBack?.pendingGates).toEqual([]);
-    expect(r.advance).toBeTruthy();
+    expect(r2.lookBack?.pendingGates).toEqual([]);
+    expect(r2.advance).toBeTruthy();
   });
 
   it('activate/completed are idempotent — a re-run adds no duplicate lifecycle events', async () => {
     const c = setup();
     chainFile([{ id: 'envision' }]);
+    // run 1 stages + decides both gates → the two-phase WAIT (no conclusion yet)
     await run(c, [mkStep('envision')], new ScriptedInteract(['accept', 'accept']));
+    // the operator's evidence discharges the wait — run 2 concludes
+    const r2 = await conclude(c, [mkStep('envision')]);
+    expect(r2.stop).toBe('completed');
     const before = c.events(TASK).length;
-    await run(c, [mkStep('envision')], new ScriptedInteract(['accept', 'accept']));
+    const r3 = await run(c, [mkStep('envision')]);
+    expect(r3.stop).toBe('completed');
     const types = c.events(TASK).map((e) => e.type);
     expect(types.filter((t) => t === 'activated')).toHaveLength(1);
     expect(types.filter((t) => t === 'completed')).toHaveLength(1);
@@ -115,13 +159,16 @@ describe('the four resume tail states (core-design §1)', () => {
     const c = setup([ev('created'), ev('submitted', { gate: 'grill' }), ev('confirmed', { gate: 'grill' })]);
     chainFile([{ id: 'envision' }]);
     let ran = 0;
-    const step = mkStep('envision', { out: () => { ran++; return { ok: true, artifact: 'a', intents: [{ kind: 'lock-artifact', name: 'envision', content: '# e\n', type: 'record' }] }; } });
-    const human = new ScriptedInteract(['accept']);
-    const r = await run(c, [step], human);
-    expect(r.stop).toBe('completed');
+    const step = mkStep('envision', { out: () => { ran++; return { ok: true, artifact: 'a', intents: [{ kind: 'stage-doc', name: 'envision', content: '# e\n' }] }; } });
+    const human = new ScriptedInteract(['accept']); // the CONFIRM gate only — grill is already decided
+    const r1 = await run(c, [step], human);
+    expect(r1.stop).toBe('blocked-waiting'); // staged + confirm decided → the two-phase wait
     expect(ran).toBe(1); // the step still ran
     expect(c.events(TASK).filter((e) => e.type === 'confirmed' && e.gate === 'grill')).toHaveLength(1);
     expect(human.presented.some((p) => p.startsWith('GATE grill'))).toBe(false); // no re-presentation
+    const r2 = await conclude(c, [step]);
+    expect(r2.stop).toBe('completed');
+    expect(ran).toBe(2); // the decided gate never skips the step on the concluding run either
   });
 
   it('2 — an undecided `submitted` BLOCKS: an interrupted gate is resumable, not un-started', async () => {
@@ -135,9 +182,11 @@ describe('the four resume tail states (core-design §1)', () => {
   it('3 — a `rejected` tail re-obtains the gate: the rework rung runs', async () => {
     const c = setup([ev('created'), ev('submitted', { gate: 'grill' }), ev('rejected', { gate: 'grill', feedback: 'not yet' })]);
     chainFile([{ id: 'envision' }]);
-    const r = await run(c, [mkStep('envision')], new ScriptedInteract(['accept', 'accept']));
-    expect(r.stop).toBe('completed');
+    const r1 = await run(c, [mkStep('envision')], new ScriptedInteract(['accept', 'accept']));
+    expect(r1.stop).toBe('blocked-waiting'); // grill re-obtained, staged, confirm decided → the wait
     expect(c.events(TASK).filter((e) => e.type === 'submitted' && e.gate === 'grill')).toHaveLength(2);
+    const r2 = await conclude(c, [mkStep('envision')]);
+    expect(r2.stop).toBe('completed');
   });
 
   it('4 — a `waiting` with no later commit evidence blocks, and is written ONCE', async () => {
@@ -154,7 +203,7 @@ describe('the four resume tail states (core-design §1)', () => {
     const c = setup();
     chainFile([]);
     expect((await run(c, [], new ScriptedInteract(['accept']))).stop).toBe('blocked-waiting');
-    c.append(TASK, { at: '2026-08-27', type: 'evidence', note: 'the runner committed', commits: [{ sha: 'abc1234' }] } as never);
+    c.append(TASK, { at: '2026-08-27', type: 'evidence', note: 'the runner committed', commits: [{ sha: 'abc1234' }] });
     const r = await run(c, [], new ScriptedInteract(['accept']));
     expect(r.stop).toBe('completed');
     expect(c.status(TASK)).toBe('done');
@@ -165,8 +214,8 @@ describe('the gate source is the CHAIN (core-design §6)', () => {
   const grillStep = (decision: string) =>
     mkStep('idea-validate', {
       decisions: ['solid', 'revise'],
-      produces: ['lock-artifact'],
-      out: () => ({ ok: true, artifact: 'grilled', verdict: { decision }, intents: [{ kind: 'lock-artifact', name: 'validation', content: '# v\n', type: 'validation' }] }),
+      produces: ['stage-doc'],
+      out: () => ({ ok: true, artifact: 'grilled', verdict: { decision }, intents: [{ kind: 'stage-doc', name: 'validation', content: '# v\n' }] }),
     });
   const CHAIN: ChainEntry[] = [
     { id: 'idea-validate', at: 'grill', verdict: { solid: { gate: 'accept' }, revise: { gate: 'reject', feedback: 'sharpen it' } } },
@@ -176,11 +225,13 @@ describe('the gate source is the CHAIN (core-design §6)', () => {
   it("routes the step's verdict to the gate decision — the human is never asked", async () => {
     const c = setup();
     chainFile(CHAIN);
-    const human = new ScriptedInteract(['accept']);
-    const r = await run(c, [grillStep('solid'), mkStep('envision')], human);
-    expect(r.stop).toBe('completed');
+    const human = new ScriptedInteract(['accept']); // the CONFIRM gate only — grill is decided by the verdict
+    const r1 = await run(c, [grillStep('solid'), mkStep('envision')], human);
+    expect(r1.stop).toBe('blocked-waiting');
     expect(human.asked.some((q) => q.includes("gate 'grill'"))).toBe(false);
     expect(c.events(TASK).some((e) => e.type === 'confirmed' && e.gate === 'grill')).toBe(true);
+    const r2 = await conclude(c, [grillStep('solid'), mkStep('envision')]);
+    expect(r2.stop).toBe('completed');
   });
 
   it('a verdict the map does not route FAILS CLOSED', async () => {
@@ -199,15 +250,19 @@ describe('the gate source is the CHAIN (core-design §6)', () => {
       decisions: ['solid', 'revise'],
       out: () => {
         ran++;
-        return { ok: true, artifact: 'grilled', verdict: { decision: 'solid' }, intents: [{ kind: 'lock-artifact', name: 'validation', content: '# v\n', type: 'validation' }] };
+        return { ok: true, artifact: 'grilled', verdict: { decision: 'solid' }, intents: [{ kind: 'stage-doc', name: 'validation', content: '# v\n' }] };
       },
     });
-    const r = await run(c, [grill, mkStep('envision')], new ScriptedInteract(['accept']));
-    expect(r.stop).toBe('completed');
+    const r1 = await run(c, [grill, mkStep('envision')], new ScriptedInteract(['accept']));
+    expect(r1.stop).toBe('blocked-waiting');
     expect(ran).toBe(1);
-    // its deferred lock reaches the SAME commit as the execute step's
-    expect(r.committed?.locked.map((l) => l.name).sort()).toEqual(['envision', 'validation']);
+    // the decided gate's staged doc reaches the SAME run's docs/ as the execute step's
+    expect(readFileSync(docFile('validation'), 'utf8')).toContain('# v');
+    expect(readFileSync(docFile('envision'), 'utf8')).toContain('# envision');
     expect(c.events(TASK).filter((e) => e.type === 'confirmed' && e.gate === 'grill')).toHaveLength(1);
+    const r2 = await conclude(c, [grill, mkStep('envision')]);
+    expect(r2.stop).toBe('completed');
+    expect(ran).toBe(2);
   });
 
   it('a rejecting verdict re-obtains the gate, and the 3-reject bound ESCALATES', async () => {
@@ -220,9 +275,9 @@ describe('the gate source is the CHAIN (core-design §6)', () => {
 });
 
 describe('verify — outputs, not acceptance events', () => {
-  const barren = mkStep('envision', { produces: [], out: () => ({ ok: true, artifact: 'nothing locked' }) });
+  const barren = mkStep('envision', { produces: [], out: () => ({ ok: true, artifact: 'nothing staged' }) });
 
-  it('a chain that produces no artifact and no commit evidence fails verify, and cycles then fails', async () => {
+  it('a chain that produces no staged doc and no commit evidence fails verify, and cycles then fails', async () => {
     const c = setup();
     chainFile([{ id: 'envision' }]);
     const r = await run(c, [barren], new ScriptedInteract(['accept']));
@@ -290,19 +345,22 @@ describe('conditional execution (flow.conditionals)', () => {
     // envision decides 'stop', so spec's condition is FALSE and spec never runs
     const envision = mkStep('envision', {
       decisions: ['go', 'stop'],
-      out: () => ({ ok: true, artifact: 'a', verdict: { decision: 'stop' }, intents: [{ kind: 'lock-artifact', name: 'envision', content: '# e\n', type: 'record' }] }),
+      out: () => ({ ok: true, artifact: 'a', verdict: { decision: 'stop' }, intents: [{ kind: 'stage-doc', name: 'envision', content: '# e\n' }] }),
     });
     const spec = mkStep('spec', { out: () => ({ ok: true, artifact: 'never' }) });
-    const r = await run(c, [envision, spec], new ScriptedInteract(['accept', 'accept']));
-    expect(r.stop).toBe('completed');
-    expect(r.outcomes.find((o) => o.step === 'spec')?.ran).toBe(false);
+    const r1 = await run(c, [envision, spec], new ScriptedInteract(['accept', 'accept']));
+    expect(r1.stop).toBe('blocked-waiting');
+    expect(r1.outcomes.find((o) => o.step === 'spec')?.ran).toBe(false);
     const skips = c.events(TASK).map((e) => e.trace as { kind?: string; stepId?: string } | undefined).filter((t) => t?.kind === 'skip');
     expect(skips).toEqual([{ kind: 'skip', stepId: 'spec', condition: 'verdict:envision=go', evaluated: false }]);
+    const r2 = await conclude(c, [envision, spec]);
+    expect(r2.stop).toBe('completed');
   });
 
   it('a `when` may reference the GRILL step that DECIDED the gate — its verdict reaches execute (depth routing)', async () => {
     // idea-validate is grill-bound; an execute step is conditional on its depth verdict.
-    // Before the gate-outcome seed, produced held only execute steps, so this always skipped.
+    // The gate phase seeds the produced map with the deciding step's outcome, so the
+    // conditional reads the depth the GRILL decided — never a silent always-skip.
     const config = () => {
       const c = setup();
       mkdirSync(join(root, '.ann', 'rules', 'config'), { recursive: true });
@@ -312,7 +370,7 @@ describe('conditional execution (flow.conditionals)', () => {
     const grill = (decision: string) =>
       mkStep('idea-validate', {
         decisions: ['clear', 'ambiguous'],
-        out: () => ({ ok: true, artifact: 'grilled', verdict: { decision }, intents: [{ kind: 'lock-artifact', name: 'validation', content: '# v\n', type: 'validation' }] }),
+        out: () => ({ ok: true, artifact: 'grilled', verdict: { decision }, intents: [{ kind: 'stage-doc', name: 'validation', content: '# v\n' }] }),
       });
 
     // CLEAR verdict → the conditional step does NOT run
@@ -324,9 +382,12 @@ describe('conditional execution (flow.conditionals)', () => {
     let ran1 = 0;
     const env1 = mkStep('envision', { out: () => { ran1++; return { ok: true, artifact: 'a' }; } });
     const r1 = await run(c1, [grill('clear'), env1], new ScriptedInteract(['accept']));
-    expect(r1.stop).toBe('completed');
+    expect(r1.stop).toBe('blocked-waiting');
     expect(ran1).toBe(0); // skipped
     expect(r1.outcomes.find((o) => o.step === 'envision')?.ran).toBe(false);
+    const d1 = await conclude(c1, [grill('clear'), env1]);
+    expect(d1.stop).toBe('completed');
+    expect(ran1).toBe(0); // still skipped on the concluding run
 
     // AMBIGUOUS verdict → the same conditional step DOES run
     const c2 = config();
@@ -337,9 +398,12 @@ describe('conditional execution (flow.conditionals)', () => {
     let ran2 = 0;
     const env2 = mkStep('envision', { out: () => { ran2++; return { ok: true, artifact: 'a' }; } });
     const r2 = await run(c2, [grill('ambiguous'), env2], new ScriptedInteract(['accept']));
-    expect(r2.stop).toBe('completed');
+    expect(r2.stop).toBe('blocked-waiting');
     expect(ran2).toBe(1); // ran
     expect(r2.outcomes.find((o) => o.step === 'envision')?.ran).toBe(true);
+    const d2 = await conclude(c2, [grill('ambiguous'), env2]);
+    expect(d2.stop).toBe('completed');
+    expect(ran2).toBe(2); // ran on the concluding run too
   });
 });
 
@@ -347,11 +411,14 @@ describe('the runner reviewer (S6) IS the verify phase (architecture-v3 §76)', 
   it('a task the runner can execute without guessing passes the review — no extra findings', async () => {
     const c = setup();
     chainFile([{ id: 'envision' }]);
-    const r = await run(c, [mkStep('envision')], new ScriptedInteract(['accept', 'accept']));
-    expect(r.stop).toBe('completed');
-    expect(r.runnerReview?.verdict).toBe('pass');
-    expect(r.runnerReview?.blockers).toEqual([]);
-    expect(r.problems.join('\n')).not.toContain('runner-review:');
+    const r1 = await run(c, [mkStep('envision')], new ScriptedInteract(['accept', 'accept']));
+    expect(r1.stop).toBe('blocked-waiting'); // staged + confirm decided → the two-phase wait
+    expect(r1.runnerReview?.verdict).toBe('pass');
+    expect(r1.runnerReview?.blockers).toEqual([]);
+    expect(r1.problems.join('\n')).not.toContain('runner-review:');
+    const r2 = await conclude(c, [mkStep('envision')]);
+    expect(r2.stop).toBe('completed');
+    expect(r2.runnerReview?.verdict).toBe('pass');
   });
 
   it('blocking confusion is a NAMED verify finding, never a silent pass', async () => {
@@ -379,11 +446,15 @@ describe('the read view + prior are the two input channels (§5)', () => {
     const c = setup();
     chainFile([{ id: 'envision' }, { id: 'spec', inputs: { vision: 'envision' } }]);
     let seen: unknown;
-    const spec = mkStep('spec', { roles: [{ name: 'vision', required: true }], out: (ctx) => { seen = ctx.prior.vision; return { ok: true, artifact: 's', intents: [{ kind: 'lock-artifact', name: 'spec', content: '# s\n', type: 'record' }] }; } });
-    const r = await run(c, [mkStep('envision'), spec], new ScriptedInteract(['accept', 'accept']));
-    expect(r.stop).toBe('completed');
+    const spec = mkStep('spec', { roles: [{ name: 'vision', required: true }], out: (ctx) => { seen = ctx.prior.vision; return { ok: true, artifact: 's', intents: [{ kind: 'stage-doc', name: 'spec', content: '# s\n' }] }; } });
+    const r1 = await run(c, [mkStep('envision'), spec], new ScriptedInteract(['accept', 'accept']));
+    expect(r1.stop).toBe('blocked-waiting');
     expect(seen).toBe('envision artifact');
-    expect(existsSync(join(root, '.ann', 'journey', 'legs', TASK, 'artifacts', 'spec.md'))).toBe(true);
-    expect(readFileSync(join(root, '.ann', 'journey', 'legs', TASK, 'artifacts', 'envision.md'), 'utf8')).toContain('# envision');
+    // the staged docs live in the repo's git docs/ home — never a task artifacts/ file
+    expect(existsSync(docFile('spec'))).toBe(true);
+    expect(readFileSync(docFile('envision'), 'utf8')).toContain('# envision');
+    const r2 = await conclude(c, [mkStep('envision'), spec]);
+    expect(r2.stop).toBe('completed');
+    expect(seen).toBe('envision artifact');
   });
 });

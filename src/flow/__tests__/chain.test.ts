@@ -25,14 +25,14 @@ const step = (id: string, over: Partial<Step> = {}): Step => ({
 });
 
 const REGISTRY: Record<string, Step> = {
-  'idea-validate': step('idea-validate', { decisions: ['solid', 'revise', 'reject'], produces: ['lock-artifact'] }),
-  envision: step('envision', { produces: ['lock-artifact'] }),
+  'idea-validate': step('idea-validate', { decisions: ['solid', 'revise', 'reject'], produces: ['stage-doc'] }),
+  envision: step('envision', { produces: ['stage-doc'] }),
   spec: step('spec', {
     roles: [{ name: 'vision', required: true }, { name: 'notes', required: false }],
-    produces: ['lock-artifact', 'propose-spawn'],
+    produces: ['stage-doc', 'propose-spawn'],
   }),
   review: step('review'), // declares NO produces[] — "produces NOTHING", fail-closed
-  sign: step('sign', { decisions: ['ship'], produces: ['lock-artifact'] }),
+  sign: step('sign', { decisions: ['ship'], produces: ['stage-doc'] }),
 };
 
 const lookup: StepLookup = {
@@ -122,8 +122,8 @@ describe('gate-source routing — the gate SOURCE is data, the set and positions
 });
 
 describe('the confirm-bound deadlock, rejected at VALIDATION (§3 rule 8)', () => {
-  it('refuses a chain whose only artifact-producing step is confirm-bound', () => {
-    expect(problemsAt([{ id: 'sign', at: 'confirm', verdict: { ship: { gate: 'accept' } } }])).toContain('every artifact-producing step is confirm-bound');
+  it('refuses a chain whose only doc-staging step is confirm-bound', () => {
+    expect(problemsAt([{ id: 'sign', at: 'confirm', verdict: { ship: { gate: 'accept' } } }])).toContain('every doc-staging step is confirm-bound — the confirm gate would decide on work that has not run yet (deadlock)');
   });
 
   it('accepts it when an execute-phase step also produces', () => {
