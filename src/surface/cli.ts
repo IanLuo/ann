@@ -641,6 +641,40 @@ function cmdRules(write: boolean) {
  *  is the committed resolution index — GENERATED from scanDocsDir, never hand-maintained
  *  (the derived-not-stored rule). Read prints the index; --write regenerates the manifest.
  *  Mirrors `rules`/`rules --write`. */
+/** `sessions` — the ACTIVE project's ARCHIVED sessions (the `goal! archive` history).
+ *  Each archived session is a full journey store in its own folder; this lists them and,
+ *  per session, derives the sealed/current goal through a READ-ONLY store over that
+ *  session (ANN_STORE-style), so you can see what each archived journey was and point
+ *  at it read-only. Always the ACTIVE project's archive — a session lives with its project. */
+function cmdSessions() {
+  const sessionsDir = join(ROOT, '.ann', 'archive', 'sessions');
+  const rows: Array<Record<string, string | number>> = [];
+  if (existsSync(sessionsDir)) {
+    for (const d of readdirSync(sessionsDir, { withFileTypes: true })) {
+      if (!d.isDirectory()) continue;
+      const p = join(sessionsDir, d.name);
+      try {
+        const st = new Store(p, { readOnly: true }); // the session dir has journey/legs → journey-kind
+        const legs = st.ids().filter((i) => !i.includes('/')).sort();
+        const goal = legs[0];
+        const status = goal ? st.status(goal) : '-';
+        const met = goal ? st.events(goal).some((e) => e.type === 'goal-met') : false;
+        rows.push({ session: d.name, goal: goal ?? '(none)', status, verdict: met ? 'met' : status === 'done' ? 'done (unconfirmed)' : status, legs: legs.length });
+      } catch {
+        rows.push({ session: d.name, goal: '(unreadable store)', status: '-', verdict: '-', legs: 0 });
+      }
+    }
+  }
+  if (JSON_OUT) return console.log(JSON.stringify({ sessionsDir, sessions: rows }, null, 2));
+  console.log(`ARCHIVED SESSIONS (${sessionsDir})`);
+  if (!rows.length) {
+    console.log('  none yet — goal! archive moves a finished journey here');
+    return;
+  }
+  for (const r of rows) console.log(`  ${r.session} · goal ${r.goal} (${r.status}) · ${r.verdict} · ${r.legs} leg(s)`);
+  console.log('  point at one read-only: ANN_STORE=<session dir> ann journey|status|specs|goal|…');
+}
+
 function cmdDocs(write: boolean) {
   // docs/ is a PROJECT concept — the RESOLVED TARGET's docs home. An ARCHIVED journey
   // ('journey'-kind target) has none: the index read prints a clear refusal instead of
@@ -964,6 +998,7 @@ const COMMANDS: Array<{ name: string; args: string; desc: string }> = [
   { name: 'validate', args: '[id]', desc: 'run the enabled validator rules (all nodes, or one node) — rule-id\'d deterministic findings · alias --validate' },
   { name: 'rules', args: '[--write]', desc: 'the DERIVED check-rules registry (self-contained rule modules are the source) · alias --rules; --write regenerates rules/check/rules.json' },
   { name: 'docs', args: '[--write]', desc: 'the docs→git resolution index (docs/manifest.json — generated from docs/, never hand-maintained) · alias --docs; --write regenerates the manifest' },
+  { name: 'sessions', args: '', desc: 'the archived sessions of this project (goal! archive history) — one line each: goal · status · verdict · legs; point at one read-only via ANN_STORE · alias --sessions' },
   { name: 'chain', args: '', desc: 'the project flow config as data (work-type chains, F3 view) · alias --chain' },
   { name: 'steps', args: '', desc: 'the step registry — the pluggable surface future steps implement against · alias --steps' },
   { name: 'next', args: '', desc: 'the run-next proposal (F5 pull): active leg, frontmost-ready, pending gates, leg gate — derived, never assumed · alias --next' },
@@ -1093,6 +1128,7 @@ try {
   else if (command === 'validate' || command === '--validate') cmdValidate(args[1]);
   else if (command === 'rules' || command === '--rules') cmdRules(args[1] === '--write');
   else if (command === 'docs' || command === '--docs') cmdDocs(args[1] === '--write');
+  else if (command === 'sessions' || command === '--sessions') cmdSessions();
   else if (command === 'chain' || command === '--chain') cmdChain();
   else if (command === 'steps' || command === '--steps') cmdSteps();
   else if (command === 'next' || command === '--next') cmdNext();
