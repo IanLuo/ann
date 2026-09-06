@@ -5,3 +5,4 @@
 {"at":"2026-09-06","type":"submitted","gate":"confirm","note":"submitted for the confirm gate (agent)"}
 {"at":"2026-09-06","type":"confirmed","gate":"confirm","feedback":"accepted: value-canonical refactor done + verified — pure handlers of ctx returning Outcome, central runMain, default text = render(value) and --json = value (parity structural), composed commands carry full values, parity e2e green; AC1-AC6 met. Commit 64c7bdd.","note":"accepted (agent)"}
 {"at":"2026-09-06","type":"completed","note":"value-canonical delivered (64c7bdd)."}
+{"at":"2026-09-06","type":"evidence","commits":[{"sha":"186685d","note":"fix(cli): review findings — run! JSON refuses, single goal-seed error, help Naming prefix"}],"note":"corrective evidence (post-close, cli review): run! under --json now refuses up-front (run-interactive doc), goal! seed errors emit once, help Naming prefix restored; suite 515 green."}
