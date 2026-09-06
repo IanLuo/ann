@@ -600,7 +600,16 @@ function cmdSteps() {
 function cmdNext() {
   const lb = commands.lookBack();
   const next = commands.advance();
-  if (JSON_OUT) return jsonEmit(lb);
+  // the FOUR-STATE GOAL CONSULT — computed ONCE and carried into BOTH the text and the
+  // JSON (uniform-json parity: the JSON doc must carry the same data the text renders,
+  // so a machine can reproduce what the human saw — advance + the goal consult too).
+  const goalView = next.action === 'none' ? commands.goal() : undefined;
+  if (JSON_OUT)
+    return jsonEmit({
+      lookBack: lb,
+      advance: next, // {leg, action, detail} — the headline, previously dropped from JSON
+      ...(goalView?.ok && goalView.value.present ? { goal: goalView.value } : {}),
+    });
   console.log('NEXT (derived from events — the observer action)');
   if (lb.activeLeg) console.log(`  active leg: ${lb.activeLeg} (${lb.activeLegStatus})`);
   if (lb.frontmostReady) console.log(`  frontmost-ready: ${lb.frontmostReady.task} (${lb.frontmostReady.status})`);
@@ -615,8 +624,7 @@ function cmdNext() {
   // holds the next move (no goal → grill & seed · exhausted-unconfirmed → the choice
   // menu · met → archive & start a new goal) — never a blind "no ready action".
   if (next.action === 'none') {
-    const g = commands.goal();
-    if (g.ok && g.value.present) console.log(`  goal: ${g.value.goalId} [${g.value.goalStatus}] — verdict ${g.value.verdict}`);
+    if (goalView?.ok && goalView.value.present) console.log(`  goal: ${goalView.value.goalId} [${goalView.value.goalStatus}] — verdict ${goalView.value.verdict}`);
   } else if (!lb.frontmostReady && !lb.pendingGates.length) {
     console.log('  no ready action — resolve blocked tasks or close via a gated closure task');
   }
@@ -815,9 +823,9 @@ function cmdDocs(write: boolean) {
   if (dh === undefined) {
     const msg = 'ann: docs refused — ANN_STORE points at an archived journey (no docs/ home; an archived session has no manifest to index). Reads work via the legacy current-artifact path (`ann read <name>` / `ann <name>`).';
     if (JSON_OUT) return reject('docs-home', msg);
+    // parity: the refusal is an ERROR in BOTH modes (exit 1), not a silent exit 0 in text
     console.error(msg);
-    if (write) process.exit(1);
-    return;
+    process.exit(1);
   }
   const manifest = loadDocsManifest(dh);
   const { fresh, missing, stale } = docsIndexFresh(dh);
@@ -964,7 +972,9 @@ function cmdConfirm(id: string) {
   // with the gate — at GATE② (confirm-result) these ARE what the human confirms.
   const d = commands.detail(id);
   if (!d.contract) return reject('confirm', `confirm: no node ${id}`);
-  if (JSON_OUT) return jsonEmit(d);
+  // parity: the JSON doc reproduces the GATE CARD the text renders (detail + results —
+  // the outputs the human confirms at GATE②), not just the detail view.
+  if (JSON_OUT) return jsonEmit({ detail: d, results: store.results(id) });
   console.log(renderGateCard({ detail: d, results: store.results(id) }));
   const items = store.results(id);
   if (items.length) console.log('  → drill: ann results <id> <n>');
