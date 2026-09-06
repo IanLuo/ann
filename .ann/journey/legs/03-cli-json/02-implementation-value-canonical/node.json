@@ -1,0 +1,20 @@
+{
+  "id": "03-cli-json/02-implementation-value-canonical",
+  "contract": {
+    "intent": "Make the CLI result value-canonical: every command is a pure handler of a ctx returning an Outcome, a central main routes flags/exits/errors, and the default text is a render of the SAME value that --json emits — so the two formats can never diverge, and handlers become in-process testable.",
+    "acceptanceCriteria": [
+      "A handler registry: each command is a function of ctx returning an Outcome (ok value or ok:false error); no handler writes stdout directly",
+      "A central main routes dispatch, the --json flag, exit codes, aliases, and the error shape in one place; default text prints render(value), --json prints the value",
+      "The composed offenders next and confirm carry the same value in text and json; the results-listing partial value is fixed",
+      "A handler-level parity test runs the handler in-process on a fixture and asserts render(value) byte-equals the real binary default stdout and --json stdout equals the value, for a representative command set",
+      "The full suite is green and ann check/verify are clean on the live journey; committed with evidence"
+    ],
+    "workType": "implementation",
+    "targetAreas": [
+      "src/surface/cli.ts",
+      "src/surface/renderers.ts",
+      "src/e2e"
+    ]
+  },
+  "createdAt": "2026-09-06"
+}
