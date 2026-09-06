@@ -16,12 +16,14 @@ import { GoalGrillSession, GoalResolvedQuestion } from './goal-grill.js';
  * DECISION per round. Each round the LLM reasons the answers BACK (never a bare list),
  * then a bounded discussion (research runs only when the LLM advises it AND the human
  * agrees) resolves the frontier, then the human picks GO (→ seed) · dig more (next round,
- * new questions) · refine (reshape the goal IN-SESSION, then re-grill) · skip. The rounds
- * end with a GO, a SKIP/abort (→ nothing), or the bound running out (→ a FULL LLM-written
+ * new questions) · refine (reshape the goal IN-SESSION, then re-grill) · skip. The DECISION
+ * menu is EXHAUSTION-DRIVEN — a converged round (no fresh questions, nothing meaningful
+ * open) offers GO / refine / skip only. The loop ends on a GO, a SKIP/abort (→ nothing),
+ * or the anti-runaway round ceiling (a safety net, never the normal end → a FULL LLM-written
  * close-out + how to continue).
  *
- * NOTHING IS CREATED unless the human says GO: skip/reject/abort → nothing · rounds run
- * out → nothing, with an honest note. The goal! seed gate (goalSeedGate — an EMPTY
+ * NOTHING IS CREATED unless the human says GO: skip/reject/abort → nothing · the ceiling
+ * stop → nothing, with an honest note. The goal! seed gate (goalSeedGate — an EMPTY
  * journey seeds fresh; a RE-SEEDABLE sole unconsumed goal is REPLACED; consumed/met
  * refuses) runs BEFORE any provider call, so the refusal is dogfoodable on a non-empty
  * repo with no provider configured.
@@ -32,7 +34,8 @@ export interface GoalSeedOptions {
   idea?: string;
   context?: GroundingInput[];
   constraints?: string[];
-  /** Bounded rounds (the flow-control 3-reject pattern — never unbounded). */
+  /** The ANTI-RUNAWAY round ceiling — overrides the high default so a caller can pin it
+   *  (tests exercise the backstop with a small value). Never the UX driver. */
   maxRounds?: number;
 }
 
@@ -97,9 +100,9 @@ ${[...criteria].map((c) => `- ${c}`).join('\n')}
  * The driver — the whole seed as a VALUE (guarded-write style, no throw-as-flow): the
  * pre-guard, the idea gather (argv, else the human channel), the goal grill, and the
  * on-GO materialize through L1. Returns the seeded doc's identity on GO; on
- * skip/reject/abort it returns seeded:false with a human note; on rounds run out it
- * returns seeded:false (the driver already showed the full summary) with an honest note;
- * provider/guard failures return the L1-shaped error the CLI already renders.
+ * skip/reject/abort it returns seeded:false with a human note; on the anti-runaway ceiling
+ * stop it returns seeded:false (the driver already showed the full summary) with an honest
+ * note; provider/guard failures return the L1-shaped error the CLI already renders.
  */
 export const runGoalSeed = async (
   commands: Commands,

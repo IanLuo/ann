@@ -18,10 +18,11 @@ import { adapterFromAbility } from './steps/engine-adapter.js';
  * what changed about the reading, names what is still weak/open, and recommends a next
  * move WITH reasoning. A bare list of answers is never acceptable.
  *
- * Loop (bounded — flow-control §3, the same never-unbounded rule). state:
- *   goal (the current working draft) · context (every answer + research finding, as
- *   grounding labels) · resolved[] · open[] · seen (never re-ask) · the discussion
- *   transcript for THIS round.
+ * Loop (EXHAUSTION-DRIVEN — rounds advance only while the human still digs; the one
+ * hard bound left is an anti-runaway ceiling, a safety net never the UX driver).
+ * state: goal (the current working draft) · context (every answer + research finding,
+ * as grounding labels) · resolved[] · open[] · seen (never re-ask) · the discussion
+ * transcript for THIS round.
  *
  *   per round:
  *     1. GRILL the CURRENT goal against all accumulated context (the task grilling
@@ -38,12 +39,19 @@ import { adapterFromAbility } from './steps/engine-adapter.js';
  *        the human agrees, and when research runs the findings fold into context +
  *        resolved and the LLM responds again to them. The discussion ends when the
  *        human says the point is sorted or the bound is hit.
- *     4. DECISION after each resolved discussion — ask explicitly: GO (seed now) /
- *        dig more (next round, NEW questions built on all prior input) / refine
- *        (reshape the goal in-session, then next round) / skip. GO is ONLY ever the
- *        human's call here.
+ *     4. DECISION after each resolved discussion — ask explicitly, and the menu depends
+ *        on whether the round is EXHAUSTED. A round is exhausted when its grill raised NO
+ *        fresh questions, nothing meaningful (non-low impact) stays open, and no blocking
+ *        concern stands in the way — the frontier is empty, so the menu is GO / refine /
+ *        skip with NO 'dig more', and GO is the natural call (refine if a blocking
+ *        concern). When NOT exhausted the menu is GO / dig more (next round, NEW questions
+ *        built on all prior input) / refine (reshape the goal in-session, then next round)
+ *        / skip, and the session continues while the human digs. GO is ONLY ever the
+ *        human's call.
  *
- * When the rounds run out with no GO the driver ends with a FULL LLM-written synthesis
+ * The session ends on a GO (seeds), a skip / abort (the human quits), or — only if the
+ * loop keeps being asked to continue without converging — the anti-runaway ceiling. That
+ * ceiling stop is never the normal end; it closes with a FULL LLM-written synthesis
  * (resolved · still open · the goal as it reads) and an honest continue path — never a
  * bare 'NOT seeded'.
  *
@@ -130,9 +138,17 @@ const isDiscussionDone = (msg: string): boolean => {
   return t === '' || isUnresolved(t) || DISCUSS_DONE.has(t);
 };
 
-const DEFAULT_MAX_ROUNDS = 3;
+/** The ANTI-RUNAWAY ceiling (flow-control §3 — never unbounded). NOT the UX driver: the
+ *  loop normally ends on exhaustion → a converged decision (GO), a skip/abort, or a GO.
+ *  This is only the safety net that stops a loop which keeps being asked to continue
+ *  without converging. High on purpose; opts.maxRounds overrides (tests use a small value
+ *  to exercise the backstop path). */
+const DEFAULT_MAX_ROUNDS = 40;
 const DEFAULT_DISCUSS_TURNS = 6;
 const DECISION_OPTIONS = ['GO', 'dig more', 'refine', 'skip'] as const;
+/** The DECISION menu when the round is EXHAUSTED — the frontier is empty, so there is
+ *  nothing left to dig: GO / refine / skip only. */
+const EXHAUSTED_OPTIONS = ['GO', 'refine', 'skip'] as const;
 
 /** A question the human (or research) RESOLVED during the grill. */
 export interface GoalResolvedQuestion {
@@ -382,7 +398,7 @@ export class GoalGrillSession {
         ...(fresh.length ? ['', 'New open questions:'] : []),
         ...fresh.map((q) => `- [${q.impact}] ${q.question}${q.default ? ` (recommended default: ${q.default})` : ''}`),
       ].join('\n');
-      await this.abilities.interact.present(`── Goal grill — round ${round} of ${maxRounds} ──\n${read}`);
+      await this.abilities.interact.present(`── Goal grill — round ${round} ──\n${read}`);
 
       // batch-ask ONLY the new questions — the answers fold into context + resolved
       let askedThisRound = 0;
@@ -506,8 +522,20 @@ export class GoalGrillSession {
       // weighs the goal draft + every answer + the discussion and states WHY before the
       // menu. A clean read (nothing to reason about) recommends GO directly.
       const openNow = [...open.values()];
-      let recommendation: (typeof DECISION_OPTIONS)[number] = blocking ? 'refine' : openNow.some((q) => q.impact !== 'low') ? 'dig more' : 'GO';
+      // EXHAUSTED = this round's grill raised NO fresh questions AND nothing meaningful
+      // (non-low impact) stays open AND no blocking concern blocks GO. The frontier is
+      // empty — nothing is left to dig — so the menu drops 'dig more' and GO is the
+      // natural call (refine if a blocking concern). A round that raised a fresh question
+      // is never exhausted, even if the human answered every one of them.
+      const exhausted = fresh.length === 0 && !openNow.some((q) => q.impact !== 'low') && !blocking;
+      const decisionOptions: string[] = exhausted ? [...EXHAUSTED_OPTIONS] : [...DECISION_OPTIONS];
+      const baseline = (): (typeof DECISION_OPTIONS)[number] =>
+        blocking ? 'refine' : exhausted ? 'GO' : openNow.some((q) => q.impact !== 'low') ? 'dig more' : 'GO';
+      let recommendation: (typeof DECISION_OPTIONS)[number] = baseline();
       if (history.length > 0) {
+        // the decision weigh-in may recommend only within THIS round's menu — an exhausted
+        // round has empty branches and must not be told to 'dig more'.
+        const allowed = decisionOptions.map((o) => `"${o}"`).join(' | ');
         const a = await decisionTurn([
           'You are the DECISION advisor at the end of a goal-grill round. Weigh the WHOLE round — the goal draft, everything the human answered, and the discussion — and recommend ONE next move.',
           '',
@@ -516,17 +544,24 @@ export class GoalGrillSession {
           `## Contract constraints\n${renderConstraints(constraints)}`,
           `## This round's reasoning/discussion transcript\n${renderHistory(history)}`,
           '',
-          'Be honest, never session-shortening: GO only if the goal is genuinely seedable now (a reader can tell when it is done and no meaningful unknown blocks a checkable criterion); dig more if a meaningful unknown still blocks that; refine if the DRAFT itself is weak. Ground the reason in the transcript/context.',
+          exhausted
+            ? 'The round is EXHAUSTED — the grill raised no new questions and nothing meaningful stays open, so digging further is not an option this round: recommend GO unless the DRAFT itself is weak (then refine). Ground the reason in the transcript/context.'
+            : 'Be honest, never session-shortening: GO only if the goal is genuinely seedable now (a reader can tell when it is done and no meaningful unknown blocks a checkable criterion); dig more if a meaningful unknown still blocks that; refine if the DRAFT itself is weak. Ground the reason in the transcript/context.',
           '## Output — strict JSON, no commentary, no fence',
-          '{ "recommendation": "GO" | "dig more" | "refine" | "skip", "reason": "one short paragraph, grounded" }',
+          `{ "recommendation": ${allowed}, "reason": "one short paragraph, grounded" }`,
         ].join('\n'));
         if (!a.ok) return a;
-        recommendation = a.value.recommendation;
-        await this.abilities.interact.present(`── Round ${round} — the grill's recommendation ──\n${a.value.reason}\n\nMy recommendation: ${a.value.recommendation}`);
+        // the model's weigh-in stands only inside this round's menu; an overreach (e.g.
+        // 'dig more' on an exhausted round) falls back to the baseline call.
+        recommendation = decisionOptions.includes(a.value.recommendation) ? a.value.recommendation : baseline();
+        await this.abilities.interact.present(`── Round ${round} — the grill's recommendation ──\n${a.value.reason}\n\nMy recommendation: ${recommendation}`);
       }
+      const actions = exhausted
+        ? 'Seed now (GO) · refine (reshape the goal in-session) · skip'
+        : 'Seed now (GO) · dig more (next round, new questions) · refine (reshape the goal in-session) · skip';
       const c = await decide(
-        `Round ${round} decision — resolved so far: ${resolved.length} · still open: ${openNow.length}. Seed now (GO) · dig more (next round, new questions) · refine (reshape the goal in-session) · skip. (recommendation: ${recommendation})`,
-        [...DECISION_OPTIONS],
+        `Round ${round} decision — resolved so far: ${resolved.length} · still open: ${openNow.length}. ${actions}. (recommendation: ${recommendation})`,
+        decisionOptions,
       );
       if (!isValue(c)) return end(c, round);
 
@@ -541,15 +576,21 @@ export class GoalGrillSession {
         if (!isValue(r)) return end(r, round);
         goal = r.value.trim() && !isUnresolved(r.value) ? r.value.trim() : goalLine;
       } else {
-        goal = goalLine; // dig more — keep the refined reading; the next round asks NEW questions
+        // dig more — keep the refined reading and advance. On an EXHAUSTED round this is
+        // only reachable defensively (the human typed it against a menu that excluded it):
+        // the next grill of an empty frontier is again exhausted, so it converges; the
+        // anti-runaway ceiling catches any loop that never does.
+        goal = goalLine;
       }
       round++;
     }
 
-    // Rounds exhausted with no GO — a FULL LLM-written synthesis (resolved · still open ·
-    // the goal as it reads) + an honest continue path, never a bare 'NOT seeded'. Nothing
-    // was created. If the close-out model call itself fails, a deterministic fallback
-    // still says where it landed — nothing is lost.
+    // The ANTI-RUNAWAY backstop was hit: the loop kept being asked to continue across round
+    // after round without converging on a GO. This is the safety net, never the normal end —
+    // a healthy grill stops at exhaustion with a converged decision. Close with a FULL
+    // LLM-written synthesis (resolved · still open · the goal as it reads) + an honest
+    // continue path — never a bare 'NOT seeded'. If the close-out model call itself fails,
+    // a deterministic fallback still says where it landed — nothing is lost.
     const resolvedBlock = (): string =>
       [
         `Resolved (${resolved.length}):`,
@@ -560,7 +601,7 @@ export class GoalGrillSession {
       ].join('\n');
     const closeText = await llmText(
       [
-        'You are closing out a GOAL grill that ran its rounds without a GO — nothing was seeded.',
+        'You are closing out a GOAL grill that hit its anti-runaway round ceiling without a GO — nothing was seeded.',
         '',
         `## Current goal draft\n${goal}`,
         `## Grounded context\n${renderContext(context)}`,
@@ -574,16 +615,16 @@ export class GoalGrillSession {
     const body = closeText.ok ? closeText.value : resolvedBlock(); // close-out hiccup → deterministic fallback
     await this.abilities.interact.present(
       [
-        `── Goal grill — no rounds left ──`,
-        `The grill ran its ${maxRounds} round(s) without a GO, so nothing was created. Here is where it landed:`,
+        `── Goal grill — anti-runaway stop ──`,
+        `The grill was asked to keep going across ${maxRounds} round(s) without converging on a GO, so the round ceiling stopped it. This is the anti-runaway safety net — it is NOT the normal end. Nothing was created. Here is where it landed:`,
         body,
-        `To continue: re-run goal! seed with a sharper statement, or raise the round bound to keep grilling this one.`,
+        `To continue: re-run goal! seed with a sharper statement — or raise the round ceiling if the grill genuinely has more to cover.`,
       ].join('\n'),
     );
     return {
       ok: true,
       verdict: 'exhausted',
-      note: `the goal grill ran out of rounds (${maxRounds}) before a GO — nothing was created; re-run sharper or raise the round bound`,
+      note: `the goal grill hit its anti-runaway round ceiling (${maxRounds}) without a GO — nothing was created; re-run sharper or raise the ceiling`,
       rounds: maxRounds,
     };
   }

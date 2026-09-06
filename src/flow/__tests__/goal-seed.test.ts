@@ -210,21 +210,24 @@ describe('runGoalSeed — the goal! seed materialize path (flow/goal-seed)', () 
     expect(new Store(root).ids()).toEqual([]);
   });
 
-  it('dig-more with the rounds running out → a FULL close-out, nothing created, and an honest how-to-continue', async () => {
+  it('ANTI-RUNAWAY: a grill dug across converged rounds hits the small explicit ceiling → the anti-runaway close-out, nothing created', async () => {
     const commands = fresh();
-    const closeText = 'Two rounds dug and no open edge surfaced; the goal reads as a solid v1. To continue, re-run goal! seed sharper or raise the round bound.';
+    const closeText = 'Two rounds dug and no open edge surfaced; the goal reads as a solid v1. To continue, re-run goal! seed sharper or raise the round ceiling.';
     const { llm } = fakeLlm([cleanGrill('Reading one.'), cleanGrill('Reading two.'), closeText]);
-    const interact = new ScriptedInteractor([], [], ['dig more', 'dig more']); // keep digging to the last round, never a GO
+    // converged rounds never OFFER dig more; typing it anyway is the defensive advance that
+    // keeps the loop alive and pushes it to the pinned ceiling (maxRounds 2) → the backstop.
+    const interact = new ScriptedInteractor([], [], ['dig more', 'dig more']);
     const r = await runGoalSeed(commands, { llm, interact }, { idea: GOAL_IDEA, maxRounds: 2 });
 
     expect(r.ok).toBe(true);
     if (!r.ok || r.seeded) return;
     expect(r.verdict).toBe('revise'); // the value that recommends a sharper re-run
-    expect(r.note).toContain('ran out of rounds');
+    expect(r.note).toContain('anti-runaway'); // the note names the safety net, never a normal end
     expect(r.note).toContain('nothing was created');
-    // the driver showed the FULL close-out — resolved · open · the goal as it reads
-    expect(interact.presented.some((p) => p.includes('Goal grill — no rounds left'))).toBe(true);
+    // the driver showed the FULL anti-runaway close-out — resolved · open · the goal as it reads
+    expect(interact.presented.some((p) => p.includes('Goal grill — anti-runaway stop'))).toBe(true);
     expect(interact.presented.some((p) => p.includes(closeText))).toBe(true);
+    expect(interact.presented.some((p) => p.includes('raise the round ceiling'))).toBe(true);
     expect(existsSync(goalDoc())).toBe(false);
     expect(new Store(root).ids()).toEqual([]);
   });

@@ -11,9 +11,12 @@ import { GoalGrillSession, GOAL_GRILL_MODE, GOAL_DISCUSS_MODE } from '../goal-gr
  * the human answers a batch → the LLM REASONS THE ANSWERS BACK (a synthesis turn) →
  * a bounded multi-turn DISCUSS (the LLM may recommend ONE research topic, which runs
  * only when the human agrees, folds, and the LLM responds again) → an explicit
- * DECISION (GO / dig more / refine / skip). GO is only ever the human's call; never
- * re-asks; on the rounds running out it ends with a full close-out — never a bare
- * 'not seeded'.
+ * DECISION whose menu is EXHAUSTION-DRIVEN: a round whose grill raised no fresh questions
+ * and left nothing meaningful open offers only GO / refine / skip (no 'dig more' — the
+ * branches are empty); otherwise the full GO / dig more / refine / skip menu stands and
+ * the session continues while the human digs. The loop ends on GO, a skip/abort, or the
+ * anti-runaway ceiling — a safety net, never the normal end — which closes with a full
+ * synthesis, never a bare 'not seeded'.
  */
 
 /** A scripted human — FIFO answers/decisions; running out is the ABORT (a departure to
@@ -89,13 +92,25 @@ const HIGH_Q = () => ({
   default: 'a',
 });
 
-/** The four decision options the after-discussion DECISION must always offer. */
+/** The after-round DECISION calls (the research yes/no gates never carry a GO option, so
+ *  they fall out of the filter). */
+const decisionCalls = (i: ScriptedInteractor) => i.decided.filter((d) => d.options.includes('GO'));
+
+/** The FOUR options a NON-exhausted round's DECISION offers. */
 const DECISION_OPTIONS = ['GO', 'dig more', 'refine', 'skip'];
-const decisionCalls = (i: ScriptedInteractor) => i.decided.filter((d) => d.options.length === 4);
+/** The THREE options an EXHAUSTED round's DECISION offers — 'dig more' is gone: a round
+ *  whose grill raised no fresh questions and left nothing meaningful open has no branches
+ *  left to dig, so the menu is GO / refine / skip and GO is the natural call. */
+const EXHAUSTED_OPTIONS = ['GO', 'refine', 'skip'];
 const everyDecisionOffersAllFour = (i: ScriptedInteractor) => {
   const calls = decisionCalls(i);
   expect(calls.length).toBeGreaterThan(0);
   for (const c of calls) expect(c.options).toEqual(DECISION_OPTIONS);
+};
+const everyDecisionOffersExhausted = (i: ScriptedInteractor) => {
+  const calls = decisionCalls(i);
+  expect(calls.length).toBeGreaterThan(0);
+  for (const c of calls) expect(c.options).toEqual(EXHAUSTED_OPTIONS);
 };
 
 describe('GoalGrillSession v4 — ANSWER → LLM RESPONSE → DISCUSS → (round)', () => {
@@ -124,7 +139,8 @@ describe('GoalGrillSession v4 — ANSWER → LLM RESPONSE → DISCUSS → (round
     // the synthesis was PRESENTED to the human before the DECISION
     const synthIndex = interact.presented.findIndex((p) => p.includes(synth));
     expect(synthIndex).toBeGreaterThan(-1);
-    expect(interact.presented.some((p) => p.includes('Goal grill — round 1 of 3'))).toBe(true);
+    // the header carries no fixed 'of N' total — the loop is exhaustion-driven
+    expect(interact.presented.some((p) => p.includes('── Goal grill — round 1 ──'))).toBe(true);
     // the decision offered exactly the four v4 options
     everyDecisionOffersAllFour(interact);
   });
@@ -140,6 +156,21 @@ describe('GoalGrillSession v4 — ANSWER → LLM RESPONSE → DISCUSS → (round
     expect(r.okClaims).toEqual(['the goal is scoped and buildable']);
     expect(r.resolved).toEqual([]);
     expect(interact.asked).toEqual([]);
+  });
+
+  it('EXHAUSTION ends the loop: a converged round (no fresh questions, nothing open) reaches a decision WITHOUT dig more, and GO seeds on round 1', async () => {
+    const { llm, prompts } = fakeLlm([clean('A working goal! seed command.')]);
+    const interact = new ScriptedInteractor([], [], ['GO']);
+    const r = await session(llm, interact).run({ statement: 'Build a goal! seed command.', maxRounds: 3 });
+
+    expect(r).toMatchObject({ ok: true, verdict: 'solid', rounds: 1 });
+    if (!r.ok || r.verdict !== 'solid') return;
+    expect(prompts).toHaveLength(1); // exhausted → nothing to reason back → one grill, one decision
+    // the round raised no fresh questions and nothing meaningful is open → EXHAUSTED: the
+    // decision offered EXACTLY GO/refine/skip — 'dig more' is not on the menu
+    everyDecisionOffersExhausted(interact);
+    // and the loop ENDED here — round 1 only, never advanced to a round 2
+    expect(interact.presented.filter((p) => p.includes('── Goal grill — round '))).toHaveLength(1);
   });
 
   it('(b) after the response a human message gets ANOTHER LLM turn — the discussion is multi-turn AND bounded', async () => {
@@ -285,21 +316,25 @@ describe('GoalGrillSession v4 — ANSWER → LLM RESPONSE → DISCUSS → (round
     expect(r.note).toContain('aborted');
   });
 
-  it('rounds exhausted with no GO → a FULL close-out (the model writes the synthesis) — never a bare not-seeded', async () => {
+  it('ANTI-RUNAWAY: a loop that keeps being dug on converged rounds hits the small ceiling — the stop is the safety net, never the normal end', async () => {
     const closeText = 'Resolved: nothing stood in the way of a v1. Still open: none the human flagged. The goal reads as a solid v1. To continue, re-run goal! seed sharper.';
     const { llm, prompts } = fakeLlm([clean('Reading one.'), clean('Reading two.'), closeText]);
-    const interact = new ScriptedInteractor([], [], ['dig more', 'dig more']); // dig to the last round, never GO
+    // 'dig more' is NOT offered on a converged round — typing it anyway is the defensive
+    // advance (re-grill an empty frontier → still exhausted), which here pushes the loop
+    // to the small explicit ceiling (maxRounds 2) so the backstop path fires.
+    const interact = new ScriptedInteractor([], [], ['dig more', 'dig more']);
     const r = await session(llm, interact).run({ statement: 'Build a goal! seed command.', maxRounds: 2 });
 
     expect(r).toMatchObject({ ok: true, verdict: 'exhausted', rounds: 2 });
     if (!r.ok || r.verdict !== 'exhausted') return;
-    expect(r.note).toContain('ran out of rounds');
+    expect(r.note).toContain('anti-runaway'); // the note names the safety net, not a normal end
     expect(r.note).toContain('nothing was created');
-    // the close-out is an LLM-written synthesis, presented with the continue path
+    // the close-out is an LLM-written synthesis presented as the anti-runaway stop, with the continue path
+    expect(prompts[2]).toContain('anti-runaway');
     expect(prompts[2]).toContain('close-out');
-    expect(interact.presented.some((p) => p.includes('Goal grill — no rounds left'))).toBe(true);
+    expect(interact.presented.some((p) => p.includes('Goal grill — anti-runaway stop'))).toBe(true);
     expect(interact.presented.some((p) => p.includes(closeText))).toBe(true);
-    expect(interact.presented.some((p) => p.includes('To continue: re-run goal! seed with a sharper statement'))).toBe(true);
+    expect(interact.presented.some((p) => p.includes('raise the round ceiling'))).toBe(true);
   });
 
   it('provider/adapter failure fails CLOSED — nothing fabricated', async () => {
