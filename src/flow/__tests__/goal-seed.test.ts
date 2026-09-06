@@ -12,8 +12,9 @@ import { runGoalSeed } from '../goal-seed.js';
  * on a HUMAN GO, the deterministic goal.md synthesis → L1 seedGoal + the goal.md
  * artifact-lock. Same scripted-abilities pattern as the goal-grill session tests: the
  * ability SET is injected, so the driver runs headless. The grill semantics themselves
- * (REVISE-in-session, dedupe, round summaries, research) are proven in goal-grill.test;
- * here the SEED and its guards are proven through the store.
+ * (the v4 ANSWER → LLM RESPONSE → DISCUSS → DECISION loop, dedupe, discussion-advised
+ * research) are proven in goal-grill.test; here the SEED and its guards are proven
+ * through the store.
  */
 
 /** A scripted human — FIFO answers/decisions (running out is the ABORT), FIFO research
@@ -127,7 +128,7 @@ describe('runGoalSeed — the goal! seed materialize path (flow/goal-seed)', () 
     expect(g.ok && g.value.present && g.value.verdict === 'open').toBe(true);
   });
 
-  it('REVISE refines the statement in-session and GO seeds the REFINED goal (≥2 grills, no question asked twice, round summary shown)', async () => {
+  it('refine reshapes the goal in-session and GO seeds the REFINED goal (≥2 grills, no question asked twice, the read-back shown)', async () => {
     const commands = fresh();
     const refined = 'A goal! seed command that re-grills a revised goal and reseeds a sole unconsumed goal.';
     const r1 = grill('A goal! seed command.', [{ verdict: 'ok', claim: 'grill bound needed', basis: [], confidence: 'high' }], [
@@ -135,15 +136,19 @@ describe('runGoalSeed — the goal! seed materialize path (flow/goal-seed)', () 
     ]);
     // round 2 re-raises the SAME question — the session must not ask it again
     const r2 = cleanGrill(refined);
-    const { llm, calls } = fakeLlm([r1, r2]);
-    const interact = new ScriptedInteractor(['3', 'the goal should also cover reseeding a sole unconsumed goal'], [], ['REVISE', 'GO']);
+    const { llm, calls } = fakeLlm([
+      r1,
+      'The bound is settled at three; the goal should also fold reseeding in — I recommend refining before GO.',
+      r2,
+    ]);
+    const interact = new ScriptedInteractor(['3', 'sorted', 'the goal should also cover reseeding a sole unconsumed goal'], [], ['refine', 'GO']);
     const r = await runGoalSeed(commands, { llm, interact }, { idea: GOAL_IDEA });
 
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.seeded).toBe(true);
     if (!r.seeded) return;
-    expect(calls.n).toBeGreaterThanOrEqual(2); // the revise round was RE-GRILLED, not ended
+    expect(calls.n).toBeGreaterThanOrEqual(2); // the refine round was RE-GRILLED, not ended
     expect(r.contract.intent).toBe(refined); // the seed carries the REFINED goal
     const md = readFileSync(goalDoc(), 'utf8');
     expect(md).toContain('reseeds a sole unconsumed goal'); // the refinement folded into the doc
@@ -151,21 +156,33 @@ describe('runGoalSeed — the goal! seed materialize path (flow/goal-seed)', () 
     expect(r.contract.acceptanceCriteria).toContain(`${BOUND_Q} → 3`);
     // never ask twice: the bound question was asked exactly once though round 2 re-raised it
     expect(interact.asked.filter((a) => a.includes(BOUND_Q))).toHaveLength(1);
-    // a ROUND SUMMARY was shown before each decision
-    expect(interact.presented.some((p) => p.includes('Round 1 summary'))).toBe(true);
-    expect(interact.presented.some((p) => p.includes('Round 2 summary'))).toBe(true);
+    // the LLM RESPONSE (the answers read back) was shown after the batch, before the decision
+    expect(interact.presented.some((p) => p.includes('your answers, read back'))).toBe(true);
     expect(new Store(root).ids()).toEqual(['01-goal']);
   });
 
-  it('high-impact unknowns are researched; a finding resolves it and the resolved constraint lands in the goal.md criteria', async () => {
+  it('a discussion-advised research (the LLM advises, the human agrees) resolves the unknown; the constraint lands in the goal.md criteria', async () => {
     const commands = fresh();
+    const discussAdvice = JSON.stringify({
+      reply: 'The bound is the open high-impact item — let me pull the flow-control docs.',
+      research: { topic: BOUND_Q, reason: 'to settle the round bound' },
+    });
+    const discussAfter = JSON.stringify({
+      reply: 'The docs confirm three rounds as the norm — the bound is now settled.',
+      research: null,
+    });
     const { llm } = fakeLlm([
-      grill('A working goal! seed command.', [], [{ question: BOUND_Q, reason: 'bounds the loop', impact: 'high', options: ['2', '3', '5'], default: '3' }]),
+      grill('A working goal! seed command.', [{ verdict: 'ok', claim: 'the round bound matters', basis: [], confidence: 'high' }], [
+        { question: BOUND_Q, reason: 'bounds the loop', impact: 'high', options: ['2', '3', '5'], default: '3' },
+      ]),
+      'The bound is the only open edge; a dig would settle it.',
+      discussAdvice,
+      discussAfter,
     ]);
     const interact = new ScriptedInteractor(
-      ['skip'], // the human skips → the high-impact question becomes a research topic
+      ['skip', 'Pull the docs.', 'sorted'], // skipped → stays open → the LLM advises research DURING discussion → the human agrees
       [[{ topic: BOUND_Q, findings: 'Three rounds is the flow-control norm.', sources: ['ann docs'] }]],
-      ['GO'],
+      ['yes', 'GO'],
     );
     const r = await runGoalSeed(commands, { llm, interact }, { idea: GOAL_IDEA });
 
@@ -173,7 +190,7 @@ describe('runGoalSeed — the goal! seed materialize path (flow/goal-seed)', () 
     if (!r.ok) return;
     expect(r.seeded).toBe(true);
     if (!r.seeded) return;
-    expect(interact.researchCalls).toEqual([[BOUND_Q]]); // research ran
+    expect(interact.researchCalls).toEqual([[BOUND_Q]]); // research ran, advised + agreed, mid-discussion
     expect(r.contract.acceptanceCriteria).toContain(`${BOUND_Q} → Three rounds is the flow-control norm.`);
   });
 
@@ -191,10 +208,11 @@ describe('runGoalSeed — the goal! seed materialize path (flow/goal-seed)', () 
     expect(new Store(root).ids()).toEqual([]);
   });
 
-  it('REVISE with the rounds running out → a FULL summary, nothing created, and an honest how-to-continue', async () => {
+  it('dig-more with the rounds running out → a FULL close-out, nothing created, and an honest how-to-continue', async () => {
     const commands = fresh();
-    const { llm } = fakeLlm([cleanGrill('Reading one.'), cleanGrill('Reading two.')]);
-    const interact = new ScriptedInteractor(['unknown', 'unknown'], [], ['REVISE', 'REVISE']); // keep revising, never a refinement
+    const closeText = 'Two rounds dug and no open edge surfaced; the goal reads as a solid v1. To continue, re-run goal! seed sharper or raise the round bound.';
+    const { llm } = fakeLlm([cleanGrill('Reading one.'), cleanGrill('Reading two.'), closeText]);
+    const interact = new ScriptedInteractor([], [], ['dig more', 'dig more']); // keep digging to the last round, never a GO
     const r = await runGoalSeed(commands, { llm, interact }, { idea: GOAL_IDEA, maxRounds: 2 });
 
     expect(r.ok).toBe(true);
@@ -202,8 +220,9 @@ describe('runGoalSeed — the goal! seed materialize path (flow/goal-seed)', () 
     expect(r.verdict).toBe('revise'); // the value that recommends a sharper re-run
     expect(r.note).toContain('ran out of rounds');
     expect(r.note).toContain('nothing was created');
-    // the driver showed the FULL summary — resolved · open · the goal as it reads
+    // the driver showed the FULL close-out — resolved · open · the goal as it reads
     expect(interact.presented.some((p) => p.includes('Goal grill — no rounds left'))).toBe(true);
+    expect(interact.presented.some((p) => p.includes(closeText))).toBe(true);
     expect(existsSync(goalDoc())).toBe(false);
     expect(new Store(root).ids()).toEqual([]);
   });

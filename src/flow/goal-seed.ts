@@ -12,9 +12,13 @@ import { GoalGrillSession, GoalResolvedQuestion } from './goal-grill.js';
  * (goalSeed = seedGoal + the goal.md artifact-lock on the goal root).
  *
  * The grill is NOT the task idea-validate session (whose 'revise' is terminal — right for
- * a task idea, wrong for a goal): revising a goal refines the statement IN-SESSION and the
- * next round re-grills it with all context carried; the rounds end with a GO (→ seed), a
- * SKIP/abort (→ nothing), or the bound running out (→ a FULL summary + how to continue).
+ * a task idea, wrong for a goal): the v4 loop is ANSWER → LLM RESPONSE → DISCUSS →
+ * DECISION per round. Each round the LLM reasons the answers BACK (never a bare list),
+ * then a bounded discussion (research runs only when the LLM advises it AND the human
+ * agrees) resolves the frontier, then the human picks GO (→ seed) · dig more (next round,
+ * new questions) · refine (reshape the goal IN-SESSION, then re-grill) · skip. The rounds
+ * end with a GO, a SKIP/abort (→ nothing), or the bound running out (→ a FULL LLM-written
+ * close-out + how to continue).
  *
  * NOTHING IS CREATED unless the human says GO: skip/reject/abort → nothing · rounds run
  * out → nothing, with an honest note. The goal! seed gate (goalSeedGate — an EMPTY
@@ -125,9 +129,9 @@ export const runGoalSeed = async (
     if (!idea) return { ok: true, seeded: false, verdict: 'reject', note: 'no goal statement given — nothing was created' };
   }
 
-  // GRILL — the dedicated GOAL grill (goal-mode rounds → GO / REVISE-in-session / SKIP).
-  // Provider/adapter failures fail CLOSED here (same as `ann run!`): the session returns
-  // ok:false and nothing is created.
+  // GRILL — the dedicated GOAL grill (v4: each round ANSWER → LLM RESPONSE → DISCUSS →
+  // DECISION; GO/dig more/refine/skip). Provider/adapter failures fail CLOSED here (same
+  // as `ann run!`): the session returns ok:false and nothing is created.
   const r = await new GoalGrillSession(abilities).run({
     statement: idea,
     ...(opts.context?.length ? { context: opts.context } : {}),
