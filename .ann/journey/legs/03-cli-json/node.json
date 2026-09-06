@@ -1,0 +1,19 @@
+{
+  "id": "03-cli-json",
+  "contract": {
+    "intent": "Uniform structured JSON output across every ann command, requested with an argument (e.g. --json), including help and the derived tables — so the CLI is machine-consumable end to end, not text-only.",
+    "acceptanceCriteria": [
+      "Every ann command accepts a JSON flag as an argument and emits one structured JSON document on stdout (no stray text); errors are JSON too with a code and a non-zero exit",
+      "Included commands: help/usage, commands (the derived table), read, status, journey, detail, branch, results, goal, sessions, docs, specs, check, verify, ledger, config, project, chain, steps, flow, packet, confirm, next, validate, and the write commands that return results",
+      "--json is documented in help/commands and accepted both globally and per command",
+      "The full suite stays green; e2e asserts JSON (valid JSON, expected fields, empty stdout otherwise) for a representative set incl. help",
+      "Committed with evidence"
+    ],
+    "targetAreas": [
+      "src/surface",
+      "src/commands",
+      "src/e2e"
+    ]
+  },
+  "createdAt": "2026-09-06"
+}

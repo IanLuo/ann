@@ -1,0 +1,20 @@
+{
+  "id": "03-cli-json/01-implementation-uniform-json",
+  "contract": {
+    "intent": "Implement uniform --json across all ann commands: a single flag contract (argument + global), every command returns one structured JSON document (help included), JSON errors carry a code and non-zero exit, and no stray text pollutes stdout when JSON is requested.",
+    "acceptanceCriteria": [
+      "A --json argument (and the existing global form) works on EVERY command, help and the derived table included, emitting exactly one JSON document on stdout",
+      "Each command has a documented JSON shape (the value the text renders, or a stable envelope when the command has no natural value); errors are {code, blocker} style JSON with non-zero exit",
+      "--json is documented in help and the commands table",
+      "The full suite is green; e2e asserts well-formed JSON (parseable, expected fields, nothing else on stdout) for a representative set including help",
+      "Committed with evidence"
+    ],
+    "workType": "implementation",
+    "targetAreas": [
+      "src/surface/cli.ts",
+      "src/surface/renderers.ts",
+      "src/e2e"
+    ]
+  },
+  "createdAt": "2026-09-06"
+}

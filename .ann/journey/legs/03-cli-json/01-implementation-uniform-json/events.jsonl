@@ -1,0 +1,3 @@
+{"at":"2026-09-06","type":"created","note":"spawned by bookkeeper (agent)"}
+{"at":"2026-09-06","type":"submitted","gate":"grill","note":"submitted for the grill gate (agent)"}
+{"at":"2026-09-06","type":"confirmed","gate":"grill","feedback":"grilled accept: the CLI is text-first today and only some commands honor --json; making JSON uniform (argument-specified, every command incl. help, JSON errors, no stray stdout) is a needed machine-facing contract. Cross-cutting but mechanical per command.","note":"accepted (agent)"}
