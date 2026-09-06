@@ -1,3 +1,4 @@
 {"at":"2026-09-06","type":"created","note":"goal re-seeded — the goal was replaced by a fresh grill"}
 {"at":"2026-09-06","type":"completed","note":"goal re-grilled & recorded — success criteria sealed when goal.md locks"}
 {"at":"2026-09-06","type":"artifact-locked","artifact":{"name":"goal","path":".ann/journey/legs/01-goal/artifacts/goal.md","lockSha":"31694e6","type":"goal","version":1},"note":"goal.md sealed by the seed grill (ianluo)"}
+{"at":"2026-09-06","type":"evidence","note":"meta-refactor: docs->git — the in-force docs + goal.md moved to docs/ (manifest-served) in the migration commit 9a2fef1; the per-task doc-artifact lock machinery is retired from new writes (D)","commits":[{"sha":"9a2fef1b4108c76a48ac3455b7f614fd25b4ee47"}]}
