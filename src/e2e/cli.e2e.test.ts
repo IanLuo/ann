@@ -247,6 +247,23 @@ describe('e2e — the goal-session lifecycle (v6: seed → docs/goal.md → work
     expect(out(cli(r, ['status', TASK]))).toContain('done');
   }
 
+  it('goal! seed emits the grill failure EXACTLY ONCE on an empty journey (regression guard — Fix 2 of 186685d)', () => {
+    // The grill's provider call fails closed (hermetic baseUrl refuses the connection).
+    // Fix 2: the goal-seed provider/gate failure is emitted ONCE — the pre-fix shape
+    // console.error'd `${code}: ${blocker}` AND returned it, so the dispatch emit
+    // printed it a second time (two stderr lines).
+    const seed = cli(root, ['goal!', 'seed', 'land a flying thing']);
+    expect(seed.code).toBe(1);
+    // stderr carries the single diagnostic — the code: blocker text, byte-parity with the old first line
+    const errLines = seed.stderr.trim().split('\n').filter((l) => l.length > 0);
+    expect(errLines).toHaveLength(1);
+    expect(errLines[0]).toMatch(/^provider-unavailable: /);
+    // text mode: the failure is a stderr diagnostic — stdout stays empty
+    expect(seed.stdout).toBe('');
+    // fail-closed: nothing was seeded
+    expect(out(cli(root, ['goal']))).toContain('GOAL: (none)');
+  });
+
   it('seeds, writes docs/goal.md, works to exhaustion, records the HUMAN verdict, refuses a dirty archive, then archives & reloads', () => {
     // empty journey: the goal consult names grill & seed — never a blind task
     expect(out(cli(root, ['goal']))).toContain('GOAL: (none)');
