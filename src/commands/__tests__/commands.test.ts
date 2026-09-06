@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store, JourneyEvent } from '../../store/store.js';
 import { Commands, CommandResult } from '../index.js';
+import { scanDocsDir, writeDocsManifest } from '../../store/docs.js';
 
 /**
  * L1 — the command surface. These tests pin the INVARIANTS the composites encode:
@@ -411,6 +412,24 @@ describe('read — the L1 content view (core-design §5)', () => {
 
   it('fails closed on an unresolvable name', () => {
     expect(errorOf(cmds().read('nope')).code).toBe('unresolved');
+  });
+
+  it('resolves a DOC through the manifest (the forward path) before falling back to current()', () => {
+    // docs/spec.md wins over a legacy artifact-locked 'spec' of the same logical name
+    mkdirSync(join(root, 'docs'), { recursive: true });
+    writeFileSync(join(root, 'docs', 'spec.md'), '<!-- draft -->\n# The Spec\n\nbody\n');
+    writeDocsManifest(root, scanDocsDir(root));
+    writeFileSync(join(nodeDir('01-leg/01-a'), 'artifacts', 'spec.md'), '# legacy spec\n');
+    valueOf(cmds().lock('01-leg/01-a', 'spec.md'));
+    const r = valueOf(new Commands(new Store(root), 'test').read('spec'));
+    expect(r.path).toBe('docs/spec.md');
+    expect(r.content).toBe('# The Spec\n\nbody\n'); // marker-stripped, matching the doc sha
+    expect(r.sha).toMatch(/^[0-9a-f]{7}$/);
+    // an unindexed name still falls back to the legacy current() reader
+    writeFileSync(join(nodeDir('01-leg/01-a'), 'artifacts', 'legacy-doc.md'), '# old\n');
+    valueOf(cmds().lock('01-leg/01-a', 'legacy-doc.md'));
+    const legacy = valueOf(new Commands(new Store(root), 'test').read('legacy-doc'));
+    expect(legacy.path).toBe('.ann/journey/legs/01-leg/01-a/artifacts/legacy-doc.md');
   });
 });
 

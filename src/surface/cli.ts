@@ -6,11 +6,12 @@
  *
  * Usage:
  *   ann                    → name → current-path map
- *   ann <name>             → current path for one logical name
+ *   ann <name>             → path for one doc (manifest) or a current artifact's logical name
  *   ann --journey          → the look-back (where we are + what's ahead)
  *   ann --status [filter]  → every node's derived status
  *   ann --check            → integrity + gates + artifact hashes
  *   ann --specs            → the locked contract stack
+ *   ann --docs [--write]   → the docs→git resolution index (docs/manifest.json; --write regenerates)
  *   ann --providers        → the adapter registry (providers · models · defaults · key state)
  *   ann project / project! add|use|remove <path>  → multi-project by PATH (own journey each)
  *   ann config / config! set <key> <val>  → user config file (masked)
@@ -40,6 +41,7 @@ import { join, basename, dirname, resolve } from 'node:path';
 import { execSync } from 'node:child_process';
 import { Store, legacyPath, logicalNameFromFile } from '../store/store.js';
 import { blobSha } from '../store/sha.js';
+import { scanDocsDir, loadDocsManifest, writeDocsManifest, docsIndexFresh, docSha, MANIFEST_FILE } from '../store/docs.js';
 import { Commands, CommandResult, GOAL_SEED_GUARD } from '../commands/index.js';
 import {
   loadProviderRegistry,
@@ -259,6 +261,17 @@ function cmdCheck() {
     try { execSync(`git diff --quiet HEAD -- "${l.path}"`); } catch {
       notes.push({ sev: 'error', msg: `${name}: uncommitted modification on disk (${l.path})` });
     }
+  }
+  // docs manifest freshness — a doc file with no manifest entry is invisible to
+  // resolution; a manifest entry with no file points at nothing. Report when the
+  // committed index disagrees with docs/ (docs/ absent → silent).
+  const { fresh, missing, stale } = docsIndexFresh(ROOT);
+  if (!fresh) {
+    const parts = [
+      ...missing.map((n) => `'${n}' not in the manifest`),
+      ...stale.map((n) => `'${n}' has no matching file in docs/`),
+    ];
+    notes.push({ sev: 'error', msg: `docs manifest out of sync with docs/: ${parts.join(' · ')} — run 'ann docs --write' and commit` });
   }
   for (const w of warns) console.log(`  [rule-warn] ${w}`);
   const errors = problems.length + notes.filter((n) => n.sev === 'error').length;
@@ -612,6 +625,36 @@ function cmdRules(write: boolean) {
   console.log(`\n  ${reg.rules.length} rules — 'ann rules --write' regenerates rules/check/rules.json from this`);
 }
 
+/** `docs` — the docs→git home (docs/ + the manifest). The MANIFEST (docs/manifest.json)
+ *  is the committed resolution index — GENERATED from scanDocsDir, never hand-maintained
+ *  (the derived-not-stored rule). Read prints the index; --write regenerates the manifest.
+ *  Mirrors `rules`/`rules --write`. */
+function cmdDocs(write: boolean) {
+  const manifest = loadDocsManifest(ROOT);
+  const { fresh, missing, stale } = docsIndexFresh(ROOT);
+  if (write) {
+    const regen = scanDocsDir(ROOT);
+    const p = writeDocsManifest(ROOT, regen);
+    console.log(`docs --write: regenerated ${p} (${Object.keys(regen).length} docs) from docs/`);
+    return;
+  }
+  console.log(`DOCS INDEX (${join('docs', MANIFEST_FILE)} — the resolution index; generated — 'ann docs --write' regenerates)`);
+  const names = Object.keys(manifest).sort();
+  if (!names.length) {
+    console.log('  (no docs in the manifest — nothing resolves yet)');
+    if (!fresh) console.log(`  note: docs/ has files but the manifest is empty/missing — run 'ann docs --write'`);
+  }
+  for (const n of names) {
+    const rel = manifest[n];
+    const full = join(ROOT, rel);
+    const sha = existsSync(full) ? docSha(readFileSync(full, 'utf8')) : '(file missing)';
+    console.log(`  ${n}  →  ${rel}  @ ${sha}`);
+  }
+  if (names.length && !fresh) {
+    console.log(`  note: manifest out of sync with docs/ (${missing.length} doc(s) not indexed · ${stale.length} stale) — run 'ann docs --write'`);
+  }
+}
+
 /** ONE CONFIG CLASS, TWO INSTANCES (core-design §6): the personal overlay + the
  *  PROJECT registry — shown together, each leaf tagged with the layer it came from. */
 function cmdConfig() {
@@ -901,7 +944,7 @@ function cmdRead(name: string) {
 // Naming: reads have NO marker; WRITES end in `!` (the mutator convention — Scheme/Ruby/Nix:
 // `set!`, `push!`). A bare write name refuses with a hint — the `!` is a guarantee, not advice.
 const COMMANDS: Array<{ name: string; args: string; desc: string }> = [
-  { name: '<name>', args: '', desc: 'current path for one logical name' },
+  { name: '<name>', args: '', desc: 'the path for one doc (docs manifest) or a current artifact\'s logical name' },
   { name: 'journey', args: '[id]', desc: 'the look-back (no id) · one node\'s walk (with id) · alias --journey' },
   { name: 'status', args: '[filter]', desc: 'every node\'s derived status (+ superseded marker) · alias --status' },
   { name: 'check', args: '', desc: 'integrity + gates + hashes + the journey state line · alias --check' },
@@ -921,6 +964,7 @@ const COMMANDS: Array<{ name: string; args: string; desc: string }> = [
   { name: 'packet', args: '<id>', desc: 'the node\'s deterministic context packet (context-packet-spec; derived on demand, never saved) · alias --packet' },
   { name: 'validate', args: '[id]', desc: 'run the enabled validator rules (all nodes, or one node) — rule-id\'d deterministic findings · alias --validate' },
   { name: 'rules', args: '[--write]', desc: 'the DERIVED check-rules registry (self-contained rule modules are the source) · alias --rules; --write regenerates rules/check/rules.json' },
+  { name: 'docs', args: '[--write]', desc: 'the docs→git resolution index (docs/manifest.json — generated from docs/, never hand-maintained) · alias --docs; --write regenerates the manifest' },
   { name: 'chain', args: '', desc: 'the project flow config as data (work-type chains, F3 view) · alias --chain' },
   { name: 'steps', args: '', desc: 'the step registry — the pluggable surface future steps implement against · alias --steps' },
   { name: 'next', args: '', desc: 'the run-next proposal (F5 pull): active leg, frontmost-ready, pending gates, leg gate — derived, never assumed · alias --next' },
@@ -929,7 +973,7 @@ const COMMANDS: Array<{ name: string; args: string; desc: string }> = [
   { name: 'run!', args: '<id>', desc: 'WRITE — run a task through the FRAME (materialize → grill → activate → execute → verify → confirm → commit); resumable, stops at the first block' },
   { name: 'commands', args: '', desc: 'this table as markdown (the derived doc) · alias --commands' },
   { name: 'help', args: '', desc: 'usage · alias --help / -h' },
-  { name: 'read', args: '<name>', desc: 'the L1 CONTENT read view — a current artifact\'s marker-stripped content + path + sha (core-design §5) · alias --read' },
+  { name: 'read', args: '<name>', desc: 'the L1 CONTENT read view — a doc (via the manifest) or current artifact\'s marker-stripped content + path + sha (core-design §5) · alias --read' },
   { name: 'append!', args: '<id> \'<json>\'', desc: 'WRITE — single-writer append; REFUSES the composite-owned kinds (created/submitted/confirmed/rejected/artifact-locked/superseded)' },
   { name: 'spawn!', args: '<id> \'<contract-json>\'', desc: 'WRITE — create a node; enforces the v14 contract schema + F-AC19 + id naming + the artifact/leg gates' },
   { name: 'submit!', args: '<id> grill|confirm [confirmedSha]', desc: 'WRITE — the resumable gate write: `submitted` alone, so an interrupted gate stays blocked (confirm records the gate② content binding)' },
@@ -1021,6 +1065,7 @@ try {
   else if (command === 'packet' || command === '--packet') cmdPacket(resolveId(args[1]));
   else if (command === 'validate' || command === '--validate') cmdValidate(args[1]);
   else if (command === 'rules' || command === '--rules') cmdRules(args[1] === '--write');
+  else if (command === 'docs' || command === '--docs') cmdDocs(args[1] === '--write');
   else if (command === 'chain' || command === '--chain') cmdChain();
   else if (command === 'steps' || command === '--steps') cmdSteps();
   else if (command === 'next' || command === '--next') cmdNext();
@@ -1042,10 +1087,20 @@ try {
   else if (command === 'lock!') cmdLock(args[1], args[2] || '', args[3] || '');
   else if (command === 'supersede!') cmdSupersede(args[1], args[2], args[3] || '', args.slice(4).join(' '));
   else {
-    const cur = store.current(command);
-    if (!cur) { console.error(`ann: no current artifact for '${command}'`); process.exit(1); }
-    console.log(cur.path);
-    if (cur.sha) console.error(`  (locked @ ${cur.sha}, producer ${cur.producer})`);
+    // bare-name read: a DOC (via the manifest — the forward path) OR a current
+    // artifact's logical name (legacy). Path map for one name; `read <name>` for content.
+    const doc = store.resolveDoc(command);
+    const cur = doc ? undefined : store.current(command);
+    if (doc) {
+      console.log(doc.path);
+      console.error(`  (docs @ ${doc.sha})`);
+    } else if (cur) {
+      console.log(cur.path);
+      if (cur.sha) console.error(`  (locked @ ${cur.sha}, producer ${cur.producer})`);
+    } else {
+      console.error(`ann: no doc/artifact for '${command}' (a docs manifest name or a current artifact's logical name)`);
+      process.exit(1);
+    }
   }
 } catch (e) {
   console.error((e as Error).message);

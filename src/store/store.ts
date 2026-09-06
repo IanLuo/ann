@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { join, basename, resolve, sep } from 'node:path';
 import { getVOCAB } from './vocab.js';
 import { blobSha, stripMarkers } from './sha.js';
+import { loadDocsManifest } from './docs.js';
 
 export interface JourneyEvent {
   at: string;
@@ -375,6 +376,25 @@ export class Store {
     };
   }
 
+  /**
+   * THE DOC RESOLUTION (docs → git): a logical doc name → its manifest entry → the
+   * on-disk file's content sha. docs/ is git content; docs/manifest.json is the
+   * committed RESOLUTION INDEX — a name the manifest serves resolves, and "current" is
+   * the file at HEAD. This is the FORWARD path for docs (reads · requiredInputs ·
+   * F-AC19 · the goal view). `current()` over artifact locks stays ONLY as a legacy
+   * reader for archived/historical nodes — never the forward path. Returns undefined
+   * when the manifest has no such name or the file is absent (a broken manifest entry
+   * resolves to nothing; `docsIndexFresh` reports the drift).
+   */
+  resolveDoc(name: string): { name: string; path: string; sha: string } | undefined {
+    const rel = loadDocsManifest(this.root)[name];
+    if (!rel) return undefined;
+    const full = join(this.root, rel);
+    if (!existsSync(full)) return undefined;
+    const content = readFileSync(full, 'utf8');
+    return { name, path: rel, sha: blobSha(stripMarkers(content)).slice(0, 7) };
+  }
+
   /** Unwrap a node contract (defensive: legacy double-nested {contract:{contract:{…}}}). */
   /** The task's CONTRACT (unwrapped from node.json's {id, contract, createdAt} wrapper) —
    *  the single unwrap path for consumers (kernel, flow, validators). Derived read. */
@@ -387,7 +407,8 @@ export class Store {
   /** F-AC19 (format v11 §2/§7) — the task contract checklist. PURE: usable at
    *  spawn (hard reject) and in check(). A contract fails when it is not
    *  self-sufficient: no intent, no acceptance criteria, or an input that does
-   *  not resolve via current(). Returns named problems (empty = passes). */
+   *  not resolve (via the docs manifest or a current artifact). Returns named
+   *  problems (empty = passes). */
   contractProblems(contract: unknown): string[] {
     const problems: string[] = [];
     const c = contract as Record<string, unknown> | null | undefined;
@@ -403,7 +424,11 @@ export class Store {
         problems.push('requiredInputs entry is not a string');
         continue;
       }
-      if (!this.current(r.trim())) problems.push(`requiredInput '${r}' does not resolve via current() (use the artifact's logical name)`);
+      // A required input resolves through the DOCS MANIFEST (the forward path — a spec
+      // authored in docs/) OR a CURRENT ARTIFACT (legacy: a doc locked under a task).
+      if (!this.resolveDoc(r.trim()) && !this.current(r.trim())) {
+        problems.push(`requiredInput '${r}' does not resolve (a docs manifest name or a current artifact's logical name)`);
+      }
     }
     return problems;
   }

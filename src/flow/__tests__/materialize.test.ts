@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store } from '../../store/store.js';
 import { assemblePacket } from '../materialize.js';
+import { scanDocsDir, writeDocsManifest } from '../../store/docs.js';
 
 let root: string;
 function makeStore() {
@@ -47,6 +48,25 @@ describe('Context assembler (S3) — deterministic packet (context-packet-spec)'
       }),
     ]);
     expect(p.dependencies[0].excerpt!.length).toBeLessThanOrEqual(2001); // capped
+    expect(p.readiness).toEqual({ ready: true, blockers: [] });
+  });
+
+  it('resolves a dependency through the DOCS MANIFEST (the forward path — a spec in docs/)', () => {
+    mkdirSync(join(root, 'docs'), { recursive: true });
+    writeFileSync(join(root, 'docs', 'spec.md'), '# The Spec\n\ncontent\n');
+    writeDocsManifest(root, scanDocsDir(root));
+    const id = '06-engine-build/10-task';
+    writeNode(id, { intent: 'Do it', acceptanceCriteria: ['AC1'], requiredInputs: ['spec'] }, [ev('created')]);
+    const p = assemblePacket(new Store(root), id);
+    expect(p.dependencies).toEqual([
+      expect.objectContaining({
+        name: 'spec',
+        status: 'resolved',
+        path: 'docs/spec.md',
+        sha: expect.stringMatching(/^[0-9a-f]{7}$/),
+        sourceType: 'derived-from',
+      }),
+    ]);
     expect(p.readiness).toEqual({ ready: true, blockers: [] });
   });
 

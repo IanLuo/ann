@@ -743,23 +743,27 @@ export class Commands {
   /* ══ READS — the derived views ══════════════════════════════════════════════ */
 
   /**
-   * `read` — THE CONTENT READ VIEW (core-design §5): an L1 derived read, `current()`
-   * plus a bounded file read, serving MARKER-STRIPPED content so what a caller reads
-   * hashes to what was locked. L2 injects it into steps; it is NOT an L3 servant.
+   * `read` — THE CONTENT READ VIEW (core-design §5): an L1 derived read serving
+   * MARKER-STRIPPED content so what a caller reads hashes to what is current. A name
+   * resolves through the DOCS MANIFEST first (the forward path — a spec in docs/),
+   * falling back to `current()` over artifact locks (a legacy reader for archived/
+   * historical nodes). L2 injects it into steps; it is NOT an L3 servant.
    *
    * The BOUND (`requiredInputs` only) is applied by L2 at injection — same-task chain
    * sources resolve through `prior`, never through here.
    */
   read(name: string): CommandResult<ResolvedRead> {
-    const cur = this.store.current(name);
-    if (!cur) return fail('unresolved', `no current artifact for '${name}' (use the artifact's logical name)`);
-    const full = join(this.store.root, cur.path);
-    if (!existsSync(full)) return fail('missing-file', `current '${name}' recorded at ${cur.path}, but the file is missing`);
+    const doc = this.store.resolveDoc(name);
+    const cur = doc ? undefined : this.store.current(name);
+    const target = doc ?? cur;
+    if (!target) return fail('unresolved', `no doc/artifact for '${name}' (a docs manifest name or a current artifact's logical name)`);
+    const full = join(this.store.root, target.path);
+    if (!existsSync(full)) return fail('missing-file', `'${name}' resolved to ${target.path}, but the file is missing`);
     const content = stripMarkers(readFileSync(full, 'utf8'));
     return ok({
       name,
-      path: cur.path,
-      sha: cur.sha ?? '',
+      path: target.path,
+      sha: target.sha ?? '',
       content: content.length > READ_CHARS ? content.slice(0, READ_CHARS) : content,
       provenance: 'derived-from',
     });

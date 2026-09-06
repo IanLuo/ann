@@ -63,7 +63,11 @@ export interface ContextPacket {
 const EXCERPT_CHARS = 2000;
 const MARKER = /^<!-- (?:specs:locked|draft)[^\n]* -->\n?/;
 
+/** A requiredInput's content identity: the DOCS MANIFEST first (the forward path — a
+ *  spec in docs/), falling back to `current()` over artifact locks (legacy reader). */
 const currentArtifact = (store: Store, name: string): { path: string; sha: string } | undefined => {
+  const doc = store.resolveDoc(name);
+  if (doc) return { path: doc.path, sha: doc.sha };
   const cur = store.current(name);
   if (!cur) return undefined;
   return { path: cur.path, sha: cur.sha ?? '' };
@@ -92,7 +96,7 @@ export function assemblePacket(store: Store, nodeId: string): ContextPacket {
   // carry it inside the contract still read — the fallback, never the written shape).
   const openQ = ((contract?.openQuestions ?? c.openQuestions) ?? []) as Array<{ id?: string; question?: string; blocking?: boolean; defaultIfUnanswered?: string }>;
 
-  // dependencies: requiredInputs × current(name) — provenance: derived-from
+  // dependencies: requiredInputs × resolveDoc/current(name) — provenance: derived-from
   const req = (Array.isArray(c.requiredInputs) ? c.requiredInputs : []) as string[];
   const dependencies: PacketDependency[] = req.map((name) => {
     const art = currentArtifact(store, name);
