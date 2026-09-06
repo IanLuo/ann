@@ -102,6 +102,43 @@ let JSON_OUT = false;
     args.splice(idx, 1);
   }
 }
+
+// ── UNIFORM JSON (uniform-json: EVERY command accepts --json) ────────────────
+// Contract: in --json mode stdout carries EXACTLY ONE JSON document — a command's
+// view value on success, or the error shape below on failure — and nothing else;
+// exit codes are unchanged (0 ok · 1 command/store/validation error · 2 usage).
+//   success (read)   → the command's value (the array/object its renderer takes)
+//   success (write)  → the CommandResult, serialized ({ok:true, value:{...}})
+//   failure (either) → { "error": { "code": <string>, "message": <string> } }
+// Human text goes to stderr (diagnostics) or is suppressed; it never shares stdout
+// with the JSON doc. The guard below makes an ignored --json impossible to miss:
+// any console.log reaching stdout in JSON mode THROWS (fail-loud) instead of
+// silently mixing text into the stream, so a command that forgets its JSON branch
+// is detected, never silently text-printed.
+const _log = console.log.bind(console); // the ORIGINAL stdout writer (JSON docs only, in JSON mode)
+let jsonEmitted = false;
+/** Emit the single JSON document for the running command. */
+const jsonEmit = (value: unknown): void => {
+  jsonEmitted = true;
+  _log(JSON.stringify(value, null, 2));
+};
+/** Fail a command: JSON mode → the error document on stdout (exit non-zero);
+ *  text mode → the same human message on stderr (byte-identical to before). */
+function reject(code: string, message: string, exitCode = 1, jsonMessage = message): never {
+  if (JSON_OUT) _log(JSON.stringify({ error: { code, message: jsonMessage } }, null, 2));
+  else console.error(message);
+  process.exit(exitCode);
+}
+/** A usage failure (exit 2) — JSON-aware like reject. */
+const usage = (message: string): never => reject('usage', message, 2, message.replace(/\n.*/s, ''));
+if (JSON_OUT) {
+  console.log = ((...data: unknown[]) => {
+    void data;
+    throw new Error(
+      'ann --json: stdout text emitted by a command that ignored --json — every command must emit exactly one JSON document (uniform-json). This is a bug.',
+    );
+  }) as typeof console.log;
+}
 const isProjectCmd = args[0] === 'project' || args[0] === 'project!';
 
 const isProjectRoot = (dir: string): boolean => existsSync(join(dir, '.ann')) || existsSync(join(dir, 'journey'));
@@ -110,8 +147,7 @@ function resolveProjectRoot(argv: string[]): string {
   const explicit = projectFlag ? resolve(projectFlag) : process.env.ANN_PROJECT ? resolve(process.env.ANN_PROJECT) : undefined;
   if (explicit) {
     if (isProjectRoot(explicit)) return explicit;
-    console.error(`ann: '${explicit}' is not an ann project (no .ann/ or journey/). Run from a project or: ann project! add <path>`);
-    process.exit(1);
+    return reject('not-project', `ann: '${explicit}' is not an ann project (no .ann/ or journey/). Run from a project or: ann project! add <path>`);
   }
   // cwd discovery: walk up looking for .ann/ (v12 marker) — legacy journey/ accepted
   let dir = process.cwd();
@@ -123,8 +159,7 @@ function resolveProjectRoot(argv: string[]): string {
   }
   const cur = getCurrentProject();
   if (cur && isProjectRoot(cur)) return cur;
-  console.error('ann: no project found — run from a project (a dir containing .ann/), or register one: ann project! add <path>');
-  process.exit(1);
+  return reject('no-project', 'ann: no project found — run from a project (a dir containing .ann/), or register one: ann project! add <path>');
 }
 
 const ROOT = isProjectCmd ? process.cwd() : resolveProjectRoot(args);
@@ -213,6 +248,7 @@ function cmdJourney() {
     alsoReady: lb.alsoReady.map((a) => ({ task: a.task, status: a.status })),
     legGate: lb.legGate,
   };
+  if (JSON_OUT) return jsonEmit({ legs: rows, ahead }); // the underlying F12 data
   console.log(renderPlan(rows, ahead));
 }
 
@@ -221,7 +257,7 @@ function cmdStatus() {
   // `ann status` with no filter prints every node (fix: silent-empty status).
   const filter = args.slice(1).find((a) => !a.startsWith('--'));
   const rows = commands.statuses(filter);
-  if (JSON_OUT) return console.log(JSON.stringify(rows, null, 2));
+  if (JSON_OUT) return jsonEmit(rows);
   // S8 — the F10 tree renderer (statuses are derived rows; the renderer emits the
   // padded tree view, never scalar progress — AC5).
   console.log(renderStatusTree(rows));
@@ -236,7 +272,6 @@ function cmdCheck() {
     if (f.severity === 'error') problems.push(line);
     else warns.push(line);
   }
-  for (const p of problems) console.error(p);
   // docs manifest freshness — a doc file with no manifest entry is invisible to
   // resolution; a manifest entry with no file points at nothing. Report when the
   // committed index disagrees with docs/ (docs/ absent → silent). Docs are git
@@ -260,13 +295,7 @@ function cmdCheck() {
       notes.push({ sev: 'error', msg: `docs manifest out of sync with docs/: ${parts.join(' · ')} — run 'ann docs --write' and commit` });
     }
   }
-  for (const w of warns) console.log(`  [rule-warn] ${w}`);
   const errors = problems.length + notes.filter((n) => n.sev === 'error').length;
-  for (const n of notes) {
-    if (n.sev === 'error') console.error(`  [docs] ${n.msg}`);
-    else if (n.sev === 'warn') console.log(`  [docs-warn] ${n.msg}`);
-    else console.log(`  [docs] ${n.msg}`);
-  }
   // Journey state line — the check says WHERE we are, not just that nothing broke.
   const legs = store.ids().filter((i) => !i.includes('/')).sort();
   const states = legs.map((l) => `${l} ${store.status(l)}`).join(' · ');
@@ -279,13 +308,26 @@ function cmdCheck() {
     state += ` · ${active} in progress (${doneN}/${tasks.length} tasks done)`;
     if (ready.length) state += ` — frontmost-ready: ${ready[0]} (${store.status(ready[0])})`;
   }
+  if (JSON_OUT) {
+    // stdout = the ONE json doc; the problems/error-notes still land on stderr as diagnostics
+    for (const p of problems) console.error(p);
+    for (const n of notes) if (n.sev === 'error') console.error(`  [docs] ${n.msg}`);
+    jsonEmit({ problems, warnings: warns, notes, docs: docCount, state });
+    process.exit(errors === 0 ? 0 : 1);
+  }
+  for (const p of problems) console.error(p);
+  for (const w of warns) console.log(`  [rule-warn] ${w}`);
+  for (const n of notes) {
+    if (n.sev === 'error') console.error(`  [docs] ${n.msg}`);
+    else if (n.sev === 'warn') console.log(`  [docs-warn] ${n.msg}`);
+    else console.log(`  [docs] ${n.msg}`);
+  }
   if (errors === 0) {
     console.log(dh ? `OK — ${docCount} docs in the manifest, no gate gaps.` : 'OK — no gate gaps (archived journey — no docs/ home to index).');
   } else {
     console.log(`${errors} problem(s).`);
   }
   console.log(state);
-  if (JSON_OUT) console.log(JSON.stringify({ problems, warnings: warns, notes, docs: docCount, state }, null, 2));
   process.exit(errors === 0 ? 0 : 1);
 }
 
@@ -293,17 +335,22 @@ function cmdCheck() {
  *  filesystem/git reality (D1-D5). Reports, never mutates; exits 1 on any drift. */
 function cmdVerify() {
   const drifts = commands.verify();
+  const code = drifts.length === 0 ? 0 : 1;
+  if (JSON_OUT) {
+    for (const d of drifts) console.error(renderDrift(d)); // diagnostics — never the stdout doc
+    jsonEmit({ drifts, count: drifts.length });
+    process.exit(code);
+  }
   for (const d of drifts) console.error(renderDrift(d));
-  if (JSON_OUT) console.log(JSON.stringify({ drifts, count: drifts.length }, null, 2));
   console.log(drifts.length === 0 ? 'verify: clean — the log and the filesystem agree (0 drifts).' : `${drifts.length} drift(s).`);
-  process.exit(drifts.length === 0 ? 0 : 1);
+  process.exit(code);
 }
 
 /** `ledger` — the write-rev ledger read: rev + per-node last-write rev/at + hashes
  *  (the store-external integrity guard). Read-only. */
 function cmdLedger() {
   const view = commands.ledger();
-  if (JSON_OUT) return console.log(JSON.stringify(view, null, 2));
+  if (JSON_OUT) return jsonEmit(view);
   console.log(renderLedger(view));
 }
 
@@ -313,7 +360,7 @@ function cmdSpecs() {
   // (resolveDoc is never attempted; current() remaps into the journey's legs/).
   if (docsHome() === undefined) {
     const docs = store.currentDocs();
-    if (JSON_OUT) return console.log(JSON.stringify(docs, null, 2));
+    if (JSON_OUT) return jsonEmit(docs);
     const rows: string[] = [];
     for (const d of docs) {
       rows.push(`${d.name}  @ ${d.sha}`);
@@ -351,7 +398,7 @@ function cmdSpecs() {
     } catch {}
     stack.push({ name, sha: docSha(readFileSync(full, 'utf8')), path: rel, ...(upstream ? { upstream } : {}), ...(referrers ? { referrers } : {}) });
   }
-  if (JSON_OUT) return console.log(JSON.stringify(stack, null, 2));
+  if (JSON_OUT) return jsonEmit(stack);
   const rows: string[] = [];
   for (const s of stack) {
     rows.push(`${s.name}  @ ${s.sha}`);
@@ -364,38 +411,74 @@ function cmdSpecs() {
 
 function cmdProviders() {
   // the adapter registry (resource-registry spec, category adapter) — env-resolved,
-  // api key MASKED (never printed).
+  // api key MASKED (never printed, never emitted — the JSON carries only the SOURCE
+  // state of the key, NFR-SEC-1; a literal in the spec never leaves the process).
+  let reg: ReturnType<typeof loadProviderRegistry>;
   try {
-    const reg = loadProviderRegistry(ROOT);
-    console.log('PROVIDER REGISTRY (rules/adapter/provider.json)');
-    console.log(`defaultProvider: ${reg.defaultProvider}`);
-    console.log('---');
-    for (const p of reg.providers) {
-      console.log(`provider: ${p.id}  [${p.kind}]`);
-      console.log(`  protocol:   ${p.protocol}`);
-      const base = resolveSetting(p.baseUrl, 'baseUrl');
-      const baseEnv = p.baseUrl.startsWith('env:') ? p.baseUrl.slice(4).split('||')[0].trim() : undefined;
-      const baseFromEnv = baseEnv ? !!process.env[baseEnv] : false;
-      const baseFromConfig = !baseFromEnv && !!loadConfig().baseUrl;
-      console.log(`  baseUrl:    ${base ?? '(unresolved — env unset, no fallback)'}${baseFromEnv ? ' (from env)' : baseFromConfig ? ' (from config file)' : baseEnv ? ' (fallback)' : ''}`);
-      const key = p.apiKey ? resolveSecret(p.apiKey) : { source: 'none' as const };
-      console.log(`  apiKey:     ${key.source === 'keychain' ? 'SET (keychain, masked)' : key.source === 'env' ? 'SET (env, masked)' : key.source === 'config' ? 'SET (config file, masked)' : key.source === 'literal' ? 'SET (literal, masked — move it to the config file or keychain)' : p.apiKey ? `unset — try: ann config! set apiKey <value>` : '(none configured)'}`);
-      const model = resolveSetting(p.defaultModel, 'model');
-      const modelEnv = p.defaultModel.startsWith('env:') ? p.defaultModel.slice(4).split('||')[0].trim() : undefined;
-      const modelFromEnv = modelEnv ? !!process.env[modelEnv] : false;
-      const modelFromConfig = !modelFromEnv && !!loadConfig().model;
-      console.log(`  defaultModel: ${model ?? '(unresolved)'}${modelFromEnv ? ' (from env)' : modelFromConfig ? ' (from config file)' : modelEnv ? ' (fallback)' : ''}`);
-    }
-    console.log('---');
-    console.log(`defaults: maxTokens=${reg.defaults.maxTokens} · temperature=${reg.defaults.temperature} · retries=${reg.defaults.retries} · backoff=${reg.defaults.backoffMs}ms→${reg.defaults.backoffMaxMs}ms · timeout=${reg.defaults.timeoutMs}ms`);
+    reg = loadProviderRegistry(ROOT);
   } catch (e) {
-    console.error((e as Error).message);
-    process.exit(1);
+    return reject('providers', (e as Error).message, 1);
   }
+  if (JSON_OUT) {
+    return jsonEmit({
+      defaultProvider: reg.defaultProvider,
+      defaults: reg.defaults,
+      providers: reg.providers.map((p) => {
+        const base = resolveSetting(p.baseUrl, 'baseUrl');
+        const baseEnv = p.baseUrl.startsWith('env:') ? p.baseUrl.slice(4).split('||')[0].trim() : undefined;
+        const baseFromEnv = baseEnv ? !!process.env[baseEnv] : false;
+        const baseFromConfig = !baseFromEnv && !!loadConfig().baseUrl;
+        const key = p.apiKey ? resolveSecret(p.apiKey) : { source: 'none' as const };
+        const model = resolveSetting(p.defaultModel, 'model');
+        const modelEnv = p.defaultModel.startsWith('env:') ? p.defaultModel.slice(4).split('||')[0].trim() : undefined;
+        const modelFromEnv = modelEnv ? !!process.env[modelEnv] : false;
+        const modelFromConfig = !modelFromEnv && !!loadConfig().model;
+        return {
+          id: p.id,
+          kind: p.kind,
+          protocol: p.protocol,
+          baseUrl: base ?? null,
+          baseUrlSource: baseFromEnv ? 'env' : baseFromConfig ? 'config' : baseEnv ? 'fallback' : 'unresolved',
+          apiKey: key.source === 'none' ? (p.apiKey ? 'unset' : 'none') : key.source,
+          defaultModel: model ?? null,
+          defaultModelSource: modelFromEnv ? 'env' : modelFromConfig ? 'config' : modelEnv ? 'fallback' : 'unresolved',
+        };
+      }),
+    });
+  }
+  console.log('PROVIDER REGISTRY (rules/adapter/provider.json)');
+  console.log(`defaultProvider: ${reg.defaultProvider}`);
+  console.log('---');
+  for (const p of reg.providers) {
+    console.log(`provider: ${p.id}  [${p.kind}]`);
+    console.log(`  protocol:   ${p.protocol}`);
+    const base = resolveSetting(p.baseUrl, 'baseUrl');
+    const baseEnv = p.baseUrl.startsWith('env:') ? p.baseUrl.slice(4).split('||')[0].trim() : undefined;
+    const baseFromEnv = baseEnv ? !!process.env[baseEnv] : false;
+    const baseFromConfig = !baseFromEnv && !!loadConfig().baseUrl;
+    console.log(`  baseUrl:    ${base ?? '(unresolved — env unset, no fallback)'}${baseFromEnv ? ' (from env)' : baseFromConfig ? ' (from config file)' : baseEnv ? ' (fallback)' : ''}`);
+    const key = p.apiKey ? resolveSecret(p.apiKey) : { source: 'none' as const };
+    console.log(`  apiKey:     ${key.source === 'keychain' ? 'SET (keychain, masked)' : key.source === 'env' ? 'SET (env, masked)' : key.source === 'config' ? 'SET (config file, masked)' : key.source === 'literal' ? 'SET (literal, masked — move it to the config file or keychain)' : p.apiKey ? `unset — try: ann config! set apiKey <value>` : '(none configured)'}`);
+    const model = resolveSetting(p.defaultModel, 'model');
+    const modelEnv = p.defaultModel.startsWith('env:') ? p.defaultModel.slice(4).split('||')[0].trim() : undefined;
+    const modelFromEnv = modelEnv ? !!process.env[modelEnv] : false;
+    const modelFromConfig = !modelFromEnv && !!loadConfig().model;
+    console.log(`  defaultModel: ${model ?? '(unresolved)'}${modelFromEnv ? ' (from env)' : modelFromConfig ? ' (from config file)' : modelEnv ? ' (fallback)' : ''}`);
+  }
+  console.log('---');
+  console.log(`defaults: maxTokens=${reg.defaults.maxTokens} · temperature=${reg.defaults.temperature} · retries=${reg.defaults.retries} · backoff=${reg.defaults.backoffMs}ms→${reg.defaults.backoffMaxMs}ms · timeout=${reg.defaults.timeoutMs}ms`);
 }
 
 function cmdProject() {
   const cur = getCurrentProject();
+  if (JSON_OUT) {
+    return jsonEmit({
+      current: cur ?? null,
+      currentStale: !!cur && !isProjectRoot(cur),
+      cwd: process.cwd(),
+      projects: listProjects().map((p) => ({ path: p, stale: !isProjectRoot(p) })),
+    });
+  }
   console.log(`CURRENT PROJECT: ${cur && isProjectRoot(cur) ? cur : cur ? `${cur} (missing/stale)` : '(none — config.currentProject unset)'}`);
   console.log(`cwd: ${process.cwd()}`);
   const projects = listProjects();
@@ -408,32 +491,31 @@ function cmdProject() {
 
 function cmdProjectSet(op: string, path: string | undefined) {
   if (op === 'add') {
-    if (!path) { console.error('usage: ann project! add <path>'); process.exit(2); }
+    if (!path) return usage('usage: ann project! add <path>');
     const abs = resolve(path);
-    if (!isProjectRoot(abs)) {
-      console.error(`project! add: ${abs} has no .ann/ — not an ann project (or init it first)`);
-      process.exit(1);
-    }
+    if (!isProjectRoot(abs)) return reject('project-add', `project! add: ${abs} has no .ann/ — not an ann project (or init it first)`);
     setProject(abs);
+    if (JSON_OUT) return jsonEmit({ ok: true, value: { op: 'add', path: abs } });
     console.log(`project: added ${abs}`);
   } else if (op === 'use') {
-    if (!path) { console.error('usage: ann project! use <path>'); process.exit(2); }
+    if (!path) return usage('usage: ann project! use <path>');
     const abs = resolve(path);
     useProject(abs);
+    if (JSON_OUT) return jsonEmit({ ok: true, value: { op: 'use', path: abs } });
     console.log(`project: current = ${abs}`);
   } else if (op === 'remove') {
-    if (!path) { console.error('usage: ann project! remove <path>'); process.exit(2); }
+    if (!path) return usage('usage: ann project! remove <path>');
     removeProject(resolve(path));
+    if (JSON_OUT) return jsonEmit({ ok: true, value: { op: 'remove', path: resolve(path) } });
     console.log(`project: removed ${resolve(path)}`);
   } else {
-    console.error('usage: ann project! add|use|remove <path>');
-    process.exit(2);
+    return usage('usage: ann project! add|use|remove <path>');
   }
 }
 
 function cmdPacket(id: string) {
   const p = assemblePacket(store, id);
-  if (JSON_OUT) return console.log(JSON.stringify(p, null, 2));
+  if (JSON_OUT) return jsonEmit(p);
   console.log(`PACKET: ${id} (${p.pathDecisions.isLeg ? 'leg' : 'task'} · depth ${p.pathDecisions.depth})`);
   console.log(`readiness: ${p.readiness.ready ? 'ready' : 'BLOCKED'}` + (p.readiness.blockers.length ? `
   blockers: ${p.readiness.blockers.join('; ')}` : ''));
@@ -458,6 +540,7 @@ function cmdPacket(id: string) {
 function cmdValidate(id: string | undefined) {
   const nodeId = id ? resolveId(id) : undefined;
   const findings = runValidators(store, nodeId);
+  if (JSON_OUT) return jsonEmit(findings);
   if (!findings.length) { console.log('VALIDATE: clean (0 findings)'); return; }
   for (const f of findings) console.log(`  [${f.severity}] ${f.code}${f.nodeId ? ` ${f.nodeId}` : ''} — ${f.detail}`);
   console.log(`${findings.length} finding(s)`);
@@ -466,6 +549,16 @@ function cmdValidate(id: string | undefined) {
 /** F3 (view side) — the project's step-chain flow config, as data. */
 function cmdChain() {
   const project = loadProjectFlow(ROOT);
+  if (JSON_OUT) {
+    // the flow config as data — every entry is a DTO (never step functions)
+    const chains: Record<string, unknown> = {};
+    if (project) {
+      for (const [workType, chain] of Object.entries(project.chains)) {
+        chains[workType] = chain.map((e) => ({ id: e.id, ...(e.at ? { at: e.at } : {}), ...(e.when ? { when: e.when } : {}) }));
+      }
+    }
+    return jsonEmit({ ...(project?.template ? { template: project.template } : {}), chains });
+  }
   console.log('FLOW CONFIG (rules/flow/default.json — DATA, never code)');
   if (!project) {
     console.log('  (no project flow file — the builtin fallback is the EMPTY chain; flow content is DATA, never code)');
@@ -483,6 +576,17 @@ function cmdChain() {
 /** The step registry — the pluggable surface future steps implement against. */
 function cmdSteps() {
   const reg = buildStepRegistry();
+  if (JSON_OUT) {
+    return jsonEmit(
+      reg.all().map((s) => ({
+        id: s.id,
+        roles: s.roles.map((r) => ({ name: r.name, required: !!r.required })),
+        produces: s.produces ?? [],
+        decisions: s.decisions ?? [],
+        rules: s.rules.map((r) => r.id),
+      })),
+    );
+  }
   console.log('STEP REGISTRY (§2 contract — add a step to src/flow/steps/ + reference it in flow data)');
   for (const s of reg.all()) {
     const roles = s.roles.map((r) => `${r.name}${r.required ? '' : '?'}`).join(', ');
@@ -496,7 +600,7 @@ function cmdSteps() {
 function cmdNext() {
   const lb = commands.lookBack();
   const next = commands.advance();
-  if (JSON_OUT) return console.log(JSON.stringify(lb, null, 2));
+  if (JSON_OUT) return jsonEmit(lb);
   console.log('NEXT (derived from events — the observer action)');
   if (lb.activeLeg) console.log(`  active leg: ${lb.activeLeg} (${lb.activeLegStatus})`);
   if (lb.frontmostReady) console.log(`  frontmost-ready: ${lb.frontmostReady.task} (${lb.frontmostReady.status})`);
@@ -524,10 +628,7 @@ function cmdNext() {
  *  structural state · verdict · legs. Status WORDS only (AC5 — the renderer never
  *  emits counts). */
 function cmdGoal() {
-  emit(commands.goal(), (v) => {
-    if (JSON_OUT) return console.log(JSON.stringify(v, null, 2));
-    console.log(renderGoal(v));
-  });
+  emit(commands.goal(), (v) => console.log(renderGoal(v)), (v) => v);
 }
 
 /** `goal! met [feedback]` / `goal! archive [--override]` / `goal! seed [statement]` —
@@ -550,8 +651,7 @@ async function cmdGoalBang(op: string | undefined, rest: string[]) {
     emit(commands.goalArchive(rest.includes('--override')), (v) => console.log(`goal! archive: session archived → ${v.dest}`));
     return;
   }
-  console.error('usage: ann goal! seed [goal-statement] | ann goal! met [feedback] | ann goal! archive [--override]');
-  process.exit(2);
+  return usage('usage: ann goal! seed [goal-statement] | ann goal! met [feedback] | ann goal! archive [--override]');
 }
 
 /** `goal! seed '<goal>'` — the interactive goal seed. The gate pre-check (empty journey
@@ -562,11 +662,14 @@ async function cmdGoalBang(op: string | undefined, rest: string[]) {
  *  is synthesized to docs/goal.md (git content — commit to publish); the seeded
  *  goal's verdict stays UNCONFIRMED until the human records goal! met. */
 async function cmdGoalSeed(idea: string) {
-  const gate = commands.goalSeedGate();
-  if (!gate.allow) {
-    console.error(`not-empty: ${gate.blocker ?? GOAL_SEED_GUARD}`);
-    process.exit(1);
+  // goal! seed drives an INTERACTIVE grilling session (ConsoleInteract.present/ask) over
+  // the terminal — JSON mode cannot carry it, so it refuses up-front (uniform-json: never
+  // let the interactive writer leak text into the JSON stream).
+  if (JSON_OUT) {
+    return reject('goal-seed-interactive', "goal! seed is an INTERACTIVE grilling session — it needs a terminal; JSON mode cannot drive it (run it in a terminal, or read the goal session: ann --json goal|journey|next)");
   }
+  const gate = commands.goalSeedGate();
+  if (!gate.allow) return reject('goal-seed-gate', `not-empty: ${gate.blocker ?? GOAL_SEED_GUARD}`);
   const r = await runGoalSeed(commands, buildAbilities(getAdapter(undefined, ROOT)), { idea });
   if (!r.ok) {
     console.error(`${r.error.code}: ${r.error.blocker}`);
@@ -588,6 +691,29 @@ function cmdFlow(id: string) {
   const flow = resolveChain(store, node, ROOT);
   const { config, problems: configProblems } = resolveConfig(ROOT);
   const problems = validateChain(buildStepRegistry(), flow.chain, assemblePacket(store, node), config);
+  if (JSON_OUT) {
+    // the resolved flow as DATA — chain entries are DTOs (data only, never functions)
+    const chain = flow.chain.map((e) => {
+      const dto: Record<string, unknown> = { id: e.id };
+      if (e.inputs) dto.inputs = e.inputs;
+      if (e.params) dto.params = e.params;
+      if (e.at) dto.at = e.at;
+      if (e.verdict) dto.verdict = e.verdict;
+      if (e.when) dto.when = e.when;
+      return dto;
+    });
+    return jsonEmit({
+      node,
+      chain,
+      source: flow.source,
+      workType: flow.workType ?? null,
+      template: flow.template ?? null,
+      problem: flow.problem ?? null,
+      configProblems,
+      chainProblems: problems.map((p) => ({ at: p.at, problem: p.problem })),
+      valid: problems.length === 0,
+    });
+  }
   console.log(`FLOW for ${node}`);
   const render = flow.chain.map((e) => `${e.id}${phaseOf(e) === 'execute' ? '' : `@${phaseOf(e)}`}`);
   console.log(`  chain: ${render.length ? render.join(' → ') : '(lifecycle only — no content steps)'}  [${flow.source}]${flow.workType ? ` workType=${flow.workType}` : ''}`);
@@ -607,7 +733,10 @@ async function cmdRun(id: string) {
   const taskId = resolveId(id);
   const frame = new Frame({ commands, root: ROOT, registry: buildStepRegistry(), abilities: buildAbilities(getAdapter(undefined, ROOT)) });
   const r = await frame.run(taskId);
-  if (JSON_OUT) return console.log(JSON.stringify(r, null, 2));
+  // exit code first — a partial/blocked run is a non-zero EXIT even under JSON (the doc
+  // on stdout still carries the full frame result; code is the machine's stop signal)
+  if (r.stop !== 'completed') process.exitCode = 1;
+  if (JSON_OUT) return jsonEmit(r);
   console.log(`FRAME ${taskId} — ${r.stop.toUpperCase()} (at ${r.phase})`);
   for (const o of r.outcomes) {
     const how = !o.ran ? 'skipped' : o.replayed ? `replayed (run ${o.runId})` : `ran (run ${o.runId})`;
@@ -617,7 +746,6 @@ async function cmdRun(id: string) {
   for (const p of r.problems) console.log(`  problem: ${p}`);
   if (r.committed?.spawned.length) console.log(`  spawned: ${r.committed.spawned.join(', ')}`);
   if (r.advance) console.log(`  advance: ${r.advance}`);
-  if (r.stop !== 'completed') process.exitCode = 1;
 }
 
 function cmdRules(write: boolean) {
@@ -629,9 +757,11 @@ function cmdRules(write: boolean) {
     const p = join(ROOT, 'rules', 'check', 'rules.json');
     mkdirSync(dirname(p), { recursive: true });
     writeFileSync(p, out);
+    if (JSON_OUT) return jsonEmit({ ok: true, value: { path: p, rules: reg.rules.length } });
     console.log(`rules --write: regenerated ${p} (${reg.rules.length} rules) from the rule modules`);
     return;
   }
+  if (JSON_OUT) return jsonEmit(reg);
   console.log('DERIVED CHECK-RULES REGISTRY (source: self-contained rule modules — never hand-maintained)');
   for (const r of reg.rules) console.log(`  ${r.id.padEnd(24)} [${r.severity.padEnd(7)}] ${r.definition}`);
   console.log(`\n  ${reg.rules.length} rules — 'ann rules --write' regenerates rules/check/rules.json from this`);
@@ -665,7 +795,7 @@ function cmdSessions() {
       }
     }
   }
-  if (JSON_OUT) return console.log(JSON.stringify({ sessionsDir, sessions: rows }, null, 2));
+  if (JSON_OUT) return jsonEmit({ sessionsDir, sessions: rows });
   console.log(`ARCHIVED SESSIONS (${sessionsDir})`);
   if (!rows.length) {
     console.log('  none yet — goal! archive moves a finished journey here');
@@ -683,7 +813,9 @@ function cmdDocs(write: boolean) {
   // reading the ACTIVE project's docs (session-addressing; writes are refused earlier).
   const dh = docsHome();
   if (dh === undefined) {
-    console.error('ann: docs refused — ANN_STORE points at an archived journey (no docs/ home; an archived session has no manifest to index). Reads work via the legacy current-artifact path (`ann read <name>` / `ann <name>`).');
+    const msg = 'ann: docs refused — ANN_STORE points at an archived journey (no docs/ home; an archived session has no manifest to index). Reads work via the legacy current-artifact path (`ann read <name>` / `ann <name>`).';
+    if (JSON_OUT) return reject('docs-home', msg);
+    console.error(msg);
     if (write) process.exit(1);
     return;
   }
@@ -692,8 +824,18 @@ function cmdDocs(write: boolean) {
   if (write) {
     const regen = scanDocsDir(dh);
     const p = writeDocsManifest(dh, regen);
+    if (JSON_OUT) return jsonEmit({ ok: true, value: { path: p, docs: Object.keys(regen).length } });
     console.log(`docs --write: regenerated ${p} (${Object.keys(regen).length} docs) from docs/`);
     return;
+  }
+  if (JSON_OUT) {
+    // the docs→git index as data — every manifest entry with its content sha + freshness
+    const docs = Object.keys(manifest).sort().map((n) => {
+      const rel = manifest[n];
+      const full = join(dh, rel);
+      return { name: n, path: rel, sha: existsSync(full) ? docSha(readFileSync(full, 'utf8')) : '(file missing)' };
+    });
+    return jsonEmit({ fresh, missing, stale, docs });
   }
   console.log(`DOCS INDEX (${join('docs', MANIFEST_FILE)} — the resolution index; generated — 'ann docs --write' regenerates)`);
   const names = Object.keys(manifest).sort();
@@ -716,7 +858,7 @@ function cmdDocs(write: boolean) {
  *  PROJECT registry — shown together, each leaf tagged with the layer it came from. */
 function cmdConfig() {
   const resolution = resolveConfig(ROOT);
-  if (JSON_OUT) return console.log(JSON.stringify({ file: configPath(), user: maskedConfig(), ...resolution }, null, 2));
+  if (JSON_OUT) return jsonEmit({ file: configPath(), user: maskedConfig(), ...resolution });
   console.log(`CONFIG FILE: ${configPath()}${configExists() ? '' : ' (not created yet)'}`);
   console.log('  outside the repo · chmod 600 (user-only) · apiKey masked · resolution: env > config > keychain/fallback');
   const entries = Object.entries(maskedConfig());
@@ -739,8 +881,7 @@ const CONFIG_KEYS = ['provider', 'model', 'baseUrl', 'apiKey', 'maxTokens', 'flo
 
 function cmdConfigSet(key: string, value: string | undefined) {
   if (!CONFIG_KEYS.includes(key) || value === undefined || value === '') {
-    console.error(`usage: ann config! set <key> <value>  (keys: ${CONFIG_KEYS.join(' · ')})`);
-    process.exit(2);
+    return usage(`usage: ann config! set <key> <value>  (keys: ${CONFIG_KEYS.join(' · ')})`);
   }
   // the general-config leaves nest under their group; validation stays in the resolver
   if (key.includes('.')) {
@@ -748,9 +889,10 @@ function cmdConfigSet(key: string, value: string | undefined) {
     const cfg = loadConfig() as Record<string, unknown>;
     const existing = (cfg[group] as Record<string, unknown> | undefined) ?? {};
     const v: unknown = leaf === 'verifyFailCycles' ? Number(value) : value;
-    if (leaf === 'verifyFailCycles' && !Number.isInteger(v)) { console.error('config!: flow.verifyFailCycles must be an integer'); process.exit(1); }
+    if (leaf === 'verifyFailCycles' && !Number.isInteger(v)) return reject('config-value', 'config!: flow.verifyFailCycles must be an integer');
     setConfig(group as 'flow' | 'preferences', { ...existing, [leaf]: v } as never);
     const after = resolveConfig(ROOT).problems.filter((p) => p.startsWith(`config ${key}`));
+    if (JSON_OUT) return jsonEmit({ ok: true, value: { key, file: configPath(), leaf, value: v, problems: after } });
     for (const p of after) console.log(`  PROBLEM: ${p}`);
     console.log(`config: saved ${key} → ${configPath()} = ${value}`);
     return;
@@ -758,33 +900,38 @@ function cmdConfigSet(key: string, value: string | undefined) {
   let v: string | number = value;
   if (key === 'maxTokens') {
     const n = Number(value);
-    if (Number.isNaN(n)) { console.error('config!: maxTokens must be a number'); process.exit(1); }
+    if (Number.isNaN(n)) return reject('config-value', 'config!: maxTokens must be a number');
     v = n;
   }
   setConfig(key as 'provider' | 'model' | 'baseUrl' | 'apiKey' | 'maxTokens', v);
+  if (JSON_OUT) {
+    // the apiKey value is NEVER echoed — the write result reports the save, not the secret
+    return jsonEmit({ ok: true, value: { key, file: configPath(), ...(key === 'apiKey' ? { masked: true } : { value: v }) } });
+  }
   console.log(`config: saved ${key} → ${configPath()}${key === 'apiKey' ? ' (masked, never echoed)' : ` = ${value}`}`);
 }
 
 function cmdCred(op: string, service: string, account: string, secret: string | undefined) {
   if ((op !== 'set' && op !== 'delete') || !service || !account) {
-    console.error('usage: ann cred! set|delete <service> <account> [secret]');
-    console.error('  secret: pass as arg OR pipe via stdin (echo -n "..." | ann cred! set ...) — stdin never hits argv/ps');
-    process.exit(2);
+    return usage('usage: ann cred! set|delete <service> <account> [secret]\n  secret: pass as arg OR pipe via stdin (echo -n "..." | ann cred! set ...) — stdin never hits argv/ps');
   }
   if (op === 'set') {
     let value = secret;
     if (value === undefined) value = readFileSync(0, 'utf8').trim(); // stdin — never argv
-    if (!value) { console.error('cred!: empty secret — pass as arg or pipe via stdin'); process.exit(1); }
+    if (!value) return reject('cred-empty', 'cred!: empty secret — pass as arg or pipe via stdin');
     addKeychainSecret(service, account, value);
+    if (JSON_OUT) return jsonEmit({ ok: true, value: { op: 'set', service, account } });
     console.log(`cred!: saved ${service}/${account} to the OS keychain (masked, never logged)`);
   } else {
     deleteKeychainSecret(service, account);
+    if (JSON_OUT) return jsonEmit({ ok: true, value: { op: 'delete', service, account } });
     console.log(`cred!: deleted ${service}/${account} from the OS keychain`);
   }
 }
 
 function cmdBranch(rootId: string) {
   const ids = store.ids().filter((i) => i.startsWith(rootId)).sort((a, b) => (a + '/events.jsonl').localeCompare(b + '/events.jsonl'));
+  if (JSON_OUT) return jsonEmit(ids.map((id) => ({ id, status: display(id), events: store.events(id) })));
   for (const id of ids) {
     console.log(`\n▸ ${id}  [${display(id)}]`);
     store.events(id).forEach((e, i) => {
@@ -798,6 +945,7 @@ function cmdBranch(rootId: string) {
 
 function cmdJourneyOne(id: string) {
   const evs = store.events(id);
+  if (JSON_OUT) return jsonEmit({ id, status: display(id), events: evs });
   console.log(`JOURNEY: ${id}`);
   console.log('---------');
   evs.forEach((e, i) => {
@@ -815,8 +963,8 @@ function cmdConfirm(id: string) {
   // confirm-target outputs + evidence). The gate card presents the task's RESULTS
   // with the gate — at GATE② (confirm-result) these ARE what the human confirms.
   const d = commands.detail(id);
-  if (!d.contract) { console.error(`confirm: no node ${id}`); process.exit(1); }
-  if (JSON_OUT) return console.log(JSON.stringify(d, null, 2));
+  if (!d.contract) return reject('confirm', `confirm: no node ${id}`);
+  if (JSON_OUT) return jsonEmit(d);
   console.log(renderGateCard({ detail: d, results: store.results(id) }));
   const items = store.results(id);
   if (items.length) console.log('  → drill: ann results <id> <n>');
@@ -824,8 +972,8 @@ function cmdConfirm(id: string) {
 
 function cmdDetail(id: string) {
   const d = commands.detail(id);
-  if (!d.contract) { console.error(`detail: no node ${id}`); process.exit(1); }
-  if (JSON_OUT) return console.log(JSON.stringify(d, null, 2));
+  if (!d.contract) return reject('detail', `detail: no node ${id}`);
+  if (JSON_OUT) return jsonEmit(d);
   const kind = d.isLeg ? 'LEG' : 'TASK';
   console.log(`${kind}: ${d.id}`);
   console.log(`status: ${d.status}${d.superseded ? ' · superseded producer' : ''}`);
@@ -871,9 +1019,9 @@ function cmdDetail(id: string) {
 
 function cmdResults(id: string, index: string | undefined) {
   const items = commands.results(id);
-  if (!store.contract(id)) { console.error(`results: no node ${id}`); process.exit(1); }
+  if (!store.contract(id)) return reject('results', `results: no node ${id}`);
   const kind = id.includes('/') ? 'TASK' : 'LEG';
-  if (JSON_OUT && index === undefined) return console.log(JSON.stringify(items, null, 2));
+  if (JSON_OUT && index === undefined) return jsonEmit(items);
   if (index === undefined) {
     console.log(`RESULTS: ${id} (${kind})`);
     if (!items.length) { console.log('  (no results yet)'); return; }
@@ -883,7 +1031,44 @@ function cmdResults(id: string, index: string | undefined) {
   }
   const n = Number(index);
   const it = items[n - 1];
-  if (!it) { console.error(`results: no item ${index} (1..${items.length})`); process.exit(1); }
+  if (!it) return reject('results', `results: no item ${index} (1..${items.length})`);
+  if (JSON_OUT) {
+    // structured drill — the matched item + the resolved body, per kind (never text)
+    const body: Record<string, unknown> = { item: it };
+    switch (it.kind) {
+      case 'commit': {
+        try {
+          body.sha = execSync(`git show -s --format='%H%n%an <%ae> %ad%n%n%s%n%n%b' ${it.sha}`, { encoding: 'utf8' }).trim();
+          body.stat = execSync(`git show --stat --format= ${it.sha}`, { encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 }).trim().slice(0, 2000);
+        } catch {
+          body.commitError = `commit ${it.sha} not resolvable in git`;
+        }
+        break;
+      }
+      case 'ref': {
+        const full = join(ROOT, it.path!);
+        if (!existsSync(full)) { body.refError = `ref missing: ${it.path}`; break; }
+        const st = statSync(full);
+        if (st.isDirectory()) {
+          body.dir = `${it.path}/`;
+          body.entries = readdirSync(full).slice(0, 30);
+        } else {
+          body.file = it.path;
+          body.head = readFileSync(full, 'utf8').split('\n').slice(0, 60);
+        }
+        break;
+      }
+      case 'evidence': {
+        const ev = store.events(id).find((e) => e.type === 'evidence' && e.note === it.note);
+        body.event = ev ?? { note: it.note };
+        break;
+      }
+      case 'link':
+        body.url = it.url;
+        break;
+    }
+    return jsonEmit(body);
+  }
   console.log(`${String(it.kind).toUpperCase()}: ${it.label}`);
   if (it.at) console.log(`  at: ${it.at}`);
   switch (it.kind) {
@@ -927,10 +1112,12 @@ function cmdResults(id: string, index: string | undefined) {
 // Every invariant these commands used to re-check by hand now lives in L1's composite
 // mutators, so the flow and the CLI get the same enforcement. The binding's whole job
 // is argv → command call → render.
-const emit = <T>(r: CommandResult<T>, render: (v: T) => void): void => {
-  if (!r.ok) {
-    console.error(`${r.error.code}: ${r.error.blocker}`);
-    process.exit(1);
+const emit = <T>(r: CommandResult<T>, render: (v: T) => void, json?: (v: T) => unknown): void => {
+  if (!r.ok) return reject(r.error.code, `${r.error.code}: ${r.error.blocker}`, 1, r.error.blocker);
+  if (JSON_OUT) {
+    // success JSON: a read's unwrapped view (json provided) or the write CommandResult
+    jsonEmit(json ? json(r.value) : { ok: true, value: r.value });
+    return;
   }
   render(r.value);
 };
@@ -940,16 +1127,14 @@ function cmdSpawn(id: string, raw: string) {
   try {
     contract = JSON.parse(raw);
   } catch (e) {
-    console.error(`spawn rejected: bad contract JSON (${(e as Error).message})`);
-    process.exit(1);
+    return reject('spawn-bad-json', `spawn rejected: bad contract JSON (${(e as Error).message})`);
   }
   emit(commands.spawn(id, contract), (v) => console.log(`spawned ${v.id} (${v.kind})`));
 }
 
 function cmdGate(id: string, gate: string, decision: string, feedback: string) {
   if (!getVOCAB().gates.includes(gate) || !['accept', 'reject'].includes(decision)) {
-    console.error('usage: ann gate! <id> grill|confirm accept|reject [feedback]');
-    process.exit(2);
+    return usage('usage: ann gate! <id> grill|confirm accept|reject [feedback]');
   }
   emit(commands.gate(id, gate, decision, feedback), (v) => {
     console.log(`gate ${v.gate}: ${v.decision} → ${id}`);
@@ -959,8 +1144,7 @@ function cmdGate(id: string, gate: string, decision: string, feedback: string) {
 
 function cmdSubmit(id: string, gate: string, sha: string | undefined) {
   if (!getVOCAB().gates.includes(gate)) {
-    console.error('usage: ann submit! <id> grill|confirm [confirmedSha]');
-    process.exit(2);
+    return usage('usage: ann submit! <id> grill|confirm [confirmedSha]');
   }
   emit(commands.submit(id, gate, sha ? { confirmedSha: sha } : {}), (v) =>
     console.log(`submitted ${v.gate} → ${id}${v.confirmedSha ? ` (confirmedSha ${v.confirmedSha})` : ''}`),
@@ -969,10 +1153,9 @@ function cmdSubmit(id: string, gate: string, sha: string | undefined) {
 
 function cmdRead(name: string) {
   emit(commands.read(name), (v) => {
-    if (JSON_OUT) return console.log(JSON.stringify(v, null, 2));
     console.error(`  (${v.path} @ ${v.sha} — provenance ${v.provenance})`);
     console.log(v.content);
-  });
+  }, (v) => v);
 }
 
 // ---- DISPATCH ----
@@ -1039,10 +1222,7 @@ const readOnlyRefuse = (): void => {
   if (!isJourneyWrite && !isDocsOrRulesWrite) return;
   const t = storeTarget();
   if (!t.readOnly) return;
-  console.error(
-    `ann: ${command} refused: ANN_STORE points at a READ-ONLY journey (${t.loc.kind === 'project' ? join(t.loc.root, '.ann', 'journey') : t.loc.root}) — not the active session. Reads work; unset ANN_STORE to write the active session.`,
-  );
-  process.exit(1);
+  return reject('read-only', `ann: ${command} refused: ANN_STORE points at a READ-ONLY journey (${t.loc.kind === 'project' ? join(t.loc.root, '.ann', 'journey') : t.loc.root}) — not the active session. Reads work; unset ANN_STORE to write the active session.`);
 };
 
 /** Resolve a possibly-partial id: exact → last-segment → unique prefix; fail-closed
@@ -1054,52 +1234,73 @@ function resolveId(raw: string): string {
   const last = (i: string) => i.split('/').pop()!;
   const byLast = ids.filter((i) => last(i) === raw);
   if (byLast.length === 1) return byLast[0];
-  if (byLast.length > 1) {
-    console.error(`ann: ambiguous id '${raw}' — matches ${byLast.join(', ')}; use the full id`);
-    process.exit(1);
-  }
+  if (byLast.length > 1) return reject('ambiguous-id', `ann: ambiguous id '${raw}' — matches ${byLast.join(', ')}; use the full id`);
   // partial last segment (e.g. '05-s2' → '05-s2-envision-grilling')
   const byLastPrefix = ids.filter((i) => last(i).startsWith(raw));
   if (byLastPrefix.length === 1) return byLastPrefix[0];
-  if (byLastPrefix.length > 1) {
-    console.error(`ann: ambiguous '${raw}' — matches ${byLastPrefix.join(', ')}; use more of the id`);
-    process.exit(1);
-  }
+  if (byLastPrefix.length > 1) return reject('ambiguous-id', `ann: ambiguous '${raw}' — matches ${byLastPrefix.join(', ')}; use more of the id`);
   // full-id prefix (e.g. '06-engine-build/05')
   const byPrefix = ids.filter((i) => i.startsWith(raw));
   if (byPrefix.length === 1) return byPrefix[0];
-  if (byPrefix.length > 1) {
-    console.error(`ann: ambiguous prefix '${raw}' — matches ${byPrefix.join(', ')}; use more of the id`);
-    process.exit(1);
-  }
-  console.error(`ann: no node '${raw}'`);
-  process.exit(1);
+  if (byPrefix.length > 1) return reject('ambiguous-id', `ann: ambiguous prefix '${raw}' — matches ${byPrefix.join(', ')}; use more of the id`);
+  return reject('no-node', `ann: no node '${raw}'`);
 }
+// ---- HELP / COMMANDS (uniform-json: the usage doc + the derived table, both in JSON) ----
+/** The help text — the human usage listing. Bare `ann` and `--help`/`help` print this
+ *  (text mode only; --json emits the usage DOC instead). */
+const printHelpText = (): void => {
+  console.log('ann — the journey CLI (read + manage). State via commands only (read discipline).');
+  console.log('Naming: reads have NO marker · WRITES end in `!` (the mutator convention — the `!` is a guarantee).');
+  for (const c of COMMANDS) console.log(`  ${c.name.padEnd(14)} ${c.args.padEnd(44)} ${c.desc}`);
+  console.log('\nenv: RECORDED_BY=<name>  provenance on recorded events (default: agent)');
+  console.log('env: ANN_STORE=<path>  read a NON-ACTIVE journey READ-ONLY (an archived session / another project); empty/unset = the active session');
+  console.log('     value: a project root (has .ann/journey/legs) or a journey root (has journey/legs, or legs/ directly)');
+  console.log('doc: npm run ann -- commands   → the command table as markdown (the derived doc source)');
+  console.log('json: --json on ANY command → ONE structured JSON document on stdout (error doc: {"error":{code,message}}, exit non-zero)');
+};
+/** The commands-table rows as DATA — the array under the markdown; every row carries
+ *  its json support. `ann --json commands` emits this directly. */
+const commandRows = (): Array<Record<string, unknown>> => COMMANDS.map((c) => ({ name: c.name, args: c.args, desc: c.desc, json: true }));
+/** The JSON usage doc — `ann --json help` / bare `ann --json` (the uniform help shape). */
+const jsonUsageDoc = (): unknown => ({
+  doc: 'ann — the journey CLI (read + manage). State via commands only (read discipline).',
+  naming: 'reads have NO marker · WRITES end in `!`',
+  env: [
+    'RECORDED_BY=<name>  provenance on recorded events (default: agent)',
+    'ANN_STORE=<path>  read a NON-ACTIVE journey READ-ONLY (an archived session / another project); empty/unset = the active session. Value: a project root (has .ann/journey/legs) or a journey root (has journey/legs, or legs/ directly).',
+  ],
+  commands: commandRows(),
+});
+/** The derived commands doc — markdown table. Every row now carries a --json column
+ *  (uniform-json: --json is supported by EVERY command). */
+const printCommandsTable = (): void => {
+  console.log('| Command | Args | What it does | --json |');
+  console.log('|---|---|---|---|');
+  for (const c of COMMANDS) console.log(`| \`${c.name}\` | \`${c.args}\` | ${c.desc} | \`yes\` |`);
+  console.log('\nEnv: `RECORDED_BY=<name>` — provenance on recorded events (default: agent).');
+  console.log('Env: `ANN_STORE=<path>` — read a NON-ACTIVE journey READ-ONLY (an archived session / another project); empty/unset = the active session. Value: a project root (`<root>/.ann/journey/legs`) or a journey root (`journey/legs`, or `legs/` directly).');
+};
+const WRITES = ['append', 'spawn', 'submit', 'gate', 'cred'];
 try {
+  if (command === undefined) {
+    // bare `ann` — the human usage listing; `ann --json` → the JSON usage doc (never the
+    // old confusing "no doc/artifact for 'undefined'").
+    if (JSON_OUT) jsonEmit(jsonUsageDoc());
+    else printHelpText();
+    process.exit(0);
+  }
   if (command === '--help' || command === '-h' || command === 'help') {
-    console.log('ann — the journey CLI (read + manage). State via commands only (read discipline).');
-    console.log('Naming: reads have NO marker · WRITES end in `!` (the mutator convention — the `!` is a guarantee).');
-    for (const c of COMMANDS) console.log(`  ${c.name.padEnd(14)} ${c.args.padEnd(44)} ${c.desc}`);
-    console.log('\nenv: RECORDED_BY=<name>  provenance on recorded events (default: agent)');
-    console.log('env: ANN_STORE=<path>  read a NON-ACTIVE journey READ-ONLY (an archived session / another project); empty/unset = the active session');
-    console.log('     value: a project root (has .ann/journey/legs) or a journey root (has journey/legs, or legs/ directly)');
-    console.log('doc: npm run ann -- commands   → the command table as markdown (the derived doc source)');
+    if (JSON_OUT) jsonEmit(jsonUsageDoc());
+    else printHelpText();
     process.exit(0);
   }
-  if (command === '--commands') {
-    // The derived command doc: markdown table from the registry — the source for
-    // AGENTS.md/README, never hand-maintained (the tree's derived-not-stored rule).
-    console.log('| Command | Args | What it does |');
-    console.log('|---|---|---|');
-    for (const c of COMMANDS) console.log(`| \`${c.name}\` | \`${c.args}\` | ${c.desc} |`);
-    console.log('\nEnv: `RECORDED_BY=<name>` — provenance on recorded events (default: agent).');
-    console.log('Env: `ANN_STORE=<path>` — read a NON-ACTIVE journey READ-ONLY (an archived session / another project); empty/unset = the active session. Value: a project root (`<root>/.ann/journey/legs`) or a journey root (`journey/legs`, or `legs/` directly).');
+  if (command === 'commands' || command === '--commands') {
+    if (JSON_OUT) jsonEmit(commandRows());
+    else printCommandsTable();
     process.exit(0);
   }
-  const WRITES = ['append', 'spawn', 'submit', 'gate', 'cred'];
   if (WRITES.includes(command)) {
-    console.error(`ann: writes are marked with '!' — did you mean '${command}!'? (mutator convention: reads have no marker, writes always end in !)`);
-    process.exit(1);
+    reject('write-marker', `ann: writes are marked with '!' — did you mean '${command}!'? (mutator convention: reads have no marker, writes always end in !)`);
   }
   readOnlyRefuse(); // read-only target (ANN_STORE → non-active journey): refuse the journey-addressing writes before dispatch
   if (command === 'journey' || command === '--journey') {
@@ -1117,13 +1318,7 @@ try {
   else if (command === 'project!') cmdProjectSet(args[1], args[2]);
   else if (command === 'cred!') cmdCred(args[1], args[2], args[3], args[4]);
   else if (command === 'branch' || command === '--branch') cmdBranch(resolveId(args[1] || ''));
-  else if (command === 'commands' || command === '--commands') {
-    console.log('| Command | Args | What it does |');
-    console.log('|---|---|---|');
-    for (const c of COMMANDS) console.log(`| \`${c.name}\` | \`${c.args}\` | ${c.desc} |`);
-    console.log('\nEnv: `RECORDED_BY=<name>` — provenance on recorded events (default: agent).');
-    console.log('Env: `ANN_STORE=<path>` — read a NON-ACTIVE journey READ-ONLY (an archived session / another project); empty/unset = the active session. Value: a project root (`<root>/.ann/journey/legs`) or a journey root (`journey/legs`, or `legs/` directly).');
-  } else if (command === 'confirm') cmdConfirm(resolveId(args[1]));
+  else if (command === 'confirm') cmdConfirm(resolveId(args[1]));
   else if (command === 'detail' || command === '--detail') cmdDetail(resolveId(args[1]));
   else if (command === 'results' || command === '--results') cmdResults(resolveId(args[1]), args[2]);
   else if (command === 'packet' || command === '--packet') cmdPacket(resolveId(args[1]));
@@ -1141,12 +1336,12 @@ try {
   else if (command === 'read' || command === '--read') cmdRead(args[1] || '');
   else if (command === 'append!') {
     const raw = args.slice(2).join(' ');
-    if (!args[1] || !raw) { console.error('usage: ann append! <id> \'{"at":..,"type":..}\''); process.exit(2); }
+    if (!args[1] || !raw) usage('usage: ann append! <id> \'{"at":..,"type":..}\'');
     emit(commands.append(args[1], JSON.parse(raw)), () => console.log(`appended → ${args[1]}`));
   } else if (command === 'submit!') cmdSubmit(args[1], args[2], args[3]);
   else if (command === 'spawn!') {
     const raw = args.slice(2).join(' ');
-    if (!args[1] || !raw) { console.error('usage: ann spawn! <id> \'<contract-json>\''); process.exit(2); }
+    if (!args[1] || !raw) usage('usage: ann spawn! <id> \'<contract-json>\'');
     cmdSpawn(args[1], raw);
   } else if (command === 'gate!') cmdGate(args[1], args[2], args[3], args.slice(4).join(' '));
   else {
@@ -1154,6 +1349,24 @@ try {
     // artifact's logical name (legacy). Path map for one name; `read <name>` for content.
     const doc = store.resolveDoc(command);
     const cur = doc ? undefined : store.current(command);
+    if (JSON_OUT) {
+      // the path MAP for one name — the same value the human line prints
+      if (doc) {
+        jsonEmit({ name: command, kind: 'doc', path: doc.path, sha: doc.sha });
+        process.exit(0);
+      }
+      if (cur) {
+        jsonEmit({
+          name: command,
+          kind: 'artifact',
+          path: cur.path,
+          ...(cur.sha ? { sha: cur.sha } : {}),
+          ...(cur.producer ? { producer: cur.producer } : {}),
+        });
+        process.exit(0);
+      }
+      reject('no-doc', `ann: no doc/artifact for '${command}' (a docs manifest name or a current artifact's logical name)`);
+    }
     if (doc) {
       console.log(doc.path);
       console.error(`  (docs @ ${doc.sha})`);
@@ -1165,7 +1378,12 @@ try {
       process.exit(1);
     }
   }
+  // uniform-json guard — a JSON-mode command that neither emitted a doc nor rejected is
+  // a BUG (a command that ignored --json); fail loud with a JSON error, never silent.
+  if (JSON_OUT && !jsonEmitted) reject('no-json', 'ann --json: this command completed without emitting a JSON document (uniform-json) — a command that ignores --json is a bug.');
 } catch (e) {
-  console.error((e as Error).message);
+  const msg = (e as Error).message;
+  if (JSON_OUT) _log(JSON.stringify({ error: { code: 'error', message: msg } }, null, 2));
+  else console.error(msg);
   process.exit(1);
 }
