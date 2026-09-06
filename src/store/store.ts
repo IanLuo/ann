@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, appendFileSync, existsSync, statSync, lstatSync, mkdirSync, writeFileSync, renameSync, rmSync } from 'node:fs';
+import { readdirSync, readFileSync, appendFileSync, existsSync, statSync, lstatSync, mkdirSync, writeFileSync, renameSync, rmSync, realpathSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join, basename, resolve, sep } from 'node:path';
 import { getVOCAB } from './vocab.js';
@@ -79,6 +79,74 @@ export class LedgerError extends Error {
   }
 }
 
+/** ══ SESSION ADDRESSING (ANN_STORE) — the same commands read ANY journey: the ACTIVE
+ *   session by default, an ARCHIVED session when ANN_STORE names one. The store shape is
+ *   identical across locations — a dir holding `legs/` (+ `.ledger.json`) — only the
+ *   folder differs. A PROJECT ROOT keeps its journey at `<root>/.ann/journey` (and its
+ *   docs/ home at `<root>/docs`); a JOURNEY ROOT is the journey dir itself (legs/ +
+ *   .ledger.json directly — the shape `goal! archive` round-trips, and the shape a
+ *   legacy pre-v12 project has at `<root>/journey`). A journey root has NO docs/ home:
+ *   docs are the LIVE project's git content, so doc resolution falls to the legacy
+ *   current() locks. */
+
+/** A resolved store target. `kind` decides the resolution rule: a 'project' target has
+ *  a docs/ manifest home (manifest-forward reads); a 'journey' target resolves docs
+ *  through the legacy current() locks and remaps recorded artifact paths into its own
+ *  legs/ root. */
+export interface StoreLocation {
+  kind: 'project' | 'journey';
+  /** 'project': the PROJECT ROOT (journey at <root>/.ann/journey, docs home at
+   *  <root>/docs). 'journey': the JOURNEY DIR itself (legs/ + .ledger.json directly —
+   *  an archived session, or a legacy pre-v12 project's journey root). */
+  root: string;
+}
+
+export const STORE_LOCATION_HINT =
+  "unset ANN_STORE for the active session, or point it at a project root (a dir with .ann/journey/legs) or a journey root (a dir with journey/legs or legs/ directly — an archived session)";
+
+/** Bad/absent ANN_STORE target — NAMED, so the CLI fails CLOSED at startup (exit 1,
+ *  never a silent empty tree). Thrown by resolveStoreLocation (a string that does not
+ *  normalize) and by the Store constructor (a resolved location with no legs/). */
+export class StoreLocationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'StoreLocationError';
+  }
+}
+
+/** Read-only store write refusal (layer b of the read-only enforcement): when a Store
+ *  is constructed read-only — because ANN_STORE points at a NON-ACTIVE journey (an
+ *  archived session, or another project) — every write method refuses with this named
+ *  error. The CLI chokepoint refuses BEFORE dispatch for the journey-addressing writes;
+ *  this guard is the store-level backstop any caller hits. */
+export class StoreReadonlyError extends Error {
+  constructor(what: string) {
+    super(`${what} refused: this journey is READ-ONLY (ANN_STORE points at a non-active session) — reads only; unset ANN_STORE to write the active session`);
+    this.name = 'StoreReadonlyError';
+  }
+}
+
+/** The journey dir for a resolved location — where legs/ + .ledger.json live (project →
+ *  <root>/.ann/journey; journey → the root itself). One derivation, used by the store
+ *  (legs/ledger paths) and by the CLI's read-only identity comparison. */
+export const storeJourneyDir = (loc: StoreLocation): string =>
+  loc.kind === 'project' ? join(loc.root, '.ann', 'journey') : loc.root;
+
+/** Normalize an ANN_STORE value to a StoreLocation. Accepts (in order): a PROJECT ROOT
+ *  (has `.ann/journey/legs` — the canonical live layout; checked first so pointing
+ *  ANN_STORE at the ACTIVE repo — where `journey` may be a symlink to `.ann/journey` —
+ *  resolves as a project, never as a legacy root), a SESSION/GROUP root (has
+ *  `journey/legs` — the archived-session shape, incl. a legacy pre-v12 project), or a
+ *  JOURNEY DIR itself (has `legs/` directly — e.g. the `<session>/journey` path
+ *  `goal! archive` prints). Anything else throws the NAMED StoreLocationError. */
+export function resolveStoreLocation(raw: string): StoreLocation {
+  const p = resolve(raw);
+  if (existsSync(join(p, '.ann', 'journey', 'legs'))) return { kind: 'project', root: p };
+  if (existsSync(join(p, 'journey', 'legs'))) return { kind: 'journey', root: join(p, 'journey') };
+  if (existsSync(join(p, 'legs'))) return { kind: 'journey', root: p };
+  throw new StoreLocationError(`ANN_STORE: bad target '${raw}' — ${STORE_LOCATION_HINT} (no legs/ journey store found)`);
+}
+
 /** Detail card types — `Store.detail()` derives; the CLI renders (ann detail <id>). */
 export interface DetailGate {
   state: 'none' | 'submitted' | 'confirmed' | 'rejected';
@@ -147,15 +215,38 @@ export const logicalNameFromFile = (f: string): string => f.replace(/\.md$/, '')
 export class Store {
   readonly root: string;
   readonly legs: string;
+  readonly kind: 'project' | 'journey';   // session-addressing: does this store have a docs/ home?
+  readonly readOnly: boolean;             // constructed read-only → write methods throw StoreReadonlyError
+  /** The journey dir this store reads/writes — legs/ + .ledger.json live here (project →
+   *  <root>/.ann/journey; journey → <root>). Shared by the CLI's read-only identity. */
+  readonly journeyDir: string;
   private nodes = new Map<string, NodeEntry>();
   private ledger?: Ledger;              // the write-rev ledger (absent = no baseline yet)
   private ledgerCorrupt = false;        // ledger file exists but is unparseable → fail-closed
   private unparseableNodes = new Set<string>(); // events.jsonl that failed load-parsing
 
-  constructor(root: string) {
-    this.root = root;
-    this.legs = join(root, '.ann', 'journey', 'legs'); // v12 layout: all ann files under .ann/
+  /** Construct over a session target. `location` is a raw path (normalized by
+   *  resolveStoreLocation — the ANN_STORE surface) or an already-resolved StoreLocation.
+   *  Existing call sites pass a path as before (the ACTIVE project root) → project-kind,
+   *  read-write, unchanged behavior. `readOnly` marks a NON-ACTIVE target so its write
+   *  methods refuse (layer b). A location with no legs/ throws the NAMED StoreLocationError
+   *  — a bad/absent store fails closed, never a silent empty tree. */
+  constructor(location: string | StoreLocation, opts: { readOnly?: boolean } = {}) {
+    const loc: StoreLocation = typeof location === 'string' ? resolveStoreLocation(location) : location;
+    this.kind = loc.kind;
+    this.readOnly = opts.readOnly ?? false;
+    this.root = loc.root;
+    this.journeyDir = storeJourneyDir(loc);
+    this.legs = join(this.journeyDir, 'legs'); // v12 layout: all ann files under the journey dir
+    if (!existsSync(this.legs)) {
+      throw new StoreLocationError(`no journey store at '${this.journeyDir}' — missing legs/ (${STORE_LOCATION_HINT})`);
+    }
     this.load();
+  }
+
+  /** Layer b of the read-only enforcement — every WRITE method starts here. */
+  private assertWritable(what: string): void {
+    if (this.readOnly) throw new StoreReadonlyError(what);
   }
 
   /** Write confinement (AC-1): resolve a node id to its canonical folder under the
@@ -215,7 +306,7 @@ export class Store {
   /** Read the write-rev ledger (if present). Corrupt → flagged: every write is refused
    *  and verify reports it — ann never reasons about an unreadable integrity record. */
   private loadLedger(): void {
-    const p = join(this.root, '.ann', 'journey', '.ledger.json');
+    const p = join(this.journeyDir, '.ledger.json');
     if (!existsSync(p)) return;
     try {
       this.ledger = JSON.parse(readFileSync(p, 'utf8')) as Ledger;
@@ -354,6 +445,17 @@ export class Store {
    * producer locked exactly one artifact. Structured events preferred; legacy prose
    * notes are parsed as a fallback.
    */
+  /** The store-relative artifact path a READER can join onto this.root — a recorded
+   *  artifact path remapped for THIS store's shape. 'project': legacyPath (the canonical
+   *  project-relative `.ann/journey/legs/…`). 'journey' (an archived session): the
+   *  recorded paths read `.ann/journey/legs/…` but the files live under the journey
+   *  root's OWN `legs/…` — strip the `.ann/journey/` anchor (the reverse of legacyPath's
+   *  prefixing). */
+  private artifactPath(p: string): string {
+    const canon = legacyPath(p);
+    return this.kind === 'journey' ? canon.replace(/^\.ann\/journey\//, '') : canon;
+  }
+
   current(name: string): { name: string; path: string; sha?: string; producer: string } | undefined {
     const lockers = this.lockers(name);
     const superseded = this.supersededLocks(name);
@@ -370,10 +472,33 @@ export class Store {
       : String(e?.note ?? '').match(/([\w.-]+\.md)/)?.[1] ?? '';
     return {
       name,
-      path: legacyPath(a?.path ?? `journey/legs/${producer}/artifacts/${filename}`),
+      path: this.artifactPath(a?.path ?? `journey/legs/${producer}/artifacts/${filename}`),
       sha: a?.lockSha ?? '',
       producer,
     };
+  }
+
+  /** Every CURRENT legacy artifact name in this store (the name-set for `specs` under a
+   *  'journey'-kind store, which has no docs/ manifest) — a name once per its current
+   *  producer, resolved through current() (supersession-aware). Doc-name union over
+   *  structured artifact-locked events + legacy prose locks. */
+  currentDocs(): Array<{ name: string; path: string; sha: string; producer: string }> {
+    const names = new Set<string>();
+    for (const [id, node] of this.nodes) {
+      for (const e of node.events) {
+        if (e.type !== 'artifact-locked') continue;
+        const a = e.artifact;
+        const filename = a?.path ? basename(a.path) : String(e?.note ?? '').match(/([\w.-]+\.md)/)?.[1] ?? '';
+        const nm = a?.name ?? String(e?.note ?? '').match(/logical name:\s*([\w.-]+)/)?.[1] ?? logicalNameFromFile(filename);
+        if (nm) names.add(nm);
+      }
+    }
+    const out: Array<{ name: string; path: string; sha: string; producer: string }> = [];
+    for (const name of [...names].sort()) {
+      const c = this.current(name);
+      if (c) out.push({ name, path: c.path, sha: c.sha ?? '', producer: c.producer });
+    }
+    return out;
   }
 
   /**
@@ -387,6 +512,10 @@ export class Store {
    * resolves to nothing; `docsIndexFresh` reports the drift).
    */
   resolveDoc(name: string): { name: string; path: string; sha: string } | undefined {
+    // A 'journey'-kind store (an archived session) has NO docs/ home — the docs
+    // manifest is the LIVE project's resolution index, never an archive's. Resolution
+    // falls to the legacy current() locks (the caller's fallback). (Session-addressing.)
+    if (this.kind === 'journey') return undefined;
     const rel = loadDocsManifest(this.root)[name];
     if (!rel) return undefined;
     const full = join(this.root, rel);
@@ -515,7 +644,7 @@ export class Store {
       const nm = a?.name ?? String(e.note ?? '').match(/logical name:\s*([\w.-]+)/)?.[1] ?? '';
       if (!nm) continue;
       const filename = a?.path ? basename(a.path) : String(e.note ?? '').match(/([\w.-]+\.md)/)?.[1] ?? '';
-      const path = legacyPath(a?.path ?? `journey/legs/${id}/artifacts/${filename}`);
+      const path = this.artifactPath(a?.path ?? `journey/legs/${id}/artifacts/${filename}`);
       artifacts.push({ name: nm, path, sha: a?.lockSha ?? '', role: 'historical' });
     }
     const blockers = evs
@@ -665,6 +794,7 @@ export class Store {
    *  manifest regenerated — there is NO goal-root artifact-lock; publishing the doc is
    *  the operator's git commit. */
   seedGoal(doc: string): { id: string; contract: { intent: string; acceptanceCriteria: string[] } } {
+    this.assertWritable('seedGoal');
     if (this.nodes.size) throw new Error('seedGoal rejected: the journey is not empty — a goal seeds the first leg of an empty session (archive first)');
     if (this.goalLegId()) throw new Error('seedGoal rejected: a goal leg already exists');
     const parsed = this.parseGoalDoc(doc);
@@ -693,6 +823,7 @@ export class Store {
    *  the goal and nothing has derived from the doc, so replacing it orphans nothing
    *  (goal-session-design §1/§2). */
   reseedGoal(doc: string): { id: string; contract: { intent: string; acceptanceCriteria: string[] } } {
+    this.assertWritable('reseedGoal');
     const goalId = this.goalLegId();
     if (!goalId || this.nodes.size !== 1 || !this.nodes.has(goalId)) {
       throw new Error('reseedGoal rejected: a goal re-seeds only while it is the journey\'s SOLE unconsumed node — archive the consumed session and seed a new goal');
@@ -733,6 +864,7 @@ export class Store {
    *  removed (else verify reports node-deleted) and the in-memory tree resets to an
    *  empty journey — id reuse across sessions is then safe. */
   archiveJourney(slug: string): { at: string; dest: string } {
+    this.assertWritable('archive');
     const ts = new Date().toISOString().replace(/[:.]/g, '-'); // dir-safe ISO stamp
     const dir = join(this.root, '.ann', 'archive', 'sessions', `${ts}-${slug}`, 'journey');
     mkdirSync(join(dir, 'legs'), { recursive: true });
@@ -741,7 +873,7 @@ export class Store {
         renameSync(join(this.legs, name), join(dir, 'legs', name));
       }
     }
-    const ledgerFile = join(this.root, '.ann', 'journey', '.ledger.json');
+    const ledgerFile = join(this.journeyDir, '.ledger.json');
     if (existsSync(ledgerFile)) renameSync(ledgerFile, join(dir, '.ledger.json'));
     mkdirSync(this.legs, { recursive: true }); // an empty live legs root stays — Store() loads clean
     // docs-as-git (D7): the archived session's goal doc leaves the LIVE docs/ home (git
@@ -784,6 +916,7 @@ export class Store {
    * never aim an append at a sibling, a parent, or the store root.
    */
   appendEvent(node: NodeDir, event: JourneyEvent): void {
+    this.assertWritable('append');
     // v6 goal session (goal-session-design §2): the designated childless goal leg is
     // the ONE leg root that may carry events — the seed (`created`/`completed`, written
     // by seedGoal, never through the general append), `goal-met`, and the one-off
@@ -886,8 +1019,8 @@ export class Store {
 
   /** Atomic ledger write (tmp + rename — a reader never sees a partial ledger). */
   private writeLedger(): void {
-    const p = join(this.root, '.ann', 'journey', '.ledger.json');
-    mkdirSync(join(this.root, '.ann', 'journey'), { recursive: true });
+    const p = join(this.journeyDir, '.ledger.json');
+    mkdirSync(this.journeyDir, { recursive: true });
     const tmp = p + '.tmp';
     writeFileSync(tmp, JSON.stringify(this.ledger, null, 2) + '\n');
     renameSync(tmp, p);
@@ -1031,6 +1164,7 @@ export class Store {
    *  through appendEvent (every event write flows through the single writer).
    *  Leg roots get NO events at all (v8 §13) — only node.json + the card. */
   spawn(id: string, contract: unknown, who = 'agent'): void {
+    this.assertWritable('spawn');
     if (this.nodes.has(id)) throw new Error(`spawn rejected: ${id} already exists (node.json immutable — no re-spawn)`);
     this.assertLedgerReadable();
     // Fail-closed: a ledger-tracked node that is no longer on disk is an external

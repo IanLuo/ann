@@ -33,7 +33,10 @@ Everything runs through one binary: `npm run ann -- <command> [args]`. Reads hav
 (the `!` is a guarantee, not a convention). `ann commands` prints the reference table
 below as markdown — it is regenerated from the command registry
 (`src/surface/cli.ts`), never hand-maintained. `RECORDED_BY=<name>` stamps provenance
-on recorded events (default: `agent`).
+on recorded events (default: `agent`). `ANN_STORE=<path>` points every command at a
+DIFFERENT journey for session-read: an archived session (`…/journey`) or any project
+root, both read-only unless they ARE the active project. Empty/unset = the active
+session (unchanged); a bad/absent target fails closed at startup (named error, exit 1).
 
 ### The full reference
 

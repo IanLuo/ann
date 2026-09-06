@@ -35,10 +35,12 @@ import {
   mkdirSync,
   lstatSync,
   statSync,
+  realpathSync,
 } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { execSync } from 'node:child_process';
-import { Store } from '../store/store.js';
+import { Store, resolveStoreLocation, storeJourneyDir } from '../store/store.js';
+import type { StoreLocation } from '../store/store.js';
 import { scanDocsDir, loadDocsManifest, writeDocsManifest, docsIndexFresh, docSha, MANIFEST_FILE } from '../store/docs.js';
 import { Commands, CommandResult, GOAL_SEED_GUARD } from '../commands/index.js';
 import {
@@ -130,12 +132,50 @@ if (!isProjectCmd) process.chdir(ROOT);
 const TODAY = new Date().toISOString().slice(0, 10);
 const WHO = process.env.RECORDED_BY || 'agent';
 
+// ── SESSION ADDRESSING (ANN_STORE) — the same commands read ANY journey: the ACTIVE
+// session (ROOT/.ann/journey) by default; an ARCHIVED session (or another project's
+// journey) when ANN_STORE names one. Stores have the same shape — only the folder
+// differs, so reads are unchanged; a NON-ACTIVE target is READ-ONLY (writes refuse).
+// Resolution is LAZY (first store use) so config!/cred!/project! — which never touch
+// the store — stay available even when ANN_STORE points at nothing. A BAD/ABSENT
+// target throws the NAMED StoreLocationError on first use → fail closed, exit 1.
+const envStore = (process.env.ANN_STORE ?? '').trim();
+let _target: { loc: StoreLocation; readOnly: boolean } | undefined;
+/** Resolve the store target once: env → resolveStoreLocation (bad value → NAMED
+ *  StoreLocationError, surfaced on first use); empty/unset → the ACTIVE session.
+ *  readOnly = the addressed journey is NOT the ACTIVE session's journey — compared by
+ *  REALPATH so pointing ANN_STORE at the active project root / its .ann/journey / the
+ *  journey symlink all stay writable (path-normalized identity). */
+function storeTarget(): { loc: StoreLocation; readOnly: boolean } {
+  if (_target) return _target;
+  if (envStore) {
+    const loc = resolveStoreLocation(envStore);
+    let activeJourney: string | undefined;
+    try {
+      activeJourney = realpathSync(storeJourneyDir(resolveStoreLocation(ROOT)));
+    } catch {
+      activeJourney = undefined; // no active legs/ baseline — any target is read-only
+    }
+    return (_target = { loc, readOnly: !activeJourney || realpathSync(storeJourneyDir(loc)) !== activeJourney });
+  }
+  return (_target = { loc: resolveStoreLocation(ROOT), readOnly: false });
+}
+
+/** The docs home to read for the resolved target: a 'project' target has its own
+ *  docs/ manifest home (its root); a 'journey' target (an archived session) has NO
+ *  docs home — docs resolution falls to the legacy current() locks. */
+const docsHome = (): string | undefined => {
+  const t = storeTarget();
+  return t.loc.kind === 'project' ? t.loc.root : undefined;
+};
+
 // Lazy store: constructed on first use, AFTER the project root is resolved and
-// chdir'd — so `ann project …` from outside a project never touches it.
+// chdir'd — so `ann project …` from outside a project never touches it. Constructs
+// over the RESOLVED TARGET (env or active) with its read-only flag.
 let _store: Store | undefined;
 const store = new Proxy({} as Store, {
   get(_t, prop) {
-    const s = (_store ??= new Store(ROOT));
+    const s = (_store ??= new Store(storeTarget().loc, { readOnly: storeTarget().readOnly }));
     const v = Reflect.get(s, prop as never);
     return typeof v === 'function' ? (v as () => unknown).bind(s) : v;
   },
@@ -203,15 +243,22 @@ function cmdCheck() {
   // content (the doc-artifact integrity era — marker-stripped blob vs lock sha — was
   // retired with the refactor, D3: integrity now = the manifest + git's own record).
   const notes: Array<{ sev: 'error' | 'warn' | 'info'; msg: string }> = [];
-  const { fresh, missing, stale } = docsIndexFresh(ROOT);
-  const manifest = loadDocsManifest(ROOT);
+  // docs-manifest freshness — read against the RESOLVED TARGET's docs home. An ARCHIVED
+  // journey ('journey'-kind target) has no docs/ home — the manifest is the live
+  // project's index, so the freshness read is skipped there, never run against the
+  // active project's docs (session-addressing).
+  const dh = docsHome();
+  const manifest = dh ? loadDocsManifest(dh) : {};
   const docCount = Object.keys(manifest).length;
-  if (!fresh) {
-    const parts = [
-      ...missing.map((n) => `'${n}' not in the manifest`),
-      ...stale.map((n) => `'${n}' has no matching file in docs/`),
-    ];
-    notes.push({ sev: 'error', msg: `docs manifest out of sync with docs/: ${parts.join(' · ')} — run 'ann docs --write' and commit` });
+  if (dh) {
+    const { fresh, missing, stale } = docsIndexFresh(dh);
+    if (!fresh) {
+      const parts = [
+        ...missing.map((n) => `'${n}' not in the manifest`),
+        ...stale.map((n) => `'${n}' has no matching file in docs/`),
+      ];
+      notes.push({ sev: 'error', msg: `docs manifest out of sync with docs/: ${parts.join(' · ')} — run 'ann docs --write' and commit` });
+    }
   }
   for (const w of warns) console.log(`  [rule-warn] ${w}`);
   const errors = problems.length + notes.filter((n) => n.sev === 'error').length;
@@ -232,7 +279,11 @@ function cmdCheck() {
     state += ` · ${active} in progress (${doneN}/${tasks.length} tasks done)`;
     if (ready.length) state += ` — frontmost-ready: ${ready[0]} (${store.status(ready[0])})`;
   }
-  console.log(errors === 0 ? `OK — ${docCount} docs in the manifest, no gate gaps.` : `${errors} problem(s).`);
+  if (errors === 0) {
+    console.log(dh ? `OK — ${docCount} docs in the manifest, no gate gaps.` : 'OK — no gate gaps (archived journey — no docs/ home to index).');
+  } else {
+    console.log(`${errors} problem(s).`);
+  }
   console.log(state);
   if (JSON_OUT) console.log(JSON.stringify({ problems, warnings: warns, notes, docs: docCount, state }, null, 2));
   process.exit(errors === 0 ? 0 : 1);
@@ -257,15 +308,32 @@ function cmdLedger() {
 }
 
 function cmdSpecs() {
+  // An ARCHIVED journey ('journey'-kind target) has NO docs/ manifest home — its
+  // "contract stack" is the legacy current-artifact set over the target's OWN nodes
+  // (resolveDoc is never attempted; current() remaps into the journey's legs/).
+  if (docsHome() === undefined) {
+    const docs = store.currentDocs();
+    if (JSON_OUT) return console.log(JSON.stringify(docs, null, 2));
+    const rows: string[] = [];
+    for (const d of docs) {
+      rows.push(`${d.name}  @ ${d.sha}`);
+      rows.push(`  path:      ${d.path}`);
+      rows.push(`  producer:  ${d.producer}`);
+    }
+    console.log(rows.length ? rows.join('\n') : '(no current docs in this archived journey — no docs/ home; legacy artifact locks only)');
+    return;
+  }
   // THE DOCS CONTRACT STACK — docs are git content: the "locked" set is the docs
   // manifest + the file at HEAD (the doc-artifact lock records are legacy/history).
-  // Iterate the manifest (the forward path); upstream/referrers prose still reads
-  // from the file head (it is content, not claim); sha = docSha over the file.
-  const manifest = loadDocsManifest(ROOT);
+  // Iterate the manifest (the forward path) of the RESOLVED TARGET's docs home;
+  // upstream/referrers prose still reads from the file head (it is content, not
+  // claim); sha = docSha over the file.
+  const dh = docsHome()!;
+  const manifest = loadDocsManifest(dh);
   const stack: Array<{ name: string; sha: string; path: string; upstream?: string; referrers?: string }> = [];
   for (const name of Object.keys(manifest).sort()) {
     const rel = manifest[name];
-    const full = join(ROOT, rel);
+    const full = join(dh, rel);
     if (!existsSync(full)) {
       stack.push({ name, sha: '(file missing)', path: rel });
       continue;
@@ -574,11 +642,20 @@ function cmdRules(write: boolean) {
  *  (the derived-not-stored rule). Read prints the index; --write regenerates the manifest.
  *  Mirrors `rules`/`rules --write`. */
 function cmdDocs(write: boolean) {
-  const manifest = loadDocsManifest(ROOT);
-  const { fresh, missing, stale } = docsIndexFresh(ROOT);
+  // docs/ is a PROJECT concept — the RESOLVED TARGET's docs home. An ARCHIVED journey
+  // ('journey'-kind target) has none: the index read prints a clear refusal instead of
+  // reading the ACTIVE project's docs (session-addressing; writes are refused earlier).
+  const dh = docsHome();
+  if (dh === undefined) {
+    console.error('ann: docs refused — ANN_STORE points at an archived journey (no docs/ home; an archived session has no manifest to index). Reads work via the legacy current-artifact path (`ann read <name>` / `ann <name>`).');
+    if (write) process.exit(1);
+    return;
+  }
+  const manifest = loadDocsManifest(dh);
+  const { fresh, missing, stale } = docsIndexFresh(dh);
   if (write) {
-    const regen = scanDocsDir(ROOT);
-    const p = writeDocsManifest(ROOT, regen);
+    const regen = scanDocsDir(dh);
+    const p = writeDocsManifest(dh, regen);
     console.log(`docs --write: regenerated ${p} (${Object.keys(regen).length} docs) from docs/`);
     return;
   }
@@ -590,7 +667,7 @@ function cmdDocs(write: boolean) {
   }
   for (const n of names) {
     const rel = manifest[n];
-    const full = join(ROOT, rel);
+    const full = join(dh, rel);
     const sha = existsSync(full) ? docSha(readFileSync(full, 'utf8')) : '(file missing)';
     console.log(`  ${n}  →  ${rel}  @ ${sha}`);
   }
@@ -906,6 +983,31 @@ const COMMANDS: Array<{ name: string; args: string; desc: string }> = [
 ];
 
 const command = args[0];
+
+// Read-only enforcement — layer (a): the CLI CHOKEPOINT, BEFORE dispatch. When
+// ANN_STORE resolves to a NON-ACTIVE journey (an archived session, or another
+// project), the journey-addressing WRITES refuse with a named message and exit 1 —
+// a read-only target is READ-ONLY, never a silent no-op. config!/cred!/project!
+// stay available (they never touch the store — resolution is deferred to the lazy
+// proxy). Layer (b) is the Store-level guard on the write methods themselves.
+const JOURNEY_REFUSED_WRITES = new Set(['append!', 'spawn!', 'submit!', 'gate!', 'goal!', 'run!']);
+const readOnlyRefuse = (): void => {
+  // Only the journey-addressing writes can be refused — and only they resolve the
+  // target here, so config!/cred!/project! (and plain reads) never trip over a bad
+  // ANN_STORE in the chokepoint (a bad target then surfaces on the store's first use,
+  // fail-closed, exactly where a journey read needs it).
+  const isJourneyWrite = JOURNEY_REFUSED_WRITES.has(command);
+  const isDocsOrRulesWrite =
+    (command === 'docs' || command === '--docs' || command === 'rules' || command === '--rules') && args.includes('--write');
+  if (!isJourneyWrite && !isDocsOrRulesWrite) return;
+  const t = storeTarget();
+  if (!t.readOnly) return;
+  console.error(
+    `ann: ${command} refused: ANN_STORE points at a READ-ONLY journey (${t.loc.kind === 'project' ? join(t.loc.root, '.ann', 'journey') : t.loc.root}) — not the active session. Reads work; unset ANN_STORE to write the active session.`,
+  );
+  process.exit(1);
+};
+
 /** Resolve a possibly-partial id: exact → last-segment → unique prefix; fail-closed
  *  with NAMED candidates when ambiguous (never a silent pick). Reads only — writes
  *  stay strict full-id (the `!` mutators take no shortcuts). */
@@ -942,6 +1044,8 @@ try {
     console.log('Naming: reads have NO marker · WRITES end in `!` (the mutator convention — the `!` is a guarantee).');
     for (const c of COMMANDS) console.log(`  ${c.name.padEnd(14)} ${c.args.padEnd(44)} ${c.desc}`);
     console.log('\nenv: RECORDED_BY=<name>  provenance on recorded events (default: agent)');
+    console.log('env: ANN_STORE=<path>  read a NON-ACTIVE journey READ-ONLY (an archived session / another project); empty/unset = the active session');
+    console.log('     value: a project root (has .ann/journey/legs) or a journey root (has journey/legs, or legs/ directly)');
     console.log('doc: npm run ann -- commands   → the command table as markdown (the derived doc source)');
     process.exit(0);
   }
@@ -952,6 +1056,7 @@ try {
     console.log('|---|---|---|');
     for (const c of COMMANDS) console.log(`| \`${c.name}\` | \`${c.args}\` | ${c.desc} |`);
     console.log('\nEnv: `RECORDED_BY=<name>` — provenance on recorded events (default: agent).');
+    console.log('Env: `ANN_STORE=<path>` — read a NON-ACTIVE journey READ-ONLY (an archived session / another project); empty/unset = the active session. Value: a project root (`<root>/.ann/journey/legs`) or a journey root (`journey/legs`, or `legs/` directly).');
     process.exit(0);
   }
   const WRITES = ['append', 'spawn', 'submit', 'gate', 'cred'];
@@ -959,6 +1064,7 @@ try {
     console.error(`ann: writes are marked with '!' — did you mean '${command}!'? (mutator convention: reads have no marker, writes always end in !)`);
     process.exit(1);
   }
+  readOnlyRefuse(); // read-only target (ANN_STORE → non-active journey): refuse the journey-addressing writes before dispatch
   if (command === 'journey' || command === '--journey') {
     if (args[1]) cmdJourneyOne(resolveId(args[1]));
     else cmdJourney();
@@ -979,6 +1085,7 @@ try {
     console.log('|---|---|---|');
     for (const c of COMMANDS) console.log(`| \`${c.name}\` | \`${c.args}\` | ${c.desc} |`);
     console.log('\nEnv: `RECORDED_BY=<name>` — provenance on recorded events (default: agent).');
+    console.log('Env: `ANN_STORE=<path>` — read a NON-ACTIVE journey READ-ONLY (an archived session / another project); empty/unset = the active session. Value: a project root (`<root>/.ann/journey/legs`) or a journey root (`journey/legs`, or `legs/` directly).');
   } else if (command === 'confirm') cmdConfirm(resolveId(args[1]));
   else if (command === 'detail' || command === '--detail') cmdDetail(resolveId(args[1]));
   else if (command === 'results' || command === '--results') cmdResults(resolveId(args[1]), args[2]);

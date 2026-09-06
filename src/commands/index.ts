@@ -651,7 +651,17 @@ export class Commands {
    *  outlive docs/goal.md between archive and a re-seed) — the caller treats
    *  undefined as "no authored doc right now". */
   private goalDocOf(): { name: string; path: string; sha: string } | undefined {
-    return this.store.resolveDoc('goal');
+    const doc = this.store.resolveDoc('goal');
+    if (doc) return doc;
+    // An ARCHIVED session store ('journey' kind) has no docs/ home — the docs manifest
+    // is the live project's index (session-addressing). Resolve the goal doc through the
+    // legacy current() reader when the archive locked one. The ACTIVE store never takes
+    // this path (resolveDoc serves docs/goal.md there).
+    if (this.store.kind === 'journey') {
+      const cur = this.store.current('goal');
+      if (cur) return { name: cur.name, path: cur.path, sha: cur.sha ?? '' };
+    }
+    return undefined;
   }
 
   /** Exhaustion (goal-session-design §5): WORK exists (≥1 task), every leg derives
