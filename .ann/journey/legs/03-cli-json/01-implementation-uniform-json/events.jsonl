@@ -5,3 +5,4 @@
 {"at":"2026-09-06","type":"submitted","gate":"confirm","note":"submitted for the confirm gate (agent)"}
 {"at":"2026-09-06","type":"confirmed","gate":"confirm","feedback":"accepted: uniform --json across every command, verified — structured help/commands, view-value reads, CommandResult writes, {error:{code,message}} failures, fail-loud guard, e2e green; AC1-AC5 met. Commit 4328097.","note":"accepted (agent)"}
 {"at":"2026-09-06","type":"completed","note":"uniform --json delivered (4328097)."}
+{"at":"2026-09-06","type":"evidence","commits":[{"sha":"d78b498","note":"fix(cli): default/json parity for next, confirm, archived-docs refusal"}],"note":"corrective evidence (post-close, json-parity review): next --json now carries advance + the goal consult; confirm --json reproduces the gate card {detail, results}; docs-on-archive refusal is exit 1 in text mode too. Suite 490 green."}
