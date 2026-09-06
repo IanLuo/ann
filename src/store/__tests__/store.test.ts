@@ -996,6 +996,24 @@ describe('Store — v6 goal session (goal-session-design §2/§4 + seed/archive)
     expect(() => s4.appendEvent(s4.resolveNode('01-goal'), goalLock)).toThrow(/leg roots carry no events/);
   });
 
+  it('the migration meta record is ONE self-disabling evidence on the goal root (docs-as-git refactor, Stage D)', () => {
+    writeNode('01-goal', {}, [ev('created'), ev('completed')]);
+    writeNode('02-work', {}, []);
+    writeNode('02-work/01-a', {}, [ev('created')]);
+    writeNode('09-other', {}, [ev('created'), ev('completed')]); // a childless seeded leg BEHIND the goal
+    const s = new Store(root);
+    const meta = { at: '2026-09-06', type: 'evidence', note: 'meta-refactor: docs moved to docs/ (the migration commit)', commits: [{ sha: '0123456789abcdef0123456789abcdef01234567' }] };
+    // the goal root takes the FIRST meta-refactor evidence — even post-completed
+    expect(() => s.appendEvent(s.resolveNode('01-goal'), meta)).not.toThrow();
+    // SELF-DISABLING: a second meta-refactor evidence on the same goal root is refused
+    expect(() => s.appendEvent(s.resolveNode('01-goal'), { ...meta, note: 'meta-refactor: a second one' })).toThrow(/leg roots carry no events/);
+    // the allowance is narrowly an evidence whose note is prefixed meta-refactor: — an
+    // ordinary evidence on the goal root is still a refused leg-root write
+    expect(() => s.appendEvent(s.resolveNode('01-goal'), { at: '2026-09-06', type: 'evidence', note: 'business conclusion' })).toThrow(/leg roots carry no events/);
+    // and the migration record never lands on a non-goal leg root
+    expect(() => s.appendEvent(s.resolveNode('09-other'), { ...meta })).toThrow(/leg roots carry no events/);
+  });
+
   it('goal-met is STATUS-INERT — the verdict never moves legStatus (the seed already derived done)', () => {
     writeNode('01-goal', {}, [ev('created'), ev('completed')]);
     const s = new Store(root);

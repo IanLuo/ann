@@ -632,12 +632,26 @@ export class Store {
   }
 
   /** The id-scoped root-event exception (§2): the designated childless goal leg may
-   *  hold ONLY `goal-met` (and the one-off migration meta record, D) through the
-   *  general writer (the seed is written by seedGoal, never here). Nothing else on
-   *  any leg root. docs-as-git: there is no goal-root artifact-lock for the doc. */
+   *  hold `goal-met` through this predicate (the one-off migration meta record, D, is
+   *  granted by goalRootMigrationEvent below — the two are the ONLY goal-root writes
+   *  through the general writer; the seed is written by seedGoal, never here). Nothing
+   *  else on any leg root. docs-as-git: there is no goal-root artifact-lock for the doc. */
   private goalRootEvent(id: string, e: JourneyEvent): boolean {
     if (id !== this.goalLegId()) return false;
     return e.type === 'goal-met';
+  }
+
+  /** The one-off migration meta record (docs-as-git refactor, Stage D): a NON-BUSINESS
+   *  `evidence` event whose note is prefixed `meta-refactor:` (commits[] = the migration
+   *  git sha) is allowed on the goal root EVEN POST-completed — the refactor records
+   *  itself on the session that archived the moved docs. SELF-DISABLING: the allowance
+   *  grants the FIRST such record only; a goal root that already holds a meta-refactor
+   *  evidence refuses another (the migration happened once — a second is a new write of
+   *  a retired bookkeeping act, not history). */
+  private goalRootMigrationEvent(id: string, e: JourneyEvent): boolean {
+    if (id !== this.goalLegId()) return false;
+    if (e.type !== 'evidence' || typeof e.note !== 'string' || !e.note.startsWith('meta-refactor:')) return false;
+    return !this.events(id).some((x) => x.type === 'evidence' && typeof x.note === 'string' && x.note.startsWith('meta-refactor:'));
   }
 
   /** v6 seed: a new session's goal leg. goal.md (fixed Goal:/Success criteria: sections)
@@ -772,10 +786,11 @@ export class Store {
   appendEvent(node: NodeDir, event: JourneyEvent): void {
     // v6 goal session (goal-session-design §2): the designated childless goal leg is
     // the ONE leg root that may carry events — the seed (`created`/`completed`, written
-    // by seedGoal, never through the general append) and `goal-met`. Everything else on
-    // a leg root stays refused (v8 §3). docs-as-git: the goal doc is docs/goal.md, so a
-    // leg root never holds an artifact-lock (there is no goal-root seal).
-    if (!node.id.includes('/') && !this.goalRootEvent(node.id, event)) {
+    // by seedGoal, never through the general append), `goal-met`, and the one-off
+    // migration meta record (goalRootMigrationEvent, self-disabling — Stage D).
+    // Everything else on a leg root stays refused (v8 §3). docs-as-git: the goal doc is
+    // docs/goal.md, so a leg root never holds an artifact-lock (there is no goal-root seal).
+    if (!node.id.includes('/') && !this.goalRootEvent(node.id, event) && !this.goalRootMigrationEvent(node.id, event)) {
       throw new Error(`append rejected: leg roots carry no events (v8 §3) — record process facts on tasks`);
     }
     // goal-met is a goal-root VERDICT — never on a task id or a non-goal leg root (the
