@@ -659,9 +659,9 @@ function cmdSessions() {
         const goal = legs[0];
         const status = goal ? st.status(goal) : '-';
         const met = goal ? st.events(goal).some((e) => e.type === 'goal-met') : false;
-        rows.push({ session: d.name, goal: goal ?? '(none)', status, verdict: met ? 'met' : status === 'done' ? 'done (unconfirmed)' : status, legs: legs.length });
+        rows.push({ session: d.name, store: p, goal: goal ?? '(none)', status, verdict: met ? 'met' : status === 'done' ? 'done (unconfirmed)' : status, legs: legs.length });
       } catch {
-        rows.push({ session: d.name, goal: '(unreadable store)', status: '-', verdict: '-', legs: 0 });
+        rows.push({ session: d.name, store: p, goal: '(unreadable store)', status: '-', verdict: '-', legs: 0 });
       }
     }
   }
@@ -672,7 +672,9 @@ function cmdSessions() {
     return;
   }
   for (const r of rows) console.log(`  ${r.session} · goal ${r.goal} (${r.status}) · ${r.verdict} · ${r.legs} leg(s)`);
-  console.log('  point at one read-only: ANN_STORE=<session dir> ann journey|status|specs|goal|…');
+  // the concrete load line — pick a row above and point ANN_STORE at its store (a session dir)
+  const first = rows[0];
+  if (typeof first.store === 'string') console.log(`  load one read-only: ANN_STORE="${first.store}" ann journey|status|specs|goal|…`);
 }
 
 function cmdDocs(write: boolean) {
