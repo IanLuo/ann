@@ -696,8 +696,17 @@ export const HANDLERS: Record<string, Handler> = {
     };
   },
 
-  /* run! — the frame result IS the value; a non-completed stop is a non-zero exit */
+  /* run! — the frame result IS the value; a non-completed stop is a non-zero exit.
+   * NOT value-canonical in JSON: it drives an interactive terminal session (materialize
+   * → gates → execute → verify → confirm via the human channel) — JSON cannot drive it,
+   * so it refuses up-front with a loud error doc (never silent non-JSON stdout). */
   'run!': async (ctx) => {
+    if (ctx.json) {
+      return boom(
+        'run-interactive',
+        "run! drives an INTERACTIVE terminal session (the frame's gates) — JSON mode cannot drive it (run it in a terminal, or read state with ann --json goal|journey|next)",
+      );
+    }
     const taskId = resolveId(ctx, ctx.args[1]);
     const frame = new Frame({
       commands: ctx.commands,
@@ -850,8 +859,8 @@ async function goalSeedInteractive(ctx: CliContext): Promise<Outcome> {
   if (!gate.allow) return boom('goal-seed-gate', `not-empty: ${gate.blocker ?? GOAL_SEED_GUARD}`);
   const r = await runGoalSeed(ctx.commands, buildAbilities(getAdapter(undefined, ctx.root)), { idea });
   if (!r.ok) {
-    console.error(`${r.error.code}: ${r.error.blocker}`);
-    return { ok: false, error: { code: r.error.code, message: r.error.blocker }, exitCode: 1 };
+    // emit() prints the error once (stderr in text, the error doc in JSON) — never twice
+    return { ok: false, error: { code: r.error.code, message: r.error.blocker, text: `${r.error.code}: ${r.error.blocker}` }, exitCode: 1 };
   }
   if (!r.seeded) {
     console.log(`goal! seed: NOT seeded — ${r.note}`);

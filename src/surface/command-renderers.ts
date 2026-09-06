@@ -78,7 +78,7 @@ export const RENDERS: Record<string, Renderer> = {
   /* help / commands / bare — the doc forms */
   help: (value) => {
     const u = value as UsageDoc;
-    const lines = [u.doc, u.naming];
+    const lines = [u.doc, `Naming: ${u.naming}`];
     for (const c of u.commands) lines.push(`  ${c.name.padEnd(14)} ${c.args.padEnd(44)} ${c.desc}`);
     lines.push('', `env: ${u.env[0]}`, `env: ${u.env[1]}`, `     ${u.env[2]}`, ...u.footer);
     return block(lines);

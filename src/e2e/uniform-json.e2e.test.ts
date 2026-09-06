@@ -214,15 +214,15 @@ describe('e2e — uniform JSON across every command', () => {
     expectNoStrayText(dirty);
   });
 
-  it('run! under --json emits the frame result doc and keeps the non-zero exit for a failed run', () => {
+  it('run! under --json refuses up-front (it drives an interactive terminal — JSON cannot; a JSON doc would only ever catch an early failure)', () => {
     prep(root, LEG, '01-leg/02-a');
     cli(root, ['spawn!', LEG, CONTRACT('l')]);
     cli(root, ['spawn!', '01-leg/02-a', CONTRACT('run me')]);
     const run = cli(root, ['--json', 'run!', '01-leg/02-a']);
-    expect(run.code).toBe(1); // provider-unavailable → FAILED stop, non-zero even in JSON
-    const j = doc<{ stop: string; problems: string[] }>(run);
-    expect(['failed', 'blocked']).toContain(j.stop);
-    expect(j.problems.some((p) => p.includes('provider'))).toBe(true);
+    expect(run.code).toBe(1);
+    const j = doc<{ error: { code: string; message: string } }>(run);
+    expect(j.error.code).toBe('run-interactive'); // the interactive driver refuses JSON up-front
+    expect(j.error.message).toContain('INTERACTIVE terminal session');
     expectNoStrayText(run);
   });
 });
