@@ -39,44 +39,43 @@ on recorded events (default: `agent`).
 
 | Command | Args | What it does |
 |---|---|---|
-| `<name>` | `` | current path for one logical name |
+| `<name>` | `` | the path for one doc (docs manifest) or a current artifact's logical name |
 | `journey` | `[id]` | the look-back (no id) · one node's walk (with id) · alias --journey |
 | `status` | `[filter]` | every node's derived status (+ superseded marker) · alias --status |
-| `check` | `` | integrity + gates + hashes + the journey state line · alias --check |
-| `verify` | `` | the DRIFT read — reconcile the log's recorded claims vs filesystem/git reality (D1-D5 + store-external); exits 1 on any drift · alias --verify |
+| `check` | `` | integrity + gates + docs-manifest freshness + the journey state line · alias --check |
+| `verify` | `` | the DRIFT read — reconciles the log's recorded claims vs filesystem/git reality (D1-D5 + store-external); exits 1 on any drift · alias --verify |
 | `ledger` | `` | the write-rev ledger — rev + per-node last-write rev/at + hashes (the store-external integrity guard) · alias --ledger |
-| `specs` | `` | the locked contract stack (name · type · @sha · path) · alias --specs |
+| `specs` | `` | the docs contract stack — the manifest → docs/<name>.md @ content-sha (upstream/referrers prose from the file head) · alias --specs |
 | `providers` | `` | the adapter registry: providers, models, defaults (env-resolved, api key masked) · alias --providers |
 | `config` | `` | the user config file (~/.ann/config.json; apiKey masked) · alias --config |
-| `config!` | `set <key> <value>` | WRITE — save a config value (provider\|model\|baseUrl\|apiKey\|maxTokens); chmod 600, outside the repo; apiKey never echoed |
+| `config!` | `set <key> <value>` | WRITE — save a config value (provider|model|baseUrl|apiKey|maxTokens); chmod 600, outside the repo; apiKey never echoed |
 | `project` | `` | show the current project + known projects · alias --project |
-| `project!` | `add\|use\|remove <path>` | WRITE — manage projects by PATH (each has its OWN journey); add <path> registers one |
-| `cred!` | `set\|delete <service> <account> [secret]` | WRITE — OS keychain (macOS, DEV-ONLY local CLI): save/remove a secret via stdin; production = server-side env (12-factor) |
+| `project!` | `add|use|remove <path>` | WRITE — manage projects by PATH (each has its OWN journey); add <path> registers one |
+| `cred!` | `set|delete <service> <account> [secret]` | WRITE — OS keychain (macOS, DEV-ONLY local CLI): save/remove a secret via stdin; production = server-side env (12-factor) |
 | `branch` | `<id>` | a node + every descendant's events, one walk · alias --branch |
-| `confirm` | `<id>` | a node's gate card: intent · ACs · artifacts · gates |
-| `detail` | `<id>` | a node's full derived detail: contract · gate states · artifacts (current/superseded) · blockers · events tail |
-| `results` | `<id> [n]` | a task's results by kind (doc/commit/ref/evidence/link); with n, drill into one (doc=content, commit=git show, ref=file/dir, evidence=event) · alias --results |
+| `confirm` | `<id>` | a node's gate card: intent · ACs · gates · results |
+| `detail` | `<id>` | a node's full derived detail: contract · gate states · artifacts (historical only) · blockers · events tail |
+| `results` | `<id> [n]` | a task's results by kind (commit/ref/evidence/link); with n, drill into one (commit=git show, ref=file/dir, evidence=event) · alias --results |
 | `packet` | `<id>` | the node's deterministic context packet (context-packet-spec; derived on demand, never saved) · alias --packet |
 | `validate` | `[id]` | run the enabled validator rules (all nodes, or one node) — rule-id'd deterministic findings · alias --validate |
 | `rules` | `[--write]` | the DERIVED check-rules registry (self-contained rule modules are the source) · alias --rules; --write regenerates rules/check/rules.json |
+| `docs` | `[--write]` | the docs→git resolution index (docs/manifest.json — generated from docs/, never hand-maintained) · alias --docs; --write regenerates the manifest |
 | `chain` | `` | the project flow config as data (work-type chains, F3 view) · alias --chain |
 | `steps` | `` | the step registry — the pluggable surface future steps implement against · alias --steps |
 | `next` | `` | the run-next proposal (F5 pull): active leg, frontmost-ready, pending gates, leg gate — derived, never assumed · alias --next |
-| `goal` | `` | the goal-session view (goal-session-design §9): goalId · status · the LOCKED goal.md · the generated contract · structural state · verdict (met/unconfirmed/open) · legs (status words only) · alias --goal |
+| `goal` | `` | the goal-session view (goal-session-design §9): goalId · status · the authored goal doc (docs/goal.md) · the generated contract · structural state · verdict (met/unconfirmed/open) · legs (status words only) · alias --goal |
 | `flow` | `<id>` | a task's RESOLVED flow + chain validation (the data the frame will execute) · alias --flow |
 | `run!` | `<id>` | WRITE — run a task through the FRAME (materialize → grill → activate → execute → verify → confirm → commit); resumable, stops at the first block |
 | `commands` | `` | this table as markdown (the derived doc) · alias --commands |
 | `help` | `` | usage · alias --help / -h |
-| `read` | `<name>` | the L1 CONTENT read view — a current artifact's marker-stripped content + path + sha (core-design §5) · alias --read |
-| `append!` | `<id> '<json>'` | WRITE — single-writer append; REFUSES the composite-owned kinds (created/submitted/confirmed/rejected/artifact-locked/superseded) |
-| `spawn!` | `<id> '<contract-json>'` | WRITE — create a node; enforces the v14 contract schema + F-AC19 + id naming + the artifact/leg gates |
-| `submit!` | `<id> grill\|confirm [confirmedSha]` | WRITE — the resumable gate write: `submitted` alone, so an interrupted gate stays blocked (confirm records the gate② content binding) |
-| `gate!` | `<id> grill\|confirm accept\|reject [feedback]` | WRITE — human gate decision (submit + decide; the 3-reject bound is a CONSTANT owned here) |
-| `lock!` | `<id> <artifact-file> [type]` | WRITE — thin artifact record over the producer's own file (write confinement): `<artifact-file>` is a single basename resolved inside `<id>`'s OWN `artifacts/` — an out-of-folder file is refused; records artifact-locked {name = file stem, path, lockSha, type?, version?}; never writes/stamps/symlinks the file |
-| `supersede!` | `<id> <successor-id> <artifact-file> [note]` | WRITE — superseded event with a forward pointer (the one cross-task write; refuses a live locker): the successor is named by `<successor-id>` + its OWN `<artifact-file>`, resolved via resolveNode — never a raw path |
+| `read` | `<name>` | the L1 CONTENT read view — marker-stripped content + path + sha; resolves via the docs manifest (the forward path), with a legacy current-artifact fallback for history · alias --read |
+| `append!` | `<id> '<json>'` | WRITE — single-writer append; REFUSES the composite-owned kinds (created/submitted/confirmed/rejected/goal-met) and the RETIRED doc-artifact vocab (artifact-locked/superseded) |
+| `spawn!` | `<id> '<contract-json>'` | WRITE — create a node; enforces the v14 contract schema + F-AC19 + id naming + the conclusion (commit-evidence)/leg gates |
+| `submit!` | `<id> grill|confirm [confirmedSha]` | WRITE — the resumable gate write: `submitted` alone, so an interrupted gate stays blocked (confirm records the gate② content binding) |
+| `gate!` | `<id> grill|confirm accept|reject [feedback]` | WRITE — human gate decision (submit + decide; the 3-reject bound is a CONSTANT owned here) |
 | `goal!` | `met [feedback]` | WRITE — the HUMAN verdict that seals a structurally-exhausted session (goal-met on the goal root); refused for automated (agent) initiators, double-met, and any undecided submission |
 | `goal!` | `archive [--override]` | WRITE — guarded structural reset: move .ann/journey → .ann/archive/sessions/<ts>-<slug>/ for a fresh goal; refuses without a met verdict (or --override), on store-external verify drifts, and on uncommitted tracked .ann/journey changes |
-| `goal!` | `seed [goal-statement]` | WRITE — grill a NEW goal at SESSION scope (EMPTY journey only): the interactive idea-validation session (grill → batch-ask → research → human verdict); on solid, synthesize goal.md (Goal:/Success criteria:) + seed the goal leg + artifact-lock goal.md on the goal root; revise/reject seeds nothing |
+| `goal!` | `seed [goal-statement]` | WRITE — grill a goal at SESSION scope (EMPTY journey seeds new; a RE-SEEDABLE sole unconsumed goal is REPLACED after re-grilling — consumed/met goals refuse): the interactive idea-validation session (grill → batch-ask → research → re-grill → human verdict); on solid, synthesize goal.md (Goal:/Success criteria:) + seed/re-seed the goal leg + write docs/goal.md + regenerate the manifest; revise/reject seeds nothing |
 
 ### When to use each
 

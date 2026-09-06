@@ -1,0 +1,15 @@
+{
+  "ann-system-design": "docs/ann-system-design.md",
+  "architecture": "docs/architecture.md",
+  "companion-guide": "docs/companion-guide.html",
+  "context-packet-spec": "docs/context-packet-spec.md",
+  "core-design": "docs/core-design.md",
+  "flow-control-spec": "docs/flow-control-spec.md",
+  "functional-spec": "docs/functional-spec.md",
+  "goal": "docs/goal.md",
+  "journey-format-spec": "docs/journey-format-spec.md",
+  "requirements-change-protocol": "docs/requirements-change-protocol.md",
+  "requirements-spec": "docs/requirements-spec.md",
+  "resource-registry": "docs/resource-registry.md",
+  "tree-format-spec": "docs/tree-format-spec.md"
+}
