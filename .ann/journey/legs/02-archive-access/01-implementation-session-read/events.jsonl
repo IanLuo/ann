@@ -1,0 +1,3 @@
+{"at":"2026-09-06","type":"created","note":"spawned by bookkeeper (agent)"}
+{"at":"2026-09-06","type":"submitted","gate":"grill","note":"submitted for the grill gate (agent)"}
+{"at":"2026-09-06","type":"confirmed","gate":"grill","feedback":"grilled accept: the archived v1 session is unreadable today (audit confirmed); ANN_STORE session-read design decided — same commands read any journey, read-only non-active targets, fail-closed, legacy-vs-manifest doc resolution. First work leg under the new goal; delivers a goal-required capability (session/archive access).","note":"accepted (agent)"}

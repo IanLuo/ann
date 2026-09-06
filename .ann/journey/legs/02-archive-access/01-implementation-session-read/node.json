@@ -1,0 +1,22 @@
+{
+  "id": "02-archive-access/01-implementation-session-read",
+  "contract": {
+    "intent": "Implement the ANN_STORE session-read design: a location knob (empty = the active session) lets the same commands read any journey, with layout normalization to a journey root, legacy-vs-manifest doc resolution plus an artifact-path remap for archived stores, read-only enforcement for non-active targets, and fail-closed bad targets; docs and help updated.",
+    "acceptanceCriteria": [
+      "ANN_STORE resolves a project root or a bare journey root to a store; empty = active session; derived reads (status/journey/detail/branch/results/next/ledger/verify/goal) work against a targeted archived session",
+      "A bad target fails closed with a named error; Store(loc) constructs over the target",
+      "Doc reads use the docs manifest under a project root and legacy current() (with the artifact-path remap into the target) under an archive or journey root",
+      "Non-active targets refuse journey writes with a named error (CLI chokepoint plus a Store readonly guard); docs stays project-scoped; --project unchanged",
+      "ann check and verify are clean on the live journey and the full suite is green; the archived v1 session is readable via ANN_STORE (manual and e2e); committed with evidence"
+    ],
+    "workType": "implementation",
+    "targetAreas": [
+      "src/store",
+      "src/commands",
+      "src/surface",
+      "README",
+      "AGENTS"
+    ]
+  },
+  "createdAt": "2026-09-06"
+}

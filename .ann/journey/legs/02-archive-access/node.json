@@ -1,0 +1,21 @@
+{
+  "id": "02-archive-access",
+  "contract": {
+    "intent": "Read access to any journey through the SAME commands: an ANN_STORE location (empty = the active session) points the store at an archived session or another journey, same store shape but a different folder, so archived journeys are readable read-only via the ordinary commands.",
+    "acceptanceCriteria": [
+      "ANN_STORE (env; empty/unset = the active session) names the journey to read: a project root with .ann/journey, or an archived session bare journey dir (the shape goal! archive writes); the same read commands (status, journey, detail, branch, results, next, ledger, verify, goal) work against it",
+      "Store and root resolution normalize both shapes to a journey root; a bad or absent target fails CLOSED with a named error, never a silent empty tree",
+      "Doc and spec reads resolve manifest-forward only under a project root with a docs home; under an archived journey root they resolve through the legacy current() over the target nodes, with recorded artifact paths remapped into the target store",
+      "Targets other than the active session are READ-ONLY: journey writes (append!, spawn!, submit!, gate!, goal!, run!, docs --write) refuse with a named error; --project/ANN_PROJECT are unchanged (project identity vs snapshot selection); docs stays project-scoped",
+      "The archived v1 session is readable end-to-end via ANN_STORE; the suite is green; ann check and verify are clean on the live journey; recorded with evidence plus gate rationale"
+    ],
+    "targetAreas": [
+      "src/store",
+      "src/commands",
+      "src/surface",
+      "README",
+      "AGENTS"
+    ]
+  },
+  "createdAt": "2026-09-06"
+}
