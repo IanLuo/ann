@@ -1,22 +1,26 @@
 import { Commands, CommandError, GOAL_SEED_GUARD } from '../commands/index.js';
 import { Abilities, InteractAbort } from './types.js';
 import { GroundingInput } from './steps/shared.js';
-import { IdeaValidationDoc, IdeaVerdict, IdeaValidationSession } from './steps/idea-validate/session.js';
+import { GoalGrillSession, GoalResolvedQuestion } from './goal-grill.js';
 
 /**
  * L2 · THE `goal! seed` MATERIALIZE PATH (the v6 composite the plan deferred: seedGoal
  * exists, but nothing drives the grill → doc → seed that goal.md is authored for).
- * This runs the idea-validation session at SESSION scope on the user's goal — the SAME
- * grill → batch-ask → research → converge loop as the flow-1 validate step — then, on a
- * HUMAN `solid`, synthesizes goal.md deterministically and seeds it through L1
+ * This runs the GOAL GRILL at SESSION scope on the user's goal — a dedicated goal-mode
+ * loop (src/flow/goal-grill) that grinds the rough goal into a sharp one — then, on a
+ * HUMAN `GO`, synthesizes goal.md deterministically and seeds it through L1
  * (goalSeed = seedGoal + the goal.md artifact-lock on the goal root).
  *
- * NOTHING IS CREATED unless the human says GO: revise → the grill recommends refining
- * (re-run with a sharper statement) · reject → the idea does not get a session ·
- * abort → the human walked away. The goal! seed gate (goalSeedGate — an EMPTY journey
- * seeds fresh; a RE-SEEDABLE sole unconsumed goal is REPLACED; consumed/met refuses)
- * runs BEFORE any provider call, so the refusal is dogfoodable on a non-empty repo with
- * no provider configured.
+ * The grill is NOT the task idea-validate session (whose 'revise' is terminal — right for
+ * a task idea, wrong for a goal): revising a goal refines the statement IN-SESSION and the
+ * next round re-grills it with all context carried; the rounds end with a GO (→ seed), a
+ * SKIP/abort (→ nothing), or the bound running out (→ a FULL summary + how to continue).
+ *
+ * NOTHING IS CREATED unless the human says GO: skip/reject/abort → nothing · rounds run
+ * out → nothing, with an honest note. The goal! seed gate (goalSeedGate — an EMPTY
+ * journey seeds fresh; a RE-SEEDABLE sole unconsumed goal is REPLACED; consumed/met
+ * refuses) runs BEFORE any provider call, so the refusal is dogfoodable on a non-empty
+ * repo with no provider configured.
  */
 
 export interface GoalSeedOptions {
@@ -46,25 +50,35 @@ export type GoalSeedResult =
 const oneLine = (s: string): string => s.replace(/\s*\n\s*/g, ' ').trim();
 
 /**
- * Deterministic synthesis: IdeaValidationDoc → goal.md (the fixed Goal:/Success
- * criteria: sections store.seedGoal parses 1:1). NO second model call — the seed lands
- * the moment the human says solid, from what the grill already converged.
+ * Deterministic synthesis: the grill's converged outcome → goal.md (the fixed
+ * Goal:/Success criteria: sections store.seedGoal parses 1:1). NO second model call —
+ * the seed lands the moment the human says GO, from what the grill already converged.
  *
- * The criteria are the session's commitments, not its whole transcript:
- *  - criterion 1 is the validated one-line goal (ALWAYS present — the AC list can
- *    never be empty, and the met gate names the outcome to seal);
- *  - the claims the grill validated as ok follow as commitments the realized goal must
- *    keep true.
- * Resolved questions / remaining unknowns are deliberately NOT criteria: they guide the
+ * The criteria are REAL checkable commitments, not the vacuous 'The validated goal is
+ * realized: <the whole idea>':
+ *  - criterion 1 is the REFINED goal statement — the concrete outcome sentence the human
+ *    just approved (it ALWAYS seeds, so the AC list can never be empty and the met gate
+ *    names the outcome to seal);
+ *  - the claims the final read validated as 'ok' follow as commitments the realized goal
+ *    must keep true;
+ *  - every resolved HIGH/MEDIUM answer imposes a constraint the goal must honor, and
+ *    lands as its own commitment (question → answer).
+ * Low-impact answers and open questions are deliberately NOT criteria: they guide the
  * FIRST task's shaping, not the met gate (goal-session-design §3/§8 — the doc stays a
  * machine contract + the human one-liner, never a transcript dump).
  */
-export const goalDocFrom = (doc: IdeaValidationDoc): string => {
-  const goal = oneLine(doc.summary) || oneLine(doc.idea);
-  const criteria = new Set<string>([`The validated goal is realized: ${goal}`]);
-  for (const a of doc.validatedAssumptions) {
-    const claim = oneLine(a.claim);
-    if (claim) criteria.add(claim);
+export const goalDocFrom = (g: { goal: string; okClaims: string[]; resolved: GoalResolvedQuestion[] }): string => {
+  const goal = oneLine(g.goal);
+  const criteria = new Set<string>([goal]); // criterion 1 — the concrete outcome sentence
+  for (const c of g.okClaims) {
+    const line = oneLine(c);
+    if (line) criteria.add(line);
+  }
+  for (const r of g.resolved) {
+    if (r.impact === 'low') continue; // only high/medium answers impose goal criteria
+    const q = oneLine(r.question);
+    const a = oneLine(r.answer);
+    if (q && a) criteria.add(`${q} → ${a}`);
   }
   return `# Goal
 
@@ -77,10 +91,11 @@ ${[...criteria].map((c) => `- ${c}`).join('\n')}
 
 /**
  * The driver — the whole seed as a VALUE (guarded-write style, no throw-as-flow): the
- * pre-guard, the idea gather (argv, else the human channel), the session, and the
- * on-solid materialize through L1. Returns the seeded doc's identity on GO; on
- * revise/reject/abort it returns seeded:false with a human note; provider/guard
- * failures return the L1-shaped error the CLI already renders.
+ * pre-guard, the idea gather (argv, else the human channel), the goal grill, and the
+ * on-GO materialize through L1. Returns the seeded doc's identity on GO; on
+ * skip/reject/abort it returns seeded:false with a human note; on rounds run out it
+ * returns seeded:false (the driver already showed the full summary) with an honest note;
+ * provider/guard failures return the L1-shaped error the CLI already renders.
  */
 export const runGoalSeed = async (
   commands: Commands,
@@ -110,30 +125,23 @@ export const runGoalSeed = async (
     if (!idea) return { ok: true, seeded: false, verdict: 'reject', note: 'no goal statement given — nothing was created' };
   }
 
-  // GRILL — the interactive idea-validation session (grill → batch-ask → research →
-  // converge → human verdict). Provider/adapter failures fail CLOSED here (same as
-  // `ann run!`): the session returns ok:false and nothing is created.
-  const r = await new IdeaValidationSession(abilities).run({
-    idea,
+  // GRILL — the dedicated GOAL grill (goal-mode rounds → GO / REVISE-in-session / SKIP).
+  // Provider/adapter failures fail CLOSED here (same as `ann run!`): the session returns
+  // ok:false and nothing is created.
+  const r = await new GoalGrillSession(abilities).run({
+    statement: idea,
     ...(opts.context?.length ? { context: opts.context } : {}),
     ...(opts.constraints?.length ? { constraints: opts.constraints } : {}),
     ...(opts.maxRounds ? { maxRounds: opts.maxRounds } : {}),
-    forceRefine: true, // the GOAL must reflect a REFINED understanding — answers are re-grilled before the verdict
   });
   if (!r.ok) return { ok: false, error: r.error };
-  const doc = r.doc;
-
-  // GO — the seed only on the HUMAN's solid (recommendation ≠ verdict: a session that
-  // recommends solid but the human revises/rejects seeds nothing, and vice versa).
-  if (doc.verdict !== 'solid') {
-    const note =
-      doc.verdict === 'revise'
-        ? 'the grill recommends REVISING the goal — refine the statement and re-run: goal! seed \'<goal>\' (nothing was created)'
-        : 'the grill REJECTED the goal — nothing was created';
-    return { ok: true, seeded: false, verdict: doc.verdict, note };
+  if (r.verdict !== 'solid') {
+    return { ok: true, seeded: false, verdict: r.verdict === 'exhausted' ? 'revise' : 'reject', note: r.note };
   }
 
-  const seeded = commands.goalSeed(goalDocFrom(doc));
+  // GO — the seed only on the HUMAN's GO (a round with remaining unknowns that the human
+  // accepts still seeds; skipping/aborting never does).
+  const seeded = commands.goalSeed(goalDocFrom(r));
   if (!seeded.ok) return { ok: false, error: seeded.error };
   return {
     ok: true,
@@ -145,6 +153,3 @@ export const runGoalSeed = async (
     verdict: 'solid',
   };
 };
-
-/** Convenience type for the seeded verdict value (keeps the result narrowing honest). */
-export type { IdeaVerdict };

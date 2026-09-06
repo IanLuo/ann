@@ -35,6 +35,10 @@ export interface GrillingRequest {
   context?: GroundingInput[];
   /** Contract constraints: ACs, scope, non-negotiables. */
   constraints?: string[];
+  /** EXTRA ENGINE DIRECTIVE, appended to the grill prompt (goal! seed mode only). The
+   *  task idea-validate flow never sets it — when absent the prompt is byte-identical
+   *  to before, so the task flow is unchanged. */
+  instructions?: string;
 }
 
 export interface ValidationPoint {
@@ -168,8 +172,11 @@ export class DefaultGrillingEngine {
       .replace('{idea}', req.idea.trim())
       .replace('{context}', renderContext(req.context))
       .replace('{constraints}', renderConstraints(req.constraints));
+    const finalPrompt = req.instructions
+      ? `${prompt}\n\n## Goal-mode instructions (goal! seed)\n${req.instructions.trim()}`
+      : prompt;
 
-    const completion = await this.adapter.complete(prompt, this.options);
+    const completion = await this.adapter.complete(finalPrompt, this.options);
     if (!completion.ok) return completion; // adapter failure passes through fail-closed — never fabricated
 
     return this.interpretGrill(completion, req);
