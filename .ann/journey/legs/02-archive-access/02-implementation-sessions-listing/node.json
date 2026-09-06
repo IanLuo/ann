@@ -1,0 +1,14 @@
+{
+  "id": "02-archive-access/02-implementation-sessions-listing",
+  "contract": {
+    "intent": "Add an ann sessions read: list the archived journeys of this project, each with a per-session goal/status/verdict/legs summary, so archived sessions are discoverable (not only reachable via ANN_STORE once the path is known).",
+    "acceptanceCriteria": [
+      "ann sessions lists the active project archived sessions (.ann/archive/sessions/*) with a per-session summary derived through a read-only Store over that session",
+      "Each row shows session, goal leg, status, verdict (met vs done-unconfirmed) and leg count, plus the ANN_STORE pointer",
+      "--json supported; project-scoped and read-only; suite green and ann check/verify clean on the live journey",
+      "Committed with evidence"
+    ],
+    "workType": "implementation"
+  },
+  "createdAt": "2026-09-06"
+}

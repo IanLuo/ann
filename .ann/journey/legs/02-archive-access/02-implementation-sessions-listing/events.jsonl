@@ -1,0 +1,7 @@
+{"at":"2026-09-06","type":"created","note":"spawned by bookkeeper (agent)"}
+{"at":"2026-09-06","type":"submitted","gate":"grill","note":"submitted for the grill gate (agent)"}
+{"at":"2026-09-06","type":"confirmed","gate":"grill","feedback":"grilled accept: discoverability gap — archived sessions were only reachable when the path was already known; ann sessions lists them with a per-session summary. Small read addition under the archive-access leg.","note":"accepted (agent)"}
+{"at":"2026-09-06","type":"evidence","commits":[{"sha":"5902735","note":"feat(cli): ann sessions — list the archived journeys of this project"}],"refs":["src/surface/cli.ts"],"note":"ann sessions implemented: walks .ann/archive/sessions/*, derives a per-session summary through a read-only Store (goal/status/verdict/legs), --json supported; verified listing the archived v1 session (01-goal done met, 10 legs). Suite 484 green; check OK / verify clean."}
+{"at":"2026-09-06","type":"submitted","gate":"confirm","note":"submitted for the confirm gate (agent)"}
+{"at":"2026-09-06","type":"confirmed","gate":"confirm","feedback":"accepted: ann sessions done + verified — lists the archived v1 session with its summary; AC1-AC4 met. Commit 5902735.","note":"accepted (agent)"}
+{"at":"2026-09-06","type":"completed","note":"ann sessions delivered (5902735) — archived journeys now discoverable."}
