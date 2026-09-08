@@ -1,0 +1,18 @@
+{
+  "id": "06-operator-loop/01-spec-amend-f5-execute",
+  "contract": {
+    "intent": "Record the F5-execute finding and amend the in-force contracts to name the operator action. functional-spec F5 ('run next' — pull: Ann proposes the frontmost-ready action, the user approves in ONE interaction) has only its proposal half in the surface (`next`, a read): no accept→execute gesture exists, so after a human gate nothing advances and a bookkeeper session must hand-author every spawn (this whole session's pattern). Deliverable: the finding recorded on this task + functional-spec.md and flow-control-spec.md amended to name the operator action and its deterministic rules + AGENTS.md write-confinement naming it before it exists — the operator loop can then be built and K3/K4 measured.",
+    "acceptanceCriteria": [
+      "The finding is recorded on this task (events/note): F5 proposes, nothing executes — checked against the code (commands.advance() derives continue-leg/advance-leg/closure-needed/none; only the `next` READ renders it; no approve gesture exists anywhere in the surface) — inclusion gate met: not recoverable by a command, a fresh session would get it wrong",
+      "functional-spec.md amended (change protocol): F5 'run next' = propose + one-interaction approve→EXECUTE, naming the operator action (command/gesture) and its convergence with F6 push + F7 gate interaction",
+      "flow-control-spec.md amended: the look-back/advance section names the operator action's rules — integrity re-check (fail closed on dirty), advance re-derived from logs, execute through sanctioned writers (deterministic, no LLM discretion), land at the next human gate never silently past one; the advance-leg contract-source question (task-contract provenance when none is pre-spawned) is resolved or recorded as an explicit open decision",
+      "AGENTS.md write-confinement names the operator action's cross-folder write (it spawns) before it exists, mirroring the SPECS-grill naming",
+      "docs manifest regenerated (ann docs --write); full suite green; ann check/verify clean; committed with evidence"
+    ],
+    "workType": "spec",
+    "targetAreas": [
+      "docs"
+    ]
+  },
+  "createdAt": "2026-09-08"
+}

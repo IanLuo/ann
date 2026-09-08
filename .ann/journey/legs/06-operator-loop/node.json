@@ -1,0 +1,17 @@
+{
+  "id": "06-operator-loop",
+  "contract": {
+    "intent": "THE OPERATOR LOOP — the F5-execute dogfooding finding, contracted. requirements K3: 'Ann proposes the frontmost-ready action, the builder accepts (≤1 interaction)'; functional-spec F5 (run next, pull) is spec'd the same — but the surface implements only the proposal (`next`, a read): NO accept→execute gesture exists, so after a human gate passes nothing advances and a bookkeeper session must hand-author every spawn. This epic RECORDS the finding and CONTRACTS the operator action — named, with its deterministic rules (derive next → check → gather → on approval execute the derived advance → land at the next human gate) and its cross-folder write named in AGENTS.md before it exists. IMPLEMENTATION is a deliberate follow-on epic (the server slice / a later leg) — this leg's deliverable is the corrected contract, so the operator loop can be built and K3/K4 measured.",
+    "acceptanceCriteria": [
+      "The F5-execute gap is recorded in the journey (corrective note on the owning task): F5/run-next proposes but has no approve→execute half; the raw pieces exist (check · verify · packet · the confirm gate card · spawn!/submit!/gate! · run!) but nothing chains them into the one-interaction operator action",
+      "functional-spec.md is amended (change protocol, docs stay git content): F5 'run next' states the FULL pull — propose the frontmost-ready action and, on the user's one-interaction approval, EXECUTE the derived advance — naming the operator action and its convergence with F6 (push) and F7 (the gate card every advance lands at)",
+      "flow-control-spec.md is amended: the look-back/advance section names the operator action — on approval it (a) re-checks integrity and fails closed on dirty state, (b) re-derives the advance action from the logs (continue-leg · advance-leg · closure-needed · none), (c) executes through the sanctioned writers — deterministic, never LLM discretion, (d) lands at the next human gate, never silently past one; the advance-leg contract-source question (where the next task's contract comes from when none is pre-spawned) is resolved or recorded as an explicit open decision",
+      "AGENTS.md write-confinement names the operator action before it exists (naming-before-existence — it is a cross-folder writer: it spawns), exactly as the SPECS grill is named",
+      "The docs manifest is regenerated, the full suite stays green, and ann check/verify stay clean on the live journey; committed with evidence"
+    ],
+    "targetAreas": [
+      "docs"
+    ]
+  },
+  "createdAt": "2026-09-08"
+}
