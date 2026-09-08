@@ -1,0 +1,20 @@
+{
+  "id": "07-operator-advance",
+  "contract": {
+    "intent": "Implement the OPERATOR ACTION `advance!` — F5's approve→execute half, contracted on 06-operator-loop (functional-spec v2 F5 · flow-control-spec v7 §2/§5 · AGENTS.md write-confinement naming: NOT YET BUILT). The deterministic command that executes the DERIVED advance on the builder's one-interaction approval — integrity re-checked fail-closed, advance re-derived from the logs (a stale proposal executes nothing), executed ONLY through the sanctioned writers (spawn!/submit!/gate!/run!), landing at the next human gate, never silently past one. This is what lets ann run as a standalone product: after a human gate passes, `advance!` — not a hand-authoring bookkeeper session — carries the journey to the next decision. advance-leg / closure-needed / none are the authored-work boundaries: present + stop, never a machine spawn, never a machine answer.",
+    "acceptanceCriteria": [
+      "`advance!` is a surface mutator: it begins by re-running the integrity reads (the check/verify equivalents — store drift, uncommitted tracked journey/docs changes, gate gaps, stale manifest) and REFUSES fail-closed on any dirty state with a named blocker, before anything executes",
+      "The advance is re-derived at execution, never replayed: the advance view is re-derived from the logs and a mismatch with the proposal that preceded the call REFUSES (a stale proposal executes nothing)",
+      "Per-derivation behavior matches flow-control-spec v7 §2: continue-leg → the frontmost-ready authored task runs through the frame and lands at its next human gate; advance-leg (an empty front leg) / closure-needed / none → NOT machine-executable — present the boundary/closure/goal card and stop, exactly per §5's authored-work boundary (never a machine spawn, never a machine contract author)",
+      "Execution goes ONLY through the sanctioned writers (spawn!/submit!/gate!/run!) — deterministic scripted orchestration, never an LLM judgment, no new write path; advance! never answers a gate, never self-closes, and every execution lands AT the next human gate, never silently past one",
+      "The interaction follows the interactive carve-outs (goal! seed · run! · spec!): the ADVANCE card (F7-shaped — the derived action, what will execute, the fail-closed re-check results) with the builder's ONE approve; the JSON/automation posture is resolved against the carve-out precedents and recorded as a decision, never hand-waved",
+      "Tests cover the deterministic rules (fail-closed refusals, stale-proposal refusal, per-derivation behavior including the not-machine-executable stops, never-past-a-gate); the full suite stays green and ann check/verify stay clean on the live journey; committed with evidence"
+    ],
+    "targetAreas": [
+      "src/surface",
+      "src/commands",
+      "src/e2e"
+    ]
+  },
+  "createdAt": "2026-09-08"
+}

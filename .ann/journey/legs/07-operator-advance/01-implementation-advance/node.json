@@ -1,0 +1,22 @@
+{
+  "id": "07-operator-advance/01-implementation-advance",
+  "contract": {
+    "intent": "Implement `advance!`, the operator action (F5's approve→execute half), per the now-locked contract: functional-spec v2 F5 (next proposes the frontmost-ready action; advance! is the ONE-interaction approve→EXECUTE) + flow-control-spec v7 §2 (four deterministic rules: integrity re-check fail-closed · advance re-derived at execution · execution only through the sanctioned writers spawn!/submit!/gate!/run! · land at the next human gate, never silently past one) + §5 (continue-leg runs the frontmost-ready through the frame; advance-leg/closure-needed/none are NOT machine-executable — the authored-work boundary: present + stop). Composes existing pieces — check/verify, the advance derivation, packet/confirm cards, run! — no new write path, no LLM judgment.",
+    "acceptanceCriteria": [
+      "`advance!` begins with the integrity re-check (the check/verify equivalents: store drift, uncommitted tracked journey/docs changes, gate gaps, stale manifest) and REFUSES fail-closed with a named blocker on any dirty state — nothing executes on a state the engine does not recognize",
+      "The advance is re-derived from the logs at execution (continue-leg / advance-leg / closure-needed / none); a call whose re-derivation contradicts the state the operator approved REFUSES — a stale proposal executes nothing",
+      "continue-leg: the frontmost-ready authored task runs through the frame (run!) and the command lands at its next human gate (the gate① or gate② card — a submission awaiting the human decision, never silently passed)",
+      "advance-leg / closure-needed / none: NOT machine-executable — the command presents the boundary/closure/goal consult card and stops (flow-control v7 §5: an empty front leg is the authored-work boundary — never a machine spawn, never a machine contract author, never a machine closure)",
+      "Execution uses ONLY the sanctioned writers — deterministic scripted orchestration, no LLM judgment, no new write path; advance! never answers a gate and never self-closes",
+      "The interaction is an interactive carve-out in the goal! seed / run! / spec! style — the ADVANCE card with the builder's ONE approve; the JSON/automation posture is resolved against the carve-out precedents and RECORDED as a decision on this task (never hand-waved)",
+      "Tests cover the deterministic rules (fail-closed refusals, stale-proposal refusal, per-derivation behavior including the stops, never-past-a-gate); the full suite stays green and ann check/verify stay clean on the live journey; committed with evidence"
+    ],
+    "workType": "implementation",
+    "targetAreas": [
+      "src/surface",
+      "src/commands",
+      "src/e2e"
+    ]
+  },
+  "createdAt": "2026-09-08"
+}
