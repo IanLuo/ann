@@ -225,4 +225,14 @@ describe('e2e — uniform JSON across every command', () => {
     expect(j.error.message).toContain('INTERACTIVE terminal session');
     expectNoStrayText(run);
   });
+
+  it('spec! under --json refuses up-front (it drives an interactive terminal grilling session — JSON cannot)', () => {
+    // refuses BEFORE any provider/goal read — a bare project suffices, no goal seeded
+    const spec = cli(root, ['--json', 'spec!', 'requirements']);
+    expect(spec.code).toBe(1);
+    const j = doc<{ error: { code: string; message: string } }>(spec);
+    expect(j.error.code).toBe('spec-interactive'); // the interactive carve-out refuses JSON up-front
+    expect(j.error.message).toContain('INTERACTIVE grilling session');
+    expectNoStrayText(spec);
+  });
 });

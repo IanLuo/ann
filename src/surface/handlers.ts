@@ -36,6 +36,7 @@ import { buildStepRegistry } from '../flow/steps/index.js';
 import { loadProjectFlow, resolveChain, validateChain } from '../flow/chain.js';
 import { Frame } from '../flow/frame.js';
 import { runGoalSeed } from '../flow/goal-seed.js';
+import { runSpecSession, docsSpecsTarget, DEFAULT_SPEC_NAME } from '../flow/spec-doc.js';
 import { buildAbilities } from '../abilities/index.js';
 import { resolveConfig } from '../flow/config.js';
 import { getAdapter } from '../abilities/llm/index.js';
@@ -273,6 +274,7 @@ const COMMANDS: Array<{ name: string; args: string; desc: string }> = [
   { name: 'goal!', args: 'met [feedback]', desc: 'WRITE — the HUMAN verdict that seals a structurally-exhausted session (goal-met on the goal root); refused for automated (agent) initiators, double-met, and any undecided submission' },
   { name: 'goal!', args: 'archive [--override]', desc: 'WRITE — guarded structural reset: move .ann/journey → .ann/archive/sessions/<ts>-<slug>/ for a fresh goal; refuses without a met verdict (or --override), on store-external verify drifts, and on uncommitted tracked .ann/journey changes' },
   { name: 'goal!', args: 'seed [goal-statement]', desc: 'WRITE — grill a goal at SESSION scope (EMPTY journey seeds new; a RE-SEEDABLE sole unconsumed goal is REPLACED after re-grilling — consumed/met goals refuse): the interactive idea-validation session (grill → batch-ask → research → re-grill → human verdict); on solid, synthesize goal.md (Goal:/Success criteria:) + seed/re-seed the goal leg + write docs/goal.md + regenerate the manifest; revise/reject seeds nothing' },
+  { name: 'spec!', args: '[docName] [--amend]', desc: 'WRITE — grill the SEEDED goal at REQUIREMENTS/SYSTEM-DESIGN level into ONE amendable spec doc docs/<docName>.md (default requirements): PRODUCE grills the goal into a NEW name; --amend REWRITES an EXISTING in-force doc in place (specs are LIVING, amendable — the goal is not): the interactive SPECS grilling session; on GO it writes docs/<name>.md + regenerates the manifest — commit to publish (JSON refuses: interactive terminal only)' },
 ];
 
 const commandRows = (): CommandRow[] => COMMANDS.map((c) => ({ name: c.name, args: c.args, desc: c.desc, json: true }));
@@ -873,6 +875,38 @@ async function goalSeedInteractive(ctx: CliContext): Promise<Outcome> {
   return { ok: true, value: { seeded: true, goalId: r.goalId } };
 }
 
+/* spec! — the SPECS interactive carve-out (PRODUCE/AMEND). NOT value-canonical: it
+ * drives the interactive SPECS grilling session in a terminal; JSON refuses up-front
+ * (before any provider/goal read — a JSON doc would only ever catch an early failure). */
+async function specInteractive(ctx: CliContext): Promise<Outcome> {
+  if (ctx.json) {
+    return boom(
+      'spec-interactive',
+      'spec! is an INTERACTIVE grilling session (a SPECS produce/amend terminal session) — JSON mode cannot drive it (run it in a terminal, or read the spec doc: ann --json read <name>|docs)',
+    );
+  }
+  const rest = ctx.args.slice(1);
+  const amend = rest.includes('--amend');
+  const positional = rest.filter((a) => a !== '--amend');
+  if (positional.length > 1) {
+    return usage("usage: ann spec! [docName] [--amend]\n\nGrill the seeded goal at REQUIREMENTS/SYSTEM-DESIGN level into one amendable spec doc docs/<docName>.md.\n  docName   the spec doc name (default 'requirements') — PRODUCE needs a NEW name\n  --amend   REWRITE an EXISTING in-force spec doc in place (specs are LIVING, amendable)\nSpecs land on the human's GO; commit the docs/<docName>.md it writes to publish.");
+  }
+  const mode: 'produce' | 'amend' = amend ? 'amend' : 'produce';
+  const name = positional[0] ?? DEFAULT_SPEC_NAME;
+  const r = await runSpecSession(docsSpecsTarget(ctx.root), buildAbilities(getAdapter(undefined, ctx.root)), { mode, name });
+  if (!r.ok) {
+    // emit() prints the error once (stderr in text, the error doc in JSON) — never twice
+    return { ok: false, error: { code: r.error.code, message: r.error.blocker, text: `${r.error.code}: ${r.error.blocker}` }, exitCode: 1 };
+  }
+  if (!r.written) {
+    console.log(`spec! ${mode} ${name}: NOT ${mode === 'amend' ? 'rewritten' : 'written'} — ${r.note}`);
+    return { ok: true, value: { written: false, note: r.note } };
+  }
+  console.log(`spec! ${mode} ${name}: ${mode === 'amend' ? 'REWRITTEN' : 'written'} → ${r.path} @ ${r.sha} — commit to publish`);
+  console.log(`  docs/${name}.md is a LIVING, AMENDABLE spec — revise it later: ann spec! ${name} --amend`);
+  return { ok: true, value: { written: true, mode, name, path: r.path, sha: r.sha } };
+}
+
 /* ── the alias map (the `--x` command forms — NOT the stripped --project/--json) ── */
 const ALIAS: Record<string, string> = {
   '--journey': 'journey',
@@ -904,7 +938,7 @@ const ALIAS: Record<string, string> = {
 
 /** The journey-addressing WRITES a read-only target refuses (config!/cred!/project!
  *  never touch the store, so they stay available). docs/rules --write refuse too. */
-const JOURNEY_REFUSED_WRITES = new Set(['append!', 'spawn!', 'submit!', 'gate!', 'goal!', 'run!']);
+const JOURNEY_REFUSED_WRITES = new Set(['append!', 'spawn!', 'submit!', 'gate!', 'goal!', 'run!', 'spec!']);
 /** Bare write names (no `!`) — a named hint, never silent. */
 const WRITES = ['append', 'spawn', 'submit', 'gate', 'cred'];
 
@@ -970,9 +1004,15 @@ export async function runMain(rawArgv: string[] = process.argv.slice(2)): Promis
       );
     }
     readOnlyRefuse(ctx, canonical);
-    // the interactive carve-out: goal! seed (never value-canonical)
+    // the interactive carve-outs (never value-canonical): goal! seed + spec! both drive
+    // an interactive terminal grilling session — JSON refuses up-front inside each.
     if (canonical === 'goal!' && (args[1] ?? '') === 'seed') {
       const out = await goalSeedInteractive(ctx);
+      if (!out.ok) throw new CommandExit(out.error.code, out.error.message, { text: out.error.text, exitCode: out.exitCode });
+      return;
+    }
+    if (canonical === 'spec!') {
+      const out = await specInteractive(ctx);
       if (!out.ok) throw new CommandExit(out.error.code, out.error.message, { text: out.error.text, exitCode: out.exitCode });
       return;
     }
