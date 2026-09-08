@@ -1,0 +1,19 @@
+{
+  "id": "05-specs-grill",
+  "contract": {
+    "intent": "A SPECS GrillArea on the portable grill: expand the seeded goal (grounded on the docs in force + the deferred HOW notes) into ONE amendable spec doc in docs/, on the same ANSWER/RESPONSE/DISCUSS/DECISION loop; and the AMEND path — a SPECS session can target an existing spec doc and produce a revised version, because specs are living, amendable guidance (unlike the immutable goal).",
+    "acceptanceCriteria": [
+      "A SPECS GrillProfile is registered on the portable GrillSession core (like the goal and design profiles), grilling toward ONE named spec doc (default the requirements spec) at requirements/system-design level, deferring code-level implementation",
+      "On GO it writes the spec doc to docs/<name>.md and regenerates the manifest, concluding via a git commit plus evidence (docs are git content); the session is interactive like goal! seed and exposes the same exhaustion-driven loop",
+      "AMEND: a SPECS session may target an existing in-force spec doc, grounded on the current doc plus the goal and work context, producing a REVISED version committed to docs/ (the doc stays current; the old version lives in git history) — specs are amendable and keep serving future work",
+      "The first target consumes the seeded goal and the deferred HOW notes, and grinds them into a concrete, checkable requirements spec",
+      "The full suite stays green and ann check/verify stay clean on the live journey; committed with evidence"
+    ],
+    "targetAreas": [
+      "src/flow",
+      "docs",
+      "src/surface"
+    ]
+  },
+  "createdAt": "2026-09-08"
+}

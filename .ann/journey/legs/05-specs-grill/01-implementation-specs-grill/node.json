@@ -1,0 +1,20 @@
+{
+  "id": "05-specs-grill/01-implementation-specs-grill",
+  "contract": {
+    "intent": "Implement the SPECS GrillArea: register a SPECS profile that grills the seeded goal (grounded on docs/ and the deferred HOW notes) into ONE amendable spec doc, plus the AMEND path that revises an existing spec doc in place (git history keeps the old version).",
+    "acceptanceCriteria": [
+      "SPECS_PROFILE registered on the portable GrillSession core (mirroring GOAL_PROFILE/DESIGN_PROFILE): boundary = requirements/system-design level, defers code-level implementation; decision verb and convergence from the profile",
+      "A produce run grills toward one named spec (default requirements) and on GO writes docs/<name>.md + regenerates the manifest, concluding via a git commit plus evidence",
+      "An amend run targets an existing in-force spec doc, grounds on its current content plus the goal and work context, and writes a REVISED docs/<name>.md (git history holds the old version); the session states it is amending",
+      "A CLI surface to run it interactively (mirroring the goal! seed carve-out): refuses JSON up-front; interactive grilling loop reused",
+      "The full suite is green and ann check/verify are clean on the live journey; committed with evidence"
+    ],
+    "workType": "implementation",
+    "targetAreas": [
+      "src/flow",
+      "docs",
+      "src/surface"
+    ]
+  },
+  "createdAt": "2026-09-08"
+}
