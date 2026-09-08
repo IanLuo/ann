@@ -2,8 +2,8 @@
 - **upstream** (this doc relies on): docs/requirements-spec.md,docs/flow-control-spec.md
 - **referrers** (must cite this when they change): architecture,ann-system-design implementation slices,review-task
 
-# Functional Spec (v1)
-*Artifact of task `05-engine/00/06-functional-spec`. Type: spec. The function contract: the surface (what the builder can DO with Ann), the settled flow decisions, and the interaction model. Deep per-function detail (exact commands, output formats, edge cases) is written into the slice task contracts during the build; this spec fixes the surface + interaction shape. Upstream: `requirements-spec` (v3), `flow-control-spec`. Referrers: architecture · ann-system-design · implementation slices · review-task.*
+# Functional Spec (v2)
+*Artifact of task `06-operator-loop/01-spec-amend-f5-execute`. Type: spec. Complete superseding version — v1 (locked @ 5e2473d) + F5 'run next' gains its accept half: the OPERATOR ACTION `advance!` — ONE-interaction approve→EXECUTE of the derived advance (`next` stays the proposing read), named before it exists and converged with F6 push + F7 gate interaction (the operator-loop gap: K3/F5 promised an accept the surface did not implement — every spawn was hand-authored). Amended in place per the docs convention (the old version stays in git history); upstream/referrer conventions preserved. The function contract: the surface (what the builder can DO with Ann), the settled flow decisions, and the interaction model. Deep per-function detail (exact commands, output formats, edge cases) is written into the slice task contracts during the build; this spec fixes the surface + interaction shape. Upstream: `requirements-spec` (v3), `flow-control-spec` (v7). Referrers: architecture · ann-system-design · implementation slices · review-task.*
 
 ## 1. The surface (settled)
 
@@ -18,7 +18,7 @@
 | F | Function | Gesture | Serves |
 |---|---|---|---|
 | F4 | **validate** | the idea's exit gate — grills the idea; **only a confirmed idea lets the next steps begin** | AC-4 |
-| F5 | **run next** | pull — Ann proposes the frontmost-ready action; user approves (one interaction) | K3, K4 |
+| F5 | **run next** | pull — `next` PROPOSES the frontmost-ready action (a derived read); the user's ONE interaction approves → **`advance!` EXECUTES the derived advance** (the operator action: integrity re-checked fail-closed, advance re-derived from the logs, executed through the sanctioned writers) and lands at the next human gate — never silently past one (flow-control-spec v7 §2/§5) | K3, K4 |
 | F6 | **specify task** | push — the user can always proactively name/point at a task to work on; spawns/activates → gate card → confirm. Covers amendments (AC-7) and steering | AC-3, AC-7 |
 | F7 | **gate interaction** | every task's first step: the card is presented at gate①; user interacts, confirms, or answers — gate② confirms the result | NFR-USE-2, AC-2 |
 | F8 | envision | the beginning build step: product vision (usage + look) — after the idea is confirmed | AC-4 |
@@ -48,7 +48,7 @@
 
 - **Default step chain:** idea → validate → envision → spec → continue. The chain is configurable per project (F3, AC-3).
 - **validate = the idea's gate:** the idea must be confirmed before envision/spec (the beginning steps) start. Nothing proceeds from an unconfirmed idea.
-- **run next = pull; specify task = push.** Both converge on the same gate interaction: task → gate① card → user confirms/answers. No separate machinery.
+- **run next = pull; specify task = push.** The pull is TWO halves: `next` PROPOSES the frontmost-ready action (a derived read); the **operator action `advance!` is the accept** — ONE interaction that re-checks integrity (fail-closed on a dirty store), re-derives the advance from the logs, executes it through the sanctioned writers only (`spawn!`/`submit!`/`gate!`/`run!` — deterministic, never an LLM judgment), and lands at the next human gate, never silently past one (flow-control-spec v7 §2/§5). The approve is the builder's single decision over the ADVANCE card, never an answer to a node gate — the card at the next task's gate① is F7's, decided there. Push (F6) converges on the same gate interaction: naming/pointing at a task spawns/activates it → gate① card → confirm — which is also how an empty front leg gets its authored task (flow-control-spec v7 §5). No separate machinery.
 - **card = gate presentation** (F7): every task's first step is the card at gate①; there is no standalone "browse a card" function (status/artifact cover viewing).
 - **change has no dedicated function** (F13 dropped): a requirement change IS the user specifying an amendment task via F6 — the change-protocol's amendment node is a task like any other. AC-7 is served by F6.
 - Gates at each step end per flow-control: gate① grilling (entry), gate② confirm-result (exit); rejection → bounded rework, closed through the same gate.
@@ -63,7 +63,7 @@ decide   → user: accept | reject + feedback | answer a question (batched, dedu
 result   → gate② confirm-result: accept | reject + feedback → bounded rework, same-gate return (flow-control §3)
 ```
 
-- "Easy and natural" (NFR-USE-1): locate ≤ 2 interactions, advance ≤ 1 — the talk-loop is the interaction; the structure answers, the user approves.
+- "Easy and natural" (NFR-USE-1): locate ≤ 2 interactions, advance ≤ 1 — the talk-loop is the interaction; the structure answers, the user approves. "advance ≤ 1" IS the operator action: `next` proposes, the single approve (`advance!`) executes the derived advance — reaching the correct next action (K3) asks nothing further of the builder.
 - Human unreachable → step stays blocked, blocker named (fail-closed).
 
 ## 4. Boundaries
