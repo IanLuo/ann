@@ -428,6 +428,35 @@ export const RENDERS: Record<string, Renderer> = {
     return block(lines);
   },
 
+  /* advance! — the OPERATOR ACTION value renderer: one block per stop. The ADVANCE /
+   * boundary cards themselves are PRESENTED live by the session channel (stdout before
+   * this render); this block is the value's own summary (the same object --json would
+   * refuse, so it never diverges from what a text terminal prints). */
+  advance: (value) => {
+    const v = value as AdvanceValue;
+    const d = v.derivation;
+    switch (v.stop) {
+      case 'refused-integrity':
+        return block([
+          `advance! REFUSED — fail-closed integrity re-check (nothing executes on a state the engine does not recognize)`,
+          `  derivation at refusal: ${d.action} — ${d.detail}`,
+          ...v.blockers.map((b) => `  blocker: ${b}`),
+        ]);
+      case 'stale-proposal':
+        return block([
+          'advance! REFUSED — the re-derived advance no longer matches the approved proposal (a stale proposal executes nothing)',
+          `  approved: ${d.action} — ${d.detail}`,
+          `  now:      ${v.reDerivation ? `${v.reDerivation.action} — ${v.reDerivation.detail}` : '(no derivation)'}`,
+        ]);
+      case 'declined':
+        return block(['advance! declined — nothing executed (the approve is your ONE decision; run advance! again to re-present the current derivation)']);
+      case 'boundary':
+        return block(boundaryLines(v));
+      case 'advanced':
+        return block(advancedLines(v));
+    }
+  },
+
   /* the provider registry — value carries the env-resolved, masked view */
   providers: (value) => {
     const v = value as ProvidersValue;
@@ -619,6 +648,101 @@ interface RunValue {
   problems: string[];
   committed?: { spawned: string[] };
   advance?: string;
+}
+
+/* the advance! value shape — structural (the operator-action module is L2; the render
+ * reads the same object the handler's text mode emits). */
+interface AdvanceValue {
+  stop: 'refused-integrity' | 'declined' | 'stale-proposal' | 'boundary' | 'advanced';
+  phase: string;
+  derivation: { leg: string; action: 'continue-leg' | 'advance-leg' | 'closure-needed' | 'none'; detail: string };
+  reDerivation?: { leg: string; action: 'continue-leg' | 'advance-leg' | 'closure-needed' | 'none'; detail: string };
+  blockers: string[];
+  frontmost?: { leg: string; task: string; status: string };
+  goal?: { goalId?: string; goalStatus?: string; verdict: string; structural: { exhausted: boolean; detail: string } };
+  frame?: RunValue;
+  landing?: {
+    task: string;
+    frameStop: string;
+    where: 'completed' | 'gate' | 'awaiting-runner' | 'stopped';
+    gate?: string;
+    advance?: string;
+    problems?: string[];
+  };
+}
+
+/** The NOT-machine-executable card (AC-4) — present + stop, per derivation. */
+function boundaryLines(v: AdvanceValue): string[] {
+  const d = v.derivation;
+  const head = `advance! STOPPED — ${d.action} is NOT machine-executable (present + stop)`;
+  if (d.action === 'advance-leg') {
+    return [
+      head,
+      `  derivation: ${d.detail}`,
+      '  the AUTHORED-WORK boundary (flow-control v7 §5): an advance selects among ALREADY-AUTHORED tasks —',
+      '  the engine derives order/readiness/gates, never content. This front leg has no authored task and',
+      '  there is no deterministic engine source for its next contract — never a machine spawn.',
+      '  The next task is authored the way every leg was — grounded on the leg epic + the look-back + the',
+      '  completed predecessor\'s artifacts — and landed as a push:',
+      '      ann spawn! <leg>/<NN>-<worktype>-<slug> \'<contract-json>\'   (F6 push — or run! its grill gate)',
+      '  advance! then re-derives continue-leg and runs it.',
+    ];
+  }
+  if (d.action === 'closure-needed') {
+    return [
+      head,
+      `  derivation: ${d.detail}`,
+      '  the closure decision is a GATED HUMAN decision (flow-control v7 §5, F-AC16) — a leg/task never',
+      '  re-scopes itself silently. Resolve the blocked tasks, or author a gated closure task (a sibling)',
+      '  that records gate-revised / transferred / deferred on the task and concludes through its own',
+      '  gate①/gate② — the look-back then derives the next advance.',
+    ];
+  }
+  // action 'none' — the four-state goal consult (goal-session-design §5)
+  const g = v.goal;
+  const consult = g
+    ? `  goal: ${g.goalId ?? '(none)'}${g.goalId ? ` [${g.goalStatus}]` : ''} — verdict ${g.verdict}${g.structural.exhausted ? ' (structurally exhausted)' : ''}`
+    : '  (no goal view)'; // unreachable — advance() derives the consult from the goal view
+  return [
+    head,
+    `  derivation: ${d.detail}`,
+    consult,
+    '  NOT machine-executable: goal! met / goal! archive stay HUMAN moves (never a machine seal, never a',
+    '  machine archive). The four-state consult: goal! met (seal an exhausted session) · author a subtle',
+    '  task (F6 push) · goal! archive & start a new goal.',
+  ];
+}
+
+/** The continue-leg execution summary + the landing (rule 4 — the next human decision). */
+function advancedLines(v: AdvanceValue): string[] {
+  const d = v.derivation;
+  const f = v.frame;
+  const fm = v.frontmost;
+  const lines = [`advance! EXECUTED ${d.action} — ${d.detail}`];
+  if (fm) lines.push(`  ran through the frame: ${fm.task} (${fm.status})`);
+  if (f) {
+    lines.push(`  FRAME ${f.taskId} — ${f.stop.toUpperCase()} (at ${f.phase})`);
+    for (const p of f.problems) lines.push(`  problem: ${p}`);
+    if (f.advance) lines.push(`  advance: ${f.advance}`);
+  }
+  const l = v.landing;
+  if (l) {
+    if (l.where === 'gate') {
+      lines.push(`  landing: the journey is AT ${l.task} gate ${l.gate} — a submission awaiting the HUMAN decision:`);
+      lines.push(`           ann gate! ${l.task} ${l.gate} accept|reject (advance! never answers a gate)`);
+    } else if (l.where === 'awaiting-runner') {
+      lines.push(`  landing: ${l.task} awaits the RUNNER (${l.frameStop}) — do the work, git commit, and record`);
+      lines.push('           evidence (ann append! <id> \'…evidence.commits[]…\'); the confirm-result gate then decides');
+      lines.push('           — a human gate, never passed silently (re-run: ann run! <id>).');
+    } else if (l.where === 'completed') {
+      lines.push(`  landing: ${l.task} completed — its gates were decided by the human channel`);
+      if (l.advance) lines.push(`  next: ${l.advance}`);
+    } else {
+      lines.push(`  landing: ${l.task} — the frame stopped (${l.frameStop}):`);
+      for (const p of l.problems ?? []) lines.push(`    ${p}`);
+    }
+  }
+  return lines;
 }
 interface ProvidersValue {
   defaultProvider: string;

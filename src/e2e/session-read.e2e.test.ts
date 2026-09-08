@@ -202,6 +202,7 @@ describe('e2e — ANN_STORE session-addressing through the CLI', () => {
       ['gate!', '02-leg/01-produce', 'confirm', 'accept'],
       ['goal!', 'met'],
       ['run!', '02-leg/01-produce'],
+      ['advance!'],
       ['docs', '--write'],
     ];
     for (const args of writes) {

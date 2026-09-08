@@ -235,4 +235,14 @@ describe('e2e — uniform JSON across every command', () => {
     expect(j.error.message).toContain('INTERACTIVE grilling session');
     expectNoStrayText(spec);
   });
+
+  it('advance! under --json refuses up-front (the ADVANCE card approve drives an interactive terminal — JSON cannot)', () => {
+    // the operator action (F5 approve→execute) refuses before ANY store/derive read
+    const adv = cli(root, ['--json', 'advance!']);
+    expect(adv.code).toBe(1);
+    const j = doc<{ error: { code: string; message: string } }>(adv);
+    expect(j.error.code).toBe('advance-interactive'); // the interactive carve-out refuses JSON up-front
+    expect(j.error.message).toContain('INTERACTIVE terminal session');
+    expectNoStrayText(adv);
+  });
 });

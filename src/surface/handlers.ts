@@ -37,6 +37,7 @@ import { loadProjectFlow, resolveChain, validateChain } from '../flow/chain.js';
 import { Frame } from '../flow/frame.js';
 import { runGoalSeed } from '../flow/goal-seed.js';
 import { runSpecSession, docsSpecsTarget, DEFAULT_SPEC_NAME } from '../flow/spec-doc.js';
+import { runOperatorAction, OperatorStop } from '../flow/operator-action.js';
 import { buildAbilities } from '../abilities/index.js';
 import { resolveConfig } from '../flow/config.js';
 import { getAdapter } from '../abilities/llm/index.js';
@@ -264,6 +265,7 @@ const COMMANDS: Array<{ name: string; args: string; desc: string }> = [
   { name: 'goal', args: '', desc: 'the goal-session view (goal-session-design §9): goalId · status · the authored goal doc (docs/goal.md) · the generated contract · structural state · verdict (met/unconfirmed/open) · legs (status words only) · alias --goal' },
   { name: 'flow', args: '<id>', desc: 'a task\'s RESOLVED flow + chain validation (the data the frame will execute) · alias --flow' },
   { name: 'run!', args: '<id>', desc: 'WRITE — run a task through the FRAME (materialize → grill → activate → execute → verify → confirm → commit); resumable, stops at the first block' },
+  { name: 'advance!', args: '', desc: 'WRITE — the OPERATOR ACTION (F5 approve→execute): integrity re-checked fail-closed → the advance re-derived (a stale proposal executes nothing) → the ADVANCE card + the builder\'s ONE approve → continue-leg runs the frontmost-ready through the frame (run!) and lands at its next human gate; advance-leg / closure-needed / none are NOT machine-executable — the boundary/closure/goal-consult card, then stop' },
   { name: 'commands', args: '', desc: 'this table as markdown (the derived doc) · alias --commands' },
   { name: 'help', args: '', desc: 'usage · alias --help / -h' },
   { name: 'read', args: '<name>', desc: 'the L1 CONTENT read view — marker-stripped content + path + sha; resolves via the docs manifest (the forward path), with a legacy current-artifact fallback for history · alias --read' },
@@ -720,6 +722,31 @@ export const HANDLERS: Record<string, Handler> = {
     return { ok: true, value: r, ...(r.stop === 'completed' ? {} : { exitCode: 1 }) };
   },
 
+  /* advance! — the OPERATOR ACTION (F5 approve→execute). NOT value-canonical in JSON:
+   * it drives an interactive terminal session (the ADVANCE card + the builder's ONE
+   * approve, then the frame's gates) — JSON cannot drive it, so it refuses up-front with
+   * a loud error doc (AC-6: the approve is a HUMAN decision; the carve-out precedents —
+   * run! · goal! seed · spec! — all refuse JSON; an automated product holds the
+   * sanctioned writers directly and never needs advance!'s human approve). */
+  'advance!': async (ctx) => {
+    if (ctx.json) {
+      return boom(
+        'advance-interactive',
+        "advance! is the OPERATOR ACTION (F5 approve→execute) — it drives an INTERACTIVE terminal session (the ADVANCE card + the builder's ONE approve, then the frame's gates); JSON mode cannot drive it (run it in a terminal, or read the derived state with ann --json next|goal|journey)",
+      );
+    }
+    const r = await runOperatorAction({
+      commands: ctx.commands,
+      root: ctx.root,
+      registry: buildStepRegistry(),
+      abilities: buildAbilities(getAdapter(undefined, ctx.root)),
+    });
+    // the exit mirrors run!: only a COMPLETED continue-leg run exits 0; the refusals and
+    // every stopped-short landing exit 1, declined/boundary (designed stops) exit 0.
+    const exitCode = advanceExit(r.stop, r.frame?.stop === 'completed');
+    return { ok: true, value: r, ...(exitCode === 0 ? {} : { exitCode }) };
+  },
+
   read: (ctx) => viewResult(ctx.commands.read(ctx.args[1] || '')),
 
   /* confirm / detail / results — detail-derived cards + results */
@@ -829,7 +856,14 @@ export function resolveDispatch(ctx: CliContext, canonical: string): { handler?:
     // journey-with-id is a DIFFERENT command (journeyOne) than the no-id look-back
     return { handler: HANDLERS.journeyOne, renderKey: 'journeyOne' };
   }
-  return { handler: HANDLERS[canonical], renderKey: canonical === 'run!' ? 'run' : canonical };
+  return { handler: HANDLERS[canonical], renderKey: canonical === 'run!' ? 'run' : canonical === 'advance!' ? 'advance' : canonical };
+}
+
+/** advance!'s exit-code mapping (the handler keeps the Outcome value-shaped). */
+function advanceExit(stop: OperatorStop, runCompleted: boolean): number {
+  if (stop === 'refused-integrity' || stop === 'stale-proposal') return 1; // fail-closed refusals
+  if (stop === 'advanced') return runCompleted ? 0 : 1; // mirror run!: a stopped-short run exits 1
+  return 0; // declined / boundary — designed stops, nothing executed
 }
 
 /** The bare-name read: a DOC (via the manifest) or a current artifact's logical name. */
@@ -938,7 +972,7 @@ const ALIAS: Record<string, string> = {
 
 /** The journey-addressing WRITES a read-only target refuses (config!/cred!/project!
  *  never touch the store, so they stay available). docs/rules --write refuse too. */
-const JOURNEY_REFUSED_WRITES = new Set(['append!', 'spawn!', 'submit!', 'gate!', 'goal!', 'run!', 'spec!']);
+const JOURNEY_REFUSED_WRITES = new Set(['append!', 'spawn!', 'submit!', 'gate!', 'goal!', 'run!', 'spec!', 'advance!']);
 /** Bare write names (no `!`) — a named hint, never silent. */
 const WRITES = ['append', 'spawn', 'submit', 'gate', 'cred'];
 

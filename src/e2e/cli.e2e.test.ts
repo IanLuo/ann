@@ -332,3 +332,60 @@ describe('e2e — the goal-session lifecycle (v6: seed → docs/goal.md → work
     expect(loaded.events(GOAL).some((e) => e.type === 'goal-met')).toBe(true);
   });
 });
+
+describe('e2e — the OPERATOR ACTION advance! (F5 approve→execute, leg 07 task 01)', () => {
+  let root: string;
+  beforeEach(() => { root = newProject(); });
+  afterEach(() => { rmSync(root, { recursive: true, force: true }); });
+
+  /** Leg 01 driven to a CLEAN close (docs committed, evidence, gates, completed) and an
+   *  EMPTY front leg spawned + committed — the state where the derived advance points at
+   *  an empty front leg (advance-leg). */
+  function driveDoneThenEmptyFront(): void {
+    prep(root, LEG, TASK, '02-leg');
+    expect(out(cli(root, ['spawn!', LEG, CONTRACT('the first leg')]))).toContain('spawned');
+    expect(out(cli(root, ['spawn!', TASK, CONTRACT('do the thing')]))).toContain('spawned');
+    expect(out(cli(root, ['submit!', TASK, 'grill']))).toContain('submitted grill');
+    expect(out(cli(root, ['gate!', TASK, 'grill', 'accept', 'looks right']))).toContain('gate grill: accept');
+    mkdirSync(join(root, 'docs'), { recursive: true });
+    writeFileSync(join(root, 'docs', 'thing.md'), '# Thing\n\nthe actual deliverable\n');
+    expect(out(cli(root, ['docs', '--write']))).toContain('regenerated');
+    git(root, ['add', '-A']);
+    git(root, ['commit', '-qm', 'stage the deliverable']);
+    const sha = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+    cli(root, ['append!', TASK, JSON.stringify({ at: '2026-08-29', type: 'evidence', note: 'committed', commits: [{ sha, note: 'deliverable' }] })]);
+    expect(out(cli(root, ['submit!', TASK, 'confirm']))).toContain('submitted confirm');
+    expect(out(cli(root, ['gate!', TASK, 'confirm', 'accept', 'done']))).toContain('gate confirm: accept');
+    cli(root, ['append!', TASK, EVENT('completed', { note: 'finished' })]);
+    git(root, ['add', '-A']);
+    git(root, ['commit', '-qm', 'close 01-leg/01-a']);
+    // the EMPTY front leg — an advance points AT it but cannot author its task (v7 §5)
+    expect(out(cli(root, ['spawn!', '02-leg', CONTRACT('the second leg')]))).toContain('spawned 02-leg');
+    git(root, ['add', '-A']);
+    git(root, ['commit', '-qm', 'spawn the empty front leg']);
+  }
+
+  it('advance-leg is NOT machine-executable: the authored-work boundary + stop, zero writes (exit 0)', () => {
+    driveDoneThenEmptyFront();
+    const boundary = cli(root, ['advance!']);
+    expect(boundary.code).toBe(0);
+    expect(out(boundary)).toContain('advance-leg');
+    expect(out(boundary)).toContain('NOT machine-executable');
+    expect(out(boundary)).toContain('02-leg');
+    // nothing was authored under the empty front leg and nothing was activated
+    expect(existsSync(join(root, '.ann', 'journey', 'legs', '02-leg', '02-a', 'node.json'))).toBe(false);
+    expect(out(cli(root, ['status', '02-leg']))).not.toContain('02-leg/02');
+  });
+
+  it('a dirty tree refuses FAIL-CLOSED before anything — the uncommitted docs change is the named blocker (exit 1)', () => {
+    driveDoneThenEmptyFront();
+    appendFileSync(join(root, 'docs', 'thing.md'), '\nhand edit\n'); // TRACKED + uncommitted
+    const dirty = cli(root, ['advance!']);
+    expect(dirty.code).toBe(1);
+    expect(out(dirty)).toContain('REFUSED');
+    expect(out(dirty)).toContain('uncommitted tracked change');
+    expect(out(dirty)).toContain('docs/thing.md');
+    // nothing executed
+    expect(existsSync(join(root, '.ann', 'journey', 'legs', '02-leg', '02-a', 'node.json'))).toBe(false);
+  });
+});
