@@ -1,0 +1,20 @@
+{
+  "id": "08-task-close",
+  "contract": {
+    "intent": "THE TASK-CLOSE VOCABULARY (submit/cancel): a task closes either as DONE (submit! → gate! accept → completed) or as CANCELLED — no longer needed. Today the model has the success half only: the no-longer-needed terminal exists as the retired artifact-era 'superseded' (derivation + leg gate still understand it, but its writer is gone and its name means version-replacement, not dropped). This epic adds the CANCELLED terminal as a first-class, live close (event + derived status + closed-set handling + an operator write path) and fixes the honest-status gap found in dogfooding (a confirm-accepted task with no completed event derives queued and looks re-runnable).",
+    "acceptanceCriteria": [
+      "A `cancelled` event type exists in the vocabulary (rules/schema/vocab.json) and `append!` may record it with a REQUIRED reason (the task is no longer needed); RECORDED_BY provenance applies; any initiator may cancel (operator/runner — cancel is bookkeeping, not a gate decision)",
+      "The store derives a task status `cancelled` from the event — TERMINAL: it never overrides a done/failed task (no un-closing delivered or exhausted work), and the blocked/waiting derivations never override it (cancelling a task with an undecided submission or mid-wait MUST stick — the escape for stuck blocked tasks)",
+      "The closed-set handling counts cancelled as closed everywhere done/superseded count: the leg gate (legGateMet), legStatus derivation, and goal-structural-exhaustion — a cancelled task never blocks its leg or the session from finishing",
+      "STATUS GAP FIX: a task whose confirm-result gate is ACCEPTED but has no `completed` event derives its own honest intermediate word (not `queued`) — so next/advance!/run! never treat accepted-but-unclosed work as runnable-again (the re-run trap found this session); `completed` remains the done terminal",
+      "Journey renders/state lines and the reconciliation register cover the new status words; the full suite stays green (new derivation + closed-set + append tests) and ann check/verify stay clean on the live journey; committed with evidence"
+    ],
+    "targetAreas": [
+      "src/store",
+      "rules",
+      "src/flow",
+      "src/surface"
+    ]
+  },
+  "createdAt": "2026-09-09"
+}

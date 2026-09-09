@@ -1,0 +1,21 @@
+{
+  "id": "08-task-close/01-implementation-close-vocab",
+  "contract": {
+    "intent": "Implement the cancelled terminal and the honest-status fix: (a) a `cancelled` event type (vocab) recordable via append! with a required reason — a task marked no longer needed; the store derives the task status `cancelled` (terminal: never overrides done/failed; the blocked/waiting derivations never override it); (b) the leg gate + legStatus + goal exhaustion count cancelled as closed like done/superseded; (c) the dogfooding gap: a confirm-result ACCEPTED task with no completed event derives its own honest intermediate status instead of falling back to queued (next/advance! must not see it as runnable). Design decisions recorded on the task: any initiator may cancel (append-style bookkeeping, RECORDED_BY, reason required); a queued/active/blocked task may be cancelled (the escape for stuck blocked tasks at undecided submissions).",
+    "acceptanceCriteria": [
+      "rules/schema/vocab.json eventTypes gains `cancelled`; append! records it (requires a reason — refuse a missing/blank reason note); RECORDED_BY provenance; not a composite-owned or retired kind",
+      "store.taskStatus derives `cancelled` from the event — TERMINAL in both directions: the case never overrides done/failed, and the undecided-submission/waiting blocked logic never overrides cancelled (cancel a blocked task and it STAYS cancelled)",
+      "Closed-set parity: legGateMet + legStatus + goal exhaustion treat cancelled like done/superseded (a leg whose only task was cancelled derives done; the session can reach structural exhaustion)",
+      "STATUS GAP: a task whose confirm gate is confirmed/accepted with no later completed derives its own honest status word (pick the word — e.g. accepted/concluded — against the existing vocabulary; never queued, never runnable-again)",
+      "Renders/state lines + the reconciliation register notes cover the new words; tests prove each rule (derivation, both terminal directions, closed-set parity, the accepted-gap word, append reason-required); the full suite stays green and ann check/verify stay clean on the live journey; committed with evidence"
+    ],
+    "workType": "implementation",
+    "targetAreas": [
+      "src/store",
+      "rules",
+      "src/flow",
+      "src/surface"
+    ]
+  },
+  "createdAt": "2026-09-09"
+}
