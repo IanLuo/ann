@@ -16,7 +16,7 @@ const artifactNameOf = (file: string): string => file.replace(/\.[^./]*$/, '');
  * CLI binding) reads and writes through here; nothing above ever touches L0.
  *
  * READS are derived views (status · packet · flow · results · look-back · specs ·
- * check · read). WRITES are the mutators — `spawn!` · `present!` · `gate!` ·
+ * check · read). WRITES are the mutators — `spawn!` · `submit!` · `gate!` ·
  * `append!` — COMPLETE over the event vocabulary (docs-as-git retired the
  * artifact surface). The composite mutators ENCODE THE INVARIANTS the design
  * assigns to L1:
@@ -24,7 +24,7 @@ const artifactNameOf = (file: string): string => file.replace(/\.[^./]*$/, '');
  *   spawn!      the v14 node.json contract schema + F-AC19 + id naming + the
  *               commit-evidence conclusion gate + the leg gate  (from the CLI)
  *   gate!       the reject bound (3/gate, a CONSTANT) + the two-write sequence
- *   present!     the other half of that sequence + the gate② content binding
+ *   submit!     the other half of that sequence + the gate② content binding
  *   append!     refuses the composite-owned kinds, `created`, and the RETIRED
  *               doc-artifact vocab (artifact-locked / superseded — D3)
  *
@@ -61,7 +61,7 @@ const REJECT_BOUND = 3;
  *  invariants those composites encode cannot be bypassed by an append (§8:289). */
 const COMPOSITE_OWNED: Record<string, string> = {
   created: 'spawn!',
-  submitted: 'present!',
+  submitted: 'submit!',
   confirmed: 'gate!',
   rejected: 'gate!',
   'goal-met': 'goal!', // v6 — the sealed-session verdict is owned by goal! met
@@ -293,7 +293,7 @@ export class Commands {
   }
 
   /**
-   * `present!` — the FIRST of the two gate writes (core-design §4). Writing `submitted`
+   * `submit!` — the FIRST of the two gate writes (core-design §4). Writing `submitted`
    * on its own is what makes an interrupted gate genuinely resumable: the task derives
    * `blocked` and waits for a decision instead of looking un-started.
    *

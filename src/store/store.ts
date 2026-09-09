@@ -1065,7 +1065,7 @@ export class Store {
       if ((e.type === 'rejected' || e.type === 'confirmed') && e.feedback !== undefined && typeof e.feedback !== 'string') {
         throw new Error(`append rejected: ${e.type}.feedback must be a string`);
       }
-      // v14 §3: the gate②-to-commit content binding — present!(confirm) records the
+      // v14 §3: the gate②-to-commit content binding — submit!(confirm) records the
       // working artifact's blob sha over MARKER-STRIPPED content; commit refuses on mismatch.
       if (e.type === 'submitted' && e.confirmedSha !== undefined && (typeof e.confirmedSha !== 'string' || !/^[0-9a-f]{7,40}$/.test(e.confirmedSha))) {
         throw new Error('append rejected: submitted.confirmedSha must be a blob sha (7-40 hex, v14 §3)');

@@ -99,7 +99,7 @@ describe('e2e — the CLI binary', () => {
     expect(out(bare)).toContain("writes are marked with '!'");
 
     // gate ①: submit alone blocks, the decision releases it
-    expect(out(cli(root, ['present!', TASK, 'grill']))).toContain('presented grill');
+    expect(out(cli(root, ['submit!', TASK, 'grill']))).toContain('submitted grill');
     expect(out(cli(root, ['status', TASK]))).toContain('blocked');
     expect(out(cli(root, ['gate!', TASK, 'grill', 'accept', 'looks right']))).toContain('gate grill: accept');
     expect(out(cli(root, ['status', TASK]))).not.toContain('blocked');
@@ -122,7 +122,7 @@ describe('e2e — the CLI binary', () => {
     expect(out(cli(root, ['append!', TASK, JSON.stringify({ at: '2026-08-29', type: 'evidence', note: 'the thing is committed', commits: [{ sha, note: 'deliverable' }] })]))).toContain('appended');
 
     // gate ②: confirm is not 'done' on its own — completed event closes it
-    expect(out(cli(root, ['present!', TASK, 'confirm']))).toContain('presented confirm');
+    expect(out(cli(root, ['submit!', TASK, 'confirm']))).toContain('submitted confirm');
     expect(out(cli(root, ['gate!', TASK, 'confirm', 'accept', 'done']))).toContain('gate confirm: accept');
     expect(out(cli(root, ['status', TASK]))).not.toContain('done');
     expect(out(cli(root, ['append!', TASK, EVENT('completed', { note: 'finished' })]))).toContain('appended');
@@ -150,8 +150,8 @@ describe('e2e — the CLI binary', () => {
     expect(out(cli(root, ['spawn!', '01-leg/01-b', CONTRACT('x')]))).toContain('prefix-clash');
 
     // a bare write name is refused with a hint — the `!` is a guarantee, not advice
-    expect(cli(root, ['present', TASK, 'grill']).code).toBe(1);
-    expect(out(cli(root, ['present', TASK, 'grill']))).toContain("writes are marked with '!'");
+    expect(cli(root, ['submit', TASK, 'grill']).code).toBe(1);
+    expect(out(cli(root, ['submit', TASK, 'grill']))).toContain("writes are marked with '!'");
 
     // a composite-owned event kind cannot be appended around the mutator
     expect(out(cli(root, ['append!', TASK, EVENT('confirmed', { gate: 'grill' })]))).toContain('composite-owned');
@@ -239,9 +239,9 @@ describe('e2e — the goal-session lifecycle (v6: seed → docs/goal.md → work
     prep(r, WORK, TASK);
     cli(r, ['spawn!', WORK, CONTRACT('the work leg')]);
     cli(r, ['spawn!', TASK, CONTRACT('do the work')]);
-    expect(out(cli(r, ['present!', TASK, 'grill']))).toContain('presented grill');
+    expect(out(cli(r, ['submit!', TASK, 'grill']))).toContain('submitted grill');
     expect(out(cli(r, ['gate!', TASK, 'grill', 'accept', 'grilled']))).toContain('gate grill: accept');
-    expect(out(cli(r, ['present!', TASK, 'confirm']))).toContain('presented confirm');
+    expect(out(cli(r, ['submit!', TASK, 'confirm']))).toContain('submitted confirm');
     expect(out(cli(r, ['gate!', TASK, 'confirm', 'accept', 'done']))).toContain('gate confirm: accept');
     expect(out(cli(r, ['append!', TASK, EVENT('completed', { note: 'finished' })]))).toContain('appended');
     expect(out(cli(r, ['status', TASK]))).toContain('done');
@@ -345,7 +345,7 @@ describe('e2e — the OPERATOR ACTION advance! (F5 approve→execute, leg 07 tas
     prep(root, LEG, TASK, '02-leg');
     expect(out(cli(root, ['spawn!', LEG, CONTRACT('the first leg')]))).toContain('spawned');
     expect(out(cli(root, ['spawn!', TASK, CONTRACT('do the thing')]))).toContain('spawned');
-    expect(out(cli(root, ['present!', TASK, 'grill']))).toContain('presented grill');
+    expect(out(cli(root, ['submit!', TASK, 'grill']))).toContain('submitted grill');
     expect(out(cli(root, ['gate!', TASK, 'grill', 'accept', 'looks right']))).toContain('gate grill: accept');
     mkdirSync(join(root, 'docs'), { recursive: true });
     writeFileSync(join(root, 'docs', 'thing.md'), '# Thing\n\nthe actual deliverable\n');
@@ -354,7 +354,7 @@ describe('e2e — the OPERATOR ACTION advance! (F5 approve→execute, leg 07 tas
     git(root, ['commit', '-qm', 'stage the deliverable']);
     const sha = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
     cli(root, ['append!', TASK, JSON.stringify({ at: '2026-08-29', type: 'evidence', note: 'committed', commits: [{ sha, note: 'deliverable' }] })]);
-    expect(out(cli(root, ['present!', TASK, 'confirm']))).toContain('presented confirm');
+    expect(out(cli(root, ['submit!', TASK, 'confirm']))).toContain('submitted confirm');
     expect(out(cli(root, ['gate!', TASK, 'confirm', 'accept', 'done']))).toContain('gate confirm: accept');
     cli(root, ['append!', TASK, EVENT('completed', { note: 'finished' })]);
     git(root, ['add', '-A']);

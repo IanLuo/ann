@@ -116,7 +116,7 @@ describe('spawn! — the contract schema gate (core-design §1, §8:289)', () =>
   });
 });
 
-describe('present! + gate! — the two-write gate sequence (core-design §4)', () => {
+describe('submit! + gate! — the two-write gate sequence (core-design §4)', () => {
   beforeEach(() => {
     makeStore();
     writeNode('01-leg', {});
@@ -124,14 +124,14 @@ describe('present! + gate! — the two-write gate sequence (core-design §4)', (
   });
   afterEach(() => { rmSync(root, { recursive: true, force: true }); });
 
-  it('present! alone blocks the task — an interrupted gate is resumable, not un-started', () => {
+  it('submit! alone blocks the task — an interrupted gate is resumable, not un-started', () => {
     const c = cmds();
     valueOf(c.submit('01-leg/01-a', 'grill'));
     expect(c.status('01-leg/01-a')).toBe('blocked');
     expect(errorOf(c.submit('01-leg/01-a', 'grill')).code).toBe('already-submitted');
   });
 
-  it('present!(confirm) records the gate② content binding, and the sha must be a sha', () => {
+  it('submit!(confirm) records the gate② content binding, and the sha must be a sha', () => {
     const c = cmds();
     valueOf(c.gate('01-leg/01-a', 'grill', 'accept'));
     expect(errorOf(c.submit('01-leg/01-a', 'confirm', { confirmedSha: 'not-a-sha' })).code).toBe('store-refused');
@@ -196,7 +196,7 @@ describe('append! — refuses what the composites own (§8:289)', () => {
     const c = cmds();
     for (const [type, owner] of [
       ['created', 'spawn!'],
-      ['submitted', 'present!'],
+      ['submitted', 'submit!'],
       ['confirmed', 'gate!'],
       ['rejected', 'gate!'],
       ['goal-met', 'goal!'],

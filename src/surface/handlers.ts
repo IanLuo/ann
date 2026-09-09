@@ -271,7 +271,7 @@ const COMMANDS: Array<{ name: string; args: string; desc: string }> = [
   { name: 'read', args: '<name>', desc: 'the L1 CONTENT read view — marker-stripped content + path + sha; resolves via the docs manifest (the forward path), with a legacy current-artifact fallback for history · alias --read' },
   { name: 'append!', args: '<id> \'<json>\'', desc: 'WRITE — single-writer append; REFUSES the composite-owned kinds (created/submitted/confirmed/rejected/goal-met) and the RETIRED doc-artifact vocab (artifact-locked/superseded)' },
   { name: 'spawn!', args: '<id> \'<contract-json>\'', desc: 'WRITE — create a node; enforces the v14 contract schema + F-AC19 + id naming + the conclusion (commit-evidence)/leg gates' },
-  { name: 'present!', args: '<id> grill|confirm [confirmedSha]', desc: 'WRITE — present the work at a gate for the human decision (the worker half of the gate): records `submitted` — the task blocks and waits for `gate! accept|reject`; an interrupted gate stays blocked (resumable), never looks un-started. `[confirmedSha]` (confirm gate only) binds the decision to the exact bytes under review' },
+  { name: 'submit!', args: '<id> grill|confirm [confirmedSha]', desc: 'WRITE — submit finished work at a gate for the human decision (the SUCCESS half of the task close; the counterpart is cancel — no longer needed): records `submitted` — the task blocks and waits for `gate! accept|reject`; an interrupted gate stays blocked (resumable), never looks un-started. `[confirmedSha]` (confirm gate only) binds the decision to the exact bytes under review' },
   { name: 'gate!', args: '<id> grill|confirm accept|reject [feedback]', desc: 'WRITE — human gate decision (submit + decide; the 3-reject bound is a CONSTANT owned here)' },
   { name: 'goal!', args: 'met [feedback]', desc: 'WRITE — the HUMAN verdict that seals a structurally-exhausted session (goal-met on the goal root); refused for automated (agent) initiators, double-met, and any undecided submission' },
   { name: 'goal!', args: 'archive [--override]', desc: 'WRITE — guarded structural reset: move .ann/journey → .ann/archive/sessions/<ts>-<slug>/ for a fresh goal; refuses without a met verdict (or --override), on store-external verify drifts, and on uncommitted tracked .ann/journey changes' },
@@ -836,8 +836,8 @@ export const HANDLERS: Record<string, Handler> = {
     }
     return writeResult(ctx.commands.spawn(ctx.args[1], contract));
   },
-  'present!': (ctx) => {
-    if (!getVOCAB().gates.includes(ctx.args[2])) return usage('usage: ann present! <id> grill|confirm [confirmedSha]');
+  'submit!': (ctx) => {
+    if (!getVOCAB().gates.includes(ctx.args[2])) return usage('usage: ann submit! <id> grill|confirm [confirmedSha]');
     return writeResult(ctx.commands.submit(ctx.args[1], ctx.args[2], ctx.args[3] ? { confirmedSha: ctx.args[3] } : {}));
   },
   'gate!': (ctx) => {
@@ -972,9 +972,9 @@ const ALIAS: Record<string, string> = {
 
 /** The journey-addressing WRITES a read-only target refuses (config!/cred!/project!
  *  never touch the store, so they stay available). docs/rules --write refuse too. */
-const JOURNEY_REFUSED_WRITES = new Set(['append!', 'spawn!', 'present!', 'gate!', 'goal!', 'run!', 'spec!', 'advance!']);
+const JOURNEY_REFUSED_WRITES = new Set(['append!', 'spawn!', 'submit!', 'gate!', 'goal!', 'run!', 'spec!', 'advance!']);
 /** Bare write names (no `!`) — a named hint, never silent. */
-const WRITES = ['append', 'spawn', 'present', 'gate', 'cred'];
+const WRITES = ['append', 'spawn', 'submit', 'gate', 'cred'];
 
 const isProjectRoot = (dir: string): boolean => existsSync(join(dir, '.ann')) || existsSync(join(dir, 'journey'));
 

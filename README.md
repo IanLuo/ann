@@ -76,7 +76,7 @@ session (unchanged); a bad/absent target fails closed at startup (named error, e
 | `read` | `<name>` | the L1 CONTENT read view — marker-stripped content + path + sha; resolves via the docs manifest (the forward path), with a legacy current-artifact fallback for history · alias --read |
 | `append!` | `<id> '<json>'` | WRITE — single-writer append; REFUSES the composite-owned kinds (created/submitted/confirmed/rejected/goal-met) and the RETIRED doc-artifact vocab (artifact-locked/superseded) |
 | `spawn!` | `<id> '<contract-json>'` | WRITE — create a node; enforces the v14 contract schema + F-AC19 + id naming + the conclusion (commit-evidence)/leg gates |
-| `present!` | `<id> grill|confirm [confirmedSha]` | WRITE — present a task's work at a gate for the HUMAN's decision: records `submitted` and the task waits (blocked) for the human's `gate! accept|reject`; an interrupted gate stays blocked (resumable), never looks un-started. `[confirmedSha]` (confirm gate only) binds the decision to the exact bytes under review |
+| `submit!` | `<id> grill|confirm [confirmedSha]` | WRITE — submit finished work at a gate for the human decision (the SUCCESS half of the task close; the counterpart is `cancel` — no longer needed): records `submitted` — the task blocks and waits for `gate! accept|reject`; an interrupted gate stays blocked (resumable), never looks un-started. `[confirmedSha]` (confirm gate only) binds the decision to the exact bytes under review |
 | `gate!` | `<id> grill|confirm accept|reject [feedback]` | WRITE — human gate decision (submit + decide; the 3-reject bound is a CONSTANT owned here) |
 | `goal!` | `met [feedback]` | WRITE — the HUMAN verdict that seals a structurally-exhausted session (goal-met on the goal root); refused for automated (agent) initiators, double-met, and any undecided submission |
 | `goal!` | `archive [--override]` | WRITE — guarded structural reset: move .ann/journey → .ann/archive/sessions/<ts>-<slug>/ for a fresh goal; refuses without a met verdict (or --override), on store-external verify drifts, and on uncommitted tracked .ann/journey changes |
@@ -120,13 +120,13 @@ will execute) · `chain` (the flow config as data) · `steps` (the step registry
    spawns a task). The v14 contract schema is enforced; a leg spawn checks the leg gate
    (every previous-leg task done — the derived aggregate); `workType`/`flow`/`model` are
    task-level (legs typically omit them), and `flow` is an array when present.
-2. `present! <id> grill` → `gate! <id> grill accept|reject [feedback]` — GATE① (entry):
+2. `submit! <id> grill` → `gate! <id> grill accept|reject [feedback]` — GATE① (entry):
    the approach is validated before execution (3-reject bound is a constant).
 3. Do the work, then conclude it as STRUCTURED COMMIT EVIDENCE (docs-as-git): content
    work stages its doc to `docs/<name>.md` (code work lands in `src/`) and commits it;
    the task records the conclusion: `append! <id> '{"at":"<date>","type":"evidence","commits":["<sha>"]}'`.
    The retired artifact-lock/supersede vocab (v16) is refused by `append!`.
-4. Close: `present! <id> confirm` then `gate! <id> confirm accept` — GATE② (exit): the
+4. Close: `submit! <id> confirm` then `gate! <id> confirm accept` — GATE② (exit): the
    human confirms the result — then `append! <id> '{"at":"<date>","type":"completed",...}'`.
    A task is `done` only after a `completed` event — the confirm gate alone does not
    record it.
@@ -164,7 +164,7 @@ single writer + derived views).
 │           results · packet · validate · rules · docs · sessions ·       │
 │           chain · steps · next · goal · flow · read · commands ·        │
 │           help · <name>   (derived views — F3/F5)                       │
-│   WRITES: spawn! · append! · present! · gate! · goal! · spec! · run! ·   │
+│   WRITES: spawn! · append! · submit! · gate! · goal! · spec! · run! ·   │
 │           advance! · config! · project! · cred!   (mutators end in !)   │
 └───────────────┬───────────────────────────────┬────────────────────────────┘
                 │ handlers compose              │ interactive carve-outs
