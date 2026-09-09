@@ -66,7 +66,7 @@ function driveLifecycle(root: string): void {
   prep(root, LEG, TASK);
   cli(root, ['spawn!', LEG, CONTRACT('the leg')]);
   cli(root, ['spawn!', TASK, CONTRACT('do the thing')]);
-  cli(root, ['submit!', TASK, 'grill']);
+  cli(root, ['present!', TASK, 'grill']);
   cli(root, ['gate!', TASK, 'grill', 'accept', 'looks right']);
   mkdirSync(join(root, 'docs'), { recursive: true });
   writeFileSync(join(root, 'docs', 'thing.md'), '# Thing\n\nthe actual deliverable\n');
@@ -74,7 +74,7 @@ function driveLifecycle(root: string): void {
   git(root, ['add', '-A']);
   git(root, ['commit', '-qm', 'stage the deliverable']);
   cli(root, ['append!', TASK, JSON.stringify({ at: '2026-08-29', type: 'evidence', note: 'committed', commits: [{ sha: 'abc1234', note: 'deliverable' }] })]);
-  cli(root, ['submit!', TASK, 'confirm']);
+  cli(root, ['present!', TASK, 'confirm']);
   cli(root, ['gate!', TASK, 'confirm', 'accept', 'done']);
   cli(root, ['append!', TASK, JSON.stringify({ at: '2026-08-29', type: 'completed', note: 'finished' })]);
   git(root, ['add', '-A']);

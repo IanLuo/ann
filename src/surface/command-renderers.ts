@@ -513,9 +513,9 @@ export const RENDERS: Record<string, Renderer> = {
     return `spawned ${v.id} (${v.kind})\n`;
   },
   'append!': (_value, env) => `appended → ${env.args[1]}\n`,
-  'submit!': (value, env) => {
+  'present!': (value, env) => {
     const v = (value as { ok: true; value: { gate: string; confirmedSha?: string } }).value;
-    return `submitted ${v.gate} → ${env.args[1]}${v.confirmedSha ? ` (confirmedSha ${v.confirmedSha})` : ''}\n`;
+    return `presented ${v.gate} → ${env.args[1]}${v.confirmedSha ? ` (confirmedSha ${v.confirmedSha})` : ''}\n`;
   },
   'gate!': (value, env) => {
     const v = (value as { ok: true; value: { gate: string; decision: string; escalated: boolean } }).value;

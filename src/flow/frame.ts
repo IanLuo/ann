@@ -201,7 +201,7 @@ export class Frame {
   /**
    * Obtain a gate decision. ONE SOURCE: a chain step bound to this gate, or — when the
    * chain binds none — the frame's own present-via-interact. Acquisition is TWO L1
-   * writes: `submit!` then `gate! accept|reject`.
+   * writes: `present!` then `gate! accept|reject`.
    *
    * Returns a FrameResult to stop on, or undefined to continue.
    */

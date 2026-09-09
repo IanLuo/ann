@@ -198,7 +198,7 @@ describe('e2e — ANN_STORE session-addressing through the CLI', () => {
     const writes: Array<Array<string>> = [
       ['append!', '02-leg/01-produce', '{"at":"2026-08-19","type":"completed"}'],
       ['spawn!', '03-leg', CONTRACT('x')],
-      ['submit!', '02-leg/01-produce', 'grill'],
+      ['present!', '02-leg/01-produce', 'grill'],
       ['gate!', '02-leg/01-produce', 'confirm', 'accept'],
       ['goal!', 'met'],
       ['run!', '02-leg/01-produce'],
