@@ -11,11 +11,5 @@
     "declaration": true,
     "types": ["node", "vitest/globals"]
   },
-  "include": ["src"],
-  "exclude": [
-    "src/engines",
-    "src/adapters",
-    "src/cli.ts",
-    "src/kernel"
-  ]
+  "include": ["src"]
 }

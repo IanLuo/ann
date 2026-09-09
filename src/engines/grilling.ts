@@ -1,1 +1,0 @@
-../flow/steps/idea-validate/grilling.ts

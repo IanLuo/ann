@@ -225,8 +225,8 @@ single writer + derived views).
 | **Operator action (leg 07)** — `advance!`: F5 approve→execute (functional-spec v2 F5 · flow-control v7 §2/§5) — integrity re-checked fail-closed, advance re-derived, continue-leg runs the frame, boundary stops presented | ✅ built | `src/flow/operator-action.ts` |
 | **Skills/tools/MCP (step model)** | ❌ decided, build deferred | — |
 
-The layer fold left compat symlinks in place: `src/cli.ts → surface/cli.ts`,
-`src/kernel → flow`, `src/engines/* → src/flow/*`, `src/adapters/provider → src/abilities/llm`.
+The layer fold is complete — the legacy tier paths are gone, and current code
+lives at `src/surface` · `src/commands` · `src/flow` · `src/abilities` · `src/store`.
 
 ## Goal-scoped sessions
 
