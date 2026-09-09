@@ -63,12 +63,14 @@ session (unchanged); a bad/absent target fails closed at startup (named error, e
 | `validate` | `[id]` | run the enabled validator rules (all nodes, or one node) — rule-id'd deterministic findings · alias --validate |
 | `rules` | `[--write]` | the DERIVED check-rules registry (self-contained rule modules are the source) · alias --rules; --write regenerates rules/check/rules.json |
 | `docs` | `[--write]` | the docs→git resolution index (docs/manifest.json — generated from docs/, never hand-maintained) · alias --docs; --write regenerates the manifest |
+| `sessions` | `` | the archived sessions of this project (goal! archive history) — one line each: goal · status · verdict · legs; point at one read-only via ANN_STORE · alias --sessions |
 | `chain` | `` | the project flow config as data (work-type chains, F3 view) · alias --chain |
 | `steps` | `` | the step registry — the pluggable surface future steps implement against · alias --steps |
 | `next` | `` | the run-next proposal (F5 pull): active leg, frontmost-ready, pending gates, leg gate — derived, never assumed · alias --next |
 | `goal` | `` | the goal-session view (goal-session-design §9): goalId · status · the authored goal doc (docs/goal.md) · the generated contract · structural state · verdict (met/unconfirmed/open) · legs (status words only) · alias --goal |
 | `flow` | `<id>` | a task's RESOLVED flow + chain validation (the data the frame will execute) · alias --flow |
 | `run!` | `<id>` | WRITE — run a task through the FRAME (materialize → grill → activate → execute → verify → confirm → commit); resumable, stops at the first block |
+| `advance!` | `` | WRITE — the OPERATOR ACTION (F5 approve→execute): integrity re-checked fail-closed → the advance re-derived (a stale proposal executes nothing) → the ADVANCE card + the builder's ONE approve → continue-leg runs the frontmost-ready through the frame (run!) and lands at its next human gate; advance-leg / closure-needed / none are NOT machine-executable — the boundary/closure/goal-consult card, then stop |
 | `commands` | `` | this table as markdown (the derived doc) · alias --commands |
 | `help` | `` | usage · alias --help / -h |
 | `read` | `<name>` | the L1 CONTENT read view — marker-stripped content + path + sha; resolves via the docs manifest (the forward path), with a legacy current-artifact fallback for history · alias --read |
@@ -79,13 +81,17 @@ session (unchanged); a bad/absent target fails closed at startup (named error, e
 | `goal!` | `met [feedback]` | WRITE — the HUMAN verdict that seals a structurally-exhausted session (goal-met on the goal root); refused for automated (agent) initiators, double-met, and any undecided submission |
 | `goal!` | `archive [--override]` | WRITE — guarded structural reset: move .ann/journey → .ann/archive/sessions/<ts>-<slug>/ for a fresh goal; refuses without a met verdict (or --override), on store-external verify drifts, and on uncommitted tracked .ann/journey changes |
 | `goal!` | `seed [goal-statement]` | WRITE — grill a goal at SESSION scope (EMPTY journey seeds new; a RE-SEEDABLE sole unconsumed goal is REPLACED after re-grilling — consumed/met goals refuse): the interactive idea-validation session (grill → batch-ask → research → re-grill → human verdict); on solid, synthesize goal.md (Goal:/Success criteria:) + seed/re-seed the goal leg + write docs/goal.md + regenerate the manifest; revise/reject seeds nothing |
+| `spec!` | `[docName] [--amend]` | WRITE — grill the SEEDED goal at REQUIREMENTS/SYSTEM-DESIGN level into ONE amendable spec doc docs/<docName>.md (default requirements): PRODUCE grills the goal into a NEW name; --amend REWRITES an EXISTING in-force doc in place (specs are LIVING, amendable — the goal is not): the interactive SPECS grilling session; on GO it writes docs/<name>.md + regenerates the manifest — commit to publish (JSON refuses: interactive terminal only) |
 
 ### When to use each
 
 **Orient — start here.** `journey` (where the journey is + what's ahead) → `next`
-(the run-next proposal: the one thing to do now) → `status [filter]` (statuses at a
-glance) → `check` (integrity + gates + hashes + the state line — run it before and
-after any change). In a goal session, `goal` shows the session state (goalId ·
+(the run-next proposal: the one thing to do now — to ACT on it, `advance!` (the
+operator action, functional-spec v2 F5) re-checks integrity fail-closed, re-derives
+the advance (a stale proposal executes nothing), and on the builder's ONE approve runs
+the frontmost-ready through the frame, landing at the next human gate) →
+`status [filter]` (statuses at a glance) → `check` (integrity + gates + hashes +
+the state line — run it before and after any change).
 status · the locked `goal.md` · verdict); when `next` falls quiet and every leg is
 done, it names the choice — `goal! met` seals the verdict, `goal! archive` resets
 for a fresh goal.
@@ -110,85 +116,91 @@ will execute) · `chain` (the flow config as data) · `steps` (the step registry
 
 **Drive a task — the lifecycle.**
 
-1. `spawn! <id> '<contract-json>'` — create the node (a bare id spawns a leg;
-   `leg/task` spawns a task). The v14 contract schema is enforced; `workType`/`flow`/
-   `model` are task-level (legs typically omit them), and `flow` is an array when
-   present.
-2. Do the work, then record evidence: `append! <id> '{"at":"<date>","type":"evidence","refs":[...]}'`.
-3. Open the task: `submit! <id> grill` then `gate! <id> grill accept|reject [feedback]`.
-4. Record the deliverable: `lock! <id> <artifact-file> [type]` — a THIN artifact
-   record over the producer's OWN file (the collapse, leg 07). `<artifact-file>` is a
-   single basename resolved inside `<id>`'s own `artifacts/` (write confinement — an
-   out-of-folder file is refused); ann verifies it exists, hashes the raw bytes, and
-   records `artifact-locked {name = file stem, path, lockSha, type?, version?}`. It
-   NEVER writes, copies, stamps, or symlinks the file — the bytes on disk are
-   untouched, and any file type locks. `type` is an optional free-form tag with no
-   placement meaning.
-5. Close: `submit! <id> confirm` then `gate! <id> confirm accept`, then
-   `append! <id> '{"at":"<date>","type":"completed",...}'`. A task is `done` only after
-   a `completed` event — the confirm gate alone does not record it.
-6. Advance a version: the NEW producer writes its draft file into its OWN
-   `artifacts/` and closes, then `supersede! <old-id> <new-id> <artifact-file>` — the
-   successor is named by the NEW node's id + that file's basename, resolved inside its
-   own `artifacts/` (never a raw path; the file must already exist; `supersede!`
-   refuses a producer that isn't done). Then `lock! <new-id> <artifact-file> [type]` —
-   `current(<name>)` flips to the new producer.
+1. `spawn! <id> '<contract-json>'` — create the node (a bare id spawns a leg; `leg/task`
+   spawns a task). The v14 contract schema is enforced; a leg spawn checks the leg gate
+   (every previous-leg task done — the derived aggregate); `workType`/`flow`/`model` are
+   task-level (legs typically omit them), and `flow` is an array when present.
+2. `submit! <id> grill` → `gate! <id> grill accept|reject [feedback]` — GATE① (entry):
+   the approach is validated before execution (3-reject bound is a constant).
+3. Do the work, then conclude it as STRUCTURED COMMIT EVIDENCE (docs-as-git): content
+   work stages its doc to `docs/<name>.md` (code work lands in `src/`) and commits it;
+   the task records the conclusion: `append! <id> '{"at":"<date>","type":"evidence","commits":["<sha>"]}'`.
+   The retired artifact-lock/supersede vocab (v16) is refused by `append!`.
+4. Close: `submit! <id> confirm` then `gate! <id> confirm accept` — GATE② (exit): the
+   human confirms the result — then `append! <id> '{"at":"<date>","type":"completed",...}'`.
+   A task is `done` only after a `completed` event — the confirm gate alone does not
+   record it.
 
-**Automate.** `run! <id>` drives a task through the frame and stops at the first block
+**Automate.** `run! <id>` drives a task through the frame (materialize → grill →
+activate → execute → verify → confirm → commit) and stops at the first block
 (fail-closed when no provider is configured). It is resumable, but re-enters the frame
 — do **not** run it on an already-`completed` task to "close" it: it re-executes and
 can regress the status. Close via the gate + `append! completed` flow instead.
+`advance!` (the operator action) is the approved-execute half of `run next`
+(functional-spec v2 F5): `next` proposes the frontmost-ready action, the builder's ONE
+approve makes `advance!` re-check integrity (fail-closed on dirty state), re-derive the
+advance (a stale proposal executes nothing), and on continue-leg run the
+frontmost-ready through the frame — landing at the next human gate, never silently
+past one. advance-leg / closure-needed / none are NOT machine-executable: the
+boundary/closure/goal-consult card is presented and it stops (the authored-work
+boundary, flow-control-spec v7 §5 — never a machine spawn, never a machine gate
+answer).
 
 ## Architecture (current code)
 
+The layers are architecture v3's L0–L3 model: **L3 surface/abilities** (handlers +
+the provider/human channels) ← **L2 flow** (frames, engines, composite drivers) ←
+**L1 commands** (the ONLY store interface — reads and writes) ← **L0 store** (the
+single writer + derived views).
+
 ```
 ┌──────────────────────────────────────────────────────────────────────────┐
-│  SURFACE — src/surface/cli.ts  (the CLI surface; src/cli.ts is a         │
-│  compat symlink that keeps the immutable cli refs resolving)             │
+│  L3 SURFACE — src/surface/ (cli.ts · handlers.ts · command-renderers.ts │
+│  renderers.ts · talk.ts) — the value-canonical CLI: every command is a  │
+│  PURE HANDLER returning an Outcome; runMain routes → the ONE emit       │
 │                                                                          │
-│   READS:  journey · status · check · specs · providers · config ·        │
-│           project · detail · results · packet · validate · rules ·       │
-│           branch · confirm · chain · steps · next · flow · read ·        │
-│           commands · help · <name>   (derived views — F3/F5)             │
-│   WRITES: spawn! · append! · gate! · lock! · supersede! · submit! ·      │
-│           run! · config! · project! · cred!   (single-writer binding)    │
-│   cross-cutting: project resolution (--project/ANN_PROJECT/cwd-walk),    │
-│                  lazy store proxy, resolveId (short ids)                 │
+│   READS:  journey · status · check · verify · ledger · specs ·          │
+│           providers · config · project · branch · confirm · detail ·    │
+│           results · packet · validate · rules · docs · sessions ·       │
+│           chain · steps · next · goal · flow · read · commands ·        │
+│           help · <name>   (derived views — F3/F5)                       │
+│   WRITES: spawn! · append! · submit! · gate! · goal! · spec! · run! ·   │
+│           advance! · config! · project! · cred!   (mutators end in !)   │
 └───────────────┬───────────────────────────────┬────────────────────────────┘
-                │ reads (store proxy)           │ composes prompts + calls
-                ▼                               ▼
+                │ handlers compose              │ interactive carve-outs
+                ▼                               ▼ (goal! seed · spec! · run! · advance!)
 ┌────────────────────────────────────────┐  ┌──────────────────────────────────┐
-│  KERNEL — src/kernel/ (S5)             │  │  PROVIDER ADAPTER —              │
-│                                        │  │   src/adapters/provider/         │
-│  kernel.ts  orchestrator:             │  │                                  │
-│   frontmostReady · lookBack ·         │──▶│  types.ts    frozen contract     │
-│   materialize · validate · execute ·  │  │  registry.ts provider registry   │
-│   verify · commit · advance           │  │  http.ts     OpenAI-compatible    │
-│  step.ts    Step protocol             │  │              client (retry,       │
-│  registry.ts id → implementation      │  │              fail-closed)         │
-│  flow.ts    work-type chains (data)   │  │  credentials.ts keychain (dev)    │
-│  interact.ts human channel (S8 seam)  │  │  config.ts   ~/.ann/config.json   │
-│  steps/     validate (interactive     │  │  oplog.ts    logs/provider.jsonl  │
-│              idea validator) ·        │  │                                  │
-│             envision · spec (F9)      │  │                                  │
-└───────────────┬────────────────────────┘  └──────────────────────────────────┘
-                │ reads (derived views)
+│  L2 FLOW — src/flow/                 │  │  L3 ABILITIES — src/abilities/     │
+│  frame.ts (the run! driver)          │  │  llm/     provider adapter (http,  │
+│  grill-session.ts (portable core +    │  │           registry, credentials,   │
+│    GOAL/DESIGN/SPECS profiles)        │  │           config, oplog)           │
+│  goal-grill · goal-seed · spec-grill  │  │  github/  the S7 binding           │
+│    · spec-doc · design-grill          │  │  recording.ts  the transcript half │
+│  operator-action.ts (advance!)        │  │                                   │
+│  materialize (packet) · validators ·  │  │  interact = the human channel (S8  │
+│  steps/ · chain · config ·            │  │  seam; console impl in surface)    │
+│  session-shared · runner-review       │  └──────────────────────────────────┘
+└───────────────┬────────────────────────┘
+                │ compose mutators + derived views (the ONLY store interface)
                 ▼
 ┌──────────────────────────────────────────────────────────────────────────┐
-│  STORE — src/store/store.ts  (the single writer, LB-3)                    │
-│                                                                            │
-│   appendEvent()  ← THE ONLY write path (strict schema, gate sequencing,   │
-│                   unknown-field rejection, per-type shapes)               │
-│   derived views: current(name) · status · detail · results · check ·      │
-│                  packet · parentConcluded · F-AC18/19 · traceability      │
-│   vocab.ts      rules/schema/vocab.json (lazy-loaded)                     │
-└───────────────┬──────────────────────────────────────────────────────────┘
+│  L1 COMMANDS — src/commands/index.ts  (Commands — the single-writer      │
+│  facade: spawn/submit/gate/append · goal-seed/met/archive · advance() ·  │
+│  look-back · status/journey/goal derivations · F-AC18/19 · vocab)        │
+└───────────────┬────────────────────────────────────────────────────────┘
+                │ reads/writes
+                ▼
+┌──────────────────────────────────────────────────────────────────────────┐
+│  L0 STORE — src/store/store.ts  (THE single writer, LB-3)                │
+│  appendEvent() ← the only write path · ledger (write-rev guard) ·        │
+│  derived views · docs.ts (the docs→git manifest)                         │
+└───────────────┬────────────────────────────────────────────────────────┘
                 │ reads/writes
                 ▼
 ┌──────────────────────────────┐   ┌───────────────────────────────────────┐
 │  PER-PROJECT  <proj>/.ann/   │   │  PER-USER  ~/.ann/                     │
 │  journey/   legs·nodes·events│   │  config.json  credentials + project    │
-│  docs/      specs·designs    │   │   paths (chmod 600, masked)            │
+│  docs/      the doc home     │   │   paths (chmod 600, masked)            │
 │  rules/     vocab·check·adap.│   │  keychain     dev-only secret          │
 └──────────────────────────────┘   └───────────────────────────────────────┘
 ```
@@ -208,7 +220,9 @@ can regress the status. Close via the gate + `append! completed` flow instead.
 | **GitHub binding (S7)** | ✅ built | `src/abilities/github/` |
 | **Human interface + renderers (S8)** | ✅ built (web UI = target surface) | `src/surface/renderers.ts` · `talk.ts` |
 | **Evals harness (S9)** | ✅ built | `src/evals/` |
-| **Goal-session lifecycle (v6)** — goal view · `goal! met` verdict · `goal! archive` reset | ✅ built | `src/commands/` + `src/store/store.ts` (goal leg · goal-met · seedGoal · archiveJourney) |
+| **Goal-session lifecycle (v6/v17)** — `goal` view · `goal! seed` grill → `docs/goal.md` · `goal! met` verdict · `goal! archive` reset | ✅ built | `src/flow/goal-grill.ts` · `goal-seed.ts` + `src/commands/` (seedGoal · verdict · archiveJourney) |
+| **SPECS grill area (leg 05)** — `spec!` produce/amend: grill the seeded goal into ONE amendable spec doc `docs/<name>.md`, PRODUCE lands a new name · `--amend` rewrites an in-force doc in place | ✅ built | `src/flow/spec-grill.ts` · `spec-doc.ts` |
+| **Operator action (leg 07)** — `advance!`: F5 approve→execute (functional-spec v2 F5 · flow-control v7 §2/§5) — integrity re-checked fail-closed, advance re-derived, continue-leg runs the frame, boundary stops presented | ✅ built | `src/flow/operator-action.ts` |
 | **Skills/tools/MCP (step model)** | ❌ decided, build deferred | — |
 
 The layer fold left compat symlinks in place: `src/cli.ts → surface/cli.ts`,
@@ -216,8 +230,8 @@ The layer fold left compat symlinks in place: `src/cli.ts → surface/cli.ts`,
 
 ## Goal-scoped sessions
 
-> **Status: implemented (v6)** — `goal` · `goal! met` · `goal! archive` are in the
-> registry above. Authoritative design:
+> **Status: implemented (v6 + v17 docs-as-git)** — `goal` · `goal! met` · `goal! archive`
+> (and `goal! seed`, the interactive grill) are in the registry above. Authoritative design:
 > `.agents/artifacts/goal-session-design.html` · implementation plan:
 > `~/.claude/plans/enchanted-growing-wombat.md`.
 
@@ -242,8 +256,8 @@ The layer fold left compat symlinks in place: `src/cli.ts → surface/cli.ts`,
    Success criteria: <…>      acs:     ← Success criteria: │ (never a hand-authored
   ────────────────────      ─────────────────────        │  duplicate — no drift)
   AUTHORED truth            GENERATED data              │
-  LOCKED (artifact-locked,  IMMUTABLE                   │
-  hash-checked)             never hand-edited           ▼
+  LOCKED (docs/goal.md —   IMMUTABLE                   │
+  git content, manifest sha)             never hand-edited           ▼
      │                        │                    fixed per session —
      └──────── changed goal ⇒ NEW SESSION (no in-place edit anywhere)
 ```
@@ -273,10 +287,8 @@ The layer fold left compat symlinks in place: `src/cli.ts → surface/cli.ts`,
   GOAL    goal.md + generated node      IMMUTABLE — criteria change ⇒ NEW SESSION
    │
   SPECS   docs-in-force                 revisable INSIDE the goal
-   │      reject rule: DEFERRED, not advertised — supersede! is content-blind today,
-   │      so "specs can't override the goal" becomes a scripted gate only when the
-   │      specs tier lands. It ships AS ONE slice (specs + reject rule + docs folder).
-   │
+   │      (leg 05: spec! produce/amend — grill the seeded goal into ONE amendable
+   │      doc docs/<name>.md; specs are living, amendable guidance — the goal is not)   │
   TASKS   code / small functions        MAY revise a spec · never the goal
    │
   RUN     the realized journey
@@ -327,7 +339,7 @@ The layer fold left compat symlinks in place: `src/cli.ts → surface/cli.ts`,
     refuses    NEW check/verify problems        (NOT the repo's known 15/4 baseline)
     refuses    uncommitted TRACKED changes      (never untracked scratch)
 
-  reset (2nd designated cross-folder writer — after supersede!):
+  reset (a designated cross-folder writer — alongside spawn! · advance! · spec!):
     .ann/journey/legs/*  +  .ledger.json
         │  move
         ▼
@@ -356,7 +368,10 @@ The layer fold left compat symlinks in place: `src/cli.ts → surface/cli.ts`,
 
 ## Contract stack
 
-The locked contracts live in `.ann/docs/` (the journey's own specs, per the change
-protocol — supersede, never edit). `npm run ann -- specs` lists them with their lock
-shas. The engine step model is decided: a shared dynamic capability environment
-(skills · tools · mcp), with the provider adapter growing tool-calling by amendment.
+The in-force contracts are git content at **`docs/`** — `npm run ann -- specs` lists the
+manifest → `docs/<name>.md` @ content-sha (the manifest is generated, never
+hand-maintained). Specs are LIVING guidance: `spec!` produce writes a NEW doc,
+`spec! --amend` rewrites an in-force doc in place (the old version stays in git
+history) — the goal doc (`docs/goal.md`) is the one immutable contract. The engine
+step model is decided: a shared dynamic capability environment (skills · tools · mcp),
+with the provider adapter growing tool-calling by amendment.
