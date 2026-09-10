@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store } from '../store/store.js';
+import { getVOCAB } from '../store/vocab.js';
 import { Commands } from '../commands/index.js';
 import { Frame } from '../flow/frame.js';
 import { Step, StepContext, StepOutput, Abilities, ResearchFinding, Intent, INTENT_KINDS } from '../flow/types.js';
@@ -362,7 +363,9 @@ export function runDogfood(root: string): { k1: Kpi; k4: Kpi; detail: string } {
   const bad: string[] = [];
   for (const id of ids) {
     const s = store.status(id);
-    if (['queued', 'active', 'done', 'failed', 'blocked', 'superseded'].includes(s)) resolved++;
+    // "valid" = a status the vocab registry declares (the list documents the derivation's
+    // range, resource-registry §5) — read, never a second hardcoded list to drift.
+    if (getVOCAB().statuses.includes(s)) resolved++;
     else bad.push(`${id}: ${s}`);
   }
   const pct = ids.length ? Math.round((resolved / ids.length) * 1000) / 10 : 0;

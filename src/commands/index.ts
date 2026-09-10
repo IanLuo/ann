@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join, relative } from 'node:path';
-import { Store, JourneyEvent, NodeDir, ResultItem, TaskDetail } from '../store/store.js';
+import { Store, JourneyEvent, NodeDir, ResultItem, TaskDetail, CLOSED_TASK_STATUSES } from '../store/store.js';
 import { blobSha, stripMarkers } from '../store/sha.js';
 import { getVOCAB } from '../store/vocab.js';
 
@@ -379,7 +379,11 @@ export class Commands {
       return fail('composite-owned', `'${event.type}' is owned by ${owner} — use it (the composite encodes the invariant; append! would bypass it)`);
     }
     try {
-      this.store.appendEvent(this.node(id), event);
+      // leg 08 task 01: `cancelled` is append-style BOOKKEEPING, not a gate decision — any
+      // initiator may record it, and the record carries the initiator's provenance
+      // (RECORDED_BY) exactly as the composites' own notes do. A caller's own note wins.
+      const record = event.type === 'cancelled' && !event.note ? { ...event, note: `cancelled (${this.who})` } : event;
+      this.store.appendEvent(this.node(id), record);
     } catch (e) {
       return fail('store-refused', (e as Error).message);
     }
@@ -472,7 +476,7 @@ export class Commands {
         : undefined;
     const goalDoc = this.goalDocOf();
     const metEvent = this.store.events(goalId).find((e) => e.type === 'goal-met');
-    const undone = legs.filter((l) => !['done', 'superseded'].includes(l.status)).map((l) => l.id);
+    const undone = legs.filter((l) => !CLOSED_TASK_STATUSES.includes(l.status)).map((l) => l.id);
     const pending = this.undecidedEverywhere();
     const exhausted = this.goalExhausted();
     const structural = {
@@ -665,20 +669,23 @@ export class Commands {
   }
 
   /** Exhaustion (goal-session-design §5): WORK exists (≥1 task), every leg derives
-   *  done/superseded, and no undecided submission hides anywhere. A seeded goal with
+   *  closed, and no undecided submission hides anywhere. A seeded goal with
    *  no work spawned is NOT exhausted — it is the open state. */
   private goalExhausted(): boolean {
-    const undone = this.legRows().filter((l) => !['done', 'superseded'].includes(l.status));
+    const undone = this.legRows().filter((l) => !CLOSED_TASK_STATUSES.includes(l.status));
     const hasWork = this.store.ids().some((i) => i.includes('/'));
     return hasWork && undone.length === 0 && this.undecidedEverywhere().length === 0;
   }
 
-  /** Undecided submissions across EVERY task (including done ones — a done task can
-   *  still hide a stray submission; the verdict must not seal over it). */
+  /** Undecided submissions across EVERY task that is not CANCELLED (including done ones —
+   *  a done task can still hide a stray submission; the verdict must not seal over it).
+   *  Leg 08 task 01: a cancelled task is closed work — its undecided submission is exactly
+   *  what the cancellation was recorded to escape, so the sweep skips it. */
   private undecidedEverywhere(): Array<{ task: string; gate: string }> {
     const out: Array<{ task: string; gate: string }> = [];
     for (const id of this.store.ids()) {
       if (!id.includes('/')) continue;
+      if (this.store.status(id) === 'cancelled') continue;
       for (const e of this.store.events(id)) {
         if (e.type !== 'submitted' || typeof e.gate !== 'string') continue;
         if (!this.undecidedSubmission(id, e.gate)) continue;
@@ -801,10 +808,11 @@ export class Commands {
 
   /* ══ look-back — a DERIVED view (core-design §1: an L1 read) ════════════════ */
 
-  /** The active leg: the frontmost leg not derived done/superseded. */
+  /** The active leg: the frontmost leg not derived closed (done/superseded/cancelled —
+   *  leg 08 task 01 put the closed set in one place). */
   private activeLeg(): string | undefined {
     const legs = this.store.ids().filter((i) => !i.includes('/')).sort();
-    return legs.find((l) => !['done', 'superseded'].includes(this.store.status(l)));
+    return legs.find((l) => !CLOSED_TASK_STATUSES.includes(this.store.status(l)));
   }
 
   /** Frontmost-ready: prefix order; queued/active only; failed/superseded/blocked
@@ -852,7 +860,7 @@ export class Commands {
       const tasks = this.store.tasksOf(working);
       const ready = tasks.filter((t) => ['queued', 'active'].includes(this.store.status(t)));
       if (ready.length) return { leg: working, action: 'continue-leg', detail: `next task: ${ready[0]} (${this.store.status(ready[0])})` };
-      const done = tasks.filter((t) => ['done', 'superseded'].includes(this.store.status(t))).length;
+      const done = tasks.filter((t) => CLOSED_TASK_STATUSES.includes(this.store.status(t))).length;
       const blocked = tasks.filter((t) => this.store.status(t) === 'blocked').length;
       return {
         leg: working,

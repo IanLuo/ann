@@ -234,6 +234,76 @@ describe('append! — refuses what the composites own (§8:289)', () => {
   it('still fails closed on the store schema', () => {
     expect(errorOf(cmds().append('01-leg/01-a', ev('evidence', { bogus: 1 }) as JourneyEvent)).code).toBe('store-refused');
   });
+
+  it('records `cancelled` through append! — with a REQUIRED reason (leg 08 task 01)', () => {
+    const c = cmds();
+    // a missing / blank / non-string reason is refused at the single writer
+    for (const extra of [{}, { reason: '   ' }, { reason: 42 }]) {
+      const e = errorOf(c.append('01-leg/01-a', ev('cancelled', extra) as JourneyEvent));
+      expect(e.code).toBe('store-refused');
+      expect(e.blocker).toContain('cancelled requires a reason');
+    }
+    // with a reason it records — ANY initiator (append-style bookkeeping, never a gate decision)
+    expect(valueOf(c.append('01-leg/01-a', ev('cancelled', { reason: 'the goal shrank — no longer needed' }) as JourneyEvent))).toBeUndefined();
+    expect(c.status('01-leg/01-a')).toBe('cancelled');
+    // provenance: the initiator is stamped onto the record (RECORDED_BY), like the composites' notes
+    expect(c.events('01-leg/01-a').find((e) => e.type === 'cancelled')!.note).toContain('test');
+  });
+});
+
+describe('the task-close vocabulary — closed-set parity in the derived views (leg 08 task 01)', () => {
+  beforeEach(() => { makeStore(); });
+  afterEach(() => { rmSync(root, { recursive: true, force: true }); });
+
+  const CANCEL = ev('cancelled', { reason: 'the goal shrank — no longer needed' });
+  const seedGoal = () => writeNode('01-goal', CONTRACT, [ev('created'), ev('completed')]);
+
+  it('a cancelled task is never proposed as ready — frontmostReady/advance skip it for the open sibling', () => {
+    writeNode('01-leg', CONTRACT);
+    writeNode('01-leg/01-a', CONTRACT, [ev('created'), CANCEL]);
+    writeNode('01-leg/02-b', CONTRACT, [ev('created')]);
+    const c = cmds();
+    expect(c.frontmostReady()).toEqual({ leg: '01-leg', task: '01-leg/02-b', status: 'queued' });
+    expect(c.advance().detail).toContain('next task: 01-leg/02-b');
+  });
+
+  it('a leg whose only task was cancelled derives done — the session reaches structural exhaustion', () => {
+    seedGoal();
+    writeNode('02-work', CONTRACT);
+    writeNode('02-work/01-a', CONTRACT, [ev('created'), CANCEL]);
+    const g = valueOf(cmds().goal());
+    expect(g.structural.exhausted).toBe(true);
+    expect(g.verdict).toBe('unconfirmed');
+  });
+
+  it('cancelling a task stuck at an undecided submission IS the escape hatch — the session can then be sealed', () => {
+    seedGoal();
+    writeNode('02-work', CONTRACT);
+    writeNode('02-work/01-a', CONTRACT, [ev('created'), ev('submitted', { gate: 'grill' })]);
+    expect(valueOf(cmds().goal()).structural.exhausted).toBe(false); // the stray submission blocks the session
+    expect(errorOf(cmds().goalVerdict('met')).code).toBe('undecided-submission');
+    // the human records the cancellation through the single writer…
+    valueOf(cmds().append('02-work/01-a', CANCEL as JourneyEvent));
+    // …and the task no longer holds the session open (the leg derives done, the submission is moot)
+    expect(cmds().status('02-work/01-a')).toBe('cancelled');
+    expect(valueOf(cmds().goal()).structural.exhausted).toBe(true);
+    expect(valueOf(cmds().goalVerdict('met')).verdict).toBe('met');
+  });
+
+  it('the accepted-but-uncompleted state is NOT runnable and NOT done — advance stops at the closure boundary', () => {
+    writeNode('01-leg', CONTRACT);
+    writeNode('01-leg/01-a', CONTRACT, [
+      ev('created'),
+      ev('submitted', { gate: 'grill' }), ev('confirmed', { gate: 'grill' }),
+      ev('submitted', { gate: 'confirm' }), ev('confirmed', { gate: 'confirm' }),
+    ]);
+    const c = cmds();
+    expect(c.statuses('01-leg/01-a')[0].status).toBe('accepted');
+    expect(c.frontmostReady()).toBeUndefined();
+    const a = c.advance();
+    expect(a.action).toBe('closure-needed');
+    expect(a.detail).not.toContain('next task:');
+  });
 });
 
 describe('lock! — the THIN artifact record (one current per name; any file; never touches the file)', () => {

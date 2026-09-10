@@ -1,4 +1,5 @@
 import { RuleFinding, ValidatorContext } from './types.js';
+import { CLOSED_TASK_STATUSES } from '../../store/store.js';
 
 /** The nodes a rule should check: one node (ann validate <id>) or all tasks. */
 const targetsOf = (ctx: ValidatorContext): string[] =>
@@ -189,11 +190,12 @@ export const distanceToGoal = {
     const remaining: string[] = [];
     for (const leg of legs) {
       const st = ctx.store.status(leg);
-      if (st === 'done' || st === 'failed' || st === 'superseded') continue;
+      // closed (done/superseded/cancelled — leg 08 task 01) or failed: nothing remains to do
+      if (CLOSED_TASK_STATUSES.includes(st) || st === 'failed') continue;
       remaining.push(leg);
       const tasks = ctx.store.tasksOf(leg).filter((t) => {
         const ts = ctx.store.status(t);
-        return !['done', 'failed', 'superseded'].includes(ts);
+        return !(CLOSED_TASK_STATUSES.includes(ts) || ts === 'failed');
       });
       for (const t of tasks) remaining.push(t);
     }

@@ -14,6 +14,8 @@ export interface JourneyEvent {
   successor?: { name: string; path: string };
   target?: string;
   feedback?: string;
+  /** The required WHY on a `cancelled` record (leg 08 task 01) — also used by `deferred`. */
+  reason?: string;
   [key: string]: unknown;
 }
 
@@ -38,6 +40,23 @@ interface NodeEntry {
   id: string;
   events: JourneyEvent[];
 }
+
+/** The CLOSED task statuses — a task in one of these is no longer OPEN WORK (leg 08
+ *  task 01 added `cancelled` to the done/superseded pair). Wherever the journey asks
+ *  "is this task still open?" — the leg-done aggregate, the leg gate, the goal's
+ *  structural exhaustion, the distance-to-goal set — this is the answer, so a cancelled
+ *  task never keeps its leg or the session from deriving finished. `failed` is
+ *  deliberately NOT closed: a leg whose remaining tasks all failed derives blocked
+ *  (escalate), and a failed task is not finished work. */
+export const CLOSED_TASK_STATUSES = ['done', 'superseded', 'cancelled'];
+
+/** NOT OPEN TO RUN: the statuses that are neither open work nor work a leg can point at
+ *  as its frontmost child — the closed set plus `failed` (exhausted → escalate). An
+ *  `accepted` task (the confirm gate accepted, no `completed` yet) is deliberately NOT
+ *  here: it is unclosed work, so it stays the leg's frontmost child and its status is
+ *  what the leg reports — it is simply not RUNNABLE (every ready derivation filters on
+ *  `queued`/`active` explicitly, so an accepted task is never proposed to next/advance!). */
+const NOT_OPEN_TO_RUN = [...CLOSED_TASK_STATUSES, 'failed'];
 
 /** The store write-rev ledger (`.ann/journey/.ledger.json`) — ann's last-known state
  *  per node, recorded after every CLI write. `verify` diffs the current store against
@@ -373,7 +392,7 @@ export class Store {
 
   /**
    * Derived status (v8 §3/§12). Tasks: tail mapping. Legs: pure function of the
-   * leg's tasks — all done → done; frontmost-ready child → its status; childless
+   * leg's tasks — all closed → done; frontmost-ready child → its status; childless
    * → own lifecycle (L1 base step); all remaining failed → blocked (escalate).
    */
   status(id: string): string {
@@ -401,14 +420,34 @@ export class Store {
         case 'superseded':
           if (status !== 'done' && status !== 'failed') status = 'superseded';
           break;
+        // leg 08 task 01 (the task-close vocabulary): the confirm-result gate was
+        // ACCEPTED but no `completed` follows — the deliverable is approved, the delivery
+        // is not recorded. Never `queued` (the created default would make it look
+        // re-runnable to next/advance!/run!) and never `done` (nothing was delivered).
+        // The GRILL gate's confirmation is NOT this state: a grilled-but-unstarted task
+        // is ordinary queued/active work.
+        case 'confirmed':
+          if (e.gate === 'confirm' && status !== 'done' && status !== 'failed') status = 'accepted';
+          break;
+        // leg 08 task 01 — the CANCELLED terminal: the task is no longer needed, an
+        // append-style bookkeeping record (NOT a gate decision — any initiator may
+        // record it, with a required reason). Like `superseded` it never un-closes
+        // delivered (done) or exhausted (failed) work; unlike it the blocked
+        // re-derivations below never override it — cancellation is the escape hatch for
+        // a task stuck at an undecided submission.
+        case 'cancelled':
+          if (status !== 'done' && status !== 'failed') status = 'cancelled';
+          break;
         // v6 goal session: `goal-met` is deliberately NOT here — a goal verdict is
         // STATUS-INERT (goal-session-design §2). Only the seed (created+completed)
         // makes the goal leg done; the verdict never moves legStatus.
       }
     }
     // v8 §3: a submitted without a confirmed/rejected at that gate = blocked
-    // (waiting on human) — a gate cannot be skipped silently. Never overrides done/failed.
-    if (status !== 'done' && status !== 'failed') {
+    // (waiting on human) — a gate cannot be skipped silently. Never overrides done/failed
+    // — nor `cancelled` (leg 08 task 01): a cancelled task STAYS cancelled, whatever
+    // undecided submission or undischarged `waiting` record it is carrying.
+    if (status !== 'done' && status !== 'failed' && status !== 'cancelled') {
       const pendingGate = evs.some((e) => {
         if (e.type !== 'submitted' || typeof e.gate !== 'string') return false;
         return !evs.slice(evs.indexOf(e) + 1).some((x) => (x.type === 'confirmed' || x.type === 'rejected') && x.gate === e.gate);
@@ -429,9 +468,9 @@ export class Store {
   private legStatus(id: string): string {
     const children = [...this.nodes.keys()].filter((n) => n.startsWith(id + '/') && n.split('/').length === 2);
     if (!children.length) return this.taskStatus(id);
-    if (children.every((c) => ['done', 'superseded'].includes(this.taskStatus(c)))) return 'done';
+    if (children.every((c) => CLOSED_TASK_STATUSES.includes(this.taskStatus(c)))) return 'done';
     const ready = children
-      .filter((c) => !['done', 'failed', 'superseded'].includes(this.taskStatus(c)))
+      .filter((c) => !NOT_OPEN_TO_RUN.includes(this.taskStatus(c)))
       .sort();
     return ready.length ? this.taskStatus(ready[0]) : 'blocked';
   }
@@ -1047,10 +1086,20 @@ export class Store {
       'gate-revised': ['at', 'type', 'note', 'gate'],
       transferred: ['at', 'type', 'note', 'target', 'scope'],
       deferred: ['at', 'type', 'note', 'reason'],
+      // leg 08 task 01: `cancelled` records WHY the task is no longer needed — the reason
+      // is REQUIRED (checked below), so a cancellation is never a silent disappearance.
+      cancelled: ['at', 'type', 'note', 'reason'],
       'goal-met': ['at', 'type', 'note', 'decision', 'feedback'],
     };
     const unknown = Object.keys(e).filter((k) => !(allowed[e.type] ?? []).includes(k));
     if (unknown.length) throw new Error(`append rejected: unknown field(s) '${unknown.join(', ')}' on ${e.type} (strict schema, format v12 §3)`);
+    if (e.type === 'cancelled') {
+      // The reason is the record's whole point (a task marked no longer needed must say
+      // why); fail-closed rather than let a bare cancellation into the log.
+      if (typeof e.reason !== 'string' || !e.reason.trim()) {
+        throw new Error("append rejected: cancelled requires a reason (a non-blank 'reason' field — why the task is no longer needed)");
+      }
+    }
     if (e.type === 'goal-met') {
       // v6 (goal-session-design §4): the verdict is 'met' only — a recorded human call.
       if (e.decision !== 'met') throw new Error("append rejected: goal-met.decision must be 'met'");
@@ -1471,7 +1520,9 @@ export class Store {
       const met = this.events(prev).some((e) => e.type === 'completed');
       return { met, blocker: met ? undefined : `leg ${prev} (childless) has no completed record` };
     }
-    const undone = tasks.filter((t) => !['done', 'superseded'].includes(this.taskStatus(t)));
+    // CLOSED_TASK_STATUSES (leg 08 task 01): a cancelled task is closed work like a done
+    // or superseded one — it never holds the next leg's gate shut.
+    const undone = tasks.filter((t) => !CLOSED_TASK_STATUSES.includes(this.taskStatus(t)));
     return undone.length ? { met: false, blocker: `${prev} has unfinished tasks: ${undone.join(', ')}` } : { met: true };
   }
 }

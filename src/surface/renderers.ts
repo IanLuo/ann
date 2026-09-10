@@ -14,9 +14,9 @@ import type { GoalView } from '../commands/index.js';
  * → text (no secrets, no scalar progress)"):
  *   - NO SECRETS (NFR-SEC-1): `redact()` strips token/key/secret patterns before any
  *     text leaves the renderer; `hasSecret()` is the guard.
- *   - NO SCALAR PROGRESS (AC5): the renderers emit STATUS WORDS (queued/active/done/
- *     blocked), never percentages or counts-as-progress. `hasScalarProgress()` is the
- *     guard, asserted in tests.
+ *   - NO SCALAR PROGRESS (AC5): the renderers emit STATUS WORDS (queued · active ·
+ *     accepted · blocked · done · failed · superseded · cancelled), never percentages or
+ *     counts-as-progress. `hasScalarProgress()` is the guard, asserted in tests.
  */
 
 export interface StatusRow {

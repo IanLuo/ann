@@ -20,7 +20,8 @@
     "gate-revised",
     "transferred",
     "deferred",
-    "goal-met"
+    "goal-met",
+    "cancelled"
   ],
   "statuses": [
     "queued",
@@ -28,7 +29,9 @@
     "blocked",
     "done",
     "failed",
-    "superseded"
+    "superseded",
+    "cancelled",
+    "accepted"
   ],
   "gates": [
     "grill",

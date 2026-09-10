@@ -88,6 +88,111 @@ describe('Store — derived status (journey-format-spec v8 §12)', () => {
   });
 });
 
+describe('Store — the task-close vocabulary: the cancelled terminal + the accepted gap (leg 08 task 01)', () => {
+  beforeEach(() => { makeStore(); });
+  afterEach(() => { rmSync(root, { recursive: true, force: true }); });
+
+  /** The gates a task walks to a confirm-gate acceptance: grill then confirm. */
+  const GATES = [ev('submitted', { gate: 'grill' }), ev('confirmed', { gate: 'grill' }), ev('submitted', { gate: 'confirm' }), ev('confirmed', { gate: 'confirm' })];
+
+  it('derives `cancelled` from the event — a task marked no longer needed', () => {
+    writeNode('01-goal/01-a', {}, [ev('created'), ev('cancelled', { reason: 'the epic goal shrank — this work is not needed' })]);
+    expect(new Store(root).status('01-goal/01-a')).toBe('cancelled');
+  });
+
+  it('cancelled is TERMINAL against delivered work — it never overrides done', () => {
+    writeNode('01-goal/01-a', {}, [ev('created'), ...GATES, ev('completed'), ev('cancelled', { reason: 'recorded in error' })]);
+    expect(new Store(root).status('01-goal/01-a')).toBe('done');
+  });
+
+  it('cancelled is TERMINAL against exhausted work — it never overrides failed', () => {
+    writeNode('01-goal/01-a', {}, [ev('created'), ev('failed'), ev('cancelled', { reason: 'x' })]);
+    expect(new Store(root).status('01-goal/01-a')).toBe('failed');
+  });
+
+  it('cancelled STICKS through the blocked re-derivations: an undecided submission and an undischarged `waiting` never override it', () => {
+    // the escape hatch: a task nobody will decide is cancelled and STAYS cancelled
+    writeNode('01-goal/01-a', {}, [ev('created'), ev('submitted', { gate: 'grill' }), ev('cancelled', { reason: 'nobody will decide this gate — the work is not needed' })]);
+    expect(new Store(root).status('01-goal/01-a')).toBe('cancelled');
+    // and the empty-chain verify wait (a `waiting` with no later commit evidence)
+    writeNode('01-goal/02-b', {}, [ev('created'), ...GATES, ev('waiting'), ev('cancelled', { reason: 'the runner work is not needed' })]);
+    expect(new Store(root).status('01-goal/02-b')).toBe('cancelled');
+  });
+
+  it('a queued or an active task can be cancelled', () => {
+    writeNode('01-goal/01-a', {}, [ev('created'), ev('cancelled', { reason: 'x' })]);
+    writeNode('01-goal/02-b', {}, [ev('created'), ev('activated'), ev('cancelled', { reason: 'x' })]);
+    const s = new Store(root);
+    expect(s.status('01-goal/01-a')).toBe('cancelled');
+    expect(s.status('01-goal/02-b')).toBe('cancelled');
+  });
+
+  it('closed-set parity: a leg whose only task was cancelled derives done, and the next leg\'s gate is MET', () => {
+    writeNode('01-goal', {}, [ev('created')]);
+    writeNode('01-goal/01-a', {}, [ev('created'), ev('cancelled', { reason: 'the goal shrank' })]);
+    const s = new Store(root);
+    expect(s.status('01-goal')).toBe('done');
+    expect(s.legGateMet('02-next')).toEqual({ met: true });
+  });
+
+  it('a cancelled task is never the leg\'s frontmost child (an open sibling drives the leg\'s status)', () => {
+    writeNode('01-goal', {}, [ev('created')]);
+    writeNode('01-goal/01-a', {}, [ev('created'), ev('cancelled', { reason: 'x' })]);
+    writeNode('01-goal/02-b', {}, [ev('created')]);
+    expect(new Store(root).status('01-goal')).toBe('queued'); // NOT `cancelled` — a closed child is not the leg's next work
+  });
+
+  it('appendEvent records `cancelled` with a reason and REFUSES a missing or blank one (fail-closed)', () => {
+    writeNode('01-goal/01-a', {}, [ev('created')]);
+    const s = new Store(root);
+    expect(() => s.appendEvent(s.resolveNode('01-goal/01-a'), ev('cancelled'))).toThrow(/requires a reason/);
+    expect(() => s.appendEvent(s.resolveNode('01-goal/01-a'), ev('cancelled', { reason: '   ' }))).toThrow(/requires a reason/);
+    expect(() => s.appendEvent(s.resolveNode('01-goal/01-a'), ev('cancelled', { reason: 42 }))).toThrow(/requires a reason/);
+    s.appendEvent(s.resolveNode('01-goal/01-a'), ev('cancelled', { reason: 'the goal shrank — no longer needed' }));
+    expect(s.events('01-goal/01-a').map((e) => e.type)).toEqual(['created', 'cancelled']);
+    expect(s.status('01-goal/01-a')).toBe('cancelled');
+  });
+
+  it('cancelled stays a strict schema (unknown fields rejected) and is never a leg-root write', () => {
+    writeNode('01-goal', {}, [ev('created')]);
+    writeNode('01-goal/01-a', {}, [ev('created')]);
+    const s = new Store(root);
+    expect(() => s.appendEvent(s.resolveNode('01-goal/01-a'), ev('cancelled', { reason: 'x', successor: { name: 'a', path: 'b' } }))).toThrow(/unknown field/);
+    expect(() => s.appendEvent(s.resolveNode('01-goal'), ev('cancelled', { reason: 'x' }))).toThrow(/leg roots carry no events/);
+  });
+
+  it('the honest-status gap: a confirm-gate ACCEPTED task with no `completed` derives `accepted` — never queued, never done', () => {
+    writeNode('01-goal/01-a', {}, [ev('created'), ...GATES]);
+    const s = new Store(root);
+    expect(s.status('01-goal/01-a')).toBe('accepted');
+    // the GRILL gate's acceptance is NOT this state — a grilled-but-unstarted task is queued work
+    writeNode('01-goal/02-b', {}, [ev('created'), ev('submitted', { gate: 'grill' }), ev('confirmed', { gate: 'grill' })]);
+    expect(s.status('01-goal/02-b')).toBe('queued');
+    // the delivery (`completed`) closes it to done
+    writeNode('01-goal/01-a', {}, [ev('created'), ...GATES, ev('completed')]);
+    expect(new Store(root).status('01-goal/01-a')).toBe('done');
+  });
+
+  it('`accepted` yields to the two-phase wait: confirm accepted + an undischarged `waiting` still derives blocked', () => {
+    writeNode('01-goal/01-a', {}, [ev('created'), ...GATES, ev('waiting')]);
+    expect(new Store(root).status('01-goal/01-a')).toBe('blocked');
+  });
+
+  it('keeps the accepted task out of its leg\'s closed aggregate (it is UNCLOSED work)', () => {
+    writeNode('01-goal', {}, [ev('created')]);
+    writeNode('01-goal/01-a', {}, [ev('created'), ...GATES]);
+    const s = new Store(root);
+    expect(s.status('01-goal')).toBe('accepted'); // the leg reports its frontmost unclosed child
+    expect(s.legGateMet('02-next').met).toBe(false); // an accepted task is not closed — the gate stays shut
+  });
+
+  it('the vocab registry declares the new words (both or neither — resource-registry §5)', () => {
+    expect(getVOCAB().eventTypes).toContain('cancelled');
+    expect(getVOCAB().statuses).toContain('cancelled');
+    expect(getVOCAB().statuses).toContain('accepted');
+  });
+});
+
 describe('Store — resolution current(name) (format §5)', () => {
   beforeEach(() => { makeStore(); });
   afterEach(() => { rmSync(root, { recursive: true, force: true }); });

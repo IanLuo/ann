@@ -137,6 +137,28 @@ describe('e2e — the CLI binary', () => {
     expect(out(chk)).toContain('State: 01-leg done');
   });
 
+  it('cancelled — the task-close terminal, recordable through append! with a REQUIRED reason', () => {
+    prep(root, LEG, TASK);
+    cli(root, ['spawn!', LEG, CONTRACT('the first leg')]);
+    cli(root, ['spawn!', TASK, CONTRACT('do the thing')]);
+
+    // the reason is REQUIRED — a bare / blank cancellation is refused at the single writer
+    for (const raw of [EVENT('cancelled'), JSON.stringify({ at: '2026-08-29', type: 'cancelled', reason: '   ' })]) {
+      const r = cli(root, ['append!', TASK, raw]);
+      expect(r.code).toBe(1);
+      expect(out(r)).toContain('cancelled requires a reason');
+    }
+
+    // with a reason it records, and the derived status is the terminal word
+    expect(out(cli(root, ['append!', TASK, JSON.stringify({ at: '2026-08-29', type: 'cancelled', reason: 'the goal shrank — this work is no longer needed' })]))).toContain('appended');
+    expect(out(cli(root, ['status', TASK]))).toContain('cancelled');
+    // closed-set parity: the cancelled task no longer holds its leg shut
+    expect(out(cli(root, ['journey']))).toContain('01-leg done');
+    const chk = cli(root, ['check']);
+    expect(chk.code).toBe(0);
+    expect(out(chk)).toContain('State: 01-leg done');
+  });
+
   it('enforces the write discipline and the gates through the CLI', () => {
     prep(root, LEG, TASK);
     cli(root, ['spawn!', LEG, CONTRACT('l')]);
