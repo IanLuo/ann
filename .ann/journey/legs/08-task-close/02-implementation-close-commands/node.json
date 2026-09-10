@@ -1,0 +1,19 @@
+{
+  "id": "08-task-close/02-implementation-close-commands",
+  "contract": {
+    "intent": "THE CLOSE COMMANDS — give the common task-close gestures first-class commands instead of hand-written append! JSON. Evidence (the conclusion record with commits[]) is written by EVERY task and is currently raw JSON; completed (the done terminal) is likewise hand-written and its absence is the accepted-but-uncompleted trap. Surface rule (the two-tier writing model): a dedicated command exists where a write is a GATE/STRUCTURE transition or a COMMON GESTURE — everything else stays a shaped fact on append!. This task adds the two common-gesture commands and resolves how completed is recorded, against leg 08 task 01's honest-status work.",
+    "acceptanceCriteria": [
+      "`evidence!` (name decided against the surface language — evidence!/commit!) records a task conclusion through a VALIDATED shape: commits[] non-empty with sha per entry, optional refs[]; per-type validation stays the store source of truth (the command is a thin validated front, never a second divergent validator); RECORDED_BY provenance applies",
+      "The `completed` decision is RESOLVED and RECORDED: either a first-class `complete!` command (named refusals when the confirm-accept or the evidence precondition is missing) OR gate! confirm accept auto-completes when evidence is present — decided against 08-task-close/01's AC-4 (the accepted-but-uncompleted derived status). If accept auto-completes, say so in 01's terms (the intermediate word may be unnecessary); if not, 01's honest intermediate status stands. The decision is recorded on this task, not left implicit",
+      "Both commands appear in the derived surface table + README; they add NO new write path (they compose the same L1 store writes the append! path uses); the e2e/unit flows that hand-write the evidence/completed JSON are migrated to the commands where they represent the normal gesture",
+      "The full suite stays green (new command tests: shape refusals, preconditions, the happy path) and ann check/verify stay clean on the live journey; committed with evidence"
+    ],
+    "workType": "implementation",
+    "targetAreas": [
+      "src/surface",
+      "src/commands",
+      "src/e2e"
+    ]
+  },
+  "createdAt": "2026-09-10"
+}
