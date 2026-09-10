@@ -92,6 +92,36 @@ describe('renderPlan (F12 — full plan)', () => {
     expect(text).toContain('frontmost-ready: 06-engine-build/09-s6-runner-reviewer (queued)');
     expect(text).toContain('also ready: 06-engine-build/10-s7-github-binding (queued)');
   });
+
+  /* The derived-state lie (leg 08 corrective): "no frontmost-ready task" is NOT "all
+   * spawned tasks done" — a blocked (waiting on a human), accepted (awaiting
+   * complete!) or failed task also leaves nothing ready. The leg's OWN closure decides. */
+  it.each(['blocked', 'accepted', 'failed'])('a leg with an unfinished (%s) task never claims "all spawned tasks done"', (status) => {
+    const text = renderPlan(
+      [
+        {
+          id: '08-task-close',
+          status: 'accepted',
+          superseded: false,
+          tasks: [
+            { id: '08-task-close/01-implementation-close-vocab', status: 'done' },
+            { id: '08-task-close/02-implementation-close-commands', status },
+          ],
+        },
+      ],
+      { activeLeg: '08-task-close', activeLegStatus: 'accepted', alsoReady: [], legGate: { met: true } },
+    );
+    expect(text).not.toContain('all spawned tasks done');
+    expect(text).toContain(`no ready tasks in leg — unfinished: 08-task-close/02-implementation-close-commands (${status})`);
+  });
+
+  it('a genuinely closed leg DOES print the leg-gate review line', () => {
+    const text = renderPlan(
+      [{ id: '07-operator-advance', status: 'done', superseded: false, tasks: [{ id: '07-operator-advance/01-implementation-advance', status: 'done' }] }],
+      { alsoReady: [], legGate: { met: true } },
+    );
+    expect(text).toContain('no active leg — previous leg derived done; LEG GATE REVIEW');
+  });
 });
 
 describe('renderGoal — the goal-session view (goal-session-design §9)', () => {

@@ -851,6 +851,8 @@ export const HANDLERS: Record<string, Handler> = {
   'evidence!': (ctx) => {
     const refs = takeFlag(ctx.args.slice(1), '--refs');
     const note = takeFlag(refs.rest, '--note');
+    const stray = strayFlag(note.rest);
+    if (stray) return usage(`usage: ann evidence! <id> <sha>[,<sha>…] [--refs a.md,b.md] [--note '<text>'] — unknown flag ${stray}`);
     const [id, ...shaGroups] = note.rest;
     const shas = shaGroups
       .flatMap((g) => g.split(','))
@@ -869,6 +871,8 @@ export const HANDLERS: Record<string, Handler> = {
   },
   'complete!': (ctx) => {
     const note = takeFlag(ctx.args.slice(1), '--note');
+    const stray = strayFlag(note.rest);
+    if (stray) return usage(`usage: ann complete! <id> [--note '<text>'] — unknown flag ${stray}`);
     const id = note.rest[0];
     if (!id) return usage("usage: ann complete! <id> [--note '<text>']");
     return writeResult(ctx.commands.complete(id, { ...(note.value ? { note: note.value } : {}) }));
@@ -916,6 +920,13 @@ function takeFlag(args: string[], flag: string): { value?: string; rest: string[
   const i = args.indexOf(flag);
   if (i < 0) return { rest: args };
   return { value: args[i + 1], rest: [...args.slice(0, i), ...args.slice(i + 2)] };
+}
+
+/** The first `--`-prefixed token left over after the KNOWN flags are taken — an unknown
+ *  flag must FAIL CLOSED (a named usage error), never land as a sha/note value: a typo
+ *  (`--bogus xx`) would otherwise write junk commits into a conclusion record. */
+function strayFlag(rest: string[]): string | undefined {
+  return rest.find((a) => a.startsWith('--'));
 }
 
 /* ── the interactive carve-out: goal! seed (NOT value-canonical — it drives a

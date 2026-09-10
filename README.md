@@ -45,50 +45,50 @@ session (unchanged); a bad/absent target fails closed at startup (named error, e
 
 ### The full reference
 
-| Command | Args | What it does |
-|---|---|---|
-| `<name>` | `` | the path for one doc (docs manifest) or a current artifact's logical name |
-| `journey` | `[id]` | the look-back (no id) · one node's walk (with id) · alias --journey |
-| `status` | `[filter]` | every node's derived status (+ superseded marker) · alias --status |
-| `check` | `` | integrity + gates + docs-manifest freshness + the journey state line · alias --check |
-| `verify` | `` | the DRIFT read — reconciles the log's recorded claims vs filesystem/git reality (D1-D5 + store-external); exits 1 on any drift · alias --verify |
-| `ledger` | `` | the write-rev ledger — rev + per-node last-write rev/at + hashes (the store-external integrity guard) · alias --ledger |
-| `specs` | `` | the docs contract stack — the manifest → docs/<name>.md @ content-sha (upstream/referrers prose from the file head) · alias --specs |
-| `providers` | `` | the adapter registry: providers, models, defaults (env-resolved, api key masked) · alias --providers |
-| `config` | `` | the user config file (~/.ann/config.json; apiKey masked) · alias --config |
-| `config!` | `set <key> <value>` | WRITE — save a config value (provider|model|baseUrl|apiKey|maxTokens); chmod 600, outside the repo; apiKey never echoed |
-| `project` | `` | show the current project + known projects · alias --project |
-| `project!` | `add|use|remove <path>` | WRITE — manage projects by PATH (each has its OWN journey); add <path> registers one |
-| `cred!` | `set|delete <service> <account> [secret]` | WRITE — OS keychain (macOS, DEV-ONLY local CLI): save/remove a secret via stdin; production = server-side env (12-factor) |
-| `branch` | `<id>` | a node + every descendant's events, one walk · alias --branch |
-| `confirm` | `<id>` | a node's gate card: intent · ACs · gates · results |
-| `detail` | `<id>` | a node's full derived detail: contract · gate states · artifacts (historical only) · blockers · events tail |
-| `results` | `<id> [n]` | a task's results by kind (commit/ref/evidence/link); with n, drill into one (commit=git show, ref=file/dir, evidence=event) · alias --results |
-| `packet` | `<id>` | the node's deterministic context packet (context-packet-spec; derived on demand, never saved) · alias --packet |
-| `validate` | `[id]` | run the enabled validator rules (all nodes, or one node) — rule-id'd deterministic findings · alias --validate |
-| `rules` | `[--write]` | the DERIVED check-rules registry (self-contained rule modules are the source) · alias --rules; --write regenerates rules/check/rules.json |
-| `docs` | `[--write]` | the docs→git resolution index (docs/manifest.json — generated from docs/, never hand-maintained) · alias --docs; --write regenerates the manifest |
-| `sessions` | `` | the archived sessions of this project (goal! archive history) — one line each: goal · status · verdict · legs; point at one read-only via ANN_STORE · alias --sessions |
-| `chain` | `` | the project flow config as data (work-type chains, F3 view) · alias --chain |
-| `steps` | `` | the step registry — the pluggable surface future steps implement against · alias --steps |
-| `next` | `` | the run-next proposal (F5 pull): active leg, frontmost-ready, pending gates, leg gate — derived, never assumed · alias --next |
-| `goal` | `` | the goal-session view (goal-session-design §9): goalId · status · the authored goal doc (docs/goal.md) · the generated contract · structural state · verdict (met/unconfirmed/open) · legs (status words only) · alias --goal |
-| `flow` | `<id>` | a task's RESOLVED flow + chain validation (the data the frame will execute) · alias --flow |
-| `run!` | `<id>` | WRITE — run a task through the FRAME (materialize → grill → activate → execute → verify → confirm → commit); resumable, stops at the first block |
-| `advance!` | `` | WRITE — the OPERATOR ACTION (F5 approve→execute): integrity re-checked fail-closed → the advance re-derived (a stale proposal executes nothing) → the ADVANCE card + the builder's ONE approve → continue-leg runs the frontmost-ready through the frame (run!) and lands at its next human gate; advance-leg / closure-needed / none are NOT machine-executable — the boundary/closure/goal-consult card, then stop |
-| `commands` | `` | this table as markdown (the derived doc) · alias --commands |
-| `help` | `` | usage · alias --help / -h |
-| `read` | `<name>` | the L1 CONTENT read view — marker-stripped content + path + sha; resolves via the docs manifest (the forward path), with a legacy current-artifact fallback for history · alias --read |
-| `append!` | `<id> '<json>'` | WRITE — single-writer append; REFUSES the composite-owned kinds (created/submitted/confirmed/rejected/goal-met) and the RETIRED doc-artifact vocab (artifact-locked/superseded). `cancelled` (a task no longer needed — the counterpart of the submit!/gate! close) is recordable here with a REQUIRED reason |
-| `spawn!` | `<id> '<contract-json>'` | WRITE — create a node; enforces the v14 contract schema + F-AC19 + id naming + the conclusion (commit-evidence)/leg gates |
-| `submit!` | `<id> grill|confirm [confirmedSha]` | WRITE — submit finished work at a gate for the human decision (the SUCCESS half of the task close; the counterpart is `cancel` — no longer needed): records `submitted` — the task blocks and waits for `gate! accept|reject`; an interrupted gate stays blocked (resumable), never looks un-started. `[confirmedSha]` (confirm gate only) binds the decision to the exact bytes under review |
-| `gate!` | `<id> grill|confirm accept|reject [feedback]` | WRITE — human gate decision (submit + decide; the 3-reject bound is a CONSTANT owned here) |
-| `evidence!` | `<id> <sha>[,<sha>…] [--refs a.md,b.md] [--note '<text>']` | WRITE — the CONCLUSION record (F-AC18): structured commit evidence naming the committed doc/code that carries the deliverable (commits[] non-empty, a sha per entry; optional refs[]); the shape stays the store's — a validated front over the same L1 write, provenance from RECORDED_BY |
-| `complete!` | `<id> [--note '<text>']` | WRITE — the DONE terminal: refuses without the confirm gate's LAST decision being an ACCEPT and without conclusion evidence (evidence.commits[]); gates decide, commands complete — gate! confirm accept never auto-completes |
-| `goal!` | `met [feedback]` | WRITE — the HUMAN verdict that seals a structurally-exhausted session (goal-met on the goal root); refused for automated (agent) initiators, double-met, and any undecided submission |
-| `goal!` | `archive [--override]` | WRITE — guarded structural reset: move .ann/journey → .ann/archive/sessions/<ts>-<slug>/ for a fresh goal; refuses without a met verdict (or --override), on store-external verify drifts, and on uncommitted tracked .ann/journey changes |
-| `goal!` | `seed [goal-statement]` | WRITE — grill a goal at SESSION scope (EMPTY journey seeds new; a RE-SEEDABLE sole unconsumed goal is REPLACED after re-grilling — consumed/met goals refuse): the interactive idea-validation session (grill → batch-ask → research → re-grill → human verdict); on solid, synthesize goal.md (Goal:/Success criteria:) + seed/re-seed the goal leg + write docs/goal.md + regenerate the manifest; revise/reject seeds nothing |
-| `spec!` | `[docName] [--amend]` | WRITE — grill the SEEDED goal at REQUIREMENTS/SYSTEM-DESIGN level into ONE amendable spec doc docs/<docName>.md (default requirements): PRODUCE grills the goal into a NEW name; --amend REWRITES an EXISTING in-force doc in place (specs are LIVING, amendable — the goal is not): the interactive SPECS grilling session; on GO it writes docs/<name>.md + regenerates the manifest — commit to publish (JSON refuses: interactive terminal only) |
+| Command | Args | What it does | --json |
+|---|---|---|---|
+| `<name>` | `` | the path for one doc (docs manifest) or a current artifact's logical name | `yes` |
+| `journey` | `[id]` | the look-back (no id) · one node's walk (with id) · alias --journey | `yes` |
+| `status` | `[filter]` | every node's derived status (+ superseded marker) · alias --status | `yes` |
+| `check` | `` | integrity + gates + docs-manifest freshness + the journey state line · alias --check | `yes` |
+| `verify` | `` | the DRIFT read — reconciles the log's recorded claims vs filesystem/git reality (D1-D5 + store-external); exits 1 on any drift · alias --verify | `yes` |
+| `ledger` | `` | the write-rev ledger — rev + per-node last-write rev/at + hashes (the store-external integrity guard) · alias --ledger | `yes` |
+| `specs` | `` | the docs contract stack — the manifest → docs/<name>.md @ content-sha (upstream/referrers prose from the file head) · alias --specs | `yes` |
+| `providers` | `` | the adapter registry: providers, models, defaults (env-resolved, api key masked) · alias --providers | `yes` |
+| `config` | `` | the user config file (~/.ann/config.json; apiKey masked) · alias --config | `yes` |
+| `config!` | `set <key> <value>` | WRITE — save a config value (provider|model|baseUrl|apiKey|maxTokens); chmod 600, outside the repo; apiKey never echoed | `yes` |
+| `project` | `` | show the current project + known projects · alias --project | `yes` |
+| `project!` | `add|use|remove <path>` | WRITE — manage projects by PATH (each has its OWN journey); add <path> registers one | `yes` |
+| `cred!` | `set|delete <service> <account> [secret]` | WRITE — OS keychain (macOS, DEV-ONLY local CLI): save/remove a secret via stdin; production = server-side env (12-factor) | `yes` |
+| `branch` | `<id>` | a node + every descendant's events, one walk · alias --branch | `yes` |
+| `confirm` | `<id>` | a node's gate card: intent · ACs · gates · results | `yes` |
+| `detail` | `<id>` | a node's full derived detail: contract · gate states · artifacts (historical only) · blockers · events tail | `yes` |
+| `results` | `<id> [n]` | a task's results by kind (commit/ref/evidence/link); with n, drill into one (commit=git show, ref=file/dir, evidence=event) · alias --results | `yes` |
+| `packet` | `<id>` | the node's deterministic context packet (context-packet-spec; derived on demand, never saved) · alias --packet | `yes` |
+| `validate` | `[id]` | run the enabled validator rules (all nodes, or one node) — rule-id'd deterministic findings · alias --validate | `yes` |
+| `rules` | `[--write]` | the DERIVED check-rules registry (self-contained rule modules are the source) · alias --rules; --write regenerates rules/check/rules.json | `yes` |
+| `docs` | `[--write]` | the docs→git resolution index (docs/manifest.json — generated from docs/, never hand-maintained) · alias --docs; --write regenerates the manifest | `yes` |
+| `sessions` | `` | the archived sessions of this project (goal! archive history) — one line each: goal · status · verdict · legs; point at one read-only via ANN_STORE · alias --sessions | `yes` |
+| `chain` | `` | the project flow config as data (work-type chains, F3 view) · alias --chain | `yes` |
+| `steps` | `` | the step registry — the pluggable surface future steps implement against · alias --steps | `yes` |
+| `next` | `` | the run-next proposal (F5 pull): active leg, frontmost-ready, pending gates, leg gate — derived, never assumed · alias --next | `yes` |
+| `goal` | `` | the goal-session view (goal-session-design §9): goalId · status · the authored goal doc (docs/goal.md) · the generated contract · structural state · verdict (met/unconfirmed/open) · legs (status words only) · alias --goal | `yes` |
+| `flow` | `<id>` | a task's RESOLVED flow + chain validation (the data the frame will execute) · alias --flow | `yes` |
+| `run!` | `<id>` | WRITE — run a task through the FRAME (materialize → grill → activate → execute → verify → confirm → commit); resumable, stops at the first block | `yes` |
+| `advance!` | `` | WRITE — the OPERATOR ACTION (F5 approve→execute): integrity re-checked fail-closed → the advance re-derived (a stale proposal executes nothing) → the ADVANCE card + the builder's ONE approve → continue-leg runs the frontmost-ready through the frame (run!) and lands at its next human gate; advance-leg / closure-needed / none are NOT machine-executable — the boundary/closure/goal-consult card, then stop | `yes` |
+| `commands` | `` | this table as markdown (the derived doc) · alias --commands | `yes` |
+| `help` | `` | usage · alias --help / -h | `yes` |
+| `read` | `<name>` | the L1 CONTENT read view — marker-stripped content + path + sha; resolves via the docs manifest (the forward path), with a legacy current-artifact fallback for history · alias --read | `yes` |
+| `append!` | `<id> '<json>'` | WRITE — single-writer append; REFUSES the composite-owned kinds (created/submitted/confirmed/rejected/goal-met) and the RETIRED doc-artifact vocab (artifact-locked/superseded). `cancelled` (a task no longer needed — the counterpart of the submit!/gate! close) is recordable here with a REQUIRED reason | `yes` |
+| `spawn!` | `<id> '<contract-json>'` | WRITE — create a node; enforces the v14 contract schema + F-AC19 + id naming + the conclusion (commit-evidence)/leg gates | `yes` |
+| `submit!` | `<id> grill|confirm [confirmedSha]` | WRITE — submit finished work at a gate for the human decision (the SUCCESS half of the task close; the counterpart is cancel — no longer needed): records `submitted` — the task blocks and waits for `gate! accept|reject`; an interrupted gate stays blocked (resumable), never looks un-started. `[confirmedSha]` (confirm gate only) binds the decision to the exact bytes under review | `yes` |
+| `gate!` | `<id> grill|confirm accept|reject [feedback]` | WRITE — human gate decision (submit + decide; the 3-reject bound is a CONSTANT owned here) | `yes` |
+| `evidence!` | `<id> <sha>[,<sha>…] [--refs a.md,b.md] [--note '<text>']` | WRITE — the CONCLUSION record (F-AC18): structured commit evidence naming the committed doc/code that carries the deliverable (commits[] non-empty, a sha per entry; optional refs[]); the shape stays the store's — a validated front over the same L1 write, provenance from RECORDED_BY | `yes` |
+| `complete!` | `<id> [--note '<text>']` | WRITE — the DONE terminal: refuses without the confirm gate's LAST decision being an ACCEPT and without conclusion evidence (evidence.commits[]); gates decide, commands complete — gate! confirm accept never auto-completes | `yes` |
+| `goal!` | `met [feedback]` | WRITE — the HUMAN verdict that seals a structurally-exhausted session (goal-met on the goal root); refused for automated (agent) initiators, double-met, and any undecided submission | `yes` |
+| `goal!` | `archive [--override]` | WRITE — guarded structural reset: move .ann/journey → .ann/archive/sessions/<ts>-<slug>/ for a fresh goal; refuses without a met verdict (or --override), on store-external verify drifts, and on uncommitted tracked .ann/journey changes | `yes` |
+| `goal!` | `seed [goal-statement]` | WRITE — grill a goal at SESSION scope (EMPTY journey seeds new; a RE-SEEDABLE sole unconsumed goal is REPLACED after re-grilling — consumed/met goals refuse): the interactive idea-validation session (grill → batch-ask → research → re-grill → human verdict); on solid, synthesize goal.md (Goal:/Success criteria:) + seed/re-seed the goal leg + write docs/goal.md + regenerate the manifest; revise/reject seeds nothing | `yes` |
+| `spec!` | `[docName] [--amend]` | WRITE — grill the SEEDED goal at REQUIREMENTS/SYSTEM-DESIGN level into ONE amendable spec doc docs/<docName>.md (default requirements): PRODUCE grills the goal into a NEW name; --amend REWRITES an EXISTING in-force doc in place (specs are LIVING, amendable — the goal is not): the interactive SPECS grilling session; on GO it writes docs/<name>.md + regenerates the manifest — commit to publish (JSON refuses: interactive terminal only) | `yes` |
 
 ### When to use each
 

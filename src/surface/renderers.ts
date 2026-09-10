@@ -1,4 +1,4 @@
-import { TaskDetail, ResultItem } from '../store/store.js';
+import { TaskDetail, ResultItem, CLOSED_TASK_STATUSES } from '../store/store.js';
 import type { GoalView } from '../commands/index.js';
 
 /**
@@ -108,9 +108,19 @@ export function renderPlan(legs: PlanLeg[], ahead: PlanAhead): string {
   out.push('=== WHAT IS AHEAD ===');
   if (ahead.activeLeg) {
     out.push(`active leg: ${ahead.activeLeg} (${ahead.activeLegStatus})`);
+    // The leg's OWN closure decides the review line — NEVER the absence of a ready
+    // task (the derived-state lie: a `blocked` task waiting on a human, an `accepted`
+    // one awaiting complete!, and a `failed` one all leave no ready task).
+    const activeTasks = legs.find((l) => l.id === ahead.activeLeg)?.tasks ?? [];
+    const unfinished = activeTasks.filter((t) => !CLOSED_TASK_STATUSES.includes(t.status));
+    const gateNote = ahead.legGate.met ? '' : ` (leg gate: ${ahead.legGate.blocker ?? 'unmet'})`;
     if (ahead.frontmostReady) {
       out.push(`frontmost-ready: ${ahead.frontmostReady.task} (${ahead.frontmostReady.status})`);
       for (const t of ahead.alsoReady) out.push(`  also ready: ${t.task} (${t.status})`);
+    } else if (unfinished.length) {
+      out.push(
+        `no ready tasks in leg — unfinished: ${unfinished.map((t) => `${t.id} (${t.status})`).join(', ')}${gateNote} — waiting on a human (a gate decision or a gated closure task)`,
+      );
     } else if (ahead.legGate.met) {
       out.push('LEG GATE REVIEW: all spawned tasks done — verify the epic ACs (node.json contract) before advancing or spawning remaining tasks');
     } else {
