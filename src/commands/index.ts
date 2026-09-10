@@ -25,6 +25,10 @@ const artifactNameOf = (file: string): string => file.replace(/\.[^./]*$/, '');
  *               commit-evidence conclusion gate + the leg gate  (from the CLI)
  *   gate!       the reject bound (3/gate, a CONSTANT) + the two-write sequence
  *   submit!     the other half of that sequence + the gate② content binding
+ *   evidence!   the CONCLUSION record (F-AC18): commits[] non-empty, the shape stays
+ *               the store's — a validated front, never a second validator
+ *   complete!   the DONE terminal: refused without a confirm-gate ACCEPT + commit
+ *               evidence (leg 08 task 02: gates decide, commands complete)
  *   append!     refuses the composite-owned kinds, `created`, and the RETIRED
  *               doc-artifact vocab (artifact-locked / superseded — D3)
  *
@@ -38,6 +42,14 @@ const artifactNameOf = (file: string): string => file.replace(/\.[^./]*$/, '');
  *
  * MULTI-CLIENT = multiple IN-PROCESS initiators (the flow, the validators, the
  * adapters). The CLI is a BINDING, not an initiator.
+ *
+ * THE TWO-TIER WRITING MODEL (leg 08 task 02): a dedicated COMMAND exists where a write
+ * is a GATE or STRUCTURE transition (spawn! · submit! · gate! · goal! · complete!) or a
+ * COMMON GESTURE (evidence! — every task concludes by citing its commit); everything
+ * else stays a shaped fact on `append!` (activated · waiting · extended · evidence with
+ * refs/answers/trace · transferred · deferred · cancelled · …). A command is never a
+ * second VALIDATOR: it adds the gesture's precondition and delegates the event's shape
+ * to the single writer.
  *
  * Failure is a VALUE in the locked shape `{ok:false, error:{code, blocker}}` —
  * never an exception-as-flow (core-design §7).
@@ -359,6 +371,94 @@ export class Commands {
     }
     const after = decision === 'reject' ? rejects + 1 : rejects;
     return ok({ gate, decision, escalated: after >= REJECT_BOUND });
+  }
+
+  /**
+   * `evidence!` — the CONCLUSION record (F-AC18, docs-as-git; leg 08 task 02 AC-1): a
+   * task's deliverable is concluded by STRUCTURED COMMIT EVIDENCE — `evidence.commits[]`
+   * naming the committed doc/code that carries it (optional `refs[]` paths).
+   *
+   * A thin VALIDATED FRONT over the general append, never a second validator and never a
+   * new write path: the SHAPE stays the single writer's (`appendEvent` re-validates the
+   * event — commits[] non-empty, a sha per entry), and this command adds only the
+   * GESTURE's precondition (a conclusion cites at least one commit) plus the initiator's
+   * provenance. Every other fact that rides `evidence` (refs-only notes, `answers`,
+   * `trace`) stays a shaped fact on `append!` — the two-tier writing model.
+   */
+  evidence(
+    id: string,
+    commits: Array<{ sha: string; note?: string }>,
+    opts: { refs?: string[]; note?: string } = {},
+  ): CommandResult<{ commits: number; refs: number }> {
+    if (!id.includes('/')) return fail('leg-gate-write', 'leg roots carry no conclusion — evidence belongs to tasks');
+    if (!this.store.ids().includes(id)) return fail('no-node', `no node ${id}`);
+    if (!Array.isArray(commits) || !commits.length) {
+      return fail(
+        'no-commits',
+        'evidence! requires at least one commit — a conclusion cites the commit that carries the deliverable (commits[] non-empty, a sha per entry); a task with nothing committed has not concluded',
+      );
+    }
+    const badCommit = commits.findIndex((c) => !c || typeof c.sha !== 'string' || !c.sha.trim());
+    if (badCommit >= 0) return fail('bad-commit', `evidence! commits[${badCommit}] needs a sha — every cited commit names the commit that carries the deliverable`);
+    const refs = opts.refs ?? [];
+    const badRef = refs.findIndex((r) => typeof r !== 'string' || !r.trim());
+    if (badRef >= 0) return fail('bad-ref', `evidence! refs[${badRef}] must be a non-blank path`);
+    try {
+      this.store.appendEvent(this.node(id), {
+        at: this.today,
+        type: 'evidence',
+        note: opts.note?.trim() ? opts.note : `concluded with commit evidence (${this.who})`,
+        commits: commits.map((c) => (c.note?.trim() ? { sha: c.sha.trim(), note: c.note } : { sha: c.sha.trim() })),
+        ...(refs.length ? { refs } : {}),
+      });
+    } catch (e) {
+      return fail('store-refused', (e as Error).message);
+    }
+    return ok({ commits: commits.length, refs: refs.length });
+  }
+
+  /**
+   * `complete!` — the DONE terminal (leg 08 task 02 AC-2, RESOLVED: gates decide,
+   * commands complete — `gate! confirm accept` does NOT auto-complete; the rationale is
+   * recorded on that task). `completed` therefore always cites a REAL gate decision and
+   * REAL committed work: refused unless the confirm gate's LAST decision is an accept and
+   * the task carries conclusion evidence (`evidence.commits[]` — the SAME F-AC18
+   * predicate the store's spawn gate and check() read). GATE-2 and F-AC18 then hold by
+   * construction, and the honest `accepted` status (leg 08 task 01) names the missing
+   * gesture instead of hiding it behind an auto-complete.
+   */
+  complete(id: string, opts: { note?: string } = {}): CommandResult<{ at: string }> {
+    if (!id.includes('/')) return fail('leg-gate-write', 'leg roots carry no lifecycle — gates and completion live on tasks (flow-control v6 §3)');
+    if (!this.store.ids().includes(id)) return fail('no-node', `no node ${id}`);
+    if (this.store.events(id).some((e) => e.type === 'completed')) {
+      return fail(
+        'already-completed',
+        `${id} is already completed — the done terminal is recorded once (rework is a superseding sibling task, never a second completed on this one)`,
+      );
+    }
+    const gateState = this.confirmGateState(id);
+    if (gateState !== 'confirmed') {
+      return fail(
+        'not-accepted',
+        `${id}: the confirm-result gate is not accepted (last decision: ${gateState}) — complete! records a delivery the HUMAN accepted: submit! ${id} confirm, then gate! ${id} confirm accept`,
+      );
+    }
+    if (!this.store.parentConcluded(id)) {
+      return fail(
+        'no-evidence',
+        `${id}: no conclusion evidence — F-AC18: a task completes only on structured commit evidence (evidence.commits[]); run evidence! ${id} <sha> with the commit that carries the deliverable`,
+      );
+    }
+    try {
+      this.store.appendEvent(this.node(id), {
+        at: this.today,
+        type: 'completed',
+        note: opts.note?.trim() ? opts.note : `completed (${this.who})`,
+      });
+    } catch (e) {
+      return fail('store-refused', (e as Error).message);
+    }
+    return ok({ at: this.today });
   }
 
   /**
@@ -905,6 +1005,17 @@ export class Commands {
       if (e.type !== 'submitted' || e.gate !== gate) return false;
       return !evs.slice(i + 1).some((x) => (x.type === 'confirmed' || x.type === 'rejected') && x.gate === gate);
     });
+  }
+
+  /** A gate's LAST decision — the same reading the frame's own gate state uses: the last
+   *  submitted/confirmed/rejected event at that gate. `complete!` requires `confirmed`
+   *  here, so a confirm gate re-submitted after an accept (an undecided submission) can
+   *  never be completed over. */
+  private confirmGateState(id: string): 'confirmed' | 'rejected' | 'submitted' | 'none' {
+    const decisions = this.store
+      .events(id)
+      .filter((e) => (e.type === 'submitted' || e.type === 'confirmed' || e.type === 'rejected') && e.gate === 'confirm');
+    return (decisions[decisions.length - 1]?.type as 'confirmed' | 'rejected' | 'submitted' | undefined) ?? 'none';
   }
 
   /** Rejections recorded at a gate — the bound's counter (and L2's rework signal). */

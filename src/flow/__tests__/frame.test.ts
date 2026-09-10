@@ -89,8 +89,8 @@ const docFile = (name: string) => join(root, 'docs', `${name}.md`);
  *  Both gates were decided on run 1, so the re-run asks the human nothing (the
  *  decided-gate path) and concludes: commit runs → `completed` is appended. */
 async function conclude(c: Commands, steps: Step[], sha = 'abc1234'): Promise<FrameResult> {
-  const a = c.append(TASK, { at: '2026-08-27', type: 'evidence', note: 'committed the staged doc (test)', commits: [{ sha }] });
-  if (!a.ok) throw new Error(`append refused: ${a.error.code}: ${a.error.blocker}`);
+  const a = c.evidence(TASK, [{ sha }], { note: 'committed the staged doc (test)' });
+  if (!a.ok) throw new Error(`evidence! refused: ${a.error.code}: ${a.error.blocker}`);
   return run(c, steps);
 }
 
@@ -203,7 +203,7 @@ describe('the four resume tail states (core-design §1)', () => {
     const c = setup();
     chainFile([]);
     expect((await run(c, [], new ScriptedInteract(['accept']))).stop).toBe('blocked-waiting');
-    c.append(TASK, { at: '2026-08-27', type: 'evidence', note: 'the runner committed', commits: [{ sha: 'abc1234' }] });
+    c.evidence(TASK, [{ sha: 'abc1234' }], { note: 'the runner committed' });
     const r = await run(c, [], new ScriptedInteract(['accept']));
     expect(r.stop).toBe('completed');
     expect(c.status(TASK)).toBe('done');

@@ -273,6 +273,8 @@ const COMMANDS: Array<{ name: string; args: string; desc: string }> = [
   { name: 'spawn!', args: '<id> \'<contract-json>\'', desc: 'WRITE — create a node; enforces the v14 contract schema + F-AC19 + id naming + the conclusion (commit-evidence)/leg gates' },
   { name: 'submit!', args: '<id> grill|confirm [confirmedSha]', desc: 'WRITE — submit finished work at a gate for the human decision (the SUCCESS half of the task close; the counterpart is cancel — no longer needed): records `submitted` — the task blocks and waits for `gate! accept|reject`; an interrupted gate stays blocked (resumable), never looks un-started. `[confirmedSha]` (confirm gate only) binds the decision to the exact bytes under review' },
   { name: 'gate!', args: '<id> grill|confirm accept|reject [feedback]', desc: 'WRITE — human gate decision (submit + decide; the 3-reject bound is a CONSTANT owned here)' },
+  { name: 'evidence!', args: '<id> <sha>[,<sha>…] [--refs a.md,b.md] [--note \'<text>\']', desc: "WRITE — the CONCLUSION record (F-AC18): structured commit evidence naming the committed doc/code that carries the deliverable (commits[] non-empty, a sha per entry; optional refs[]); the shape stays the store's — a validated front over the same L1 write, provenance from RECORDED_BY" },
+  { name: 'complete!', args: '<id> [--note \'<text>\']', desc: 'WRITE — the DONE terminal: refuses without the confirm gate\'s LAST decision being an ACCEPT and without conclusion evidence (evidence.commits[]); gates decide, commands complete — gate! confirm accept never auto-completes' },
   { name: 'goal!', args: 'met [feedback]', desc: 'WRITE — the HUMAN verdict that seals a structurally-exhausted session (goal-met on the goal root); refused for automated (agent) initiators, double-met, and any undecided submission' },
   { name: 'goal!', args: 'archive [--override]', desc: 'WRITE — guarded structural reset: move .ann/journey → .ann/archive/sessions/<ts>-<slug>/ for a fresh goal; refuses without a met verdict (or --override), on store-external verify drifts, and on uncommitted tracked .ann/journey changes' },
   { name: 'goal!', args: 'seed [goal-statement]', desc: 'WRITE — grill a goal at SESSION scope (EMPTY journey seeds new; a RE-SEEDABLE sole unconsumed goal is REPLACED after re-grilling — consumed/met goals refuse): the interactive idea-validation session (grill → batch-ask → research → re-grill → human verdict); on solid, synthesize goal.md (Goal:/Success criteria:) + seed/re-seed the goal leg + write docs/goal.md + regenerate the manifest; revise/reject seeds nothing' },
@@ -846,6 +848,31 @@ export const HANDLERS: Record<string, Handler> = {
     }
     return writeResult(ctx.commands.gate(ctx.args[1], ctx.args[2], ctx.args[3], ctx.args.slice(4).join(' ')));
   },
+  'evidence!': (ctx) => {
+    const refs = takeFlag(ctx.args.slice(1), '--refs');
+    const note = takeFlag(refs.rest, '--note');
+    const [id, ...shaGroups] = note.rest;
+    const shas = shaGroups
+      .flatMap((g) => g.split(','))
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (!id || !shas.length) {
+      return usage("usage: ann evidence! <id> <sha>[,<sha>…] [--refs a.md,b.md] [--note '<text>']");
+    }
+    const refPaths = refs.value
+      ? refs.value
+          .split(',')
+          .map((r) => r.trim())
+          .filter(Boolean)
+      : undefined;
+    return writeResult(ctx.commands.evidence(id, shas.map((sha) => ({ sha })), { ...(refPaths ? { refs: refPaths } : {}), ...(note.value ? { note: note.value } : {}) }));
+  },
+  'complete!': (ctx) => {
+    const note = takeFlag(ctx.args.slice(1), '--note');
+    const id = note.rest[0];
+    if (!id) return usage("usage: ann complete! <id> [--note '<text>']");
+    return writeResult(ctx.commands.complete(id, { ...(note.value ? { note: note.value } : {}) }));
+  },
 };
 
 /** Resolve the handler + render key for a canonical command — SHARED by runMain and
@@ -879,6 +906,16 @@ export function bareNameHandler(ctx: CliContext): Outcome {
     };
   }
   return boom('no-doc', `ann: no doc/artifact for '${name}' (a docs manifest name or a current artifact's logical name)`);
+}
+
+/** A `--flag <value>` reader for the gesture commands (evidence!/complete! are the only
+ *  flag-carrying writes): returns the flag's value (undefined when absent) and the args
+ *  with the flag + its value removed. `--note 'a b'` must be ONE argv element; `--refs
+ *  a.md,b.md` is comma-separated. */
+function takeFlag(args: string[], flag: string): { value?: string; rest: string[] } {
+  const i = args.indexOf(flag);
+  if (i < 0) return { rest: args };
+  return { value: args[i + 1], rest: [...args.slice(0, i), ...args.slice(i + 2)] };
 }
 
 /* ── the interactive carve-out: goal! seed (NOT value-canonical — it drives a
@@ -972,9 +1009,9 @@ const ALIAS: Record<string, string> = {
 
 /** The journey-addressing WRITES a read-only target refuses (config!/cred!/project!
  *  never touch the store, so they stay available). docs/rules --write refuse too. */
-const JOURNEY_REFUSED_WRITES = new Set(['append!', 'spawn!', 'submit!', 'gate!', 'goal!', 'run!', 'spec!', 'advance!']);
+const JOURNEY_REFUSED_WRITES = new Set(['append!', 'spawn!', 'submit!', 'gate!', 'evidence!', 'complete!', 'goal!', 'run!', 'spec!', 'advance!']);
 /** Bare write names (no `!`) — a named hint, never silent. */
-const WRITES = ['append', 'spawn', 'submit', 'gate', 'cred'];
+const WRITES = ['append', 'spawn', 'submit', 'gate', 'evidence', 'complete', 'cred'];
 
 const isProjectRoot = (dir: string): boolean => existsSync(join(dir, '.ann')) || existsSync(join(dir, 'journey'));
 

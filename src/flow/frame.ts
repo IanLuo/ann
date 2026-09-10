@@ -491,7 +491,7 @@ export class Frame {
           {
             at: today(),
             type: 'waiting',
-            note: 'the staged doc is confirmed but uncommitted — `git commit` the docs/ change and `append! evidence.commits[]` to conclude (two-phase)',
+            note: 'the staged doc is confirmed but uncommitted — `git commit` the docs/ change and `evidence! <id> <sha>` to conclude (two-phase)',
           } as unknown as JourneyEvent,
         );
         if (!w.ok) return this.stopFailed(taskId, result, w.error);

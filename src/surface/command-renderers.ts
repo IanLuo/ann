@@ -523,6 +523,12 @@ export const RENDERS: Record<string, Renderer> = {
     if (v.escalated) lines.push('  (reject bound reached — the next rejection escalates to a human design decision)');
     return block(lines);
   },
+  'evidence!': (value, env) => {
+    const v = (value as { ok: true; value: { commits: number; refs: number } }).value;
+    const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`;
+    return `evidence recorded → ${env.args[1]} (${plural(v.commits, 'commit')}${v.refs ? ` · ${plural(v.refs, 'ref')}` : ''})\n`;
+  },
+  'complete!': (_value, env) => `completed → ${env.args[1]}\n`,
   'config!': (value, env) => {
     const v = (value as { ok: true; value: { key: string; file: string; problems?: string[]; masked?: boolean } }).value;
     const lines: string[] = [];
@@ -732,8 +738,8 @@ function advancedLines(v: AdvanceValue): string[] {
       lines.push(`           ann gate! ${l.task} ${l.gate} accept|reject (advance! never answers a gate)`);
     } else if (l.where === 'awaiting-runner') {
       lines.push(`  landing: ${l.task} awaits the RUNNER (${l.frameStop}) — do the work, git commit, and record`);
-      lines.push('           evidence (ann append! <id> \'…evidence.commits[]…\'); the confirm-result gate then decides');
-      lines.push('           — a human gate, never passed silently (re-run: ann run! <id>).');
+      lines.push(`           evidence (ann evidence! ${l.task} <sha>); the confirm-result gate then decides`);
+      lines.push(`           — a human gate, never passed silently (then ann complete! ${l.task}, or re-run: ann run! ${l.task}).`);
     } else if (l.where === 'completed') {
       lines.push(`  landing: ${l.task} completed — its gates were decided by the human channel`);
       if (l.advance) lines.push(`  next: ${l.advance}`);

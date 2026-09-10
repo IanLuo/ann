@@ -85,10 +85,10 @@ function driveLifecycle(root: string): string {
   git(root, ['add', '-A']);
   git(root, ['commit', '-qm', 'stage the deliverable']);
   const sha = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
-  cli(root, ['append!', TASK, JSON.stringify({ at: '2026-08-29', type: 'evidence', note: 'committed', commits: [{ sha, note: 'deliverable' }] })]);
+  cli(root, ['evidence!', TASK, sha, '--note', 'committed']);
   cli(root, ['submit!', TASK, 'confirm']);
   cli(root, ['gate!', TASK, 'confirm', 'accept', 'done']);
-  cli(root, ['append!', TASK, EVENT('completed', { note: 'finished' })]);
+  cli(root, ['complete!', TASK]);
   git(root, ['add', '-A']);
   git(root, ['commit', '-qm', 'close the task']);
   return sha;
@@ -99,7 +99,9 @@ describe('e2e — uniform JSON across every command', () => {
   beforeEach(() => { root = newProject(); });
   afterEach(() => { rmSync(root, { recursive: true, force: true }); });
 
-  it('every READ command under --json emits exactly ONE JSON doc on stdout and exits 0', () => {
+  // Spawn-bound: the read matrix runs the real binary ~45× — an explicit budget, never
+  // the 5s default (flaked under the suite's parallel files before this was added).
+  it('every READ command under --json emits exactly ONE JSON doc on stdout and exits 0', { timeout: 30_000 }, () => {
     driveLifecycle(root);
     const reads: Array<Array<string>> = [
       ['status'], ['journey'], ['ledger'], ['specs'], ['docs'],

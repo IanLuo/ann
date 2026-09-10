@@ -115,17 +115,20 @@ describe('e2e — the CLI binary', () => {
     expect(out(cli(root, ['read', 'thing']))).toContain('the actual deliverable');
 
     // commit the staged doc in the temp project (git is the archive); the commit sha is
-    // the traceability the conclusion evidence cites (F-AC18)
+    // the traceability the conclusion evidence cites (F-AC18) — recorded by the gesture
+    // command, never hand-written JSON
     git(root, ['add', '-A']);
     git(root, ['commit', '-qm', 'stage the deliverable']);
     const sha = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
-    expect(out(cli(root, ['append!', TASK, JSON.stringify({ at: '2026-08-29', type: 'evidence', note: 'the thing is committed', commits: [{ sha, note: 'deliverable' }] })]))).toContain('appended');
+    expect(out(cli(root, ['evidence!', TASK, sha, '--note', 'the thing is committed']))).toContain(`evidence recorded → ${TASK} (1 commit)`);
 
-    // gate ②: confirm is not 'done' on its own — completed event closes it
+    // gate ②: confirm is not 'done' on its own — complete! closes it, and only behind the
+    // human's accept + the evidence (gates decide, commands complete; AC-2 resolved)
     expect(out(cli(root, ['submit!', TASK, 'confirm']))).toContain('submitted confirm');
     expect(out(cli(root, ['gate!', TASK, 'confirm', 'accept', 'done']))).toContain('gate confirm: accept');
+    expect(out(cli(root, ['status', TASK]))).toContain('accepted'); // the honest intermediate state
     expect(out(cli(root, ['status', TASK]))).not.toContain('done');
-    expect(out(cli(root, ['append!', TASK, EVENT('completed', { note: 'finished' })]))).toContain('appended');
+    expect(out(cli(root, ['complete!', TASK]))).toContain(`completed → ${TASK}`);
     expect(out(cli(root, ['status', TASK]))).toContain('done');
 
     // commit the whole tree so the check's manifest-freshness + traceability read a clean git
@@ -157,6 +160,41 @@ describe('e2e — the CLI binary', () => {
     const chk = cli(root, ['check']);
     expect(chk.code).toBe(0);
     expect(out(chk)).toContain('State: 01-leg done');
+  });
+
+  it('evidence! + complete! — the close gestures, with named refusals and no hand-written JSON', () => {
+    prep(root, LEG, TASK);
+    cli(root, ['spawn!', LEG, CONTRACT('the first leg')]);
+    cli(root, ['spawn!', TASK, CONTRACT('do the thing')]);
+    cli(root, ['submit!', TASK, 'grill']);
+    cli(root, ['gate!', TASK, 'grill', 'accept', 'looks right']);
+    const sha = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+    mkdirSync(join(root, 'docs'), { recursive: true });
+    writeFileSync(join(root, 'docs', 'thing.md'), '# Thing\n\nthe actual deliverable\n');
+    cli(root, ['docs', '--write']);
+
+    // complete! cannot precede the human's accept, and evidence! cannot precede a commit
+    const early = cli(root, ['complete!', TASK]);
+    expect(early.code).toBe(1);
+    expect(out(early)).toContain('not-accepted');
+    const noSha = cli(root, ['evidence!', TASK, ',']);
+    expect(noSha.code).toBe(2);
+    expect(out(noSha)).toContain('usage: ann evidence!');
+    expect(out(cli(root, ['evidence', TASK, sha]))).toContain("writes are marked with '!'");
+
+    // the gestures, in order: evidence! then the gates then complete!
+    expect(out(cli(root, ['evidence!', TASK, sha, '--refs', 'docs/thing.md', '--note', 'the deliverable is committed']))).toContain('1 commit · 1 ref');
+    cli(root, ['submit!', TASK, 'confirm']);
+    cli(root, ['gate!', TASK, 'confirm', 'accept', 'done']);
+    expect(out(cli(root, ['complete!', TASK, '--note', 'closed by the operator']))).toContain(`completed → ${TASK}`);
+    expect(out(cli(root, ['status', TASK]))).toContain('done');
+    expect(out(cli(root, ['complete!', TASK]))).toContain('already-completed');
+
+    git(root, ['add', '-A']);
+    git(root, ['commit', '-qm', 'close the task']);
+    const chk = cli(root, ['check']);
+    expect(chk.code).toBe(0);
+    expect(out(chk)).toContain('no gate gaps');
   });
 
   it('enforces the write discipline and the gates through the CLI', () => {
@@ -265,7 +303,9 @@ describe('e2e — the goal-session lifecycle (v6: seed → docs/goal.md → work
     expect(out(cli(r, ['gate!', TASK, 'grill', 'accept', 'grilled']))).toContain('gate grill: accept');
     expect(out(cli(r, ['submit!', TASK, 'confirm']))).toContain('submitted confirm');
     expect(out(cli(r, ['gate!', TASK, 'confirm', 'accept', 'done']))).toContain('gate confirm: accept');
-    expect(out(cli(r, ['append!', TASK, EVENT('completed', { note: 'finished' })]))).toContain('appended');
+    const sha = execFileSync('git', ['-C', r, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+    expect(out(cli(r, ['evidence!', TASK, sha]))).toContain('evidence recorded');
+    expect(out(cli(r, ['complete!', TASK]))).toContain('completed →');
     expect(out(cli(r, ['status', TASK]))).toContain('done');
   }
 
@@ -375,10 +415,10 @@ describe('e2e — the OPERATOR ACTION advance! (F5 approve→execute, leg 07 tas
     git(root, ['add', '-A']);
     git(root, ['commit', '-qm', 'stage the deliverable']);
     const sha = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
-    cli(root, ['append!', TASK, JSON.stringify({ at: '2026-08-29', type: 'evidence', note: 'committed', commits: [{ sha, note: 'deliverable' }] })]);
+    cli(root, ['evidence!', TASK, sha, '--note', 'committed']);
     expect(out(cli(root, ['submit!', TASK, 'confirm']))).toContain('submitted confirm');
     expect(out(cli(root, ['gate!', TASK, 'confirm', 'accept', 'done']))).toContain('gate confirm: accept');
-    cli(root, ['append!', TASK, EVENT('completed', { note: 'finished' })]);
+    cli(root, ['complete!', TASK]);
     git(root, ['add', '-A']);
     git(root, ['commit', '-qm', 'close 01-leg/01-a']);
     // the EMPTY front leg — an advance points AT it but cannot author its task (v7 §5)

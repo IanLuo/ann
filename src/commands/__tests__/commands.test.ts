@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, appendFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store, JourneyEvent } from '../../store/store.js';
@@ -49,6 +50,10 @@ const valueOf = <T>(r: CommandResult<T>): T => {
 };
 
 const cmds = () => new Commands(new Store(root), 'test');
+
+/** A sha that RESOLVES in the ann repo — required for evidence.commits[] that check()
+ *  traces (`git cat-file -t`, run against process.cwd()). */
+const realSha = () => execFileSync('git', ['rev-parse', 'HEAD'], { cwd: process.cwd() }).toString().trim().slice(0, 7);
 
 describe('spawn! — the contract schema gate (core-design §1, §8:289)', () => {
   beforeEach(() => { makeStore(); writeNode('01-leg', {}); });
@@ -248,6 +253,112 @@ describe('append! — refuses what the composites own (§8:289)', () => {
     expect(c.status('01-leg/01-a')).toBe('cancelled');
     // provenance: the initiator is stamped onto the record (RECORDED_BY), like the composites' notes
     expect(c.events('01-leg/01-a').find((e) => e.type === 'cancelled')!.note).toContain('test');
+  });
+});
+
+describe('evidence! + complete! — the close gesture commands (leg 08 task 02)', () => {
+  beforeEach(() => { makeStore(); writeNode('01-leg', CONTRACT); });
+  afterEach(() => { rmSync(root, { recursive: true, force: true }); });
+
+  /** The gates a task walks to a confirm-gate ACCEPT (grill then confirm). */
+  const GATE = [ev('submitted', { gate: 'grill' }), ev('confirmed', { gate: 'grill' }), ev('submitted', { gate: 'confirm' }), ev('confirmed', { gate: 'confirm' })];
+  const accepted = (extra: Array<Record<string, unknown>> = []) => writeNode('01-leg/01-a', CONTRACT, [ev('created'), ...GATE, ...extra]);
+
+  it('evidence! records the conclusion — commits[] (+ optional refs[]) with the initiator provenance', () => {
+    accepted();
+    const c = cmds();
+    expect(valueOf(c.evidence('01-leg/01-a', [{ sha: 'abc1234', note: 'the deliverable' }], { refs: ['src/store'] }))).toEqual({ commits: 1, refs: 1 });
+    const e = c.events('01-leg/01-a').at(-1)!;
+    expect(e.type).toBe('evidence');
+    expect(e.commits).toEqual([{ sha: 'abc1234', note: 'the deliverable' }]);
+    expect(e.refs).toEqual(['src/store']);
+    expect(String(e.note)).toContain('test');
+    // the conclusion EVIDENCE is not the terminal — an accepted task stays accepted
+    expect(c.status('01-leg/01-a')).toBe('accepted');
+  });
+
+  it('evidence! refuses the shapes a conclusion cannot have (named refusals, nothing written)', () => {
+    accepted();
+    const c = cmds();
+    expect(errorOf(c.evidence('01-leg', [{ sha: 'abc1234' }])).code).toBe('leg-gate-write');
+    expect(errorOf(c.evidence('01-leg/09-x', [{ sha: 'abc1234' }])).code).toBe('no-node');
+    expect(errorOf(c.evidence('01-leg/01-a', [])).code).toBe('no-commits');
+    expect(errorOf(c.evidence('01-leg/01-a', [{ sha: '   ' }])).code).toBe('bad-commit');
+    expect(errorOf(c.evidence('01-leg/01-a', [{ sha: 'abc1234' }], { refs: [''] })).code).toBe('bad-ref');
+    expect(c.events('01-leg/01-a').filter((e) => e.type === 'evidence')).toEqual([]);
+  });
+
+  it('the commits[] shape stays the STORE\'s — an empty commit list is refused through the general append too (one validator)', () => {
+    accepted();
+    const e = errorOf(cmds().append('01-leg/01-a', ev('evidence', { commits: [] }) as JourneyEvent));
+    expect(e.code).toBe('store-refused');
+    expect(e.blocker).toContain('concludes nothing');
+  });
+
+  it('complete! records the DONE terminal on an accepted + evidenced task', () => {
+    accepted();
+    const c = cmds();
+    valueOf(c.evidence('01-leg/01-a', [{ sha: realSha() }]));
+    expect(valueOf(c.complete('01-leg/01-a')).at).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(c.status('01-leg/01-a')).toBe('done');
+    expect(String(c.events('01-leg/01-a').at(-1)!.note)).toContain('test');
+    expect(c.check()).toEqual([]); // the conclusion is complete: evidence resolves + the gate is cited
+  });
+
+  it('complete! refuses without the human ACCEPT — none · rejected · an undecided re-submission after an accept', () => {
+    // (a) submitted at the confirm gate, never decided
+    writeNode('01-leg/01-a', CONTRACT, [ev('created'), ev('submitted', { gate: 'grill' }), ev('confirmed', { gate: 'grill' }), ev('submitted', { gate: 'confirm' })]);
+    expect(errorOf(cmds().complete('01-leg/01-a')).code).toBe('not-accepted');
+    // (b) rejected
+    writeNode('01-leg/01-a', CONTRACT, [ev('created'), ...GATE, ev('rejected', { gate: 'confirm', feedback: 'not this' })]);
+    expect(errorOf(cmds().complete('01-leg/01-a')).code).toBe('not-accepted');
+    // (c) accepted, then RE-SUBMITTED — the LAST decision is the open submission
+    writeNode('01-leg/01-a', CONTRACT, [ev('created'), ...GATE, ev('submitted', { gate: 'confirm' })]);
+    const c = cmds();
+    const e = errorOf(c.complete('01-leg/01-a'));
+    expect(e.code).toBe('not-accepted');
+    expect(e.blocker).toContain('last decision: submitted');
+  });
+
+  it('complete! refuses without conclusion evidence and names the command to run (F-AC18)', () => {
+    accepted();
+    const e = errorOf(cmds().complete('01-leg/01-a'));
+    expect(e.code).toBe('no-evidence');
+    expect(e.blocker).toContain('evidence!');
+    expect(cmds().status('01-leg/01-a')).toBe('accepted'); // the honest intermediate state STANDS
+  });
+
+  it('AC-2 RESOLVED: gate! confirm accept does NOT auto-complete — `accepted` stands until complete!', () => {
+    writeNode('01-leg/01-a', CONTRACT, [ev('created'), ev('submitted', { gate: 'grill' }), ev('confirmed', { gate: 'grill' })]);
+    const c = cmds();
+    valueOf(c.evidence('01-leg/01-a', [{ sha: realSha() }]));
+    valueOf(c.submit('01-leg/01-a', 'confirm'));
+    valueOf(c.gate('01-leg/01-a', 'confirm', 'accept', 'looks right'));
+    // the human accepted a task that ALREADY carried commit evidence — still not done:
+    // gates decide, commands complete (the gate writes the decision, never the delivery)
+    expect(c.status('01-leg/01-a')).toBe('accepted');
+    valueOf(c.complete('01-leg/01-a'));
+    expect(c.status('01-leg/01-a')).toBe('done');
+    expect(c.check()).toEqual([]);
+  });
+
+  it('complete! is recorded once, and never on a leg root or an unknown node', () => {
+    accepted();
+    const c = cmds();
+    valueOf(c.evidence('01-leg/01-a', [{ sha: 'abc1234' }]));
+    valueOf(c.complete('01-leg/01-a'));
+    expect(errorOf(c.complete('01-leg/01-a')).code).toBe('already-completed');
+    expect(errorOf(c.complete('01-leg')).code).toBe('leg-gate-write');
+    expect(errorOf(c.complete('01-leg/09-x')).code).toBe('no-node');
+  });
+
+  it('adds NO new write path — every event lands through the single writer', () => {
+    accepted();
+    const c = cmds();
+    valueOf(c.evidence('01-leg/01-a', [{ sha: 'abc1234' }]));
+    valueOf(c.complete('01-leg/01-a'));
+    expect(c.events('01-leg/01-a').map((e) => e.type)).toEqual(['created', 'submitted', 'confirmed', 'submitted', 'confirmed', 'evidence', 'completed']);
+    expect(c.verify()).toEqual([]);
   });
 });
 

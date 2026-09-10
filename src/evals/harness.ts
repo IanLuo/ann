@@ -210,12 +210,8 @@ async function runFlowFixture(fixture: FlowFixture): Promise<{ firstPass: boolea
     // left waiting — the frame never fabricates the runner's work for a fake pass.
     const staged = stagedDocsUnder(root);
     if (r.stop === 'blocked-waiting' && staged.some((d) => d.nonEmpty)) {
-      const commit = commands.append(taskId, {
-        at: today(),
-        type: 'evidence',
-        note: 'eval: operator committed the staged doc',
-        commits: [{ sha: headSha(), note: 'eval commit' }],
-      });
+      // the operator's commit gesture — the same command a human runs (leg 08 task 02)
+      const commit = commands.evidence(taskId, [{ sha: headSha(), note: 'eval commit' }], { note: 'eval: operator committed the staged doc' });
       if (!commit.ok) {
         return { firstPass: false, verified: false, stop: r.stop, detail: `operator-commit refused: ${commit.error.code}: ${commit.error.blocker}` };
       }

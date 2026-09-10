@@ -73,10 +73,10 @@ function driveLifecycle(root: string): void {
   cli(root, ['docs', '--write']);
   git(root, ['add', '-A']);
   git(root, ['commit', '-qm', 'stage the deliverable']);
-  cli(root, ['append!', TASK, JSON.stringify({ at: '2026-08-29', type: 'evidence', note: 'committed', commits: [{ sha: 'abc1234', note: 'deliverable' }] })]);
+  cli(root, ['evidence!', TASK, 'abc1234']);
   cli(root, ['submit!', TASK, 'confirm']);
   cli(root, ['gate!', TASK, 'confirm', 'accept', 'done']);
-  cli(root, ['append!', TASK, JSON.stringify({ at: '2026-08-29', type: 'completed', note: 'finished' })]);
+  cli(root, ['complete!', TASK]);
   git(root, ['add', '-A']);
   git(root, ['commit', '-qm', 'close the task']);
 }
@@ -124,7 +124,10 @@ describe('handler-level parity — in-process value === the spawned binary', () 
     rmSync(root, { recursive: true, force: true });
   });
 
-  it('text(render(value)) and json(stringify(value)) each byte-match the spawned binary', async () => {
+  // The matrix spawns the real binary ~50×: this is a process-bound test, so it takes an
+  // explicit budget instead of the 5s default (under the suite's parallel files the
+  // default times out on a loaded machine — the same spawn-bound shape as uniform-json).
+  it('text(render(value)) and json(stringify(value)) each byte-match the spawned binary', { timeout: 30_000 }, async () => {
     driveLifecycle(root);
     // representative read set incl. the composed offenders next + confirm, the
     // journey-with-id branch (journeyOne), the results-listing value, bare + doc forms

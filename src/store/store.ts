@@ -1142,8 +1142,11 @@ export class Store {
       }
     }
     if (e.type === 'evidence') {
-      if (e.commits !== undefined && (!Array.isArray(e.commits) || !e.commits.every((c) => typeof (c as { sha?: unknown })?.sha === 'string' && (c as { sha: string }).sha))) {
-        throw new Error('append rejected: evidence.commits must be [{sha, note?}, …]');
+      // commits[] is the CONCLUSION shape (F-AC18): when present it is non-empty and every
+      // entry names a commit. An empty commit list concludes nothing — refuse it here so
+      // the single writer is the one place the shape lives (leg 08 task 02).
+      if (e.commits !== undefined && (!Array.isArray(e.commits) || !e.commits.length || !e.commits.every((c) => typeof (c as { sha?: unknown })?.sha === 'string' && (c as { sha: string }).sha))) {
+        throw new Error('append rejected: evidence.commits must be a non-empty [{sha, note?}, …] — an empty commit list concludes nothing');
       }
       if (e.refs !== undefined && (!Array.isArray(e.refs) || !e.refs.every((r) => typeof r === 'string'))) {
         throw new Error('append rejected: evidence.refs must be [path, …]');

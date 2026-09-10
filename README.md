@@ -30,7 +30,12 @@ State comes from commands only — never read `events.jsonl` directly; never han
 
 Everything runs through one binary: `npm run ann -- <command> [args]`. Reads have
 **no marker**; writes always end in `!` — a bare write name is refused with a hint
-(the `!` is a guarantee, not a convention). `ann commands` prints the reference table
+(the `!` is a guarantee, not a convention). **The two-tier writing model:** a dedicated
+command exists where a write is a GATE/STRUCTURE transition (`spawn!` · `submit!` ·
+`gate!` · `goal!` · `complete!`) or a COMMON GESTURE (`evidence!` — every task
+concludes by citing its commit); everything else stays a shaped fact on `append!`
+(`activated` · `waiting` · `extended` · refs/answers/trace evidence · `cancelled` · …).
+`ann commands` prints the reference table
 below as markdown — it is regenerated from the command registry
 (`src/surface/cli.ts`), never hand-maintained. `RECORDED_BY=<name>` stamps provenance
 on recorded events (default: `agent`). `ANN_STORE=<path>` points every command at a
@@ -78,6 +83,8 @@ session (unchanged); a bad/absent target fails closed at startup (named error, e
 | `spawn!` | `<id> '<contract-json>'` | WRITE — create a node; enforces the v14 contract schema + F-AC19 + id naming + the conclusion (commit-evidence)/leg gates |
 | `submit!` | `<id> grill|confirm [confirmedSha]` | WRITE — submit finished work at a gate for the human decision (the SUCCESS half of the task close; the counterpart is `cancel` — no longer needed): records `submitted` — the task blocks and waits for `gate! accept|reject`; an interrupted gate stays blocked (resumable), never looks un-started. `[confirmedSha]` (confirm gate only) binds the decision to the exact bytes under review |
 | `gate!` | `<id> grill|confirm accept|reject [feedback]` | WRITE — human gate decision (submit + decide; the 3-reject bound is a CONSTANT owned here) |
+| `evidence!` | `<id> <sha>[,<sha>…] [--refs a.md,b.md] [--note '<text>']` | WRITE — the CONCLUSION record (F-AC18): structured commit evidence naming the committed doc/code that carries the deliverable (commits[] non-empty, a sha per entry; optional refs[]); the shape stays the store's — a validated front over the same L1 write, provenance from RECORDED_BY |
+| `complete!` | `<id> [--note '<text>']` | WRITE — the DONE terminal: refuses without the confirm gate's LAST decision being an ACCEPT and without conclusion evidence (evidence.commits[]); gates decide, commands complete — gate! confirm accept never auto-completes |
 | `goal!` | `met [feedback]` | WRITE — the HUMAN verdict that seals a structurally-exhausted session (goal-met on the goal root); refused for automated (agent) initiators, double-met, and any undecided submission |
 | `goal!` | `archive [--override]` | WRITE — guarded structural reset: move .ann/journey → .ann/archive/sessions/<ts>-<slug>/ for a fresh goal; refuses without a met verdict (or --override), on store-external verify drifts, and on uncommitted tracked .ann/journey changes |
 | `goal!` | `seed [goal-statement]` | WRITE — grill a goal at SESSION scope (EMPTY journey seeds new; a RE-SEEDABLE sole unconsumed goal is REPLACED after re-grilling — consumed/met goals refuse): the interactive idea-validation session (grill → batch-ask → research → re-grill → human verdict); on solid, synthesize goal.md (Goal:/Success criteria:) + seed/re-seed the goal leg + write docs/goal.md + regenerate the manifest; revise/reject seeds nothing |
@@ -124,18 +131,20 @@ will execute) · `chain` (the flow config as data) · `steps` (the step registry
    the approach is validated before execution (3-reject bound is a constant).
 3. Do the work, then conclude it as STRUCTURED COMMIT EVIDENCE (docs-as-git): content
    work stages its doc to `docs/<name>.md` (code work lands in `src/`) and commits it;
-   the task records the conclusion: `append! <id> '{"at":"<date>","type":"evidence","commits":["<sha>"]}'`.
-   The retired artifact-lock/supersede vocab (v16) is refused by `append!`.
+   the task records the conclusion with the gesture command —
+   `evidence! <id> <sha> [--refs a.md,b.md] [--note '<text>']` (commits[] non-empty, a
+   sha per entry). The retired artifact-lock/supersede vocab (v16) is refused by `append!`.
 4. Close: `submit! <id> confirm` then `gate! <id> confirm accept` — GATE② (exit): the
-   human confirms the result — then `append! <id> '{"at":"<date>","type":"completed",...}'`.
-   A task is `done` only after a `completed` event — the confirm gate alone does not
-   record it.
+   human confirms the result. The gate writes the DECISION, never the delivery: an
+   accepted task with no `completed` reads `accepted`, and `complete! <id>` (which
+   refuses without the accept and without `evidence.commits[]`) records the `completed`
+   event — `done` follows only from that event (gates decide, commands complete).
 
 **Automate.** `run! <id>` drives a task through the frame (materialize → grill →
 activate → execute → verify → confirm → commit) and stops at the first block
 (fail-closed when no provider is configured). It is resumable, but re-enters the frame
 — do **not** run it on an already-`completed` task to "close" it: it re-executes and
-can regress the status. Close via the gate + `append! completed` flow instead.
+can regress the status. Close via the gate + `evidence!` + `complete!` flow instead.
 `advance!` (the operator action) is the approved-execute half of `run next`
 (functional-spec v2 F5): `next` proposes the frontmost-ready action, the builder's ONE
 approve makes `advance!` re-check integrity (fail-closed on dirty state), re-derive the
@@ -164,8 +173,9 @@ single writer + derived views).
 │           results · packet · validate · rules · docs · sessions ·       │
 │           chain · steps · next · goal · flow · read · commands ·        │
 │           help · <name>   (derived views — F3/F5)                       │
-│   WRITES: spawn! · append! · submit! · gate! · goal! · spec! · run! ·   │
-│           advance! · config! · project! · cred!   (mutators end in !)   │
+│   WRITES: spawn! · append! · submit! · gate! · evidence! · complete! ·   │
+│           goal! · spec! · run! · advance! · config! · project! · cred!   │
+│           (mutators end in !)                                           │
 └───────────────┬───────────────────────────────┬────────────────────────────┘
                 │ handlers compose              │ interactive carve-outs
                 ▼                               ▼ (goal! seed · spec! · run! · advance!)

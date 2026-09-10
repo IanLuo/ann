@@ -200,6 +200,8 @@ describe('e2e — ANN_STORE session-addressing through the CLI', () => {
       ['spawn!', '03-leg', CONTRACT('x')],
       ['submit!', '02-leg/01-produce', 'grill'],
       ['gate!', '02-leg/01-produce', 'confirm', 'accept'],
+      ['evidence!', '02-leg/01-produce', 'abc1234'],
+      ['complete!', '02-leg/01-produce'],
       ['goal!', 'met'],
       ['run!', '02-leg/01-produce'],
       ['advance!'],

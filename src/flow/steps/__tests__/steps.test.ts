@@ -119,7 +119,7 @@ const doc = (name: string) => readFileSync(docPath(name), 'utf8');
  *  the commit is recorded as structured evidence (evidence.commits[]). The sha is a
  *  placeholder — only store.check() resolves shas in git, and these tests never call it. */
 function recordCommitEvidence(c: Commands): void {
-  const r = c.append(TASK, { at: '2026-08-27', type: 'evidence', note: 'the staged doc is committed', commits: [{ sha: 'abc1234', note: 'spec staged' }] });
+  const r = c.evidence(TASK, [{ sha: 'abc1234', note: 'spec staged' }], { note: 'the staged doc is committed' });
   expect(r.ok).toBe(true);
 }
 
