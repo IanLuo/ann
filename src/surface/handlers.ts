@@ -926,9 +926,7 @@ export const HANDLERS: Record<string, Handler> = {
   /* confirm / detail / results — detail-derived cards + results */
   confirm: (ctx) => {
     const id = resolveId(ctx, ctx.args[1]);
-    const d = ctx.commands.detail(id);
-    if (!d.contract) return boom('confirm', `confirm: no node ${id}`);
-    return { ok: true, value: { detail: d, results: ctx.store.results(id) } };
+    return { ok: true, value: { detail: nodeCard(ctx, id), results: ctx.store.results(id) } };
   },
   detail: (ctx) => {
     const id = resolveId(ctx, ctx.args[1]);

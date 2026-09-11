@@ -296,11 +296,26 @@ export const RENDERS: Record<string, Renderer> = {
     return block(lines);
   },
 
-  /* confirm — the gate card + the drill hint (the F11 card, value-shaped) */
+  /* confirm — the GATE CARD (the reviewer's screen): the SAME complete node card
+   *  `detail <id>` shows (every node.json field · resolved inputs · open questions ·
+   *  gates · artifacts · blockers), then the results and the drill links. The frame's
+   *  live gate prompt keeps its own compact form (renderers.ts renderGateCard — talk.ts):
+   *  a different surface — what the runner pauses on, not what a human reviews. */
   confirm: (value) => {
-    const v = value as { detail: TaskDetail; results: ResultItem[] };
-    const card = renderGateCard({ detail: v.detail, results: v.results });
-    return v.results.length ? card + '\n' + '  → drill: ann results <id> <n>' + '\n' : card + '\n';
+    const v = value as { detail: NodeCard; results: ResultItem[] };
+    const lines = nodeCardLines(v.detail);
+    lines.push('---', `RESULTS (${v.results.length})`);
+    if (!v.results.length) lines.push('  (none — no commits, refs, evidence or links recorded yet)');
+    v.results.forEach((r, i) => lines.push(`  ${String(i + 1).padStart(2)}. [${r.kind.padEnd(8)}] ${r.label}`));
+    if (v.results.length) lines.push(`  → drill: ann results ${v.detail.id} <n>`);
+    lines.push(
+      '---',
+      'LINKS',
+      `  ann events ${v.detail.id} [n]   the event list · one event's raw record + what it points at`,
+      `  ann journey ${v.detail.id}      the node + the full numbered walk`,
+      `  ann packet ${v.detail.id}       the materialized context (inputs · siblings · open questions)`,
+    );
+    return block(lines);
   },
 
   detail: (value) => {

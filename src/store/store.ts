@@ -637,7 +637,7 @@ export class Store {
       for (const c of Array.isArray(e.commits) ? e.commits : []) {
         const sha = (c as { sha?: unknown })?.sha;
         if (typeof sha !== 'string' || !sha) continue;
-        push({ kind: 'commit', label: `${sha} — ${String((c as { note?: unknown })?.note ?? '')}`, sha, note: String((c as { note?: unknown })?.note ?? ''), at: e.at });
+        push({ kind: 'commit', label: (c as { note?: unknown })?.note ? `${sha} — ${String((c as { note?: unknown }).note)}` : sha, sha, note: String((c as { note?: unknown })?.note ?? ''), at: e.at });
       }
     }
     // refs — structured evidence.refs[] (+ external links)
