@@ -73,7 +73,20 @@ function driveLifecycle(root: string): void {
   cli(root, ['docs', '--write']);
   git(root, ['add', '-A']);
   git(root, ['commit', '-qm', 'stage the deliverable']);
-  cli(root, ['evidence!', TASK, 'abc1234']);
+  // v18: the structured conclusion rides the evidence event (claims per AC + the checks
+  // that were run) — the card's CLAIMS/CHECKS sections must survive the render parity.
+  cli(root, [
+    'evidence!',
+    TASK,
+    'abc1234',
+    '--claims',
+    JSON.stringify([
+      { ac: 'AC-1', statement: 'the thing works', evidence: ['abc1234', 'docs/thing.md'] },
+      { ac: 'AC-2', statement: 'nobody reviewed it yet' },
+    ]),
+    '--checks',
+    JSON.stringify([{ command: 'npm test', result: 'pass', detail: '3/3' }, { command: 'ann check', result: 'fail', detail: 'known' }]),
+  ]);
   cli(root, ['submit!', TASK, 'confirm']);
   cli(root, ['gate!', TASK, 'confirm', 'accept', 'done']);
   cli(root, ['complete!', TASK]);

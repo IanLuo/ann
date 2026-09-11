@@ -388,8 +388,8 @@ export class Commands {
   evidence(
     id: string,
     commits: Array<{ sha: string; note?: string }>,
-    opts: { refs?: string[]; note?: string } = {},
-  ): CommandResult<{ commits: number; refs: number }> {
+    opts: { refs?: string[]; note?: string; claims?: unknown[]; checks?: unknown[] } = {},
+  ): CommandResult<{ commits: number; refs: number; claims: number; checks: number }> {
     if (!id.includes('/')) return fail('leg-gate-write', 'leg roots carry no conclusion — evidence belongs to tasks');
     if (!this.store.ids().includes(id)) return fail('no-node', `no node ${id}`);
     if (!Array.isArray(commits) || !commits.length) {
@@ -403,6 +403,12 @@ export class Commands {
     const refs = opts.refs ?? [];
     const badRef = refs.findIndex((r) => typeof r !== 'string' || !r.trim());
     if (badRef >= 0) return fail('bad-ref', `evidence! refs[${badRef}] must be a non-blank path`);
+    // v18 §3 — the structured conclusion rides the SAME event (one conclusion record):
+    // `claims[]` (how each AC is met) and `checks[]` (what was run, against which bytes).
+    // Thin front only: the SHAPE is the single writer's (claimShapeProblem/
+    // checkShapeProblem in the store), so a malformed claim is refused by name there.
+    const claims = opts.claims ?? [];
+    const checks = opts.checks ?? [];
     try {
       this.store.appendEvent(this.node(id), {
         at: this.today,
@@ -410,11 +416,13 @@ export class Commands {
         note: opts.note?.trim() ? opts.note : `concluded with commit evidence (${this.who})`,
         commits: commits.map((c) => (c.note?.trim() ? { sha: c.sha.trim(), note: c.note } : { sha: c.sha.trim() })),
         ...(refs.length ? { refs } : {}),
+        ...(claims.length ? { claims } : {}),
+        ...(checks.length ? { checks } : {}),
       });
     } catch (e) {
       return fail('store-refused', (e as Error).message);
     }
-    return ok({ commits: commits.length, refs: refs.length });
+    return ok({ commits: commits.length, refs: refs.length, claims: claims.length, checks: checks.length });
   }
 
   /**

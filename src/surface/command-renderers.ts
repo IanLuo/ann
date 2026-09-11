@@ -45,6 +45,10 @@ export interface NodeCard extends TaskDetail {
   createdAt: string;
   openQuestions: Array<{ id?: string; question?: string; blocking?: boolean; defaultIfUnanswered?: string }>;
   inputs: Array<{ name: string; resolved: boolean; path?: string; sha?: string }>;
+  /** v18 §3 — the structured conclusion, lined up against the contract's ACs. */
+  claims: Array<{ ac: string; statement: string; evidence: string[]; acText?: string }>;
+  /** The verification RUN HISTORY as the log holds it (newest last). */
+  checks: Array<{ command: string; result: 'pass' | 'fail'; detail?: string; sha?: string; at: string }>;
 }
 
 /** One event as a LIST ROW — the numbering `journey <id>` prints and `events <id> <n>`
@@ -125,6 +129,23 @@ const nodeCardLines = (c: NodeCard): string[] => {
   for (const k of Object.keys(contract).sort()) {
     if (known.includes(k)) continue;
     lines.push(`  ${k}: ${JSON.stringify(contract[k])}`);
+  }
+  lines.push('---', 'CLAIMS (how each acceptance criterion is met — from the evidence log, v18)');
+  if (!c.claims.length) lines.push('  (no claims recorded — the conclusion carries prose, not a per-AC mapping)');
+  for (const claim of c.claims) {
+    if (!claim.statement) {
+      lines.push(`  ${claim.ac}: NO CLAIM RECORDED — ${claim.acText ?? ''}`);
+      continue;
+    }
+    lines.push(`  ${claim.ac}: ${claim.statement}`);
+    if (claim.evidence.length) lines.push(`        evidence: ${claim.evidence.join(' · ')}`);
+  }
+  lines.push('---', 'CHECKS (what was run — result · command · against which bytes)');
+  if (!c.checks.length) lines.push('  (none recorded — the verification is not in the log)');
+  for (const k of c.checks) {
+    const sha = k.sha ? ` @ ${k.sha}` : '';
+    const detail = k.detail ? ` — ${k.detail}` : '';
+    lines.push(`  ${k.result === 'pass' ? 'PASS' : 'FAIL'}  ${k.command}${sha}${detail}`);
   }
   lines.push('---', 'GATES (derived)');
   const gateLine = (g: { state: string; at?: string }) =>
@@ -650,9 +671,10 @@ export const RENDERS: Record<string, Renderer> = {
     return block(lines);
   },
   'evidence!': (value, env) => {
-    const v = (value as { ok: true; value: { commits: number; refs: number } }).value;
+    const v = (value as { ok: true; value: { commits: number; refs: number; claims: number; checks: number } }).value;
     const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`;
-    return `evidence recorded → ${env.args[1]} (${plural(v.commits, 'commit')}${v.refs ? ` · ${plural(v.refs, 'ref')}` : ''})\n`;
+    const extra = [v.refs ? plural(v.refs, 'ref') : '', v.claims ? plural(v.claims, 'claim') : '', v.checks ? plural(v.checks, 'check') : ''].filter(Boolean);
+    return `evidence recorded → ${env.args[1]} (${plural(v.commits, 'commit')}${extra.length ? ` · ${extra.join(' · ')}` : ''})\n`;
   },
   'complete!': (_value, env) => `completed → ${env.args[1]}\n`,
   'config!': (value, env) => {

@@ -772,6 +772,24 @@ describe('Store — commit traceability (format v10 §9)', () => {
     const problems = new Store(root).check();
     expect(problems.some((p) => p.includes('does not resolve') || p.includes('does not exist'))).toBe(false);
   });
+
+  // v18 §3 — a CHECK's sha binds the verification to the bytes it ran against: a
+  // verification about a commit that does not exist is named, not silently kept.
+  it('flags a checks[].sha that does not resolve in git (verification binds to bytes)', () => {
+    writeNode('06-engine-build/13-code', {}, [
+      ev('evidence', { commits: [{ sha: '8e94c58' }], checks: [{ command: 'npm test', result: 'pass', sha: 'deadbeef00000000000000000000000000000000' }] }),
+    ]);
+    const problems = new Store(root).check();
+    expect(problems.some((p) => p.includes("check 'npm test' ran against deadbeef") && p.includes('does not resolve in git'))).toBe(true);
+  });
+
+  it('passes a checks[].sha that DOES resolve, and a check with no sha at all', () => {
+    writeNode('06-engine-build/14-code', {}, [
+      ev('evidence', { commits: [{ sha: '8e94c58' }], checks: [{ command: 'npm test', result: 'pass', sha: '8e94c58' }, { command: 'ann check', result: 'pass' }] }),
+    ]);
+    const problems = new Store(root).check();
+    expect(problems.some((p) => p.includes('ran against'))).toBe(false);
+  });
 });
 
 describe('Store — detail() (the full task/leg card)', () => {
@@ -935,6 +953,44 @@ describe('Store — strict event schema (format v12 §3: unknown fields + shapes
     writeNode('06-engine-build/20-d', {}, [ev('created')]);
     expectReject('06-engine-build/20-d', { at: '2026-08-22', type: 'evidence', commits: [{ noSha: true }] } as unknown as JourneyEvent, /commits must be/);
     expectReject('06-engine-build/20-d', { at: '2026-08-22', type: 'evidence', refs: [42] } as unknown as JourneyEvent, /refs must be/);
+  });
+
+  // v18 §3 — the STRUCTURED VERIFICATION shapes (claims[]/checks[]), policed here at
+  // the single writer: a malformed claim/check is refused BY NAME, never stored as prose.
+  it('rejects malformed claims on evidence (shape, unknown key, empty ac/statement)', () => {
+    writeNode('06-engine-build/20-h', {}, [ev('created')]);
+    const E = (claims: unknown): JourneyEvent => ({ at: '2026-08-22', type: 'evidence', claims } as unknown as JourneyEvent);
+    expectReject('06-engine-build/20-h', E([]), /claims must be a non-empty/);
+    expectReject('06-engine-build/20-h', E(['AC-1']), /each claim must be an object/);
+    expectReject('06-engine-build/20-h', E([{ ac: 'AC-1', statement: 'x', bogus: 1 }]), /unknown field\(s\) 'bogus'/);
+    expectReject('06-engine-build/20-h', E([{ statement: 'x' }]), /needs 'ac'/);
+    expectReject('06-engine-build/20-h', E([{ ac: 'AC-1', statement: '   ' }]), /needs 'statement'/);
+    expectReject('06-engine-build/20-h', E([{ ac: 'AC-1', statement: 'x', evidence: [] }]), /evidence must be a non-empty/);
+  });
+
+  it('rejects malformed checks (command, result domain, sha shape)', () => {
+    writeNode('06-engine-build/20-i', {}, [ev('created')]);
+    const E = (checks: unknown): JourneyEvent => ({ at: '2026-08-22', type: 'evidence', checks } as unknown as JourneyEvent);
+    expectReject('06-engine-build/20-i', E([]), /checks must be a non-empty/);
+    expectReject('06-engine-build/20-i', E([{ result: 'pass' }]), /non-blank command/);
+    expectReject('06-engine-build/20-i', E([{ command: 'npm test', result: 'green' }]), /result must be 'pass' or 'fail'/);
+    expectReject('06-engine-build/20-i', E([{ command: 'npm test', result: 'pass', sha: 'not-a-sha' }]), /sha must be a commit sha/);
+    expectReject('06-engine-build/20-i', E([{ command: 'npm test', result: 'pass', kind: 'x' }]), /unknown field\(s\) 'kind'/);
+  });
+
+  it('accepts the valid claim/check shapes and carries them on the event', () => {
+    writeNode('06-engine-build/20-j', {}, [ev('created')]);
+    const s2 = s();
+    s2.appendEvent(s2.resolveNode('06-engine-build/20-j'), {
+      at: '2026-08-22',
+      type: 'evidence',
+      commits: [{ sha: 'abc1234' }],
+      claims: [{ ac: 'AC-1', statement: 'it works', evidence: ['abc1234', 'src/x.ts'] }, { ac: 'AC-2', statement: 'it is reviewed' }],
+      checks: [{ command: 'npm test', result: 'pass', detail: '622/622', sha: 'abc1234' }],
+    } as unknown as JourneyEvent);
+    const e = s2.events('06-engine-build/20-j').find((x) => x.type === 'evidence');
+    expect(e?.claims).toHaveLength(2);
+    expect(e?.checks).toEqual([{ command: 'npm test', result: 'pass', detail: '622/622', sha: 'abc1234' }]);
   });
 
   it('accepts the valid shapes the engine itself writes (dogfood)', () => {

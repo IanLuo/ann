@@ -2,6 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { Store } from '../../store/store.js';
 import { createContext, HANDLERS, CliContext } from '../handlers.js';
 import { RENDERS, type NodeCard } from '../command-renderers.js';
 
@@ -224,6 +226,87 @@ describe('the NODE VIEW — the complete task card + the event drill (leg 10 tas
     expect(() => HANDLERS.events(createContext(root, ['events', '07-leg/01-implementation-thing', '9']))).toThrow(/no event 9/);
     expect(() => HANDLERS.events(createContext(root, ['events', '07-leg/01-implementation-thing', 'nope']))).toThrow(/no event nope/);
     expect(() => HANDLERS.events(createContext(root, ['events', '99-nope']))).toThrow(/no node/);
+  });
+});
+
+describe('STRUCTURED EVIDENCE — claims/checks at the gate (format v18)', () => {
+  const mk = () => {
+    mkdirSync(dir('08-leg'), { recursive: true });
+    writeFileSync(join(dir('08-leg'), 'node.json'), JSON.stringify({ id: '08-leg', contract: { intent: 'l', acceptanceCriteria: ['l'] }, createdAt: '2026-09-01' }));
+    mkdirSync(dir('08-leg/01-implementation-x'), { recursive: true });
+    writeFileSync(
+      join(dir('08-leg/01-implementation-x'), 'node.json'),
+      JSON.stringify({
+        id: '08-leg/01-implementation-x',
+        contract: { intent: 'Build it', acceptanceCriteria: ['AC-1: the first thing works', 'AC-2: the second thing works'], workType: 'implementation' },
+        createdAt: '2026-09-01',
+      }),
+    );
+    writeFileSync(join(dir('08-leg/01-implementation-x'), 'events.jsonl'), JSON.stringify(ev('created')) + '\n');
+  };
+  const id = '08-leg/01-implementation-x';
+  const sha = () => execFileSync('git', ['-C', process.cwd(), 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim().slice(0, 7);
+
+  it('--claims / --checks land on the evidence event; a bad argument writes NOTHING', () => {
+    mk();
+    const s = sha();
+    const claims = JSON.stringify([{ ac: 'AC-1', statement: 'the thing works', evidence: [s, 'docs/core-design.md', 'ghost'] }]);
+    const checks = JSON.stringify([{ command: 'npm test', result: 'pass', detail: '622/622', sha: s }]);
+    const out = HANDLERS['evidence!'](createContext(root, ['evidence!', id, s, '--claims', claims, '--checks', checks, '--note', 'concluded'])) as { value: { value: { claims: number; checks: number } } };
+    expect(out.value.value).toEqual({ commits: 1, refs: 0, claims: 1, checks: 1 });
+    const event = new Store(root).events(id).find((e) => e.type === 'evidence');
+    expect(event?.claims).toEqual([{ ac: 'AC-1', statement: 'the thing works', evidence: [s, 'docs/core-design.md', 'ghost'] }]);
+    expect(event?.checks).toEqual([{ command: 'npm test', result: 'pass', detail: '622/622', sha: s }]);
+
+    // a non-JSON or non-array argument is a NAMED usage failure — nothing appended
+    const before = new Store(root).events(id).length;
+    expect(() => HANDLERS['evidence!'](createContext(root, ['evidence!', id, s, '--claims', '{not json']))).toThrow(/must be a JSON array/);
+    expect(() => HANDLERS['evidence!'](createContext(root, ['evidence!', id, s, '--checks', '"nope"']))).toThrow(/must be a JSON ARRAY/);
+    expect(new Store(root).events(id).length).toBe(before);
+    // …and a malformed claim is refused by the single writer, by NAME
+    expect(() => HANDLERS['evidence!'](createContext(root, ['evidence!', id, s, '--claims', JSON.stringify([{ ac: 'AC-1', statement: 'x', bogus: 1 }])]))).toThrow(/unknown field/);
+  });
+
+  it('the card states how each AC is met, resolves the pointers, and names the gaps', () => {
+    mk();
+    const s = sha();
+    HANDLERS['evidence!'](
+      createContext(root, [
+        'evidence!',
+        id,
+        s,
+        '--claims',
+        JSON.stringify([{ ac: 'AC-1', statement: 'the first thing works — proven by the suite', evidence: [s, 'docs/core-design.md', 'ghost-pointer'] }]),
+        '--checks',
+        JSON.stringify([{ command: 'npm test', result: 'pass', detail: '622 passed', sha: s }, { command: 'ann check', result: 'fail', detail: '1 problem' }]),
+      ]),
+    );
+    const card = (HANDLERS.confirm(createContext(root, ['confirm', id])) as { value: { detail: NodeCard } }).value.detail;
+    expect(card.claims.map((c) => c.ac)).toEqual(['AC-1', 'AC-2']);
+    expect(card.claims[0].statement).toContain('proven by the suite');
+    expect(card.claims[0].evidence.join(' ')).toContain(`${s} [resolves in git]`);
+    expect(card.claims[0].evidence.join(' ')).toContain('docs/core-design.md');
+    expect(card.claims[0].evidence.join(' ')).toContain('ghost-pointer [UNRESOLVED');
+    const text = RENDERS.confirm({ detail: card, results: [] }, createContext(root, ['confirm']).renderEnv());
+    expect(text).toContain('CLAIMS (how each acceptance criterion is met');
+    expect(text).toContain('AC-1: the first thing works — proven by the suite');
+    expect(text).toContain('AC-2: NO CLAIM RECORDED');
+    expect(text).toContain('PASS  npm test @');
+    expect(text).toContain('FAIL  ann check — 1 problem');
+    expect(text).toContain('CHECKS (what was run');
+  });
+
+  it('a LATER claim for the same AC supersedes the earlier one (the rework model)', () => {
+    mk();
+    const s = sha();
+    const claim = (statement: string) => JSON.stringify([{ ac: 'AC-1', statement }]);
+    HANDLERS['evidence!'](createContext(root, ['evidence!', id, s, '--claims', claim('first attempt')]));
+    HANDLERS['evidence!'](createContext(root, ['evidence!', id, s, '--claims', claim('second attempt, after the rework')]));
+    const card = (HANDLERS.confirm(createContext(root, ['confirm', id])) as { value: { detail: NodeCard } }).value.detail;
+    expect(card.claims[0].statement).toBe('second attempt, after the rework');
+    expect(card.checks).toEqual([]); // no checks recorded — the card says so
+    const text = RENDERS.confirm({ detail: card, results: [] }, createContext(root, ['confirm']).renderEnv());
+    expect(text).toContain('(none recorded — the verification is not in the log)');
   });
 });
 

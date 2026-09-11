@@ -264,10 +264,10 @@ describe('evidence! + complete! — the close gesture commands (leg 08 task 02)'
   const GATE = [ev('submitted', { gate: 'grill' }), ev('confirmed', { gate: 'grill' }), ev('submitted', { gate: 'confirm' }), ev('confirmed', { gate: 'confirm' })];
   const accepted = (extra: Array<Record<string, unknown>> = []) => writeNode('01-leg/01-a', CONTRACT, [ev('created'), ...GATE, ...extra]);
 
-  it('evidence! records the conclusion — commits[] (+ optional refs[]) with the initiator provenance', () => {
+  it('evidence! records the conclusion — commits[] (+ optional refs[] · claims[] · checks[]) with the initiator provenance', () => {
     accepted();
     const c = cmds();
-    expect(valueOf(c.evidence('01-leg/01-a', [{ sha: 'abc1234', note: 'the deliverable' }], { refs: ['src/store'] }))).toEqual({ commits: 1, refs: 1 });
+    expect(valueOf(c.evidence('01-leg/01-a', [{ sha: 'abc1234', note: 'the deliverable' }], { refs: ['src/store'] }))).toEqual({ commits: 1, refs: 1, claims: 0, checks: 0 });
     const e = c.events('01-leg/01-a').at(-1)!;
     expect(e.type).toBe('evidence');
     expect(e.commits).toEqual([{ sha: 'abc1234', note: 'the deliverable' }]);
@@ -275,6 +275,21 @@ describe('evidence! + complete! — the close gesture commands (leg 08 task 02)'
     expect(String(e.note)).toContain('test');
     // the conclusion EVIDENCE is not the terminal — an accepted task stays accepted
     expect(c.status('01-leg/01-a')).toBe('accepted');
+  });
+
+  it('evidence! carries the STRUCTURED conclusion too (v18: claims per AC + the checks run)', () => {
+    accepted();
+    const c = cmds();
+    const claims = [{ ac: 'AC-1', statement: 'the store holds it', evidence: ['abc1234', 'src/store'] }];
+    const checks = [{ command: 'npm test', result: 'pass' as const, detail: '3/3', sha: 'abc1234' }];
+    expect(valueOf(c.evidence('01-leg/01-a', [{ sha: 'abc1234' }], { claims, checks }))).toEqual({ commits: 1, refs: 0, claims: 1, checks: 1 });
+    const e = c.events('01-leg/01-a').at(-1)!;
+    expect(e.claims).toEqual(claims);
+    expect(e.checks).toEqual(checks);
+    // the SHAPE stays the store's: a malformed claim is refused through this front too
+    const bad = errorOf(c.evidence('01-leg/01-a', [{ sha: 'abc1234' }], { claims: [{ ac: 'AC-1' }] }));
+    expect(bad.code).toBe('store-refused');
+    expect(bad.blocker).toContain("needs 'statement'");
   });
 
   it('evidence! refuses the shapes a conclusion cannot have (named refusals, nothing written)', () => {

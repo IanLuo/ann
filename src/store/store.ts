@@ -221,6 +221,40 @@ export const legacyPath = (p: string): string =>
  *  A CHECK-REPORTING rule only: no write path reads it. */
 const V9_CUTOFF = '2026-08-21';
 
+/** A CLAIM's shape (format v18 §3): {ac, statement, evidence?} — how one acceptance
+ *  criterion is met. `evidence[]` entries are POINTERS (a commit sha, a ref path, a doc
+ *  name): they are resolved at READ time by the views, never here — a pointer that stops
+ *  resolving IS the finding, so write-time only polices the shape. */
+function claimShapeProblem(c: unknown): string | undefined {
+  if (!c || typeof c !== 'object' || Array.isArray(c)) return 'each claim must be an object';
+  const r = c as Record<string, unknown>;
+  const unknown = Object.keys(r).filter((k) => !['ac', 'statement', 'evidence'].includes(k));
+  if (unknown.length) return `unknown field(s) '${unknown.join(', ')}' on a claim (ac · statement · evidence)`;
+  if (typeof r.ac !== 'string' || !r.ac.trim()) return "a claim needs 'ac' — the acceptance criterion it speaks to (its id or its text)";
+  if (typeof r.statement !== 'string' || !r.statement.trim()) return `claim '${String(r.ac)}' needs 'statement' — HOW the AC is met`;
+  if (r.evidence !== undefined && (!Array.isArray(r.evidence) || !r.evidence.length || !r.evidence.every((x) => typeof x === 'string' && x.trim()))) {
+    return `claim '${String(r.ac)}'.evidence must be a non-empty [commit-sha | ref-path | doc-name, …] when present`;
+  }
+  return undefined;
+}
+
+/** A CHECK's shape (format v18 §3): {command, result, detail?, sha?} — what was RUN.
+ *  `sha` is OPTIONAL and, when present, binds the verification to the bytes it ran
+ *  against; the traceability read refuses one that does not resolve in git. */
+function checkShapeProblem(c: unknown): string | undefined {
+  if (!c || typeof c !== 'object' || Array.isArray(c)) return 'each check must be an object';
+  const r = c as Record<string, unknown>;
+  const unknown = Object.keys(r).filter((k) => !['command', 'result', 'detail', 'sha'].includes(k));
+  if (unknown.length) return `unknown field(s) '${unknown.join(', ')}' on a check (command · result · detail · sha)`;
+  if (typeof r.command !== 'string' || !r.command.trim()) return 'a check needs a non-blank command — what was RUN';
+  if (r.result !== 'pass' && r.result !== 'fail') return `check '${String(r.command)}'.result must be 'pass' or 'fail', got ${JSON.stringify(r.result)}`;
+  if (r.detail !== undefined && typeof r.detail !== 'string') return `check '${String(r.command)}'.detail must be a string when present`;
+  if (r.sha !== undefined && (typeof r.sha !== 'string' || !/^[0-9a-f]{7,40}$/.test(r.sha))) {
+    return `check '${String(r.command)}'.sha must be a commit sha (7-40 hex) when present — the bytes it ran against`;
+  }
+  return undefined;
+}
+
 /** Logical name from a filename: strip .md and any -vN version suffix
  *  (functional-spec-v3.md → functional-spec). The third fallback of the
  *  resolver's collect() — notes may omit the explicit logical-name marker. */
@@ -743,6 +777,17 @@ export class Store {
             problems.push(`F-AC18: ${id} — ref '${String(ref)}' does not exist (traceability, format v10 §9)`);
           }
         }
+        // v18 §3 — a CHECK's sha binds the verification to the bytes it ran against; a
+        // sha that does not resolve is a verification claim about nothing (named here).
+        for (const ck of Array.isArray(e.checks) ? e.checks : []) {
+          const sha = (ck as { sha?: unknown })?.sha;
+          if (typeof sha !== 'string' || !sha.trim()) continue;
+          try {
+            execFileSync('git', ['cat-file', '-t', sha.trim()], { stdio: 'pipe' });
+          } catch {
+            problems.push(`F-AC18: ${id} — check '${String((ck as { command?: unknown })?.command ?? '')}' ran against ${sha.trim()}, which does not resolve in git (format v18 §3 — verification binds to bytes)`);
+          }
+        }
       }
     }
     return problems;
@@ -1085,7 +1130,7 @@ export class Store {
       created: ['at', 'type', 'note'],
       activated: ['at', 'type', 'note'],
       extended: ['at', 'type', 'note'],
-      evidence: ['at', 'type', 'note', 'commits', 'refs', 'answers', 'trace'],
+      evidence: ['at', 'type', 'note', 'commits', 'refs', 'answers', 'trace', 'claims', 'checks'],
       'artifact-locked': ['at', 'type', 'note', 'artifact'],
       completed: ['at', 'type', 'note'],
       failed: ['at', 'type', 'note'],
@@ -1167,6 +1212,28 @@ export class Store {
         throw new Error('append rejected: evidence.answers must be [{id, answer, provenance?}, …]');
       }
       if (e.trace !== undefined) this.validateTrace(e.trace);
+      // v18 §3 — STRUCTURED VERIFICATION: `claims[]` (how each AC is met) and `checks[]`
+      // (what was run, and against which bytes). Strict at the single writer, like every
+      // other shape here: a malformed claim/check is refused by NAME, never stored as
+      // prose the gate would then have to interpret.
+      if (e.claims !== undefined) {
+        if (!Array.isArray(e.claims) || !e.claims.length) {
+          throw new Error('append rejected: evidence.claims must be a non-empty [{ac, statement, evidence?}, …] — one per acceptance criterion');
+        }
+        for (const c of e.claims) {
+          const problem = claimShapeProblem(c);
+          if (problem) throw new Error(`append rejected: evidence.claims — ${problem}`);
+        }
+      }
+      if (e.checks !== undefined) {
+        if (!Array.isArray(e.checks) || !e.checks.length) {
+          throw new Error("append rejected: evidence.checks must be a non-empty [{command, result: 'pass'|'fail', detail?, sha?}, …] — what was run");
+        }
+        for (const c of e.checks) {
+          const problem = checkShapeProblem(c);
+          if (problem) throw new Error(`append rejected: evidence.checks — ${problem}`);
+        }
+      }
     }
     if (e.type === 'transferred' && (typeof e.target !== 'string' || typeof e.scope !== 'string')) {
       throw new Error('append rejected: transferred.target and .scope must be strings');

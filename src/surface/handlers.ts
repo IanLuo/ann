@@ -279,7 +279,7 @@ const COMMANDS: Array<{ name: string; args: string; desc: string }> = [
   { name: 'spawn!', args: '<id> \'<contract-json>\'', desc: 'WRITE — create a node; enforces the v14 contract schema + F-AC19 + id naming + the conclusion (commit-evidence)/leg gates' },
   { name: 'submit!', args: '<id> grill|confirm [confirmedSha]', desc: 'WRITE — submit finished work at a gate for the human decision (the SUCCESS half of the task close; the counterpart is cancel — no longer needed): records `submitted` — the task blocks and waits for `gate! accept|reject`; an interrupted gate stays blocked (resumable), never looks un-started. `[confirmedSha]` (confirm gate only) binds the decision to the exact bytes under review' },
   { name: 'gate!', args: '<id> grill|confirm accept|reject [feedback]', desc: 'WRITE — human gate decision (submit + decide; the 3-reject bound is a CONSTANT owned here)' },
-  { name: 'evidence!', args: '<id> <sha>[,<sha>…] [--refs a.md,b.md] [--note \'<text>\']', desc: "WRITE — the CONCLUSION record (F-AC18): structured commit evidence naming the committed doc/code that carries the deliverable (commits[] non-empty, a sha per entry; optional refs[]); the shape stays the store's — a validated front over the same L1 write, provenance from RECORDED_BY" },
+  { name: 'evidence!', args: "<id> <sha>[,<sha>…] [--refs a.md,b.md] [--note '<text>'] [--claims '<json>'] [--checks '<json>']", desc: "WRITE — the CONCLUSION record (F-AC18): structured commit evidence naming the committed doc/code that carries the deliverable (commits[] non-empty, a sha per entry) plus the OPTIONAL structured conclusion (format v18): --claims = one {ac, statement, evidence?} per acceptance criterion (how it is met; evidence entries are POINTERS — commit sha · ref path · doc name — resolved at READ time) and --checks = {command, result: pass|fail, detail?, sha?} (what was RUN, sha binding it to the bytes); the shape stays the store's — a validated front over the same L1 write, provenance from RECORDED_BY, and a bad JSON argument writes nothing" },
   { name: 'complete!', args: '<id> [--note \'<text>\']', desc: 'WRITE — the DONE terminal: refuses without the confirm gate\'s LAST decision being an ACCEPT and without conclusion evidence (evidence.commits[]); gates decide, commands complete — gate! confirm accept never auto-completes' },
   { name: 'goal!', args: 'met [feedback]', desc: 'WRITE — the HUMAN verdict that seals a structurally-exhausted session (goal-met on the goal root); refused for automated (agent) initiators, double-met, and any undecided submission' },
   { name: 'goal!', args: 'archive [--override]', desc: 'WRITE — guarded structural reset: move .ann/journey → .ann/archive/sessions/<ts>-<slug>/ for a fresh goal; refuses without a met verdict (or --override), on store-external verify drifts, and on uncommitted tracked .ann/journey changes' },
@@ -301,13 +301,92 @@ function nodeCard(ctx: CliContext, id: string): NodeCard {
   if (!d.contract) boom('no-contract', `no node ${id} — nothing to show`);
   const raw = (ctx.store.contract(id) ?? {}) as { openQuestions?: unknown; createdAt?: unknown };
   const nested = (d.contract as { openQuestions?: unknown } | undefined)?.openQuestions;
+  const conclusion = conclusionOf(ctx, id);
   return {
     ...d,
     status: display(ctx, id),
     createdAt: typeof raw.createdAt === 'string' ? raw.createdAt : ctx.store.createdAt(id),
     openQuestions: (raw.openQuestions ?? nested ?? []) as NodeCard['openQuestions'],
     inputs: resolveInputs(ctx, d.contract),
+    claims: claimRows(ctx, d.contract, conclusion.claims),
+    checks: conclusion.checks,
   };
+}
+
+/** THE CONCLUSION AS THE LOG HOLDS IT (v18 §3): the CLAIMS per acceptance criterion —
+ *  a LATER claim supersedes an earlier one for the same AC (the rework model: the newest
+ *  evidence event speaks) — and every CHECK in order (a verification RUN HISTORY, newest
+ *  last). Derived on demand; the log is the only source. */
+function conclusionOf(ctx: CliContext, id: string): { claims: Array<{ ac: string; statement: string; evidence: string[] }>; checks: NodeCard['checks'] } {
+  const latest = new Map<string, { ac: string; statement: string; evidence: string[] }>();
+  const checks: NodeCard['checks'] = [];
+  for (const e of ctx.store.events(id)) {
+    if (e.type !== 'evidence') continue;
+    for (const c of Array.isArray(e.claims) ? e.claims : []) {
+      const r = c as { ac?: unknown; statement?: unknown; evidence?: unknown };
+      const ac = String(r.ac ?? '');
+      if (!ac) continue;
+      latest.set(ac.trim().toLowerCase(), {
+        ac,
+        statement: String(r.statement ?? ''),
+        evidence: (Array.isArray(r.evidence) ? r.evidence : []).map((x) => String(x)),
+      });
+    }
+    for (const k of Array.isArray(e.checks) ? e.checks : []) {
+      const r = k as { command?: unknown; result?: unknown; detail?: unknown; sha?: unknown };
+      checks.push({
+        command: String(r.command ?? ''),
+        result: r.result === 'fail' ? 'fail' : 'pass',
+        ...(typeof r.detail === 'string' && r.detail ? { detail: r.detail } : {}),
+        ...(typeof r.sha === 'string' && r.sha ? { sha: r.sha } : {}),
+        at: String(e.at ?? ''),
+      });
+    }
+  }
+  const claims = [...latest.values()].map((c) => ({ ...c, evidence: c.evidence.map((p) => `${p} [${resolvePointer(ctx, p)}]`) }));
+  return { claims, checks };
+}
+
+/** A claim's evidence POINTER, resolved at READ time: a commit sha · a ref path · a doc
+ *  name — and an explicit UNRESOLVED when none of those hold (the pointer that stopped
+ *  resolving is the finding; it is never dropped). */
+function resolvePointer(ctx: CliContext, pointer: string): string {
+  const p = pointer.trim();
+  if (/^[0-9a-f]{7,40}$/.test(p)) {
+    try {
+      execFileSync('git', ['cat-file', '-t', p], { stdio: 'ignore' });
+      return 'resolves in git';
+    } catch {
+      return 'UNRESOLVED — no such commit';
+    }
+  }
+  const full = join(ctx.root, p);
+  if (existsSync(full)) {
+    const st = statSync(full);
+    return st.isDirectory() ? 'directory' : `${readFileSync(full, 'utf8').split('\n').length} lines`;
+  }
+  const doc = ctx.store.resolveDoc(p);
+  if (doc) return `${doc.path} @ ${doc.sha}`;
+  const cur = ctx.store.current(p);
+  if (cur) return `${cur.path} @ ${cur.sha ?? '(no sha)'}`;
+  return 'UNRESOLVED — no commit, path or doc';
+}
+
+/** The claims lined up against the CONTRACT's acceptance criteria: one row per AC (with
+ *  an explicit NO CLAIM RECORDED when the log says nothing about it — the reviewer's
+ *  signal, not an invented rule), then any claim that matched no AC. */
+function claimRows(ctx: CliContext, contract: Record<string, unknown> | undefined, claims: Array<{ ac: string; statement: string; evidence: string[] }>): NodeCard['claims'] {
+  const acs = ((contract?.acceptanceCriteria as string[] | undefined) ?? []).filter((a) => typeof a === 'string');
+  const key = (s: string): string => s.trim().toLowerCase().replace(/\s+/g, ' ');
+  const used = new Set<number>();
+  const rows: NodeCard['claims'] = acs.map((ac, i) => {
+    const match = claims.findIndex((c, ci) => !used.has(ci) && (key(c.ac) === `ac-${i + 1}` || key(ac).startsWith(key(c.ac))));
+    if (match < 0) return { ac: `AC-${i + 1}`, statement: '', evidence: [], acText: ac };
+    used.add(match);
+    return { ...claims[match], ac: `AC-${i + 1}`, acText: ac };
+  });
+  for (const [i, c] of claims.entries()) if (!used.has(i)) rows.push(c);
+  return rows;
 }
 
 /** A requiredInput's resolution (the SAME rule the context packet uses): the docs
@@ -1019,15 +1098,17 @@ export const HANDLERS: Record<string, Handler> = {
   'evidence!': (ctx) => {
     const refs = takeFlag(ctx.args.slice(1), '--refs');
     const note = takeFlag(refs.rest, '--note');
-    const stray = strayFlag(note.rest);
-    if (stray) return usage(`usage: ann evidence! <id> <sha>[,<sha>…] [--refs a.md,b.md] [--note '<text>'] — unknown flag ${stray}`);
-    const [id, ...shaGroups] = note.rest;
+    const claims = takeFlag(note.rest, '--claims');
+    const checks = takeFlag(claims.rest, '--checks');
+    const stray = strayFlag(checks.rest);
+    if (stray) return usage(`usage: ann evidence! <id> <sha>[,<sha>…] [--refs a.md,b.md] [--note '<text>'] [--claims '<json>'] [--checks '<json>'] — unknown flag ${stray}`);
+    const [id, ...shaGroups] = checks.rest;
     const shas = shaGroups
       .flatMap((g) => g.split(','))
       .map((s) => s.trim())
       .filter(Boolean);
     if (!id || !shas.length) {
-      return usage("usage: ann evidence! <id> <sha>[,<sha>…] [--refs a.md,b.md] [--note '<text>']");
+      return usage("usage: ann evidence! <id> <sha>[,<sha>…] [--refs a.md,b.md] [--note '<text>'] [--claims '<json>'] [--checks '<json>']");
     }
     const refPaths = refs.value
       ? refs.value
@@ -1035,7 +1116,29 @@ export const HANDLERS: Record<string, Handler> = {
           .map((r) => r.trim())
           .filter(Boolean)
       : undefined;
-    return writeResult(ctx.commands.evidence(id, shas.map((sha) => ({ sha })), { ...(refPaths ? { refs: refPaths } : {}), ...(note.value ? { note: note.value } : {}) }));
+    // v18 §3 — the structured conclusion. A bad argument FAILS CLOSED here (named) and
+    // writes nothing; the field SHAPES are the single writer's business (the store).
+    const jsonList = (raw: string | undefined, flag: string): unknown[] | undefined => {
+      if (raw === undefined) return undefined;
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(raw);
+      } catch (e) {
+        return boom('evidence-json', `evidence! ${flag} must be a JSON array — ${(e as Error).message}`);
+      }
+      if (!Array.isArray(parsed)) return boom('evidence-json', `evidence! ${flag} must be a JSON ARRAY of objects`);
+      return parsed;
+    };
+    const claimRows = jsonList(claims.value, '--claims');
+    const checkRows = jsonList(checks.value, '--checks');
+    return writeResult(
+      ctx.commands.evidence(id, shas.map((sha) => ({ sha })), {
+        ...(refPaths ? { refs: refPaths } : {}),
+        ...(note.value ? { note: note.value } : {}),
+        ...(claimRows ? { claims: claimRows } : {}),
+        ...(checkRows ? { checks: checkRows } : {}),
+      }),
+    );
   },
   'complete!': (ctx) => {
     const note = takeFlag(ctx.args.slice(1), '--note');
