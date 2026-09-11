@@ -577,7 +577,7 @@ export class Commands {
     const goalDoc = this.goalDocOf();
     const metEvent = this.store.events(goalId).find((e) => e.type === 'goal-met');
     const undone = legs.filter((l) => !CLOSED_TASK_STATUSES.includes(l.status)).map((l) => l.id);
-    const pending = this.undecidedEverywhere();
+    const pending = this.pendingGates();
     const exhausted = this.goalExhausted();
     const structural = {
       exhausted,
@@ -653,7 +653,7 @@ export class Commands {
     if (this.store.events(goalId).some((e) => e.type === 'goal-met')) {
       return fail('already-met', 'the goal is already met — verdicts are immutable per session (a wrong met is recoverable only via the goal! archive --override path)');
     }
-    const pending = this.undecidedEverywhere();
+    const pending = this.pendingGates();
     if (pending.length) {
       return fail('undecided-submission', `cannot seal the goal while a submission is undecided: ${pending.map((p) => `${p.task}@${p.gate}`).join(', ')} — decide it first`);
     }
@@ -774,15 +774,21 @@ export class Commands {
   private goalExhausted(): boolean {
     const undone = this.legRows().filter((l) => !CLOSED_TASK_STATUSES.includes(l.status));
     const hasWork = this.store.ids().some((i) => i.includes('/'));
-    return hasWork && undone.length === 0 && this.undecidedEverywhere().length === 0;
+    return hasWork && undone.length === 0 && this.pendingGates().length === 0;
   }
 
-  /** Undecided submissions across EVERY task that is not CANCELLED/DEFERRED (including
-   *  done ones — a done task can still hide a stray submission; the verdict must not seal
-   *  over it). Leg 08 task 01: a cancelled task is closed work — its undecided submission
-   *  is exactly what the cancellation was recorded to escape, so the sweep skips it; a
+  /** THE WHOLE-JOURNEY GATE QUEUE (the WAITING ON YOU view): every UNDECIDED submission
+   *  across EVERY task that is not CANCELLED/DEFERRED (including done ones — a done task
+   *  can still hide a stray submission; the goal verdict must not seal over it).
+   *  `lookBack().pendingGates` is the ACTIVE-LEG observer view; THIS read is the whole
+   *  journey (the service/UI gate queue), so a gate waiting in a leg that is already
+   *  done is surfaced rather than scoped away. Derived on demand from the logs — never
+   *  cached, never asserted. Consumers: the goal verdict/exhaustion sweep, the service.
+   *
+   *  Leg 08 task 01: a cancelled task is closed work — its undecided submission is
+   *  exactly what the cancellation was recorded to escape, so the sweep skips it; a
    *  deferred task (the same escape hatch, the work postponed) is skipped the same way. */
-  private undecidedEverywhere(): Array<{ task: string; gate: string }> {
+  pendingGates(): Array<{ task: string; gate: string }> {
     const out: Array<{ task: string; gate: string }> = [];
     for (const id of this.store.ids()) {
       if (!id.includes('/')) continue;

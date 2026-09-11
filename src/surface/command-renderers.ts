@@ -428,6 +428,22 @@ export const RENDERS: Record<string, Renderer> = {
     return block(lines);
   },
 
+  /* serve — the startup descriptor of the minimal service binding (the value IS the
+   * bound endpoint; the process stays alive on the socket after this prints). */
+  serve: (value) => {
+    const v = value as { host: string; port: number; url: string; journey: string };
+    return block([
+      `ann serve: listening on ${v.url}`,
+      `journey: ${v.journey}`,
+      '',
+      `  UI:     ${v.url}/`,
+      `  reads:  GET  ${v.url}/api/journey · /api/status · /api/next · /api/gates`,
+      `          GET  ${v.url}/api/detail?id=<id> · /api/confirm?id=<id> · /api/results?id=<id> · /api/packet?id=<id>`,
+      `  write:  POST ${v.url}/api/gate  {"id":…,"gate":"grill|confirm","decision":"accept|reject","feedback":…}`,
+      '  Ctrl-C to stop.',
+    ]);
+  },
+
   /* advance! — the OPERATOR ACTION value renderer: one block per stop. The ADVANCE /
    * boundary cards themselves are PRESENTED live by the session channel (stdout before
    * this render); this block is the value's own summary (the same object --json would

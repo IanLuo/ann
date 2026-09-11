@@ -279,6 +279,7 @@ const COMMANDS: Array<{ name: string; args: string; desc: string }> = [
   { name: 'goal!', args: 'archive [--override]', desc: 'WRITE — guarded structural reset: move .ann/journey → .ann/archive/sessions/<ts>-<slug>/ for a fresh goal; refuses without a met verdict (or --override), on store-external verify drifts, and on uncommitted tracked .ann/journey changes' },
   { name: 'goal!', args: 'seed [goal-statement]', desc: 'WRITE — grill a goal at SESSION scope (EMPTY journey seeds new; a RE-SEEDABLE sole unconsumed goal is REPLACED after re-grilling — consumed/met goals refuse): the interactive idea-validation session (grill → batch-ask → research → re-grill → human verdict); on solid, synthesize goal.md (Goal:/Success criteria:) + seed/re-seed the goal leg + write docs/goal.md + regenerate the manifest; revise/reject seeds nothing' },
   { name: 'spec!', args: '[docName] [--amend]', desc: 'WRITE — grill the SEEDED goal at REQUIREMENTS/SYSTEM-DESIGN level into ONE amendable spec doc docs/<docName>.md (default requirements): PRODUCE grills the goal into a NEW name; --amend REWRITES an EXISTING in-force doc in place (specs are LIVING, amendable — the goal is not): the interactive SPECS grilling session; on GO it writes docs/<name>.md + regenerates the manifest — commit to publish (JSON refuses: interactive terminal only)' },
+  { name: 'serve', args: '[--host <h>] [--port <n>]', desc: 'RUN — the minimal SERVICE + UI vertical (the goal\'s AC-1): a thin HTTP binding over THIS command layer (same L1 reads/writes, the SAME value-canonical JSON as --json; no second state derivation) — reads journey·status·next·detail·confirm·results·packet·the whole-journey gate queue, the gate write (accept|reject + feedback), and the UI page at /; binds 127.0.0.1 by default (host/port from --host/--port or ANN_HOST/ANN_PORT); credentials stay server-side (JSON refuses: a daemon has no one-document answer)' },
 ];
 
 const commandRows = (): CommandRow[] => COMMANDS.map((c) => ({ name: c.name, args: c.args, desc: c.desc, json: true }));
@@ -751,6 +752,44 @@ export const HANDLERS: Record<string, Handler> = {
 
   read: (ctx) => viewResult(ctx.commands.read(ctx.args[1] || '')),
 
+  /* serve — the MINIMAL SERVICE + UI vertical (the goal's AC-1): an HTTP binding over
+   * THIS command layer (L3, architecture rung 3) — the same L1 reads and the same gate
+   * write, answering the SAME value-canonical JSON `--json` prints (surface/service.ts
+   * reuses jsonDoc/resolveDispatch/the handlers, never a second derivation).
+   *
+   * It is NOT a store write and NOT a read value: it starts a LONG-RUNNING server and
+   * returns its STARTUP DESCRIPTOR (host · port · url · journey) — the process then
+   * stays alive on the listening socket until Ctrl-C. JSON refuses up-front, like
+   * run!/advance!: a daemon has no one-document answer (a `--json serve` would print a
+   * doc and then hang the caller's pipeline). The module is loaded LAZILY so the
+   * surface module graph stays acyclic (handlers ← service, never both). */
+  serve: async (ctx) => {
+    const { startService, DEFAULT_HOST, DEFAULT_PORT } = await import('./service.js');
+    if (ctx.json) {
+      return boom(
+        'serve-daemon',
+        'serve starts a LONG-RUNNING HTTP service (the minimal service + UI vertical) — JSON mode cannot represent a daemon (start it in a terminal: ann serve; read state with ann --json next|journey)',
+      );
+    }
+    const hostFlag = takeFlag(ctx.args.slice(1), '--host');
+    const portFlag = takeFlag(hostFlag.rest, '--port');
+    const stray = strayFlag(portFlag.rest);
+    if (stray) return usage(`usage: ann serve [--host <host>] [--port <port>] — unknown flag ${stray}`);
+    const host = hostFlag.value ?? process.env.ANN_HOST ?? DEFAULT_HOST;
+    const portRaw = portFlag.value ?? process.env.ANN_PORT ?? String(DEFAULT_PORT);
+    const port = Number(portRaw);
+    if (!Number.isInteger(port) || port < 0 || port > 65535) {
+      return usage(`ann serve: --port/ANN_PORT must be an integer 0..65535 (0 = the OS picks a free port), got '${portRaw}'`);
+    }
+    let handle: Awaited<ReturnType<typeof startService>>;
+    try {
+      handle = await startService({ root: ctx.root, host, port });
+    } catch (e) {
+      return boom('serve-bind', `serve could not bind ${host}:${port} — ${(e as Error).message}`);
+    }
+    return { ok: true, value: { host: handle.host, port: handle.port, url: handle.url, journey: ctx.root } };
+  },
+
   /* confirm / detail / results — detail-derived cards + results */
   confirm: (ctx) => {
     const id = resolveId(ctx, ctx.args[1]);
@@ -1112,12 +1151,21 @@ export async function runMain(rawArgv: string[] = process.argv.slice(2)): Promis
   }
 }
 
+/** The JSON DOCUMENT of an Outcome — the ONE serializer behind `--json` stdout AND the
+ *  service's response bodies (surface/service.ts): a read's view value, a write's
+ *  `{ok:true,value}`, or the `{error:{code,message}}` failure doc. Both bindings are
+ *  byte-identical BY CONSTRUCTION (they call this), never by convention. */
+export function jsonDoc(outcome: Outcome): string {
+  if (!outcome.ok) return JSON.stringify({ error: { code: outcome.error.code, message: outcome.error.message } }, null, 2) + '\n';
+  return JSON.stringify(outcome.value, null, 2) + '\n';
+}
+
 /** The single emission point: an Outcome → stderr diagnostics (DIAG) → stdout
  *  (JSON doc, or the RENDER of the SAME value) → the exit code. */
 function emit(outcome: Outcome, json: boolean, env?: RenderEnv, renderKey?: string): void {
   if (!outcome.ok) {
     const text = outcome.error.text ?? outcome.error.message;
-    if (json) process.stdout.write(JSON.stringify({ error: { code: outcome.error.code, message: outcome.error.message } }, null, 2) + '\n');
+    if (json) process.stdout.write(jsonDoc(outcome));
     else console.error(text);
     process.exitCode = outcome.exitCode ?? 1;
     return;
@@ -1138,8 +1186,9 @@ function emit(outcome: Outcome, json: boolean, env?: RenderEnv, renderKey?: stri
 
 /** Normalize a thrown failure into an error Outcome (CommandExit → its shape; any
  *  other error → the generic `error` doc, text = the message — byte-identical to the
- *  old outer try/catch). */
-function outcomeOf(e: unknown): Outcome {
+ *  old outer try/catch). Exported for the service binding, which catches the SAME
+ *  thrown failures around the SAME handlers (never a second error mapper). */
+export function outcomeOf(e: unknown): Outcome {
   if (e instanceof CommandExit) {
     return { ok: false, error: { code: e.code, message: e.message, ...(e.text ? { text: e.text } : {}) }, exitCode: e.exitCode };
   }

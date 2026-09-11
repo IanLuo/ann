@@ -78,6 +78,33 @@ describe('lookBack — the observer view', () => {
   });
 });
 
+describe('pendingGates — the WHOLE-JOURNEY gate queue (the service/UI WAITING ON YOU view)', () => {
+  it('surfaces an undecided submission the ACTIVE-LEG look-back scopes away', () => {
+    // A DONE task can still hide a stray submission (it never overrides `done`), so a
+    // pending gate can live in a leg that already derives done — the whole-journey read
+    // is the one that shows it.
+    writeNode('01-leg', []);
+    writeNode('01-leg/01-a', [ev('created'), ev('completed'), ev('submitted', { gate: 'grill' })]);
+    writeNode('02-leg', []);
+    writeNode('02-leg/01-a', [ev('created')]);
+    expect(commands().status('01-leg')).toBe('done');
+    expect(commands().lookBack().pendingGates).toEqual([]); // the active leg is 02-leg
+    expect(commands().pendingGates()).toEqual([{ task: '01-leg/01-a', gate: 'grill' }]);
+  });
+
+  it('covers every leg, in id order, and skips cancelled/deferred escape hatches', () => {
+    writeNode('01-leg', []);
+    writeNode('01-leg/01-a', [ev('created'), ev('submitted', { gate: 'grill' })]);
+    writeNode('01-leg/02-b', [ev('created'), ev('submitted', { gate: 'grill' }), ev('cancelled', { reason: 'not needed' })]);
+    writeNode('02-leg', []);
+    writeNode('02-leg/01-a', [ev('created'), ev('submitted', { gate: 'confirm' })]);
+    expect(commands().pendingGates()).toEqual([
+      { task: '01-leg/01-a', gate: 'grill' },
+      { task: '02-leg/01-a', gate: 'confirm' },
+    ]);
+  });
+});
+
 describe('advance — the leg gate validated from the logs, never assumed', () => {
   it('tasks remaining → continue-leg, naming the frontmost', () => {
     writeNode('01-leg', []);
