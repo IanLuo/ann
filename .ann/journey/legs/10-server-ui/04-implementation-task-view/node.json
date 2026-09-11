@@ -1,0 +1,26 @@
+{
+  "id": "10-server-ui/04-implementation-task-view",
+  "contract": {
+    "intent": "The TASK VIEW, complete enough to review without shopping around (the correction to the thin gate card, which showed a contract and a flat results list and nothing about the node): `ann journey <id>` shows the WHOLE node — every node.json contract field (intent · acceptanceCriteria · targetAreas · requiredInputs · expectedOutputs · workType · flow · model) + openQuestions + createdAt + the RESOLVED requiredInputs (logical name → path @ sha, resolved/unresolved) + the derived status/gates/artifacts/blockers — above the FULL numbered event walk, with links to the other drills; plus a NEW shared read `ann events <id> [n]` that lists the node's events (the SAME numbering `journey <id>` shows) and drills into ONE: its raw record plus LINKS, per link kind (commit → the results drill; ref → the results drill + existence; artifact → the recorded path + its current/superseded role; gate event → the gate state / confirm card; transferred/superseded target → the node walk). Read-only, value-canonical, and exposed by the service. NOT a gate-specific surface — it is the enrichment the existing journey command was missing.",
+    "acceptanceCriteria": [
+      "ann journey <id> prints the complete node data — every contract field present in node.json (workType · flow · model included, not just intent/ACs) + openQuestions + createdAt + the RESOLVED requiredInputs (name → path @ sha, marked resolved/unresolved) + status/gates/artifacts/blockers — followed by the FULL numbered event walk and the drill links (ann events <id> <n> · ann packet <id> · ann confirm <id> · ann results <id>)",
+      "ann events <id> lists the node's events in LOG ORDER, numbered exactly as journey <id> numbers them (at · type · gate · note); ann events <id> <n> prints that one event's RAW record plus a links block naming, per link, the follow-up command (commit → the results drill; ref → the results drill + existence; artifact → its recorded path + role; gate event → confirm <id>); an out-of-range index or an unknown id fails CLOSED with a named error",
+      "both reads are value-canonical (the default text is a render of the SAME value --json emits), and the service exposes the new read (GET /api/events?id=<node>[&n=<n>]) with a body byte-identical to the CLI's --json for the same state",
+      "the full suite stays green (unit + handler-parity + service e2e coverage of both reads), ann check/verify stay clean on the live journey, and ann commands + the README command table stay row-for-row identical; committed with evidence"
+    ],
+    "targetAreas": [
+      "src/surface",
+      "src/commands",
+      "src/e2e",
+      "README"
+    ],
+    "requiredInputs": [
+      "core-design"
+    ],
+    "expectedOutputs": [
+      "code + tests committed (commit evidence)"
+    ],
+    "workType": "implementation"
+  },
+  "createdAt": "2026-09-11"
+}
