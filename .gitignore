@@ -6,3 +6,9 @@ coverage/
 # store's current state (which IS the baseline) instead of churning on every append.
 .ann/journey/.ledger.json
 .ann/journey/.ledger.json.tmp
+
+# Environment + runtime scratch — never source data. .direnv/ is generated env
+# symlinks; logs/ is per-run working state (the provider op-log records prompts,
+# so it must never be committed).
+.direnv/
+logs/
