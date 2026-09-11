@@ -1,0 +1,18 @@
+{
+  "id": "09-spec-fidelity/01-validate-decision-forks",
+  "contract": {
+    "intent": "ELICIT AND RECORD THE DECISION FORKS (the design-fidelity review's D1-D8). Each fork is a place where docs/ (in force), the shipped code, and the plan's recommendations disagree; each blocks named downstream work (D1/D4/D6/D7/D8 gate leg 11, D2 gates leg 10, D3/D5 gate the 09/02 amendment text). This task delivers the DECISION RECORD: every fork answered — the option chosen, the rationale, the alternatives rejected and why, and the exact doc sections (plus the code slice, if any) the answer changes — elicited WITH the human in a grilling session, never decided by the agent. The plan's recommendations are input to the grill, never the decision. Provenance per the resolution ladder: 'discussed' for every high-impact fork, and a 'defaulted' answer flagged rather than silently accepted. Per the plan, D9-D11 (the surface vocabulary forks) belong to 12/01 in the surface leg — the record names them as such and does not decide them. This is the first work item of leg 09 and needs nothing but the human.",
+    "acceptanceCriteria": [
+      "AC-1: forks D1-D8 are each answered in the record; no fork is left implicit, and no fork is answered 'both' without naming which one is normative; D9-D11 are named as 12/01's forks (the surface leg), not decided here",
+      "AC-2: each answer names the doc sections it changes and the code slice (if any) that embodies it — so the amendment and the code legs cannot drift",
+      "AC-3: provenance per the ladder ('discussed' for every high-impact fork; a 'defaulted' answer is flagged, never silently accepted)",
+      "AC-4: any fork the human deliberately defers is recorded as an open decision with a named owner and the slice it blocks",
+      "AC-5: committed as <sha> with evidence; the record itself is the commit-cited doc (or an evidence record naming it)"
+    ],
+    "workType": "validate",
+    "targetAreas": [
+      "docs"
+    ]
+  },
+  "createdAt": "2026-09-11"
+}

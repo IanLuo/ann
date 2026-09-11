@@ -1,0 +1,16 @@
+{
+  "id": "09-spec-fidelity",
+  "contract": {
+    "intent": "SPEC FIDELITY — reconcile the contract stack with the shipped engine. The design-fidelity review found a named set of disagreements between docs/ (in force) and src/ (shipped): retired vocabulary still presented as live (lock!/supersede!/present!/src/kernel), claims with no producer (confirmedSha's comparator; goal.md's 'hash-checked immutability'; core-design's openQuestions read-path claim), contradictory rules (rework: journey-format-spec §16.4 vs flow-control-spec §3), and stale read/path facts. This leg (a) elicits and RECORDS the human's answers to the code-blocking decision forks D1-D8 with provenance, and (b) lands exactly ONE coherent amendment of the contract stack, in which every claim is either implemented or explicitly marked as a target. NO CODE rides this leg — the deliverable is docs/ content; legs 10-12 then embody what it decides. Authority: docs/ (in force) beats the scratch plan; where the plan and a contract disagree, the disagreement is a finding this leg resolves.",
+    "acceptanceCriteria": [
+      "AC-1: every open decision that blocks code (D1-D8) is decided, recorded with provenance, and the deciding human is named",
+      "AC-2: exactly ONE coherent amendment lands the whole reconciliation — the contract stack is internally consistent, and each claim in it is either implemented or explicitly marked as a target",
+      "AC-3: no code change rides this leg; the deliverable is docs/ content",
+      "AC-4: the amendment's claims are each checkable against the shipped code, and every stale path/vocabulary named by the review is resolved one way or the other"
+    ],
+    "targetAreas": [
+      "docs"
+    ]
+  },
+  "createdAt": "2026-09-11"
+}
