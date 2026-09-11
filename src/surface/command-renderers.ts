@@ -496,7 +496,7 @@ export const RENDERS: Record<string, Renderer> = {
     lines.push('', 'GENERAL CONFIG (rules/config/default.json — the project registry; precedence per leaf: env > user > project > builtin)');
     for (const [key, layer] of Object.entries(v.provenance)) {
       const [g, l] = key.split('.');
-      const val = (v.config[g as 'flow' | 'preferences'] as unknown as Record<string, unknown>)[l];
+      const val = (v.config[g as 'flow' | 'preferences' | 'server'] as unknown as Record<string, unknown>)[l];
       lines.push(`  ${key.padEnd(26)} ${JSON.stringify(val)} [${layer}]`);
     }
     lines.push('  flow.conditionals is PROJECT SEMANTICS — set it in the project registry, never the overlay');
@@ -621,7 +621,7 @@ export const DIAG: Record<string, DiagFn> = {
 
 /* ── shared words/helpers ───────────────────────────────────────────────────── */
 
-export const CONFIG_KEYS = ['provider', 'model', 'baseUrl', 'apiKey', 'maxTokens', 'flow.verifyFailCycles', 'preferences.askVsAssume'];
+export const CONFIG_KEYS = ['provider', 'model', 'baseUrl', 'apiKey', 'maxTokens', 'flow.verifyFailCycles', 'preferences.askVsAssume', 'server.host', 'server.port'];
 
 function baseUrlText(p: { baseUrl: string | null; baseUrlSource: string }): string {
   if (p.baseUrl === null) return '(unresolved — env unset, no fallback)';
@@ -783,7 +783,7 @@ interface ProvidersValue {
 interface ConfigValue {
   file: string;
   user: Record<string, unknown>;
-  config: { flow: Record<string, unknown>; preferences: Record<string, unknown> };
+  config: { flow: Record<string, unknown>; preferences: Record<string, unknown>; server: Record<string, unknown> };
   provenance: Record<string, string>;
   problems: string[];
 }

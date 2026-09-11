@@ -234,7 +234,10 @@ function resolveId(ctx: CliContext, raw: string | undefined): string {
   return boom('no-node', `ann: no node '${raw}'`);
 }
 
-/* ── the command table (one source — text rows, JSON rows, markdown rows) ───── */
+/** The config! group leaves that are NUMBERS (everything else is a string). */
+const NUMERIC_CONFIG_LEAVES = new Set(['verifyFailCycles', 'port']);
+
+/** The command table (one source — text rows, JSON rows, markdown rows) */
 
 const COMMANDS: Array<{ name: string; args: string; desc: string }> = [
   { name: '<name>', args: '', desc: 'the path for one doc (docs manifest) or a current artifact\'s logical name' },
@@ -279,7 +282,7 @@ const COMMANDS: Array<{ name: string; args: string; desc: string }> = [
   { name: 'goal!', args: 'archive [--override]', desc: 'WRITE — guarded structural reset: move .ann/journey → .ann/archive/sessions/<ts>-<slug>/ for a fresh goal; refuses without a met verdict (or --override), on store-external verify drifts, and on uncommitted tracked .ann/journey changes' },
   { name: 'goal!', args: 'seed [goal-statement]', desc: 'WRITE — grill a goal at SESSION scope (EMPTY journey seeds new; a RE-SEEDABLE sole unconsumed goal is REPLACED after re-grilling — consumed/met goals refuse): the interactive idea-validation session (grill → batch-ask → research → re-grill → human verdict); on solid, synthesize goal.md (Goal:/Success criteria:) + seed/re-seed the goal leg + write docs/goal.md + regenerate the manifest; revise/reject seeds nothing' },
   { name: 'spec!', args: '[docName] [--amend]', desc: 'WRITE — grill the SEEDED goal at REQUIREMENTS/SYSTEM-DESIGN level into ONE amendable spec doc docs/<docName>.md (default requirements): PRODUCE grills the goal into a NEW name; --amend REWRITES an EXISTING in-force doc in place (specs are LIVING, amendable — the goal is not): the interactive SPECS grilling session; on GO it writes docs/<name>.md + regenerates the manifest — commit to publish (JSON refuses: interactive terminal only)' },
-  { name: 'serve', args: '[--host <h>] [--port <n>]', desc: 'RUN — the minimal SERVICE + UI vertical (the goal\'s AC-1): a thin HTTP binding over THIS command layer (same L1 reads/writes, the SAME value-canonical JSON as --json; no second state derivation) — reads journey·status·next·detail·confirm·results·packet·the whole-journey gate queue, the gate write (accept|reject + feedback), and the UI page at /; binds 127.0.0.1 by default (host/port from --host/--port or ANN_HOST/ANN_PORT); credentials stay server-side (JSON refuses: a daemon has no one-document answer)' },
+  { name: 'serve', args: '[--host <h>] [--port <n>]', desc: 'RUN — the minimal SERVICE + UI vertical (the goal\'s AC-1): a thin HTTP binding over THIS command layer (same L1 reads/writes, the SAME value-canonical JSON as --json; no second state derivation) — reads journey·status·next·detail·confirm·results·packet·the whole-journey gate queue, the gate write (accept|reject + feedback), and the UI page at /; the BIND comes from --host/--port > ANN_HOST/ANN_PORT > the general config (server.host/server.port — the project registry + the ~/.ann/config.json overlay) > the builtin 127.0.0.1:8787; credentials stay server-side (JSON refuses: a daemon has no one-document answer)' },
 ];
 
 const commandRows = (): CommandRow[] => COMMANDS.map((c) => ({ name: c.name, args: c.args, desc: c.desc, json: true }));
@@ -477,9 +480,9 @@ export const HANDLERS: Record<string, Handler> = {
       const [group, leaf] = key.split('.');
       const cfg = loadConfig() as Record<string, unknown>;
       const existing = (cfg[group] as Record<string, unknown> | undefined) ?? {};
-      const v: unknown = leaf === 'verifyFailCycles' ? Number(value) : value;
-      if (leaf === 'verifyFailCycles' && !Number.isInteger(v)) return boom('config-value', 'config!: flow.verifyFailCycles must be an integer');
-      setConfig(group as 'flow' | 'preferences', { ...existing, [leaf]: v } as never);
+      const v: unknown = NUMERIC_CONFIG_LEAVES.has(leaf) ? Number(value) : value;
+      if (NUMERIC_CONFIG_LEAVES.has(leaf) && !Number.isInteger(v)) return boom('config-value', `config!: ${key} must be an integer`);
+      setConfig(group as 'flow' | 'preferences' | 'server', { ...existing, [leaf]: v } as never);
       const after = resolveConfig(ctx.root).problems.filter((p) => p.startsWith(`config ${key}`));
       return { ok: true, value: { ok: true, value: { key, file: configPath(), leaf, value: v, problems: after } } };
     }
@@ -764,7 +767,7 @@ export const HANDLERS: Record<string, Handler> = {
    * doc and then hang the caller's pipeline). The module is loaded LAZILY so the
    * surface module graph stays acyclic (handlers ← service, never both). */
   serve: async (ctx) => {
-    const { startService, DEFAULT_HOST, DEFAULT_PORT } = await import('./service.js');
+    const { startService } = await import('./service.js');
     if (ctx.json) {
       return boom(
         'serve-daemon',
@@ -775,8 +778,15 @@ export const HANDLERS: Record<string, Handler> = {
     const portFlag = takeFlag(hostFlag.rest, '--port');
     const stray = strayFlag(portFlag.rest);
     if (stray) return usage(`usage: ann serve [--host <host>] [--port <port>] — unknown flag ${stray}`);
-    const host = hostFlag.value ?? process.env.ANN_HOST ?? DEFAULT_HOST;
-    const portRaw = portFlag.value ?? process.env.ANN_PORT ?? String(DEFAULT_PORT);
+    // The bind comes from the GENERAL CONFIG CLASS (the one place the precedence is
+    // written down): --host/--port (this invocation) > env ANN_HOST/ANN_PORT > the user
+    // overlay > the project registry > the builtin literal. A config problem on a
+    // server.* leaf FAILS CLOSED (a bad bind setting is never silently ignored).
+    const cfg = resolveConfig(ctx.root);
+    const badBind = cfg.problems.find((p) => p.startsWith('config server.'));
+    if (badBind) return boom('serve-config', `serve refuses: ${badBind}`);
+    const host = hostFlag.value ?? cfg.config.server.host;
+    const portRaw = portFlag.value ?? String(cfg.config.server.port);
     const port = Number(portRaw);
     if (!Number.isInteger(port) || port < 0 || port > 65535) {
       return usage(`ann serve: --port/ANN_PORT must be an integer 0..65535 (0 = the OS picks a free port), got '${portRaw}'`);

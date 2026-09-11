@@ -108,7 +108,19 @@ interface Server { url: string; host: string; port: number; child: ChildProcess;
 async function serve(root: string, args: string[] = [], env: Record<string, string> = {}): Promise<Server> {
   const child = spawn(process.execPath, [CLI, 'serve', ...args], {
     cwd: root,
-    env: { ...process.env, ...HERMETIC, ANN_PROJECT: root, RECORDED_BY: 'e2e', ANN_CONFIG: join(root, '.e2e-config.json'), ANN_LLM_API_KEY: API_KEY, ...env },
+    env: {
+      ...process.env,
+      ...HERMETIC,
+      ANN_PROJECT: root,
+      RECORDED_BY: 'e2e',
+      ANN_CONFIG: join(root, '.e2e-config.json'),
+      ANN_LLM_API_KEY: API_KEY,
+      // the bind's env layer is BLANKED unless a caller sets it — the dev shell's
+      // ANN_HOST/ANN_PORT must not decide what this suite proves
+      ANN_HOST: '',
+      ANN_PORT: '',
+      ...env,
+    },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let out = '';
@@ -243,6 +255,55 @@ describe('e2e — the minimal service + UI (AC-1: the thin binding over the comm
       expect(res.status).toBe(200);
     } finally {
       fromEnv.kill();
+    }
+  });
+
+  it('the BIND also comes from the GENERAL CONFIG class (project registry · user overlay · config!)', { timeout: 30_000 }, async () => {
+    const cfgRoot = newProject();
+    const registry = join(cfgRoot, '.ann', 'rules', 'config', 'default.json');
+    try {
+      // 1. the PROJECT registry (rules/config/default.json) sets the bind — no flags, no env
+      writeFileSync(
+        registry,
+        JSON.stringify({ flow: { conditionals: true, verifyFailCycles: 1 }, preferences: { askVsAssume: 'ask', defaults: {} }, server: { host: '127.0.0.1', port: 0 } }, null, 2) + '\n',
+      );
+      const fromRegistry = await serve(cfgRoot, []);
+      try {
+        expect(fromRegistry.host).toBe('127.0.0.1');
+        expect(fromRegistry.port).toBeGreaterThan(0);
+        expect(fromRegistry.port).not.toBe(8787); // 0 = the OS picked it, not the builtin floor
+        expect((await get(`http://127.0.0.1:${fromRegistry.port}/api/journey`)).status).toBe(200);
+      } finally {
+        fromRegistry.kill();
+      }
+      const resolved = JSON.parse(cli(cfgRoot, ['--json', 'config']).stdout) as { config: { server: { host: string; port: number } }; provenance: Record<string, string> };
+      expect(resolved.config.server).toEqual({ host: '127.0.0.1', port: 0 });
+      expect(resolved.provenance['server.port']).toBe('project');
+
+      // 2. the USER overlay (the fixture's ANN_CONFIG) overrides the registry leaf
+      writeFileSync(join(cfgRoot, '.e2e-config.json'), JSON.stringify({ server: { port: 0 } }));
+      const overlaid = JSON.parse(cli(cfgRoot, ['--json', 'config']).stdout) as { provenance: Record<string, string> };
+      expect(overlaid.provenance['server.port']).toBe('user');
+
+      // 3. `ann config! set server.port` writes that overlay — the knob is user-settable,
+      //    and a bad value is refused BY NAME (fail-closed, never clamped)
+      const set = cli(cfgRoot, ['--json', 'config!', 'set', 'server.port', '9123']);
+      expect(set.code, set.stderr).toBe(0);
+      const after = JSON.parse(cli(cfgRoot, ['--json', 'config']).stdout) as { config: { server: { port: number } }; provenance: Record<string, string> };
+      expect(after.config.server.port).toBe(9123);
+      expect(after.provenance['server.port']).toBe('user');
+      const bad = cli(cfgRoot, ['--json', 'config!', 'set', 'server.port', 'sea']);
+      expect(bad.code).toBe(1);
+      expect((JSON.parse(bad.stdout) as { error: { code: string } }).error.code).toBe('config-value');
+
+      // 4. and an unusable bind fails CLOSED at serve (named), never a silent fall-back
+      writeFileSync(registry, JSON.stringify({ server: { host: 'http://0.0.0.0:8787' } }) + '\n');
+      const refused = cli(cfgRoot, ['serve', '--port', '0']);
+      expect(refused.code).toBe(1);
+      expect(refused.stderr).toContain('serve refuses');
+      expect(refused.stderr).toContain('no scheme, port, or path');
+    } finally {
+      rmSync(cfgRoot, { recursive: true, force: true });
     }
   });
 

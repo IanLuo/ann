@@ -22,8 +22,9 @@ npm run ann -- validate <id>    # the validator rules (self-contained modules)
 npm run ann -- providers        # the adapter registry (masked)
 npm run ann -- project          # multi-project management by path
 npm run ann -- serve            # the minimal SERVICE + UI: the journey views + the gate
-                                # queue over HTTP (http://127.0.0.1:8787/ by default) —
-                                # host/port from --host/--port or ANN_HOST/ANN_PORT
+                                # queue over HTTP; the bind resolves --host/--port >
+                                # ANN_HOST/ANN_PORT > the general config (server.host/
+                                # server.port) > builtin 127.0.0.1:8787
 ```
 
 State comes from commands only — never read `events.jsonl` directly; never hand-edit
@@ -92,7 +93,7 @@ session (unchanged); a bad/absent target fails closed at startup (named error, e
 | `goal!` | `archive [--override]` | WRITE — guarded structural reset: move .ann/journey → .ann/archive/sessions/<ts>-<slug>/ for a fresh goal; refuses without a met verdict (or --override), on store-external verify drifts, and on uncommitted tracked .ann/journey changes | `yes` |
 | `goal!` | `seed [goal-statement]` | WRITE — grill a goal at SESSION scope (EMPTY journey seeds new; a RE-SEEDABLE sole unconsumed goal is REPLACED after re-grilling — consumed/met goals refuse): the interactive idea-validation session (grill → batch-ask → research → re-grill → human verdict); on solid, synthesize goal.md (Goal:/Success criteria:) + seed/re-seed the goal leg + write docs/goal.md + regenerate the manifest; revise/reject seeds nothing | `yes` |
 | `spec!` | `[docName] [--amend]` | WRITE — grill the SEEDED goal at REQUIREMENTS/SYSTEM-DESIGN level into ONE amendable spec doc docs/<docName>.md (default requirements): PRODUCE grills the goal into a NEW name; --amend REWRITES an EXISTING in-force doc in place (specs are LIVING, amendable — the goal is not): the interactive SPECS grilling session; on GO it writes docs/<name>.md + regenerates the manifest — commit to publish (JSON refuses: interactive terminal only) | `yes` |
-| `serve` | `[--host <h>] [--port <n>]` | RUN — the minimal SERVICE + UI vertical (the goal's AC-1): a thin HTTP binding over THIS command layer (same L1 reads/writes, the SAME value-canonical JSON as --json; no second state derivation) — reads journey·status·next·detail·confirm·results·packet·the whole-journey gate queue, the gate write (accept|reject + feedback), and the UI page at /; binds 127.0.0.1 by default (host/port from --host/--port or ANN_HOST/ANN_PORT); credentials stay server-side (JSON refuses: a daemon has no one-document answer) | `yes` |
+| `serve` | `[--host <h>] [--port <n>]` | RUN — the minimal SERVICE + UI vertical (the goal's AC-1): a thin HTTP binding over THIS command layer (same L1 reads/writes, the SAME value-canonical JSON as --json; no second state derivation) — reads journey·status·next·detail·confirm·results·packet·the whole-journey gate queue, the gate write (accept|reject + feedback), and the UI page at /; the BIND comes from --host/--port > ANN_HOST/ANN_PORT > the general config (server.host/server.port — the project registry + the ~/.ann/config.json overlay) > the builtin 127.0.0.1:8787; credentials stay server-side (JSON refuses: a daemon has no one-document answer) | `yes` |
 
 ### When to use each
 

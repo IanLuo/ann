@@ -12,7 +12,7 @@ import { resolveConfig, BUILTIN_CONFIG, VERIFY_FAIL_CYCLES_CEILING } from '../co
  */
 
 let root: string;
-const ENV_KEYS = ['ANN_FLOW_CONDITIONALS', 'ANN_FLOW_VERIFY_FAIL_CYCLES', 'ANN_PREF_ASK_VS_ASSUME'];
+const ENV_KEYS = ['ANN_FLOW_CONDITIONALS', 'ANN_FLOW_VERIFY_FAIL_CYCLES', 'ANN_PREF_ASK_VS_ASSUME', 'ANN_HOST', 'ANN_PORT'];
 
 const project = (cfg: unknown) => {
   mkdirSync(join(root, '.ann', 'rules', 'config'), { recursive: true });
@@ -87,6 +87,52 @@ describe('flow.conditionals is PROJECT SEMANTICS — not user-overridable', () =
     const r = resolveConfig(root);
     expect(r.config.flow.conditionals).toBe(false);
     expect(r.problems.join('\n')).toContain('PROJECT SEMANTICS');
+  });
+});
+
+describe('server.* — the SERVE BIND group (the general config carries the bind)', () => {
+  it('resolves per leaf: project registry · user overlay · env ANN_HOST/ANN_PORT', () => {
+    project({ server: { host: '0.0.0.0', port: 9001 } });
+    let r = resolveConfig(root);
+    expect(r.config.server).toEqual({ host: '0.0.0.0', port: 9001 });
+    expect(r.provenance['server.host']).toBe('project');
+
+    // the overlay may set the bind (a MACHINE preference, not journey semantics)…
+    user({ server: { port: 9002 } });
+    r = resolveConfig(root);
+    expect(r.config.server).toEqual({ host: '0.0.0.0', port: 9002 }); // per leaf: host stays project
+    expect(r.provenance['server.port']).toBe('user');
+
+    // …and the env layer beats both
+    process.env.ANN_HOST = '127.0.0.1';
+    process.env.ANN_PORT = '9003';
+    r = resolveConfig(root);
+    expect(r.config.server).toEqual({ host: '127.0.0.1', port: 9003 });
+    expect(r.provenance['server.host']).toBe('env');
+    expect(r.provenance['server.port']).toBe('env');
+  });
+
+  it('the builtin floor is 127.0.0.1:8787 — the local server never accidentally binds wide', () => {
+    const r = resolveConfig(root);
+    expect(r.config.server).toEqual({ host: '127.0.0.1', port: 8787 });
+    expect(r.provenance['server.host']).toBe('builtin');
+    expect(r.problems).toEqual([]);
+  });
+
+  it('port 0 is LEGAL (the OS picks a free port) — not an out-of-range clamp', () => {
+    project({ server: { port: 0 } });
+    const r = resolveConfig(root);
+    expect(r.config.server.port).toBe(0);
+    expect(r.problems).toEqual([]);
+    expect(r.provenance['server.port']).toBe('project');
+  });
+
+  it('refuses a non-bare host and an out-of-range port — NAMED, keeping the lower layer', () => {
+    project({ server: { host: 'http://0.0.0.0:8787', port: 70000 } });
+    const r = resolveConfig(root);
+    expect(r.config.server).toEqual(BUILTIN_CONFIG.server); // refused, never clamped
+    expect(r.problems.join('\n')).toContain('no scheme, port, or path');
+    expect(r.problems.join('\n')).toContain('out of range 0..65535');
   });
 });
 

@@ -20,17 +20,15 @@ import { UI_HTML } from './ui.js';
  * (`not-exposed`), never a silent pass-through.
  *
  * OUT OF SCOPE, NAMED: auth beyond local, multi-user, packaging/distribution. The
- * server binds 127.0.0.1 by default and is REMOTE-CAPABLE IN SHAPE — the request path
- * reads only the URL path + query (relative UI fetches; no host/loopback test, nothing
- * in it assumes localhost), so binding elsewhere or proxying it changes no code path.
- * CREDENTIALS ARE SERVER-SIDE (NFR-SEC-1): the LLM apiKey lives in the process env /
- * user config, is reachable only by the L2/L3 abilities that make provider calls, and is
- * NEVER serialized into a response — no route here reads settings, and the e2e proves
- * a configured key appears in no response body.
+ * server binds 127.0.0.1 by default (the general config's `server.*` builtin — the
+ * CALLER resolves the bind; this module has no default of its own) and is REMOTE-CAPABLE
+ * IN SHAPE — the request path reads only the URL path + query (relative UI fetches; no
+ * host/loopback test, nothing in it assumes localhost), so binding elsewhere or proxying
+ * it changes no code path. CREDENTIALS ARE SERVER-SIDE (NFR-SEC-1): the LLM apiKey lives
+ * in the process env / user config, is reachable only by the L2/L3 abilities that make
+ * provider calls, and is NEVER serialized into a response — no route here reads
+ * settings, and the e2e proves a configured key appears in no response body.
  */
-
-export const DEFAULT_HOST = '127.0.0.1';
-export const DEFAULT_PORT = 8787;
 
 /** The canonical reads this slice exposes — the CLI's own command names, dispatched
  *  through the CLI's own handlers (an id-less read is a named usage refusal). */
@@ -45,8 +43,10 @@ const MAX_BODY = 64 * 1024;
 export interface ServiceOptions {
   /** The project root the service answers for (the journey the CLI would read). */
   root: string;
-  host?: string;
-  port?: number;
+  /** The resolved bind — the caller (`ann serve`) applies the config precedence
+   *  (flags > env > general config > builtin); the service holds no default. */
+  host: string;
+  port: number;
 }
 
 export interface ServiceHandle {
@@ -61,8 +61,8 @@ export interface ServiceHandle {
  *  OS error — the caller names it, fail-closed, never a half-up server). `port: 0` lets
  *  the OS pick a free port; the handle reports the BOUND one. */
 export async function startService(opts: ServiceOptions): Promise<ServiceHandle> {
-  const host = opts.host ?? DEFAULT_HOST;
-  const port = opts.port ?? DEFAULT_PORT;
+  const host = opts.host;
+  const port = opts.port;
   const root = opts.root;
   const server = createServer((req, res) => {
     route(root, req, res).catch((e: unknown) => {

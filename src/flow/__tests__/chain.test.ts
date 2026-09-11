@@ -46,6 +46,7 @@ const packet = (resolved: string[] = []): ContextPacket =>
 const cfg = (over: Partial<GeneralConfig['flow']> = {}): GeneralConfig => ({
   flow: { ...BUILTIN_CONFIG.flow, ...over },
   preferences: { ...BUILTIN_CONFIG.preferences },
+  server: { ...BUILTIN_CONFIG.server },
 });
 
 const check = (chain: ChainEntry[], deps: string[] = [], config = cfg()) => validateChain(lookup, chain, packet(deps), config);
