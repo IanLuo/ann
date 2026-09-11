@@ -1,0 +1,26 @@
+{
+  "id": "10-server-ui/07-implementation-conclusion-gate",
+  "contract": {
+    "intent": "Close the regression: the STRUCTURED CONCLUSION becomes a PRECONDITION of the close. One shared L1 derivation (Commands.conclusion(id): the latest claim per acceptance criterion, the checks, and the ACs left UNCLAIMED) feeds BOTH the card and a new `complete!` refusal — so a task cannot reach `completed` while its conclusion is unreviewable: every contract AC must carry a claim, and at least one check must have PASSED against a cited commit (a sha in evidence.commits[] — the bytes under review). The refusal is named, lists exactly what is missing, and writes nothing. The handler-side duplicate derivation is removed (the card renders the L1 read). NAMED, UNFIXED GAP of this slice: the FRAME completes tasks by appending `completed` directly (frame.ts), so a frame-run task can still close thin — its own follow-up.",
+    "acceptanceCriteria": [
+      "ann complete! <id> refuses with a NAMED error and writes NOTHING when any contract AC has no claim (naming those ACs), and separately when no check is both result='pass' and bound to a cited commit (checks[].sha in evidence.commits[])",
+      "the precondition reads the SAME L1 derivation the card renders (Commands.conclusion) — so a card showing NO CLAIM RECORDED plus a close that succeeds for the same state is unrepresentable; the handler-side duplicate is gone",
+      "a compliant conclusion still completes (every AC claimed + a passing check bound to a cited commit); a claim recorded in a LATER evidence event counts; a passing check with a foreign or absent sha does NOT satisfy the rule",
+      "the full suite stays green with the fixtures updated to carry compliant conclusions (they become examples of the rule), the live journey's ann check/verify stay clean, committed with evidence; the frame bypass is recorded as the named follow-up"
+    ],
+    "targetAreas": [
+      "src/commands",
+      "src/surface",
+      "src/e2e"
+    ],
+    "requiredInputs": [
+      "journey-format-spec",
+      "flow-control-spec"
+    ],
+    "expectedOutputs": [
+      "code + tests committed (commit evidence)"
+    ],
+    "workType": "implementation"
+  },
+  "createdAt": "2026-09-11"
+}
