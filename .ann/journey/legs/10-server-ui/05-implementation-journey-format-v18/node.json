@@ -1,0 +1,24 @@
+{
+  "id": "10-server-ui/05-implementation-journey-format-v18",
+  "contract": {
+    "intent": "Amend the EVIDENCE contract for structured verification: docs/journey-format-spec (v18) states the two OPTIONAL `evidence` fields — `claims[]` = one {ac, statement, evidence?} per acceptance criterion (how the AC is met; `evidence[]` entries are POINTERS — a commit sha, a ref path, or a doc name — resolved at READ time, never at write) and `checks[]` = {command, result: 'pass'|'fail', detail?, sha?} (what was RUN and how it went; `sha` binds the verification to the BYTES it ran against) — with the write-time validation and the traceability clause (checks[].sha must resolve in git); docs/core-design's conclusion/evidence wording is re-pointed to admit them. Docs are written by a SPECS session and committed by the operator.",
+    "acceptanceCriteria": [
+      "docs/journey-format-spec.md enumerates the two new evidence fields with their exact shapes, the strict write-time validation (unknown key / empty ac / empty statement / result not in pass|fail refused, named), and the READ-time pointer resolution rule",
+      "docs/core-design.md's evidence/conclusion wording admits claims[]/checks[] (or re-points at the format spec) with no stale evidence-is-commits-only claim",
+      "the amended docs are produced by a SPECS session (spec! journey-format-spec --amend, and core-design --amend) and committed by the operator as git content; ann check stays clean"
+    ],
+    "targetAreas": [
+      "docs/journey-format-spec.md",
+      "docs/core-design.md"
+    ],
+    "requiredInputs": [
+      "journey-format-spec",
+      "core-design"
+    ],
+    "expectedOutputs": [
+      "the amended in-force docs, committed (commit evidence naming the doc commit)"
+    ],
+    "workType": "implementation"
+  },
+  "createdAt": "2026-09-11"
+}

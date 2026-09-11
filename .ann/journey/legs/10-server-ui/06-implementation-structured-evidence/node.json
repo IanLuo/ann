@@ -1,0 +1,26 @@
+{
+  "id": "10-server-ui/06-implementation-structured-evidence",
+  "contract": {
+    "intent": "STRUCTURED EVIDENCE at the gate: `ann evidence!` gains `--claims '<json array>'` and `--checks '<json array>'` (parsed fail-closed, named, writing nothing on a bad argument); the store's single writer validates both shapes (strict fields, result in pass|fail, a sha-shaped check.sha) and the traceability read flags a check whose sha does not resolve in git; and the node card (journey/detail/confirm — and the same value over GET /api/confirm|detail) derives the CONCLUSION from the log: CLAIMS per acceptance criterion (a later claim supersedes an earlier one for the same AC; an AC with no claim prints NO CLAIM RECORDED) with every pointer RESOLVED at read time (resolves in git · N lines · docs/<name> @ sha · UNRESOLVED), and CHECKS as a run history (result · command · the sha it ran against · detail). The reviewer decides against stated claims and a real verification record instead of prose.",
+    "acceptanceCriteria": [
+      "ann evidence! <id> <sha>[,<sha>] [--note] [--refs] [--claims '<json>'] [--checks '<json>'] records claims/checks onto the evidence event; a non-JSON or non-array argument fails CLOSED with a named error and writes NOTHING",
+      "the single writer validates the shapes strictly (unknown key, empty ac/statement, result not in pass|fail, malformed check.sha) and the traceability read reports a check whose sha does not resolve in git",
+      "the card (ann confirm / journey / detail, and the same value over the service) prints CLAIMS — one line per contract AC, its statement, its resolved pointers, and NO CLAIM RECORDED for an unclaimed AC — and CHECKS (the run history), so a gate can be decided on stated claims + verification",
+      "the full suite stays green (store shape/refusal tests, handler tests incl. the card rendering, the handler-parity fixture carrying claims+checks), ann check/verify stay clean on the live journey, committed with evidence"
+    ],
+    "targetAreas": [
+      "src/store",
+      "src/commands",
+      "src/surface",
+      "src/e2e"
+    ],
+    "requiredInputs": [
+      "journey-format-spec"
+    ],
+    "expectedOutputs": [
+      "code + tests committed (commit evidence)"
+    ],
+    "workType": "implementation"
+  },
+  "createdAt": "2026-09-11"
+}
