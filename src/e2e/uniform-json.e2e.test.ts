@@ -85,7 +85,18 @@ function driveLifecycle(root: string): string {
   git(root, ['add', '-A']);
   git(root, ['commit', '-qm', 'stage the deliverable']);
   const sha = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
-  cli(root, ['evidence!', TASK, sha, '--note', 'committed']);
+  // v18: a compliant conclusion (claims per AC + a passing check bound to the cited commit)
+  cli(root, [
+    'evidence!',
+    TASK,
+    sha,
+    '--note',
+    'committed',
+    '--claims',
+    JSON.stringify([{ ac: 'AC-1', statement: 'the thing is done', evidence: [sha] }]),
+    '--checks',
+    JSON.stringify([{ command: 'npm test', result: 'pass', detail: 'fixture', sha }]),
+  ]);
   cli(root, ['submit!', TASK, 'confirm']);
   cli(root, ['gate!', TASK, 'confirm', 'accept', 'done']);
   cli(root, ['complete!', TASK]);

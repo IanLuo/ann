@@ -123,6 +123,21 @@ export interface GateOutcome {
   escalated: boolean;
 }
 
+/** The STRUCTURED CONCLUSION as the log holds it (format v18) — the ONE derivation the
+ *  card renders AND the close enforces, so the two can never disagree. */
+export interface ConclusionView {
+  /** The latest claim per acceptance criterion (a later claim supersedes an earlier one
+   *  for the same AC — the rework model), each lined up with the contract AC it speaks
+   *  to. Unclaimed ACs are NOT here: they are reported in `unclaimed`. */
+  claims: Array<{ ac: string; statement: string; evidence: string[]; acText: string }>;
+  /** Every check the log holds, in order (the verification run history). */
+  checks: Array<{ command: string; result: 'pass' | 'fail'; detail?: string; sha?: string; at: string }>;
+  /** The contract ACs with NO claim — the reviewer's signal, and `complete!`'s refusal. */
+  unclaimed: Array<{ ac: string; acText: string }>;
+  /** The commits this task's conclusion cites (evidence.commits[].sha). */
+  cited: string[];
+}
+
 export interface FrontmostReady {
   leg: string;
   task: string;
@@ -455,6 +470,25 @@ export class Commands {
       return fail(
         'no-evidence',
         `${id}: no conclusion evidence — F-AC18: a task completes only on structured commit evidence (evidence.commits[]); run evidence! ${id} <sha> with the commit that carries the deliverable`,
+      );
+    }
+    // v18 (the conclusion GATE): a close is a REVIEW — the log must be able to say how
+    // every AC is met and what was actually run. The SAME `conclusion()` the card renders
+    // decides it here, so "the card shows NO CLAIM RECORDED" and "the close succeeded"
+    // cannot both be true for one state.
+    const conclusion = this.conclusion(id);
+    if (conclusion.unclaimed.length) {
+      return fail(
+        'no-structured-conclusion',
+        `${id}: ${conclusion.unclaimed.length} acceptance criterion(s) carry no claim — ${conclusion.unclaimed.map((u) => `'${u.ac}' (${u.acText})`).join(' · ')}. Record how each is met: ann evidence! ${id} <sha> --claims '[{"ac":"AC-1","statement":"…","evidence":["<sha|path|doc>"]}]'`,
+      );
+    }
+    const passing = conclusion.checks.find((c) => c.result === 'pass' && c.sha && conclusion.cited.includes(c.sha));
+    if (!passing) {
+      const checks = conclusion.checks.length ? `${conclusion.checks.length} check(s), none PASSING against a cited commit` : 'no checks';
+      return fail(
+        'no-structured-conclusion',
+        `${id}: the conclusion has ${checks} — a close must cite at least one PASSING check bound to the bytes under review (checks[].sha in evidence.commits[] ${conclusion.cited.length ? conclusion.cited.join(', ') : '(none cited)'}). Record it: ann evidence! ${id} <sha> --checks '[{"command":"npm test","result":"pass","sha":"<cited sha>"}]'`,
       );
     }
     try {
@@ -1008,6 +1042,66 @@ export class Commands {
     const gate = this.store.legGateMet(front);
     if (!gate.met) return { leg: front, action: 'closure-needed', detail: `leg gate UNMET: ${gate.blocker} — close via a gated closure task (transfer/defer, F-AC16)` };
     return { leg: front, action: 'advance-leg', detail: `leg gate MET: all previous-leg tasks done — spawn tasks into ${front} carrying the epic goal` };
+  }
+
+  /** THE STRUCTURED CONCLUSION, derived from the log (format v18) — the ONE place the
+   *  claims/checks structure is read: the card renders it, `complete!` enforces it, and
+   *  `unclaimed` is the AC list neither may ignore. Pointer RESOLUTION (git/fs probing)
+   *  is a render-time concern and stays in the binding. */
+  conclusion(id: string): ConclusionView {
+    const latest = new Map<string, { ac: string; statement: string; evidence: string[] }>();
+    const checks: ConclusionView['checks'] = [];
+    const cited: string[] = [];
+    for (const e of this.store.events(id)) {
+      if (e.type !== 'evidence') continue;
+      for (const c of Array.isArray(e.commits) ? e.commits : []) {
+        const sha = (c as { sha?: unknown })?.sha;
+        if (typeof sha === 'string' && sha.trim() && !cited.includes(sha.trim())) cited.push(sha.trim());
+      }
+      for (const c of Array.isArray(e.claims) ? e.claims : []) {
+        const r = c as { ac?: unknown; statement?: unknown; evidence?: unknown };
+        const ac = String(r.ac ?? '');
+        if (!ac) continue;
+        latest.set(this.acKey(ac), {
+          ac,
+          statement: String(r.statement ?? ''),
+          evidence: (Array.isArray(r.evidence) ? r.evidence : []).map((x) => String(x)),
+        });
+      }
+      for (const k of Array.isArray(e.checks) ? e.checks : []) {
+        const r = k as { command?: unknown; result?: unknown; detail?: unknown; sha?: unknown };
+        checks.push({
+          command: String(r.command ?? ''),
+          result: r.result === 'fail' ? 'fail' : 'pass',
+          ...(typeof r.detail === 'string' && r.detail ? { detail: r.detail } : {}),
+          ...(typeof r.sha === 'string' && r.sha ? { sha: r.sha } : {}),
+          at: String(e.at ?? ''),
+        });
+      }
+    }
+    const acs = ((this.store.contractOf(id)?.acceptanceCriteria as string[] | undefined) ?? []).filter((a) => typeof a === 'string');
+    const used = new Set<string>();
+    const claims: ConclusionView['claims'] = [];
+    const unclaimed: ConclusionView['unclaimed'] = [];
+    acs.forEach((ac, i) => {
+      const key = this.acKey(ac);
+      const match = [...latest.entries()].find(([k, c]) => !used.has(k) && (k === `ac-${i + 1}` || key.startsWith(k)));
+      if (!match) {
+        unclaimed.push({ ac: `AC-${i + 1}`, acText: ac });
+        return;
+      }
+      used.add(match[0]);
+      claims.push({ ...match[1], ac: `AC-${i + 1}`, acText: ac });
+    });
+    // a claim that matched no AC is KEPT (an author's extra claim is data, never dropped)
+    for (const [k, c] of latest.entries()) if (!used.has(k)) claims.push({ ...c, acText: '' });
+    return { claims, checks, unclaimed, cited };
+  }
+
+  /** The comparison key for an AC (and a claim's `ac`): case/whitespace-insensitive, so
+   *  "AC-2" and "ac-2 " and the criterion's own text prefixes all line up. */
+  private acKey(s: string): string {
+    return s.trim().toLowerCase().replace(/\s+/g, ' ');
   }
 
   /* ══ shared derivations ════════════════════════════════════════════════════ */

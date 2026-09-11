@@ -85,7 +85,8 @@ function driveLifecycle(root: string): void {
       { ac: 'AC-2', statement: 'nobody reviewed it yet' },
     ]),
     '--checks',
-    JSON.stringify([{ command: 'npm test', result: 'pass', detail: '3/3' }, { command: 'ann check', result: 'fail', detail: 'known' }]),
+    // the passing check must be BOUND to a cited commit (v18: complete! refuses otherwise)
+    JSON.stringify([{ command: 'npm test', result: 'pass', detail: '3/3', sha: 'abc1234' }, { command: 'ann check', result: 'fail', detail: 'known' }]),
   ]);
   cli(root, ['submit!', TASK, 'confirm']);
   cli(root, ['gate!', TASK, 'confirm', 'accept', 'done']);

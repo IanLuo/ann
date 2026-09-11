@@ -310,14 +310,84 @@ describe('evidence! + complete! — the close gesture commands (leg 08 task 02)'
     expect(e.blocker).toContain('concludes nothing');
   });
 
+  /** A COMPLIANT v18 conclusion: a claim for every contract AC + a passing check bound to
+   *  a cited commit (the sha the checks ran against) — what `complete!` now requires. */
+  const conclude = (c: Commands, id: string, sha: string) =>
+    c.evidence(id, [{ sha }], {
+      claims: [{ ac: 'AC-1', statement: 'the AC is met', evidence: [sha] }],
+      checks: [{ command: 'npm test', result: 'pass' as const, detail: '3/3', sha }],
+    });
+
   it('complete! records the DONE terminal on an accepted + evidenced task', () => {
     accepted();
     const c = cmds();
-    valueOf(c.evidence('01-leg/01-a', [{ sha: realSha() }]));
+    conclude(c, '01-leg/01-a', realSha());
     expect(valueOf(c.complete('01-leg/01-a')).at).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     expect(c.status('01-leg/01-a')).toBe('done');
     expect(String(c.events('01-leg/01-a').at(-1)!.note)).toContain('test');
     expect(c.check()).toEqual([]); // the conclusion is complete: evidence resolves + the gate is cited
+  });
+
+  // v18 — the CONCLUSION GATE: the close is a review, so it refuses a thin conclusion.
+  // (Each case starts from a FRESH accepted task: the fixture's own shape is rewritten.)
+  const ID = '01-leg/01-a';
+
+  it('complete! refuses when an AC carries no claim — named, with the AC listed, nothing written', () => {
+    accepted();
+    const c = cmds();
+    c.evidence(ID, [{ sha: realSha() }], { checks: [{ command: 'npm test', result: 'pass', sha: realSha() }] });
+    const e = errorOf(c.complete(ID));
+    expect(e.code).toBe('no-structured-conclusion');
+    expect(e.blocker).toContain('carry no claim');
+    expect(e.blocker).toContain("'AC-1'");
+    expect(e.blocker).toContain('--claims');
+    expect(c.status(ID)).toBe('accepted'); // nothing was written
+    // the derivation the CARD renders is the one that refused
+    expect(c.conclusion(ID).unclaimed).toEqual([{ ac: 'AC-1', acText: 'it is done' }]);
+  });
+
+  it('complete! refuses when no PASSING check is bound to a cited commit — no checks · a foreign sha · a failing check', () => {
+    // one node per case: the fixture hand-writes node.json/events.jsonl, and the store's
+    // ledger guard (correctly) refuses a WRITE over a node that was rewritten behind it.
+    const at = (id: string) => writeNode(id, CONTRACT, [ev('created'), ...GATE]);
+    const close = (id: string, opts: Parameters<Commands['evidence']>[2]) => {
+      at(id);
+      const c = cmds();
+      valueOf(c.evidence(id, [{ sha: realSha() }], opts));
+      return { c, err: errorOf(c.complete(id)) };
+    };
+    // (a) claims, but no checks at all
+    const a = close('01-leg/02-nochecks', { claims: [{ ac: 'AC-1', statement: 'met', evidence: [realSha()] }] });
+    expect(a.err.code).toBe('no-structured-conclusion');
+    expect(a.err.blocker).toContain('no checks');
+    // (b) a passing check bound to a sha the task does NOT cite (verification of nothing)
+    const b = close('01-leg/03-foreign', {
+      claims: [{ ac: 'AC-1', statement: 'met', evidence: [realSha()] }],
+      checks: [{ command: 'npm test', result: 'pass', sha: 'deadbeef00000000000000000000000000000000' }],
+    });
+    expect(b.err.code).toBe('no-structured-conclusion');
+    expect(b.err.blocker).toContain('none PASSING against a cited commit');
+    expect(b.c.status('01-leg/03-foreign')).toBe('accepted'); // nothing written
+    // (c) a FAILING check does not satisfy it
+    const d = close('01-leg/04-failing', {
+      claims: [{ ac: 'AC-1', statement: 'met', evidence: [realSha()] }],
+      checks: [{ command: 'npm test', result: 'fail', detail: '1 failed', sha: realSha() }],
+    });
+    expect(d.err.code).toBe('no-structured-conclusion');
+    expect(d.c.status('01-leg/04-failing')).toBe('accepted');
+  });
+
+  it('a claim recorded in a LATER evidence event counts (the rework model) — matched by the AC text or its AC-N', () => {
+    accepted();
+    const c = cmds();
+    const sha = realSha();
+    c.evidence(ID, [{ sha }]); // evidence first — thin
+    expect(errorOf(c.complete(ID)).code).toBe('no-structured-conclusion');
+    // the claim names the criterion by its TEXT, the check passes against the cited commit
+    c.evidence(ID, [{ sha }], { claims: [{ ac: 'it is done', statement: 'met — the criterion named by its text', evidence: [sha] }] });
+    c.evidence(ID, [{ sha }], { checks: [{ command: 'npm test', result: 'pass', detail: '3/3', sha }] });
+    expect(valueOf(c.complete(ID)).at).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(c.check()).toEqual([]);
   });
 
   it('complete! refuses without the human ACCEPT — none · rejected · an undecided re-submission after an accept', () => {
@@ -346,7 +416,7 @@ describe('evidence! + complete! — the close gesture commands (leg 08 task 02)'
   it('AC-2 RESOLVED: gate! confirm accept does NOT auto-complete — `accepted` stands until complete!', () => {
     writeNode('01-leg/01-a', CONTRACT, [ev('created'), ev('submitted', { gate: 'grill' }), ev('confirmed', { gate: 'grill' })]);
     const c = cmds();
-    valueOf(c.evidence('01-leg/01-a', [{ sha: realSha() }]));
+    conclude(c, '01-leg/01-a', realSha());
     valueOf(c.submit('01-leg/01-a', 'confirm'));
     valueOf(c.gate('01-leg/01-a', 'confirm', 'accept', 'looks right'));
     // the human accepted a task that ALREADY carried commit evidence — still not done:
@@ -360,7 +430,7 @@ describe('evidence! + complete! — the close gesture commands (leg 08 task 02)'
   it('complete! is recorded once, and never on a leg root or an unknown node', () => {
     accepted();
     const c = cmds();
-    valueOf(c.evidence('01-leg/01-a', [{ sha: 'abc1234' }]));
+    conclude(c, '01-leg/01-a', 'abc1234');
     valueOf(c.complete('01-leg/01-a'));
     expect(errorOf(c.complete('01-leg/01-a')).code).toBe('already-completed');
     expect(errorOf(c.complete('01-leg')).code).toBe('leg-gate-write');
@@ -370,7 +440,7 @@ describe('evidence! + complete! — the close gesture commands (leg 08 task 02)'
   it('adds NO new write path — every event lands through the single writer', () => {
     accepted();
     const c = cmds();
-    valueOf(c.evidence('01-leg/01-a', [{ sha: 'abc1234' }]));
+    conclude(c, '01-leg/01-a', 'abc1234');
     valueOf(c.complete('01-leg/01-a'));
     expect(c.events('01-leg/01-a').map((e) => e.type)).toEqual(['created', 'submitted', 'confirmed', 'submitted', 'confirmed', 'evidence', 'completed']);
     expect(c.verify()).toEqual([]);

@@ -86,7 +86,19 @@ function driveJourney(root: string): void {
   git(root, ['add', '-A']);
   git(root, ['commit', '-qm', 'stage the deliverable']);
   const sha = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
-  cli(root, ['evidence!', T1, sha, '--note', 'committed']);
+  // v18: complete! requires a structured conclusion — claims for every AC + a passing
+  // check bound to the cited commit
+  cli(root, [
+    'evidence!',
+    T1,
+    sha,
+    '--note',
+    'committed',
+    '--claims',
+    JSON.stringify([{ ac: 'AC-1', statement: 'the alpha thing is done', evidence: [sha] }]),
+    '--checks',
+    JSON.stringify([{ command: 'npm test', result: 'pass', detail: 'fixture', sha }]),
+  ]);
   cli(root, ['submit!', T1, 'confirm']);
   cli(root, ['gate!', T1, 'confirm', 'accept', 'done']);
   cli(root, ['complete!', T1]);

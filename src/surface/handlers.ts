@@ -301,50 +301,22 @@ function nodeCard(ctx: CliContext, id: string): NodeCard {
   if (!d.contract) boom('no-contract', `no node ${id} — nothing to show`);
   const raw = (ctx.store.contract(id) ?? {}) as { openQuestions?: unknown; createdAt?: unknown };
   const nested = (d.contract as { openQuestions?: unknown } | undefined)?.openQuestions;
-  const conclusion = conclusionOf(ctx, id);
+  // v18: the card renders the SAME L1 conclusion the close enforces (ctx.commands
+  // .conclusion) — the binding only RESOLVES the pointers for display, so a card that
+  // says NO CLAIM RECORDED and a close that succeeds cannot both be true.
+  const conclusion = ctx.commands.conclusion(id);
   return {
     ...d,
     status: display(ctx, id),
     createdAt: typeof raw.createdAt === 'string' ? raw.createdAt : ctx.store.createdAt(id),
     openQuestions: (raw.openQuestions ?? nested ?? []) as NodeCard['openQuestions'],
     inputs: resolveInputs(ctx, d.contract),
-    claims: claimRows(ctx, d.contract, conclusion.claims),
+    claims: [
+      ...conclusion.claims.map((c) => ({ ...c, evidence: c.evidence.map((p) => `${p} [${resolvePointer(ctx, p)}]`) })),
+      ...conclusion.unclaimed.map((u) => ({ ac: u.ac, statement: '', evidence: [] as string[], acText: u.acText })),
+    ],
     checks: conclusion.checks,
   };
-}
-
-/** THE CONCLUSION AS THE LOG HOLDS IT (v18 §3): the CLAIMS per acceptance criterion —
- *  a LATER claim supersedes an earlier one for the same AC (the rework model: the newest
- *  evidence event speaks) — and every CHECK in order (a verification RUN HISTORY, newest
- *  last). Derived on demand; the log is the only source. */
-function conclusionOf(ctx: CliContext, id: string): { claims: Array<{ ac: string; statement: string; evidence: string[] }>; checks: NodeCard['checks'] } {
-  const latest = new Map<string, { ac: string; statement: string; evidence: string[] }>();
-  const checks: NodeCard['checks'] = [];
-  for (const e of ctx.store.events(id)) {
-    if (e.type !== 'evidence') continue;
-    for (const c of Array.isArray(e.claims) ? e.claims : []) {
-      const r = c as { ac?: unknown; statement?: unknown; evidence?: unknown };
-      const ac = String(r.ac ?? '');
-      if (!ac) continue;
-      latest.set(ac.trim().toLowerCase(), {
-        ac,
-        statement: String(r.statement ?? ''),
-        evidence: (Array.isArray(r.evidence) ? r.evidence : []).map((x) => String(x)),
-      });
-    }
-    for (const k of Array.isArray(e.checks) ? e.checks : []) {
-      const r = k as { command?: unknown; result?: unknown; detail?: unknown; sha?: unknown };
-      checks.push({
-        command: String(r.command ?? ''),
-        result: r.result === 'fail' ? 'fail' : 'pass',
-        ...(typeof r.detail === 'string' && r.detail ? { detail: r.detail } : {}),
-        ...(typeof r.sha === 'string' && r.sha ? { sha: r.sha } : {}),
-        at: String(e.at ?? ''),
-      });
-    }
-  }
-  const claims = [...latest.values()].map((c) => ({ ...c, evidence: c.evidence.map((p) => `${p} [${resolvePointer(ctx, p)}]`) }));
-  return { claims, checks };
 }
 
 /** A claim's evidence POINTER, resolved at READ time: a commit sha · a ref path · a doc
@@ -370,23 +342,6 @@ function resolvePointer(ctx: CliContext, pointer: string): string {
   const cur = ctx.store.current(p);
   if (cur) return `${cur.path} @ ${cur.sha ?? '(no sha)'}`;
   return 'UNRESOLVED — no commit, path or doc';
-}
-
-/** The claims lined up against the CONTRACT's acceptance criteria: one row per AC (with
- *  an explicit NO CLAIM RECORDED when the log says nothing about it — the reviewer's
- *  signal, not an invented rule), then any claim that matched no AC. */
-function claimRows(ctx: CliContext, contract: Record<string, unknown> | undefined, claims: Array<{ ac: string; statement: string; evidence: string[] }>): NodeCard['claims'] {
-  const acs = ((contract?.acceptanceCriteria as string[] | undefined) ?? []).filter((a) => typeof a === 'string');
-  const key = (s: string): string => s.trim().toLowerCase().replace(/\s+/g, ' ');
-  const used = new Set<number>();
-  const rows: NodeCard['claims'] = acs.map((ac, i) => {
-    const match = claims.findIndex((c, ci) => !used.has(ci) && (key(c.ac) === `ac-${i + 1}` || key(ac).startsWith(key(c.ac))));
-    if (match < 0) return { ac: `AC-${i + 1}`, statement: '', evidence: [], acText: ac };
-    used.add(match);
-    return { ...claims[match], ac: `AC-${i + 1}`, acText: ac };
-  });
-  for (const [i, c] of claims.entries()) if (!used.has(i)) rows.push(c);
-  return rows;
 }
 
 /** A requiredInput's resolution (the SAME rule the context packet uses): the docs

@@ -75,6 +75,21 @@ function prep(root: string, ...ids: string[]): void {
 
 const LEG = '01-leg';
 const TASK = '01-leg/01-a';
+/** v18 — a COMPLIANT conclusion: every contract AC claimed + a passing check bound to the
+ *  cited commit. `complete!` refuses a thin conclusion, so every fixture that closes a task
+ *  must produce one (the fixtures double as examples of the rule). */
+const conclude = (root: string, id: string, sha: string, extra: string[] = []): CliResult =>
+  cli(root, [
+    'evidence!',
+    id,
+    sha,
+    ...extra,
+    '--claims',
+    JSON.stringify([{ ac: 'AC-1', statement: 'the criterion is met', evidence: [sha] }]),
+    '--checks',
+    JSON.stringify([{ command: 'npm test', result: 'pass', detail: 'fixture', sha }]),
+  ]);
+
 const CONTRACT = (intent: string) => JSON.stringify({ intent, acceptanceCriteria: [`${intent} is done`] });
 const EVENT = (type: string, extra: Record<string, string> = {}) =>
   JSON.stringify({ at: '2026-08-29', type, ...extra });
@@ -120,7 +135,7 @@ describe('e2e — the CLI binary', () => {
     git(root, ['add', '-A']);
     git(root, ['commit', '-qm', 'stage the deliverable']);
     const sha = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
-    expect(out(cli(root, ['evidence!', TASK, sha, '--note', 'the thing is committed']))).toContain(`evidence recorded → ${TASK} (1 commit)`);
+    expect(out(conclude(root, TASK, sha, ['--note', 'the thing is committed']))).toContain(`evidence recorded → ${TASK} (1 commit`);
 
     // gate ②: confirm is not 'done' on its own — complete! closes it, and only behind the
     // human's accept + the evidence (gates decide, commands complete; AC-2 resolved)
@@ -205,7 +220,7 @@ describe('e2e — the CLI binary', () => {
     expect(out(cli(root, ['evidence', TASK, sha]))).toContain("writes are marked with '!'");
 
     // the gestures, in order: evidence! then the gates then complete!
-    expect(out(cli(root, ['evidence!', TASK, sha, '--refs', 'docs/thing.md', '--note', 'the deliverable is committed']))).toContain('1 commit · 1 ref');
+    expect(out(conclude(root, TASK, sha, ['--refs', 'docs/thing.md', '--note', 'the deliverable is committed']))).toContain('1 commit · 1 ref');
     cli(root, ['submit!', TASK, 'confirm']);
     cli(root, ['gate!', TASK, 'confirm', 'accept', 'done']);
     expect(out(cli(root, ['complete!', TASK, '--note', 'closed by the operator']))).toContain(`completed → ${TASK}`);
@@ -326,7 +341,7 @@ describe('e2e — the goal-session lifecycle (v6: seed → docs/goal.md → work
     expect(out(cli(r, ['submit!', TASK, 'confirm']))).toContain('submitted confirm');
     expect(out(cli(r, ['gate!', TASK, 'confirm', 'accept', 'done']))).toContain('gate confirm: accept');
     const sha = execFileSync('git', ['-C', r, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
-    expect(out(cli(r, ['evidence!', TASK, sha]))).toContain('evidence recorded');
+    expect(out(conclude(r, TASK, sha))).toContain('evidence recorded');
     expect(out(cli(r, ['complete!', TASK]))).toContain('completed →');
     expect(out(cli(r, ['status', TASK]))).toContain('done');
   }
@@ -437,7 +452,7 @@ describe('e2e — the OPERATOR ACTION advance! (F5 approve→execute, leg 07 tas
     git(root, ['add', '-A']);
     git(root, ['commit', '-qm', 'stage the deliverable']);
     const sha = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
-    cli(root, ['evidence!', TASK, sha, '--note', 'committed']);
+    conclude(root, TASK, sha, ['--note', 'committed']);
     expect(out(cli(root, ['submit!', TASK, 'confirm']))).toContain('submitted confirm');
     expect(out(cli(root, ['gate!', TASK, 'confirm', 'accept', 'done']))).toContain('gate confirm: accept');
     cli(root, ['complete!', TASK]);
