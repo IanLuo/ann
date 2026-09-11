@@ -42,13 +42,14 @@ interface NodeEntry {
 }
 
 /** The CLOSED task statuses — a task in one of these is no longer OPEN WORK (leg 08
- *  task 01 added `cancelled` to the done/superseded pair). Wherever the journey asks
+ *  task 01 added `cancelled` to the done/superseded pair; `deferred` — the work is
+ *  postponed, not delivered — completes the set the same way). Wherever the journey asks
  *  "is this task still open?" — the leg-done aggregate, the leg gate, the goal's
  *  structural exhaustion, the distance-to-goal set — this is the answer, so a cancelled
- *  task never keeps its leg or the session from deriving finished. `failed` is
- *  deliberately NOT closed: a leg whose remaining tasks all failed derives blocked
+ *  OR deferred task never keeps its leg or the session from deriving finished. `failed`
+ *  is deliberately NOT closed: a leg whose remaining tasks all failed derives blocked
  *  (escalate), and a failed task is not finished work. */
-export const CLOSED_TASK_STATUSES = ['done', 'superseded', 'cancelled'];
+export const CLOSED_TASK_STATUSES = ['done', 'superseded', 'cancelled', 'deferred'];
 
 /** NOT OPEN TO RUN: the statuses that are neither open work nor work a leg can point at
  *  as its frontmost child — the closed set plus `failed` (exhausted → escalate). An
@@ -438,6 +439,16 @@ export class Store {
         case 'cancelled':
           if (status !== 'done' && status !== 'failed') status = 'cancelled';
           break;
+        // leg 08 task 01's `cancelled` counterpart, wired as a real terminal: `deferred`
+        // is the task POSTPONED (not delivered, not abandoned) — an append-style
+        // bookkeeping record with a required reason, same escape-hatch semantics as
+        // `cancelled`. Terminal in BOTH directions: it never un-closes delivered (done) /
+        // exhausted (failed) / abandoned (cancelled) work, and the blocked re-derivations
+        // below never override it — so deferring a task stuck at an undecided submission
+        // STICKS and its leg can derive done.
+        case 'deferred':
+          if (status !== 'done' && status !== 'failed' && status !== 'cancelled') status = 'deferred';
+          break;
         // v6 goal session: `goal-met` is deliberately NOT here — a goal verdict is
         // STATUS-INERT (goal-session-design §2). Only the seed (created+completed)
         // makes the goal leg done; the verdict never moves legStatus.
@@ -445,9 +456,9 @@ export class Store {
     }
     // v8 §3: a submitted without a confirmed/rejected at that gate = blocked
     // (waiting on human) — a gate cannot be skipped silently. Never overrides done/failed
-    // — nor `cancelled` (leg 08 task 01): a cancelled task STAYS cancelled, whatever
-    // undecided submission or undischarged `waiting` record it is carrying.
-    if (status !== 'done' && status !== 'failed' && status !== 'cancelled') {
+    // — nor `cancelled` (leg 08 task 01) and `deferred`: a cancelled OR deferred task
+    // STAYS so, whatever undecided submission or undischarged `waiting` record it carries.
+    if (status !== 'done' && status !== 'failed' && status !== 'cancelled' && status !== 'deferred') {
       const pendingGate = evs.some((e) => {
         if (e.type !== 'submitted' || typeof e.gate !== 'string') return false;
         return !evs.slice(evs.indexOf(e) + 1).some((x) => (x.type === 'confirmed' || x.type === 'rejected') && x.gate === e.gate);

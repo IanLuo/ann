@@ -417,6 +417,53 @@ describe('the task-close vocabulary — closed-set parity in the derived views (
   });
 });
 
+describe('the `deferred` terminal — closed-set parity in the derived views (leg 09)', () => {
+  beforeEach(() => { makeStore(); });
+  afterEach(() => { rmSync(root, { recursive: true, force: true }); });
+
+  const DEFER = ev('deferred', { reason: 'the server slice takes priority — this work returns as its own later leg' });
+  const seedGoal = () => writeNode('01-goal', CONTRACT, [ev('created'), ev('completed')]);
+
+  it('records `deferred` through append! — any initiator, with the reason the store requires', () => {
+    writeNode('01-leg', CONTRACT);
+    writeNode('01-leg/01-a', CONTRACT, [ev('created')]);
+    const c = cmds();
+    expect(valueOf(c.append('01-leg/01-a', DEFER as JourneyEvent))).toBeUndefined();
+    expect(c.status('01-leg/01-a')).toBe('deferred');
+    expect(c.events('01-leg/01-a').find((e) => e.type === 'deferred')!.reason).toContain('the server slice takes priority');
+  });
+
+  it('a deferred task is never proposed as ready — frontmostReady/advance skip it for the open sibling', () => {
+    writeNode('01-leg', CONTRACT);
+    writeNode('01-leg/01-a', CONTRACT, [ev('created'), DEFER]);
+    writeNode('01-leg/02-b', CONTRACT, [ev('created')]);
+    const c = cmds();
+    expect(c.frontmostReady()).toEqual({ leg: '01-leg', task: '01-leg/02-b', status: 'queued' });
+    expect(c.advance().detail).toContain('next task: 01-leg/02-b');
+  });
+
+  it('a leg whose only task was deferred derives done — the session reaches structural exhaustion', () => {
+    seedGoal();
+    writeNode('02-work', CONTRACT);
+    writeNode('02-work/01-a', CONTRACT, [ev('created'), DEFER]);
+    const g = valueOf(cmds().goal());
+    expect(g.structural.exhausted).toBe(true);
+    expect(g.verdict).toBe('unconfirmed');
+  });
+
+  it('deferring a task stuck at an undecided submission leaves the sweep clean — the goal verdict can be recorded', () => {
+    seedGoal();
+    writeNode('02-work', CONTRACT);
+    writeNode('02-work/01-a', CONTRACT, [ev('created'), ev('submitted', { gate: 'grill' })]);
+    expect(valueOf(cmds().goal()).structural.exhausted).toBe(false); // the stray submission blocks the session
+    expect(errorOf(cmds().goalVerdict('met')).code).toBe('undecided-submission');
+    valueOf(cmds().append('02-work/01-a', DEFER as JourneyEvent)); // the human postpones the work
+    expect(cmds().status('02-work/01-a')).toBe('deferred'); // the undecided submission no longer re-derives blocked
+    expect(valueOf(cmds().goal()).structural.exhausted).toBe(true);
+    expect(valueOf(cmds().goalVerdict('met')).verdict).toBe('met');
+  });
+});
+
 describe('lock! — the THIN artifact record (one current per name; any file; never touches the file)', () => {
   beforeEach(() => {
     makeStore();

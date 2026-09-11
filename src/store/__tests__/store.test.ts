@@ -193,6 +193,93 @@ describe('Store — the task-close vocabulary: the cancelled terminal + the acce
   });
 });
 
+describe('Store — the `deferred` terminal (leg 09: the half-implemented word wired)', () => {
+  beforeEach(() => { makeStore(); });
+  afterEach(() => { rmSync(root, { recursive: true, force: true }); });
+
+  /** The gates a task walks to a confirm-gate acceptance: grill then confirm. */
+  const GATES = [ev('submitted', { gate: 'grill' }), ev('confirmed', { gate: 'grill' }), ev('submitted', { gate: 'confirm' }), ev('confirmed', { gate: 'confirm' })];
+  const DEFER = (reason = 'the server slice takes priority — this work returns later') => ev('deferred', { reason });
+
+  it('derives `deferred` from the event — the work POSTPONED, not delivered', () => {
+    writeNode('01-goal/01-a', {}, [ev('created'), DEFER()]);
+    expect(new Store(root).status('01-goal/01-a')).toBe('deferred');
+  });
+
+  it('deferred is TERMINAL against delivered work — it never overrides done', () => {
+    writeNode('01-goal/01-a', {}, [ev('created'), ...GATES, ev('completed'), DEFER('recorded in error')]);
+    expect(new Store(root).status('01-goal/01-a')).toBe('done');
+  });
+
+  it('deferred is TERMINAL against exhausted work — it never overrides failed', () => {
+    writeNode('01-goal/01-a', {}, [ev('created'), ev('failed'), DEFER('x')]);
+    expect(new Store(root).status('01-goal/01-a')).toBe('failed');
+  });
+
+  it('deferred and cancelled never override each other — the FIRST terminal recorded on a task holds', () => {
+    writeNode('01-goal/01-a', {}, [ev('created'), ev('cancelled', { reason: 'abandoned' }), DEFER('x')]);
+    writeNode('01-goal/02-b', {}, [ev('created'), DEFER('postponed'), ev('cancelled', { reason: 'then abandoned' })]);
+    const s = new Store(root);
+    expect(s.status('01-goal/01-a')).toBe('cancelled'); // deferred never overrides cancelled
+    expect(s.status('01-goal/02-b')).toBe('cancelled'); // cancelled does override deferred
+  });
+
+  it('deferred STICKS through the blocked re-derivations: an undecided submission and an undischarged `waiting` never override it', () => {
+    // the same escape hatch as cancellation: a gate nobody will decide no longer holds the task open
+    writeNode('01-goal/01-a', {}, [ev('created'), ev('submitted', { gate: 'grill' }), DEFER('nobody will decide this gate — the work is postponed')]);
+    expect(new Store(root).status('01-goal/01-a')).toBe('deferred');
+    // and the empty-chain verify wait (a `waiting` with no later commit evidence)
+    writeNode('01-goal/02-b', {}, [ev('created'), ...GATES, ev('waiting'), DEFER('the runner work is postponed')]);
+    expect(new Store(root).status('01-goal/02-b')).toBe('deferred');
+  });
+
+  it('a queued or an active task can be deferred', () => {
+    writeNode('01-goal/01-a', {}, [ev('created'), DEFER()]);
+    writeNode('01-goal/02-b', {}, [ev('created'), ev('activated'), DEFER()]);
+    const s = new Store(root);
+    expect(s.status('01-goal/01-a')).toBe('deferred');
+    expect(s.status('01-goal/02-b')).toBe('deferred');
+  });
+
+  it('closed-set parity: a leg whose only task was deferred derives done, and the next leg\'s gate is MET', () => {
+    writeNode('01-goal', {}, [ev('created')]);
+    writeNode('01-goal/01-a', {}, [ev('created'), DEFER()]);
+    const s = new Store(root);
+    expect(s.status('01-goal')).toBe('done');
+    expect(s.legGateMet('02-next')).toEqual({ met: true });
+  });
+
+  it('a deferred task is never the leg\'s frontmost child (an open sibling drives the leg\'s status)', () => {
+    writeNode('01-goal', {}, [ev('created')]);
+    writeNode('01-goal/01-a', {}, [ev('created'), DEFER()]);
+    writeNode('01-goal/02-b', {}, [ev('created')]);
+    expect(new Store(root).status('01-goal')).toBe('queued'); // NOT `deferred` — a closed child is not the leg's next work
+  });
+
+  it('appendEvent records `deferred` with a reason and REFUSES a missing or non-string one (the pre-existing store shape)', () => {
+    writeNode('01-goal/01-a', {}, [ev('created')]);
+    const s = new Store(root);
+    expect(() => s.appendEvent(s.resolveNode('01-goal/01-a'), ev('deferred'))).toThrow(/deferred\.reason must be a string/);
+    expect(() => s.appendEvent(s.resolveNode('01-goal/01-a'), ev('deferred', { reason: 42 }))).toThrow(/deferred\.reason must be a string/);
+    s.appendEvent(s.resolveNode('01-goal/01-a'), DEFER());
+    expect(s.events('01-goal/01-a').map((e) => e.type)).toEqual(['created', 'deferred']);
+    expect(s.status('01-goal/01-a')).toBe('deferred');
+  });
+
+  it('deferred stays a strict schema (unknown fields rejected) and is never a leg-root write', () => {
+    writeNode('01-goal', {}, [ev('created')]);
+    writeNode('01-goal/01-a', {}, [ev('created')]);
+    const s = new Store(root);
+    expect(() => s.appendEvent(s.resolveNode('01-goal/01-a'), ev('deferred', { reason: 'x', successor: { name: 'a', path: 'b' } }))).toThrow(/unknown field/);
+    expect(() => s.appendEvent(s.resolveNode('01-goal'), ev('deferred', { reason: 'x' }))).toThrow(/leg roots carry no events/);
+  });
+
+  it('the vocab registry declares the word (both or neither — resource-registry §5)', () => {
+    expect(getVOCAB().eventTypes).toContain('deferred');
+    expect(getVOCAB().statuses).toContain('deferred');
+  });
+});
+
 describe('Store — resolution current(name) (format §5)', () => {
   beforeEach(() => { makeStore(); });
   afterEach(() => { rmSync(root, { recursive: true, force: true }); });

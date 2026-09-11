@@ -777,15 +777,16 @@ export class Commands {
     return hasWork && undone.length === 0 && this.undecidedEverywhere().length === 0;
   }
 
-  /** Undecided submissions across EVERY task that is not CANCELLED (including done ones —
-   *  a done task can still hide a stray submission; the verdict must not seal over it).
-   *  Leg 08 task 01: a cancelled task is closed work — its undecided submission is exactly
-   *  what the cancellation was recorded to escape, so the sweep skips it. */
+  /** Undecided submissions across EVERY task that is not CANCELLED/DEFERRED (including
+   *  done ones — a done task can still hide a stray submission; the verdict must not seal
+   *  over it). Leg 08 task 01: a cancelled task is closed work — its undecided submission
+   *  is exactly what the cancellation was recorded to escape, so the sweep skips it; a
+   *  deferred task (the same escape hatch, the work postponed) is skipped the same way. */
   private undecidedEverywhere(): Array<{ task: string; gate: string }> {
     const out: Array<{ task: string; gate: string }> = [];
     for (const id of this.store.ids()) {
       if (!id.includes('/')) continue;
-      if (this.store.status(id) === 'cancelled') continue;
+      if (['cancelled', 'deferred'].includes(this.store.status(id))) continue;
       for (const e of this.store.events(id)) {
         if (e.type !== 'submitted' || typeof e.gate !== 'string') continue;
         if (!this.undecidedSubmission(id, e.gate)) continue;

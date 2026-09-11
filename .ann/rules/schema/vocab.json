@@ -31,7 +31,8 @@
     "failed",
     "superseded",
     "cancelled",
-    "accepted"
+    "accepted",
+    "deferred"
   ],
   "gates": [
     "grill",

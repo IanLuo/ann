@@ -162,6 +162,28 @@ describe('e2e — the CLI binary', () => {
     expect(out(chk)).toContain('State: 01-leg done');
   });
 
+  it('deferred — the postponed terminal, recordable through append! and closing the leg (leg 09)', () => {
+    prep(root, LEG, TASK);
+    cli(root, ['spawn!', LEG, CONTRACT('the first leg')]);
+    cli(root, ['spawn!', TASK, CONTRACT('do the thing')]);
+
+    // the store shape requires the reason (a missing / non-string one is refused at the single writer)
+    for (const raw of [EVENT('deferred'), JSON.stringify({ at: '2026-08-29', type: 'deferred', reason: 42 })]) {
+      const r = cli(root, ['append!', TASK, raw]);
+      expect(r.code).toBe(1);
+      expect(out(r)).toContain('deferred.reason must be a string');
+    }
+
+    // with a reason it records, and the derived status is the terminal word
+    expect(out(cli(root, ['append!', TASK, JSON.stringify({ at: '2026-08-29', type: 'deferred', reason: 'the server slice takes priority — this work returns later', note: 'deferred by the operator' })]))).toContain('appended');
+    expect(out(cli(root, ['status', TASK]))).toContain('deferred');
+    // closed-set parity: the deferred task no longer holds its leg shut
+    expect(out(cli(root, ['journey']))).toContain('01-leg done');
+    const chk = cli(root, ['check']);
+    expect(chk.code).toBe(0);
+    expect(out(chk)).toContain('State: 01-leg done');
+  });
+
   it('evidence! + complete! — the close gestures, with named refusals and no hand-written JSON', () => {
     prep(root, LEG, TASK);
     cli(root, ['spawn!', LEG, CONTRACT('the first leg')]);
