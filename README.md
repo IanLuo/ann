@@ -52,7 +52,8 @@ session (unchanged); a bad/absent target fails closed at startup (named error, e
 | Command | Args | What it does | --json |
 |---|---|---|---|
 | `<name>` | `` | the path for one doc (docs manifest) or a current artifact's logical name | `yes` |
-| `journey` | `[id]` | the look-back (no id) · one node's walk (with id) · alias --journey | `yes` |
+| `journey` | `[id]` | the look-back (no id) · the COMPLETE NODE VIEW (with id): every node.json field (workType · flow · model too) + openQuestions · createdAt · the RESOLVED requiredInputs + status/gates/artifacts/blockers + the full numbered event walk · alias --journey | `yes` |
+| `events` | `<id> [n]` | the EVENT LIST (numbered exactly as journey <id> numbers it) · with n, the DRILL: that event's raw record + LINKS to more data (commit → the results drill · ref → its existence · artifact → ann read <name> · gate event → ann confirm <id>) — the shared drill every node view points at | `yes` |
 | `status` | `[filter]` | every node's derived status (+ superseded marker) · alias --status | `yes` |
 | `check` | `` | integrity + gates + docs-manifest freshness + the journey state line · alias --check | `yes` |
 | `verify` | `` | the DRIFT read — reconciles the log's recorded claims vs filesystem/git reality (D1-D5 + store-external); exits 1 on any drift · alias --verify | `yes` |

@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createContext, HANDLERS, CliContext } from '../handlers.js';
-import { RENDERS } from '../command-renderers.js';
+import { RENDERS, type NodeCard } from '../command-renderers.js';
 
 /**
  * The CLI HANDLERS (surface) — two regressions:
@@ -35,6 +35,10 @@ let savedStore: string | undefined;
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'ann-surface-'));
   mkdirSync(join(root, '.ann', 'journey', 'legs'), { recursive: true });
+  // a docs/ manifest so a requiredInput resolves (`ann detail` shows inputs resolved)
+  mkdirSync(join(root, 'docs'), { recursive: true });
+  writeFileSync(join(root, 'docs', 'core-design.md'), '# Core design\n\nthe model\n');
+  writeFileSync(join(root, 'docs', 'manifest.json'), JSON.stringify({ 'core-design': 'docs/core-design.md' }, null, 2));
   savedStore = process.env.ANN_STORE;
   delete process.env.ANN_STORE; // the fixture is the ACTIVE journey, never an env target
 });
@@ -120,6 +124,106 @@ describe('evidence! — the gesture flags parse CLOSED', () => {
     });
     HANDLERS['evidence!'](ctx);
     expect(calls).toEqual([['08-task-close/02', [{ sha: 'abc1234' }], {}]]);
+  });
+});
+
+describe('the NODE VIEW — the complete task card + the event drill (leg 10 task 04)', () => {
+  // A node with a real contract, a resolved input, open questions and a rich event log:
+  // the fields the thin gate card used to hide.
+  const rich = () => {
+    writeFileSync(join(root, 'docs', 'thing.md'), '# Thing\n\nbody\n'); // the live ref the drill probes
+    mkdirSync(dir('07-leg'), { recursive: true });
+    writeFileSync(
+      join(dir('07-leg'), 'node.json'),
+      JSON.stringify({ id: '07-leg', contract: { intent: 'the leg', acceptanceCriteria: ['leg done'] }, createdAt: '2026-09-01' }),
+    );
+    mkdirSync(dir('07-leg/01-implementation-thing'), { recursive: true });
+    writeFileSync(
+      join(dir('07-leg/01-implementation-thing'), 'node.json'),
+      JSON.stringify({
+        id: '07-leg/01-implementation-thing',
+        contract: {
+          intent: 'Build the thing',
+          acceptanceCriteria: ['AC-1: it works', 'AC-2: it is reviewed'],
+          targetAreas: ['src/thing'],
+          requiredInputs: ['core-design', 'ghost-input'],
+          expectedOutputs: ['code committed'],
+          workType: 'implementation',
+          model: 'deepseek-chat',
+        },
+        openQuestions: [{ id: 'Q1', question: 'which store?', blocking: false }],
+        createdAt: '2026-09-01',
+      }),
+    );
+    writeFileSync(
+      join(dir('07-leg/01-implementation-thing'), 'events.jsonl'),
+      [
+        ev('created'),
+        ev('submitted', { gate: 'grill' }),
+        ev('confirmed', { gate: 'grill' }),
+        ev('evidence', { note: 'the work', commits: [{ sha: 'abc1234' }], refs: ['docs/thing.md', 'nope/missing.md'] }),
+      ]
+        .map((e) => JSON.stringify(e))
+        .join('\n') + '\n',
+    );
+  };
+  const ctx = () => createContext(root, ['detail', '07-leg/01-implementation-thing']);
+  const value = () => ((HANDLERS.detail(ctx()) as { value: NodeCard }).value);
+
+  it('detail/journey carry the WHOLE node: workType · model · openQuestions · createdAt · resolved+unresolved inputs', () => {
+    rich();
+    const v = value();
+    expect(v.createdAt).toBe('2026-09-01');
+    expect(v.openQuestions).toEqual([{ id: 'Q1', question: 'which store?', blocking: false }]);
+    expect(v.inputs).toEqual([
+      { name: 'core-design', resolved: true, path: 'docs/core-design.md', sha: expect.any(String) },
+      { name: 'ghost-input', resolved: false },
+    ]);
+    const text = RENDERS.detail(v, ctx().renderEnv());
+    expect(text).toContain('workType: implementation');
+    expect(text).toContain('model: deepseek-chat');
+    expect(text).toContain('Q1: which store?');
+    expect(text).toContain('core-design → docs/core-design.md @');
+    expect(text).toContain('ghost-input  [UNRESOLVED');
+    expect(text).toContain('created 2026-09-01');
+  });
+
+  it('the event list numbers events EXACTLY as the journey walk numbers them', () => {
+    rich();
+    const rows = (HANDLERS.events(createContext(root, ['events', '07-leg/01-implementation-thing'])) as { value: { events: Array<{ n: number; type: string }> } }).value.events;
+    expect(rows.map((r) => r.n)).toEqual([1, 2, 3, 4]);
+    expect(rows.map((r) => r.type)).toEqual(['created', 'submitted', 'confirmed', 'evidence']);
+    const walk = RENDERS.journeyOne(value(), ctx().renderEnv());
+    for (const r of rows) expect(walk).toContain(`${String(r.n).padStart(2)}. `);
+    expect(walk).toContain('EVENTS (4)');
+    expect(walk).toContain('ann events 07-leg/01-implementation-thing <n>');
+  });
+
+  it('the drill returns the RAW record plus links that resolve — and reports a dead ref', () => {
+    rich();
+    const drill = (n: string) =>
+      (HANDLERS.events(createContext(root, ['events', '07-leg/01-implementation-thing', n])) as { value: { event: Record<string, unknown>; links: Array<{ kind: string; what: string; detail: string; command: string }> } }).value;
+    const v = drill('4');
+    expect(v.event).toEqual({ at: '2026-09-01', type: 'evidence', note: 'the work', commits: [{ sha: 'abc1234' }], refs: ['docs/thing.md', 'nope/missing.md'] });
+    const commit = v.links.find((l) => l.kind === 'commit');
+    expect(commit?.what).toBe('abc1234');
+    expect(commit?.command).toBe('ann results 07-leg/01-implementation-thing 1'); // the results row for that sha
+    const live = v.links.find((l) => l.what === 'docs/thing.md');
+    expect(live?.detail).toMatch(/lines/); // exists → its size is reported, not assumed
+    const dead = v.links.find((l) => l.what === 'nope/missing.md');
+    expect(dead?.detail).toBe('MISSING'); // never silently dropped: the missing ref IS the finding
+    expect(v.links.some((l) => l.kind === 'node' && l.command === 'ann journey 07-leg/01-implementation-thing')).toBe(true);
+    // a gate event links to the gate card
+    const gate = drill('3');
+    expect(gate.links.find((l) => l.kind === 'gate')?.command).toBe('ann confirm 07-leg/01-implementation-thing');
+    expect(RENDERS.events(v, createContext(root, ['events']).renderEnv())).toContain('links:');
+  });
+
+  it('a bad index or an unknown id fails CLOSED, named', () => {
+    rich();
+    expect(() => HANDLERS.events(createContext(root, ['events', '07-leg/01-implementation-thing', '9']))).toThrow(/no event 9/);
+    expect(() => HANDLERS.events(createContext(root, ['events', '07-leg/01-implementation-thing', 'nope']))).toThrow(/no event nope/);
+    expect(() => HANDLERS.events(createContext(root, ['events', '99-nope']))).toThrow(/no node/);
   });
 });
 

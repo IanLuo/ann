@@ -191,6 +191,8 @@ describe('e2e — the minimal service + UI (AC-1: the thin binding over the comm
       { route: `/api/confirm?id=${T2}`, argv: ['confirm', T2] },
       { route: `/api/results?id=${T2}`, argv: ['results', T2] },
       { route: `/api/packet?id=${T2}`, argv: ['packet', T2] },
+      { route: `/api/events?id=${T2}`, argv: ['events', T2] },
+      { route: `/api/events?id=${T2}&n=2`, argv: ['events', T2, '2'] },
     ];
     for (const { route, argv } of matrix) {
       const cliJson = cli(root, ['--json', ...argv]);
@@ -223,7 +225,7 @@ describe('e2e — the minimal service + UI (AC-1: the thin binding over the comm
     const secrets = [API_KEY, process.env.ANN_LLM_API_KEY].filter((s): s is string => !!s);
     expect(secrets).toContain(API_KEY);
     const bodies: Array<{ what: string; body: string }> = [];
-    for (const route of ['/', '/api/journey', '/api/status', '/api/next', '/api/gates', `/api/confirm?id=${T2}`, `/api/detail?id=${T2}`, `/api/results?id=${T2}`, `/api/packet?id=${T2}`, '/api/run', '/api/config', '/api/providers']) {
+    for (const route of ['/', '/api/journey', '/api/status', '/api/next', '/api/gates', `/api/confirm?id=${T2}`, `/api/detail?id=${T2}`, `/api/results?id=${T2}`, `/api/packet?id=${T2}`, `/api/events?id=${T2}`, '/api/run', '/api/config', '/api/providers']) {
       const res = await get(server.url + route);
       bodies.push({ what: `GET ${route}`, body: res.body });
     }

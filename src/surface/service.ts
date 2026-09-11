@@ -32,7 +32,7 @@ import { UI_HTML } from './ui.js';
 
 /** The canonical reads this slice exposes — the CLI's own command names, dispatched
  *  through the CLI's own handlers (an id-less read is a named usage refusal). */
-const READ_ROUTES = new Set(['journey', 'status', 'next', 'detail', 'confirm', 'results', 'packet']);
+const READ_ROUTES = new Set(['journey', 'status', 'next', 'detail', 'confirm', 'results', 'packet', 'events']);
 /** The reads addressed by a node id (`?id=<node>`). */
 const ID_READS = new Set(['detail', 'confirm', 'results', 'packet']);
 
@@ -180,6 +180,11 @@ async function route(root: string, req: IncomingMessage, res: ServerResponse): P
   if (name === 'status') {
     const filter = url.searchParams.get('filter');
     argv = filter ? ['status', filter] : ['status'];
+  } else if (name === 'events') {
+    const id = url.searchParams.get('id');
+    if (!id) return sendJson(res, 400, jsonDoc(usageError('GET /api/events?id=<node>[&n=<n>]')));
+    const n = url.searchParams.get('n');
+    argv = n ? ['events', id, n] : ['events', id];
   } else if (ID_READS.has(name)) {
     const id = url.searchParams.get('id');
     if (!id) return sendJson(res, 400, jsonDoc(usageError(`GET /api/${name}?id=<node>`)));

@@ -109,6 +109,7 @@ describe('e2e — uniform JSON across every command', () => {
       ['goal'], ['rules'], ['validate'],
       ['journey', LEG], ['branch', LEG],
       ['confirm', TASK], ['detail', TASK], ['packet', TASK], ['results', TASK],
+      ['events', TASK], ['events', TASK, '2'],
       ['read', 'thing'], ['thing'], // read + bare-name path map
     ];
     for (const cmd of reads) {

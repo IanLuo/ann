@@ -8,9 +8,9 @@ import {
   realpathSync,
 } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
-import { execSync } from 'node:child_process';
+import { execSync, execFileSync } from 'node:child_process';
 import { Store, resolveStoreLocation, storeJourneyDir } from '../store/store.js';
-import type { StoreLocation } from '../store/store.js';
+import type { StoreLocation, JourneyEvent, ResultItem, TaskDetail } from '../store/store.js';
 import { scanDocsDir, loadDocsManifest, writeDocsManifest, docsIndexFresh, docSha } from '../store/docs.js';
 import { Commands, CommandResult, GOAL_SEED_GUARD } from '../commands/index.js';
 import {
@@ -43,9 +43,11 @@ import { resolveConfig } from '../flow/config.js';
 import { getAdapter } from '../abilities/llm/index.js';
 import {
   RENDERS,
+  eventRow,
   DIAG,
   renderPacketById,
   type RenderEnv,
+  type NodeCard,
   type UsageDoc,
   type CommandRow,
   HELP_DOC,
@@ -241,7 +243,8 @@ const NUMERIC_CONFIG_LEAVES = new Set(['verifyFailCycles', 'port']);
 
 const COMMANDS: Array<{ name: string; args: string; desc: string }> = [
   { name: '<name>', args: '', desc: 'the path for one doc (docs manifest) or a current artifact\'s logical name' },
-  { name: 'journey', args: '[id]', desc: 'the look-back (no id) · one node\'s walk (with id) · alias --journey' },
+  { name: 'journey', args: '[id]', desc: 'the look-back (no id) · the COMPLETE NODE VIEW (with id): every node.json field (workType · flow · model too) + openQuestions · createdAt · the RESOLVED requiredInputs + status/gates/artifacts/blockers + the full numbered event walk · alias --journey' },
+  { name: 'events', args: '<id> [n]', desc: 'the EVENT LIST (numbered exactly as journey <id> numbers it) · with n, the DRILL: that event\'s raw record + LINKS to more data (commit → the results drill · ref → its existence · artifact → ann read <name> · gate event → ann confirm <id>) — the shared drill every node view points at' },
   { name: 'status', args: '[filter]', desc: 'every node\'s derived status (+ superseded marker) · alias --status' },
   { name: 'check', args: '', desc: 'integrity + gates + docs-manifest freshness + the journey state line · alias --check' },
   { name: 'verify', args: '', desc: 'the DRIFT read — reconciles the log\'s recorded claims vs filesystem/git reality (D1-D5 + store-external); exits 1 on any drift · alias --verify' },
@@ -284,6 +287,106 @@ const COMMANDS: Array<{ name: string; args: string; desc: string }> = [
   { name: 'spec!', args: '[docName] [--amend]', desc: 'WRITE — grill the SEEDED goal at REQUIREMENTS/SYSTEM-DESIGN level into ONE amendable spec doc docs/<docName>.md (default requirements): PRODUCE grills the goal into a NEW name; --amend REWRITES an EXISTING in-force doc in place (specs are LIVING, amendable — the goal is not): the interactive SPECS grilling session; on GO it writes docs/<name>.md + regenerates the manifest — commit to publish (JSON refuses: interactive terminal only)' },
   { name: 'serve', args: '[--host <h>] [--port <n>]', desc: 'RUN — the minimal SERVICE + UI vertical (the goal\'s AC-1): a thin HTTP binding over THIS command layer (same L1 reads/writes, the SAME value-canonical JSON as --json; no second state derivation) — reads journey·status·next·detail·confirm·results·packet·the whole-journey gate queue, the gate write (accept|reject + feedback), and the UI page at /; the BIND comes from --host/--port > ANN_HOST/ANN_PORT > the general config (server.host/server.port — the project registry + the ~/.ann/config.json overlay) > the builtin 127.0.0.1:8787; credentials stay server-side (JSON refuses: a daemon has no one-document answer)' },
 ];
+
+/* ── the NODE CARD — the complete task view (shared by `journey <id>` and `detail`) ──
+ *
+ * The correction to a thin gate card: the node's OWN data first — every contract field
+ * present in node.json (workType · flow · model included), the top-level openQuestions
+ * (v14: a SIBLING of contract, never a contract field), createdAt, and the RESOLVED
+ * requiredInputs (a bare logical name is not reviewable; name → path @ sha, resolved or
+ * not) — then the derived state (status · gates · artifacts · blockers · leg tasks).
+ * Derived on demand from the log; never cached, never asserted. */
+function nodeCard(ctx: CliContext, id: string): NodeCard {
+  const d = ctx.commands.detail(id);
+  if (!d.contract) boom('no-contract', `no node ${id} — nothing to show`);
+  const raw = (ctx.store.contract(id) ?? {}) as { openQuestions?: unknown; createdAt?: unknown };
+  const nested = (d.contract as { openQuestions?: unknown } | undefined)?.openQuestions;
+  return {
+    ...d,
+    status: display(ctx, id),
+    createdAt: typeof raw.createdAt === 'string' ? raw.createdAt : ctx.store.createdAt(id),
+    openQuestions: (raw.openQuestions ?? nested ?? []) as NodeCard['openQuestions'],
+    inputs: resolveInputs(ctx, d.contract),
+  };
+}
+
+/** A requiredInput's resolution (the SAME rule the context packet uses): the docs
+ *  manifest first — the forward path — then a legacy current artifact. A name that
+ *  resolves to nothing is REPORTED as unresolved, never dropped: an unreviewable input
+ *  is the thing the reader must see. */
+function resolveInputs(ctx: CliContext, contract: Record<string, unknown> | undefined): Array<{ name: string; resolved: boolean; path?: string; sha?: string }> {
+  const names = ((contract?.requiredInputs as string[] | undefined) ?? []).filter((n) => typeof n === 'string' && n.trim());
+  return names.map((name) => {
+    const doc = ctx.store.resolveDoc(name);
+    const cur = doc ? undefined : ctx.store.current(name);
+    const hit = doc ?? cur;
+    return hit ? { name, resolved: true, path: hit.path, sha: hit.sha ?? '' } : { name, resolved: false };
+  });
+}
+
+/** The DRILL'S LINKS: what this event points at, and the command that shows it. A link
+ *  that cannot be followed is still listed (the missing ref IS the finding). */
+function eventLinks(ctx: CliContext, id: string, e: JourneyEvent): Array<{ kind: string; what: string; detail: string; command: string }> {
+  const links: Array<{ kind: string; what: string; detail: string; command: string }> = [];
+  const results = ctx.commands.results(id);
+  const rowOf = (match: (r: ResultItem) => boolean): number | undefined => {
+    const i = results.findIndex(match);
+    return i < 0 ? undefined : i + 1;
+  };
+  const drill = (n: number | undefined): string => (n === undefined ? `ann results ${id}` : `ann results ${id} ${n}`);
+
+  for (const c of Array.isArray(e.commits) ? e.commits : []) {
+    const sha = String((c as { sha?: unknown })?.sha ?? '');
+    let exists = false;
+    try {
+      execFileSync('git', ['cat-file', '-t', sha], { stdio: 'ignore' });
+      exists = true;
+    } catch {
+      exists = false;
+    }
+    const note = (c as { note?: unknown })?.note;
+    links.push({
+      kind: 'commit',
+      what: sha,
+      detail: `${exists ? 'resolves in git' : 'DOES NOT resolve in git'}${typeof note === 'string' && note ? ` — ${note}` : ''}`,
+      command: drill(rowOf((r) => r.kind === 'commit' && r.sha === sha)),
+    });
+  }
+  for (const ref of Array.isArray(e.refs) ? e.refs : []) {
+    const p = String(ref);
+    const full = join(ctx.root, p);
+    let detail = 'MISSING';
+    if (existsSync(full)) {
+      const st = statSync(full);
+      detail = st.isDirectory() ? 'directory' : `${readFileSync(full, 'utf8').split('\n').length} lines`;
+    }
+    links.push({ kind: 'ref', what: p, detail, command: drill(rowOf((r) => r.kind === 'ref' && r.path === p)) });
+  }
+  const artifact = (e.artifact ?? undefined) as { name?: unknown; path?: unknown } | undefined;
+  if (artifact?.name) {
+    const name = String(artifact.name);
+    const cur = ctx.store.current(name);
+    links.push({
+      kind: 'artifact',
+      what: name,
+      detail: cur ? `${cur.sha || '(no sha)'}${cur.sha === '' ? '' : ' '}— ${cur.path}` : `no current artifact for '${name}' (recorded: ${String(artifact.path ?? '(no path)')})`,
+      command: `ann read ${name}`,
+    });
+  }
+  if (typeof e.gate === 'string') {
+    const state = e.type === 'confirmed' ? 'confirmed' : e.type === 'rejected' ? 'rejected' : 'submitted (undecided)';
+    links.push({ kind: 'gate', what: `${e.gate} — ${state}`, detail: 'the gate card (contract · gate states · results)', command: `ann confirm ${id}` });
+  }
+  for (const [field, kind] of [['successor', 'node'], ['target', 'node']] as const) {
+    const v = (e as Record<string, unknown>)[field];
+    const target = typeof v === 'string' ? v : typeof v === 'object' && v !== null ? String((v as { id?: unknown }).id ?? '') : '';
+    if (target && ctx.store.ids().includes(target)) {
+      links.push({ kind, what: target, detail: `${ctx.store.status(target)} — this event points at it`, command: `ann journey ${target}` });
+    }
+  }
+  links.push({ kind: 'node', what: id, detail: 'the whole node: contract · inputs · gates · the full event walk', command: `ann journey ${id}` });
+  return links;
+}
 
 const commandRows = (): CommandRow[] => COMMANDS.map((c) => ({ name: c.name, args: c.args, desc: c.desc, json: true }));
 
@@ -336,7 +439,27 @@ export const HANDLERS: Record<string, Handler> = {
   },
   journeyOne: (ctx) => {
     const id = resolveId(ctx, ctx.args[1]);
-    return { ok: true, value: { id, status: display(ctx, id), events: ctx.store.events(id) } };
+    return { ok: true, value: nodeCard(ctx, id) };
+  },
+
+  /* events — the EVENT LIST + the ONE-EVENT DRILL (the shared drill every node view
+   *  links to). The list carries the SAME numbering `journey <id>` prints (1..N in LOG
+   *  order), so a number is a stable handle: `ann events <id> 4` is the 4th event of
+   *  that walk. The drill returns the RAW record plus LINKS — per-commit, per-ref, per-
+   *  artifact, per-gate — each naming the follow-up command that shows more (the results
+   *  drill, the confirm card, the node walk). Value-canonical like every read; the
+   *  fs/git probing of a link's existence is the SAME shape `results`' drill uses. */
+  events: (ctx) => {
+    const id = resolveId(ctx, ctx.args[1]);
+    const events = ctx.store.events(id);
+    const kind = id.includes('/') ? 'TASK' : 'LEG';
+    const list = events.map((e, i) => eventRow(i + 1, e as unknown as Record<string, unknown>));
+    const index = ctx.args[2];
+    if (index === undefined) return { ok: true, value: { id, kind, events: list } };
+    const n = Number(index);
+    const event = Number.isInteger(n) ? events[n - 1] : undefined;
+    if (!event) return boom('events', `events: no event ${index} on ${id} (1..${events.length})`);
+    return { ok: true, value: { id, kind, n, total: events.length, event, links: eventLinks(ctx, id, event) } };
   },
 
   /* branch — a node + every descendant's events */
@@ -809,9 +932,7 @@ export const HANDLERS: Record<string, Handler> = {
   },
   detail: (ctx) => {
     const id = resolveId(ctx, ctx.args[1]);
-    const d = ctx.commands.detail(id);
-    if (!d.contract) return boom('detail', `detail: no node ${id}`);
-    return { ok: true, value: d };
+    return { ok: true, value: nodeCard(ctx, id) };
   },
   results: (ctx) => {
     const id = resolveId(ctx, ctx.args[1]);

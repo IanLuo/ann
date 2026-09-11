@@ -36,6 +36,114 @@ export interface RenderEnv {
 export type Renderer = (value: unknown, env: RenderEnv) => string;
 export type DiagFn = (value: unknown, env: RenderEnv) => string[];
 
+/* ── THE NODE CARD (the complete task view) — the value BOTH `detail <id>` and
+ *  `journey <id>` return: the node's OWN data (every contract field, the top-level
+ *  openQuestions, createdAt, the RESOLVED requiredInputs) plus the derived state
+ *  (status · gates · artifacts · blockers · events). One derivation, two views: the
+ *  journey view adds the full numbered walk + the drill links. ─────────────────── */
+export interface NodeCard extends TaskDetail {
+  createdAt: string;
+  openQuestions: Array<{ id?: string; question?: string; blocking?: boolean; defaultIfUnanswered?: string }>;
+  inputs: Array<{ name: string; resolved: boolean; path?: string; sha?: string }>;
+}
+
+/** One event as a LIST ROW — the numbering `journey <id>` prints and `events <id> <n>`
+ *  addresses (1..N in LOG order). */
+export interface EventRow {
+  n: number;
+  at: string;
+  type: string;
+  gate?: string;
+  note?: string;
+}
+
+/** A drill link: what an event points at, and the command that shows it. */
+export interface EventLink {
+  kind: string;
+  what: string;
+  detail: string;
+  command: string;
+}
+
+export type JourneyEventValue = Record<string, unknown> & { at?: string; type?: string; gate?: string };
+
+/** ONE event → its LIST ROW — the numbering `journey <id>` prints and `events <id> <n>`
+ *  addresses. `note` is the event's own prose (its summary), never re-worded. Exported
+ *  so the CLI handler and the renderer cannot derive different numbers for one log. */
+export const eventRow = (n: number, e: Record<string, unknown>): EventRow => ({
+  n,
+  at: String(e.at ?? ''),
+  type: String(e.type ?? ''),
+  ...(typeof e.gate === 'string' ? { gate: e.gate } : {}),
+  ...(typeof e.note === 'string' && e.note ? { note: e.note } : {}),
+});
+
+/** The numbered event line — ONE formatter, so `journey <id>`'s numbering and
+ *  `events <id>`'s numbering can never drift (a number IS a handle). */
+const walkLines = (row: EventRow, indent = 0): string[] => {
+  const pad = ' '.repeat(indent);
+  const gate = row.gate ? ` (gate=${row.gate})` : '';
+  const out = [`${pad}${String(row.n).padStart(2)}. ${row.at}  ${row.type}${gate}`];
+  if (row.note) out.push(`${pad}      ${row.note}`);
+  return out;
+};
+
+/** THE COMPLETE NODE — every field node.json holds, in a stable order, then the derived
+ *  state. Fields the renderer does not know about are STILL printed (a contract field a
+ *  reader cannot see is the bug this view exists to fix). */
+const nodeCardLines = (c: NodeCard): string[] => {
+  const contract = (c.contract ?? {}) as Record<string, unknown>;
+  const lines: string[] = [];
+  lines.push(`${c.isLeg ? 'LEG' : 'TASK'}: ${c.id}`);
+  lines.push(`status: ${c.status}${c.superseded ? ' · superseded producer' : ''} · created ${c.createdAt || '(unknown)'}`);
+  lines.push('---', 'NODE (node.json — immutable, written once at spawn)');
+  lines.push(`  intent: ${String(contract.intent ?? '(none)')}`);
+  const acs = (contract.acceptanceCriteria as string[] | undefined) ?? [];
+  acs.forEach((a, i) => lines.push(`  AC-${i + 1}: ${a}`));
+  const areas = (contract.targetAreas as string[] | undefined) ?? [];
+  if (areas.length) lines.push(`  targetAreas: ${areas.join(' · ')}`);
+  lines.push(`  requiredInputs:${c.inputs.length ? '' : ' (none)'}`);
+  for (const i of c.inputs) {
+    lines.push(
+      i.resolved
+        ? `    - ${i.name} → ${i.path} @ ${i.sha || '(no sha)'}`
+        : `    - ${i.name}  [UNRESOLVED — no doc in the manifest and no current artifact resolves it]`,
+    );
+  }
+  const outs = (contract.expectedOutputs as string[] | undefined) ?? [];
+  lines.push(`  expectedOutputs: ${outs.length ? outs.join(' · ') : '(none)'}`);
+  lines.push(`  workType: ${String(contract.workType ?? '(none — the chain falls back to the default)')}`);
+  lines.push(`  flow: ${contract.flow === undefined ? '(none — workType selects the chain)' : JSON.stringify(contract.flow)}`);
+  lines.push(`  model: ${String(contract.model ?? '(none — the provider default)')}`);
+  if (!c.openQuestions.length) lines.push('  openQuestions: (none)');
+  else {
+    lines.push('  openQuestions:');
+    for (const q of c.openQuestions) lines.push(`    - ${q.id ?? ''}${q.blocking ? ' [BLOCKING]' : ''}: ${q.question ?? ''}`);
+  }
+  // every OTHER field the contract carries — a future field is never silently hidden
+  const known = ['intent', 'acceptanceCriteria', 'targetAreas', 'requiredInputs', 'expectedOutputs', 'workType', 'flow', 'model', 'openQuestions'];
+  for (const k of Object.keys(contract).sort()) {
+    if (known.includes(k)) continue;
+    lines.push(`  ${k}: ${JSON.stringify(contract[k])}`);
+  }
+  lines.push('---', 'GATES (derived)');
+  const gateLine = (g: { state: string; at?: string }) =>
+    `GATE ${g.state === 'confirmed' ? '✓' : g.state === 'rejected' ? '✗' : g.state === 'submitted' ? '…' : '·'} ${g.state}${g.at ? ` (${g.at})` : ''}`;
+  lines.push(`  ${gateLine(c.gates.grill)} — grilling (entry)`, `  ${gateLine(c.gates.confirm)} — confirm-result (exit)`);
+  lines.push('---', 'ARTIFACTS');
+  if (!c.artifacts.length) lines.push('  (none locked)');
+  for (const a of c.artifacts) lines.push(`  - ${a.name} @ ${a.sha || '(no sha)'} [${a.role}]`, `      ${a.path}`);
+  if (c.tasks) {
+    lines.push('---', 'TASKS');
+    for (const t of c.tasks) lines.push(`  ${t.id}  ${t.status}`);
+  }
+  if (c.blockers.length) {
+    lines.push('---', 'BLOCKED — waiting on human:');
+    for (const b of c.blockers) lines.push(`  ${b}`);
+  }
+  return lines;
+};
+
 /** One string per console.log call — joined with '\n' plus the single trailing
  *  newline console.log always appends. Byte-identical to the old text stdout. */
 export const block = (lines: string[]): string => lines.join('\n') + '\n';
@@ -109,15 +217,34 @@ export const RENDERS: Record<string, Renderer> = {
 
   /* journeyOne / branch — the event-walk reads */
   journeyOne: (value) => {
-    const v = value as { id: string; status: string; events: Array<Record<string, unknown>> };
-    const lines = [`JOURNEY: ${v.id}`, '---------'];
-    v.events.forEach((e, i) => {
-      const gate = typeof e.gate === 'string' ? ` (gate=${e.gate})` : '';
-      lines.push(`${String(i + 1).padStart(2)}. ${e.at ?? ''}  ${e.type}${gate}`);
-      if (e.note) lines.push(`      ${e.note}`);
-      if (e.feedback) lines.push(`      feedback: ${e.feedback}`);
-    });
-    lines.push('---------', `STATUS: ${v.status}`);
+    const v = value as NodeCard;
+    const lines = nodeCardLines(v);
+    lines.push('---', `EVENTS (${v.events.length}) — the full walk; drill one: ann events ${v.id} <n>`);
+    v.events.forEach((e, i) => lines.push(...walkLines(eventRow(i + 1, e), 2)));
+    lines.push('---', 'LINKS');
+    lines.push(`  ann events ${v.id} <n>   one event's raw record + what it points at`);
+    lines.push(`  ann packet ${v.id}       the materialized context (inputs resolved, siblings, open questions)`);
+    lines.push(`  ann confirm ${v.id}      the gate card (contract · gate states · results)`);
+    lines.push(`  ann results ${v.id}      the results, unchanged: commits · refs · evidence`);
+    return block(lines);
+  },
+
+  /* events — the LIST (numbered as `journey <id>` numbers: 1..N in log order) and the
+   * DRILL (the raw record + the links that lead on). */
+  events: (value) => {
+    const v = value as { id: string; kind: string; events: EventRow[] } | { id: string; kind: string; n: number; total: number; event: JourneyEventValue; links: EventLink[] };
+    if (!('event' in v)) {
+      const lines = [`EVENTS — ${v.id} (${v.kind} · ${v.events.length})`];
+      if (!v.events.length) lines.push('  (no events)');
+      for (const row of v.events) lines.push(...walkLines(row, 0));
+      if (v.events.length) lines.push('', `  → drill one: ann events ${v.id} <n>  (also: ann journey ${v.id})`);
+      return block(lines);
+    }
+    const lines = [`EVENT ${v.n}/${v.total} — ${v.id}  [${v.event.type}${v.event.gate ? ` gate=${v.event.gate}` : ''}]`];
+    lines.push(...JSON.stringify(v.event, null, 2).split('\n'));
+    lines.push('', 'links:');
+    if (!v.links.length) lines.push('  (none — the record stands alone)');
+    for (const l of v.links) lines.push(`  ${l.kind.padEnd(8)} ${l.what.padEnd(34)} ${l.detail}`, `           → ${l.command}`);
     return block(lines);
   },
   branch: (value) => {
@@ -177,44 +304,12 @@ export const RENDERS: Record<string, Renderer> = {
   },
 
   detail: (value) => {
-    const d = value as TaskDetail;
-    const lines: string[] = [];
-    lines.push(`${d.isLeg ? 'LEG' : 'TASK'}: ${d.id}`);
-    lines.push(`status: ${d.status}${d.superseded ? ' · superseded producer' : ''}`);
-    lines.push('---', 'CONTRACT');
-    lines.push(`  intent: ${String((d.contract as Record<string, unknown> | undefined)?.intent ?? '(none)')}`);
-    const acs = ((d.contract as Record<string, unknown> | undefined)?.acceptanceCriteria as string[] | undefined) ?? [];
-    acs.forEach((a, i) => lines.push(`  AC-${i + 1}: ${a}`));
-    for (const k of ['targetAreas', 'requiredInputs', 'expectedOutputs']) {
-      const arr = ((d.contract as Record<string, unknown> | undefined)?.[k] as string[] | undefined) ?? [];
-      if (arr.length) lines.push(`  ${k}: ${arr.join(' · ')}`);
-    }
-    const oq = ((d.contract as Record<string, unknown> | undefined)?.openQuestions as Array<{ id?: string; question?: string; blocking?: boolean }> | undefined) ?? [];
-    if (oq.length) {
-      lines.push('  openQuestions:');
-      oq.forEach((q) => lines.push(`    - ${q.id ?? ''}${q.blocking ? ' [blocking]' : ''}: ${q.question ?? ''}`));
-    }
-    lines.push('---', 'GATES (derived)');
-    const gateLine = (g: { state: string; at?: string }) =>
-      `GATE ${g.state === 'confirmed' ? '✓' : g.state === 'rejected' ? '✗' : g.state === 'submitted' ? '…' : '·'} ${g.state}${g.at ? ` (${g.at})` : ''}`;
-    lines.push(`  ${gateLine(d.gates.grill)} — grilling (entry)`, `  ${gateLine(d.gates.confirm)} — confirm-result (exit)`);
-    lines.push('---', 'ARTIFACTS');
-    if (!d.artifacts.length) lines.push('  (none locked)');
-    for (const a of d.artifacts) {
-      lines.push(`  - ${a.name} @ ${a.sha || '(no sha)'} [${a.role}]`, `      ${a.path}`);
-    }
-    lines.push('---', 'EVENTS', `  ${d.events.length} event(s) — full walk: ann branch ${d.id}`);
-    for (const e of d.events.slice(-5)) {
-      const g = typeof e.gate === 'string' ? ` (gate=${e.gate})` : '';
-      lines.push(`  ${e.at ?? ''}  ${e.type}${g}`);
-    }
-    if (d.tasks) {
-      lines.push('---', 'TASKS');
-      for (const t of d.tasks) lines.push(`  ${t.id}  ${t.status}`);
-    }
-    if (d.blockers.length) {
-      lines.push('---', 'BLOCKED — waiting on human:');
-      for (const b of d.blockers) lines.push(`  ${b}`);
+    const c = value as NodeCard;
+    const lines = nodeCardLines(c);
+    lines.push('---', `EVENTS (${c.events.length}) — drill: ann events ${c.id} [n] · full walk: ann branch ${c.id}`);
+    for (const row of c.events.slice(-5)) {
+      const gate = typeof row.gate === 'string' ? ` (gate=${row.gate})` : '';
+      lines.push(`  ${String(row.at ?? '')}  ${String(row.type)}${gate}`);
     }
     return block(lines);
   },

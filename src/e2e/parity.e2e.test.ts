@@ -135,6 +135,7 @@ describe('handler-level parity — in-process value === the spawned binary', () 
       [], ['help'], ['commands'],
       ['status'], ['journey'], ['journey', LEG], ['branch', LEG], ['ledger'], ['goal'],
       ['next'], ['confirm', TASK], ['detail', TASK], ['results', TASK], ['packet', TASK],
+      ['events', TASK], ['events', TASK, '1'], ['events', TASK, '3'],
       ['read', 'thing'], ['thing'], ['docs'], ['specs'], ['rules'], ['validate'], ['chain'], ['steps'],
     ];
     for (const argv of matrix) {
