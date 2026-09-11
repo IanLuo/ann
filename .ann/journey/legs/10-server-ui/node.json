@@ -1,0 +1,19 @@
+{
+  "id": "10-server-ui",
+  "contract": {
+    "intent": "SERVER/UI — the goal's server + API layer and the minimal UI that drives it. docs/goal.md's outcome: Ann is to gain a server and API layer that will later serve a UI, with the existing engine core treated as settled. The DECIDED product form (architecture v3, 2026-08-22) is LOCAL-FIRST CLIENT-SERVER, packaged together: the client (browser) supports local AND remote servers, the server runs locally by default and owns the engine + the journey (single-writer store), multi-user deferred, and credentials are SERVER-side (env / secrets-manager; the client never holds them). This epic slices that outcome into gated legs; its FIRST slice is one thin vertical — an HTTP service over the EXISTING value-canonical commands (the JSON surface IS the API contract; no second engine, no new write path) plus a minimal UI (the journey view + the WAITING ON YOU gate queue + a gate card) — enough that a human can read the journey and answer a gate from a browser. Packaging polish, auth beyond local, multi-user and the full command surface are deliberately later, not silently assumed.",
+    "acceptanceCriteria": [
+      "AC-1: the service serves the EXISTING engine — every read and the gate write go through the same L1 commands the CLI calls (the value-canonical JSON surface IS the API contract, leg 03); the service never re-derives journey state and never writes a journey file itself",
+      "AC-2: a minimal UI over the service: the journey view (legs/tasks/state) + the WAITING ON YOU gate queue + a gate card that accepts/rejects WITH feedback — the human can answer a gate from the browser and the journey records that decision",
+      "AC-3: the DECIDED deployment shape (architecture v3): local-first client-server; the server binds localhost by default and is remote-capable in shape; credentials are server-side only — never in the client, the store, or the repo (NFR-SEC-1)",
+      "AC-4: the outcome is proven by running the slice — real HTTP against a real journey, the full suite green, ann check/verify clean; committed with evidence",
+      "AC-5: scope OUT is stated and kept out: auth beyond local, multi-user, packaging/distribution polish, and the full command surface (run!/spawn!/submit!/goal!/spec!/archive) belong to later tasks, not this epic's first slice"
+    ],
+    "targetAreas": [
+      "src/surface",
+      "src/e2e",
+      "README"
+    ]
+  },
+  "createdAt": "2026-09-11"
+}

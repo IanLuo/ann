@@ -1,0 +1,20 @@
+{
+  "id": "10-server-ui/01-implementation-minimal-service",
+  "contract": {
+    "intent": "THE MINIMAL SLICE — an HTTP service over the existing value-canonical commands plus a minimal UI, as ONE thin vertical. Leg 03 (03-cli-json/01-implementation-uniform-json + 02-value-canonical) already made every command a stable JSON surface with canonical values, so the service is a BINDING, not new machinery (architecture rung 3: src/surface = L3 bindings over L1). Reads exposed: journey · status · next · detail · confirm · results · packet. Write exposed: the gate decision (accept|reject with the human's feedback). The minimal UI: the journey view (legs/tasks/state), the WAITING ON YOU gate queue (every undecided submission across the journey) and the gate card. Start posture: a scripted entry in the derived command table, binds 127.0.0.1 by default, host/port from config/env, remote-capable in shape; credentials (the LLM API key) stay server-side and never reach the client or the store. Scope OUT (explicit): auth beyond local, multi-user, packaging/distribution polish, and the rest of the command surface — this task is one vertical, not the whole server.",
+    "acceptanceCriteria": [
+      "AC-1: the service exposes the read views journey · status · next · detail · confirm · results · packet and the gate write (accept|reject + feedback) over HTTP on the SAME command layer the CLI uses — responses carry the same value-canonical JSON the CLI prints with --json; no second state derivation and no direct store/file access outside Commands. Proof: an e2e that starts the service against a temp journey and asserts each read plus the gate write over real HTTP against the CLI's own JSON for the same state",
+      "AC-2: the service has a scripted start entry (in the derived command table + README), binds 127.0.0.1 by default, takes host/port from config/env, and is remote-capable in shape (nothing in the request path assumes localhost); credentials stay server-side — an e2e asserts the configured apiKey never appears in a response body (NFR-SEC-1, architecture §4)",
+      "AC-3: the minimal UI renders the journey view (legs/tasks/state), the WAITING ON YOU gate queue (every undecided submission across the journey, not just the active leg) and a gate card with accept/reject + feedback; the decision round-trip is proven end-to-end — a decision made through the UI lands as the journey's gate event via the same L1 write, and the view reflects it (the harness level — DOM or the page's HTTP contract — is recorded on the task, never assumed)",
+      "AC-4: scope OUT is honored and named: no auth beyond local, no multi-user, no packaging/distribution polish, and none of the non-slice commands (run!/spawn!/submit!/goal!/spec!/archive) — the service simply does not expose them",
+      "AC-5: the full suite stays green (new service + UI e2e tests) and ann check/verify stay clean on the live journey; committed with evidence"
+    ],
+    "workType": "implementation",
+    "targetAreas": [
+      "src/surface",
+      "src/e2e",
+      "README"
+    ]
+  },
+  "createdAt": "2026-09-11"
+}
