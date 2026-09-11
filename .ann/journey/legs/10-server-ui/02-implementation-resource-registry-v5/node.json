@@ -1,0 +1,24 @@
+{
+  "id": "10-server-ui/02-implementation-resource-registry-v5",
+  "contract": {
+    "intent": "Amend the GENERAL-CONFIG contract to admit the SERVE BIND group: docs/resource-registry.md (v5 — the CONFIG class row/table, the user-overlay admissible-leaves rule, the ONE-CLASS-TWO-INSTANCES paragraph, the builtin-duplicate reconciliation row) and docs/core-design.md (the general-config paragraph + the config-registry row) name server.host + server.port (project registry + user overlay overridable; env layer ANN_HOST/ANN_PORT; builtin 127.0.0.1:8787). The docs LEAD the code (amendment protocol): both are written by a SPECS session and committed by the operator.",
+    "acceptanceCriteria": [
+      "docs/resource-registry.md enumerates server.host and server.port as leaves of the general config class (project registry + user overlay), states the env layer ANN_HOST/ANN_PORT, and keeps ONE CONFIG CLASS, TWO INSTANCES true",
+      "docs/core-design.md admits the serve bind in its config knob enumeration (or re-points at resource-registry §8a) with no stale flow-only leaf list",
+      "the amended docs are produced by a SPECS session (spec! <name> --amend) and committed by the operator as git content; ann check stays clean"
+    ],
+    "targetAreas": [
+      "docs/resource-registry.md",
+      "docs/core-design.md"
+    ],
+    "requiredInputs": [
+      "resource-registry",
+      "core-design"
+    ],
+    "expectedOutputs": [
+      "the amended in-force docs, committed (commit evidence naming the doc commit)"
+    ],
+    "workType": "implementation"
+  },
+  "createdAt": "2026-09-11"
+}

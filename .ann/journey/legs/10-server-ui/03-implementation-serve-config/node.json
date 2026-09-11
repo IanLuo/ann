@@ -1,0 +1,28 @@
+{
+  "id": "10-server-ui/03-implementation-serve-config",
+  "contract": {
+    "intent": "Make the SERVE BIND come from the general config class: rules/config/default.json (registry DATA) + src/flow/config.ts (server.host/server.port leaves — env ANN_HOST/ANN_PORT, user-overlay overridable, builtin 127.0.0.1:8787) + src/abilities/llm/config.ts (overlay schema) + the serve handler precedence (--host/--port > the config) + config! set for the new keys + tests.",
+    "acceptanceCriteria": [
+      "ann serve resolves the bind as --host/--port > ANN_HOST/ANN_PORT > user overlay > project registry > builtin, with both the project registry and the overlay proven by tests (incl. per-leaf provenance in ann config)",
+      "a bad bind leaf (non-bare host, out-of-range port) is a NAMED config problem and serve fails closed on it — never a silent fall-back, never a clamp",
+      "config! set server.host|server.port writes the overlay, and a non-integer port is refused by name",
+      "the full suite stays green; ann check/verify stay clean on the live journey; committed with evidence"
+    ],
+    "targetAreas": [
+      "rules/config",
+      "src/flow",
+      "src/abilities/llm",
+      "src/surface",
+      "src/e2e",
+      "README"
+    ],
+    "requiredInputs": [
+      "resource-registry"
+    ],
+    "expectedOutputs": [
+      "code + tests committed (commit evidence)"
+    ],
+    "workType": "implementation"
+  },
+  "createdAt": "2026-09-11"
+}
