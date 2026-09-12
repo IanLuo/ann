@@ -323,10 +323,10 @@ describe('e2e — the operate loop: the WHAT\'S NEXT card + the approve (leg 11)
     expect(page.status).toBe(200);
     expect(page.body).toContain("What's next"); // the card
     const script = page.body.match(/<script>([\s\S]*?)<\/script>/)?.[1] ?? '';
-    for (const route of ['/api/whatsnext', '/api/approve', '/api/journey', '/api/gates', '/api/confirm?id=', '/api/gate']) expect(script).toContain(route);
+    for (const route of ['/api/whatsnext', '/api/approve', '/api/journey', '/api/gates', '/api/confirm?id=', '/api/gate', '/api/packet?id=', '/api/detail?id=', '/api/next']) expect(script).toContain(route);
     // the card's own words: the machine-executable derivation, the presented-and-stopped
-    // boundary, how to clear a blocker, and the approve affordance
-    for (const word of ['MACHINE-EXECUTABLE', 'PRESENTED AND STOPPED', 'NOT machine-executable', 'the authored-work boundary', 'uncommitted tracked journey changes — commit them', 'frontmost-ready', 'leg gate', 'UNMET — ', 'pending gates'])
+    // boundary, how to clear a blocker, the approve affordance, and the DRILL-INS
+    for (const word of ['MACHINE-EXECUTABLE', 'PRESENTED AND STOPPED', 'NOT machine-executable', 'the authored-work boundary', 'uncommitted tracked journey changes — commit them', 'frontmost-ready', 'leg gate', 'UNMET — ', 'pending gates', 'drillTask', 'drillLeg', 'drillBlocker', 'drillAdvance', 'wn-fact', 'drill in'])
       expect(script, `the served page lost '${word}'`).toContain(word);
     expect(page.body).toContain('Approve'); // the approve affordance itself
     expect(page.body).not.toContain('innerHTML'); // data is rendered as text, never as markup
@@ -336,6 +336,33 @@ describe('e2e — the operate loop: the WHAT\'S NEXT card + the approve (leg 11)
     const checked = spawnSync(process.execPath, ['--check', checkFile], { encoding: 'utf8' });
     expect(checked.status, `the served page script does not parse: ${checked.stderr}`).toBe(0);
     rmSync(checkDir, { recursive: true, force: true });
+  });
+
+  it('every item on the card has a DRILL READ over real HTTP (the pane the page opens)', { timeout: 30_000 }, async () => {
+    // the rejection asked to drill into each item; each drill is one EXISTING read, and
+    // each carries the data the drill renders — no new route, no new state
+    const task = await get(server.url + `/api/confirm?id=${encodeURIComponent(FIRST)}`);
+    expect(task.status).toBe(200);
+    expect((JSON.parse(task.body) as { detail: { contract: { intent: string } } }).detail.contract.intent).toBe('do the thing');
+
+    const packet = await get(server.url + `/api/packet?id=${encodeURIComponent(FIRST)}`);
+    expect(packet.status).toBe(200);
+    const p = JSON.parse(packet.body) as { readiness: { ready: boolean; blockers: string[] }; dependencies: unknown[]; openQuestions: unknown[] };
+    expect(p.readiness.ready).toBe(true); // what the frame will materialize for this step
+    expect(Array.isArray(p.dependencies)).toBe(true);
+    expect(Array.isArray(p.openQuestions)).toBe(true);
+
+    const leg = await get(server.url + `/api/detail?id=${encodeURIComponent(LEG)}`);
+    expect(leg.status).toBe(200);
+    const d = JSON.parse(leg.body) as { isLeg: boolean; tasks: Array<{ id: string; status: string }> };
+    expect(d.isLeg).toBe(true);
+    expect(d.tasks.map((t) => t.id)).toEqual([FIRST, SECOND]); // the leg's tasks, each drillable further
+
+    const next = await get(server.url + '/api/next');
+    expect(next.status).toBe(200);
+    const n = JSON.parse(next.body) as { advance: { action: string }; lookBack: { activeLeg: string } };
+    expect(n.advance.action).toBe('closure-needed'); // the state at this point in the suite: no ready task, the leg gate unmet
+    expect(n.lookBack.activeLeg).toBe(LEG);
   });
 });
 

@@ -1,7 +1,13 @@
 /**
  * THE MINIMAL UI (the goal's AC-3) — the journey view, the WAITING ON YOU gate queue, the
- * gate card, and the WHAT'S NEXT card (leg 11), as ONE page: vanilla JS, no framework, no
- * bundler, no build step (the server serves this string as-is, `GET /`).
+ * gate card, and the WHAT'S NEXT card (leg 11) with its DRILL-INS, as ONE page: vanilla
+ * JS, no framework, no bundler, no build step (the server serves this string as-is, `GET /`).
+ *
+ * ONE DETAIL PANE, EVERY DETAIL: a gate queue row opens the gate card; a WHAT'S NEXT item
+ * (the derivation, the frontmost-ready task, the leg gate, each pending gate, each integrity
+ * blocker) opens the SAME pane, filled from the reads the service already exposes — the
+ * node/packet/detail reads for the items, the goal consult for a `none` derivation. A
+ * drilled item is PRESENTED, never decided.
  *
  * It is a CLIENT OF THE SERVICE'S HTTP CONTRACT ONLY — the same routes whose bodies are
  * the CLI's own `--json` values:
@@ -104,10 +110,19 @@ export const UI_HTML = `<!doctype html>
   .wn-head h3 { margin: 0; }
   .wn .badge.run { color: var(--ok); }
   .wn .badge.stop { color: var(--warn); }
+  .wn-action { padding: .1rem .5rem; margin-left: -.5rem; border: 1px solid transparent; border-radius: 8px; background: none; color: var(--fg); font: inherit; font-size: .95rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-weight: 600; cursor: pointer; }
+  .wn-action:hover { border-color: var(--line); color: var(--accent); }
   .wn-detail { margin: .4rem 0 .6rem; font-size: .9rem; }
   .wn-facts { margin: 0 0 .35rem; font-size: .85rem; }
+  .wn-facts button { display: inline-block; margin: 0 .35rem .35rem 0; padding: .15rem .6rem; border: 1px solid var(--line); border-radius: 999px; background: #26242e; color: var(--fg); font: inherit; font-size: .82rem; cursor: pointer; }
+  .wn-facts button:hover { border-color: var(--accent); }
+  .wn-facts button:hover .k { color: var(--accent); }
   .wn-facts .k { color: var(--muted); }
   .wn-blockers { margin: .35rem 0 .5rem; }
+  .wn-blockers button { display: block; width: 100%; padding: .25rem .3rem; border: 1px solid transparent; border-radius: 8px; background: none; color: var(--warn); font: inherit; font-size: .85rem; text-align: left; cursor: pointer; }
+  .wn-blockers button:hover { border-color: var(--warn); }
+  .wn-blockers button .k { color: var(--muted); }
+  .drill { margin: .15rem 0; font-size: .85rem; }
 </style>
 </head>
 <body>
@@ -122,7 +137,7 @@ export const UI_HTML = `<!doctype html>
   <section class="wn" id="wn">
     <h2>What's next</h2>
     <div class="wn-head">
-      <h3 id="wn-action">loading…</h3>
+      <button class="wn-action" id="wn-action">loading…</button>
       <span class="badge" id="wn-badge"></span>
     </div>
     <p class="wn-detail" id="wn-detail"></p>
@@ -147,12 +162,12 @@ export const UI_HTML = `<!doctype html>
     <p class="card-what" id="card-what"></p>
     <p class="next" id="card-next"></p>
     <div id="card-node"></div>
-    <h2>Claims</h2>
+    <h2 id="card-claims-h">Claims</h2>
     <ul class="claims" id="card-claims"></ul>
-    <h2>Checks</h2>
+    <h2 id="card-checks-h">Checks</h2>
     <ul class="checks" id="card-checks"></ul>
     <div class="gates" id="card-gates"></div>
-    <h2>Results</h2>
+    <h2 id="card-results-h">Results</h2>
     <ul id="card-results"></ul>
     <div id="card-decide" hidden>
       <textarea id="feedback" placeholder="feedback for the decision (the rejection's why)"></textarea>
@@ -265,6 +280,18 @@ export const UI_HTML = `<!doctype html>
   function gateState(detail, gate) {
     return gate && detail.gates && detail.gates[gate] ? detail.gates[gate] : { state: 'none' };
   }
+  /** The pane's sections BEYOND the node fields: a gate card shows all four, a drilled
+   *  item shows only what it has (and the rest are hidden, never left stale). */
+  function sections(o) {
+    byId('card-claims').replaceChildren();
+    byId('card-checks').replaceChildren();
+    byId('card-gates').replaceChildren();
+    byId('card-results').replaceChildren();
+    byId('card-claims-h').hidden = !o.claims;
+    byId('card-checks-h').hidden = !o.checks;
+    byId('card-results-h').hidden = !o.results;
+    byId('card-gates').hidden = !o.gates;
+  }
   /** What the task is WAITING FOR — derived from its status + gate states, never assumed:
    *  a queued task with nothing submitted is NOT decidable, and must not look it. */
   function nextLine(detail, gate) {
@@ -292,6 +319,7 @@ export const UI_HTML = `<!doctype html>
   function openCard(id, gate) {
     selected = { id: id, gate: gate };
     message('');
+    sections({ claims: true, checks: true, gates: true, results: true }); // the gate card shows all four
     return api('/api/confirm?id=' + encodeURIComponent(id)).then(function (r) {
       if (r.status !== 200) { message('card unavailable: ' + JSON.stringify(r.doc.error), true); return; }
       var detail = r.doc.detail;
@@ -437,28 +465,38 @@ export const UI_HTML = `<!doctype html>
     else if (!clean) { badge.textContent = 'BLOCKED — CANNOT ADVANCE'; badge.className = 'badge stop'; }
     else { badge.textContent = 'PRESENTED AND STOPPED'; badge.className = 'badge stop'; }
 
-    // the facts: the frontmost-ready task, the leg gate, the pending gates
+    // the facts: EVERY one is a DRILL — click it and the pane shows the item's own data
     var facts = byId('wn-facts');
     facts.replaceChildren();
-    function fact(k, val) {
-      facts.appendChild(el('span', k + ': ', 'k'));
-      facts.appendChild(el('span', val + '   '));
+    function fact(k, val, drill) {
+      var b = el('button', null, 'wn-fact');
+      b.appendChild(el('span', k + ': ', 'k'));
+      b.appendChild(el('span', val));
+      b.appendChild(el('span', ' ›', 'k'));
+      b.addEventListener('click', drill);
+      facts.appendChild(b);
     }
-    fact('frontmost-ready', v.frontmost ? v.frontmost.task + ' (' + v.frontmost.status + ')' : 'none');
-    fact('leg gate', v.legGate && v.legGate.met ? 'MET' : 'UNMET — ' + ((v.legGate && v.legGate.blocker) || ''));
+    fact('frontmost-ready', v.frontmost ? v.frontmost.task + ' (' + v.frontmost.status + ')' : 'none',
+      function () { if (v.frontmost) drillTask(v.frontmost.task); else wnMessage('no frontmost-ready task — nothing to drill (the derivation above says why).'); });
+    fact('leg gate', v.legGate && v.legGate.met ? 'MET' : 'UNMET — ' + ((v.legGate && v.legGate.blocker) || ''), function () { drillLeg(v.advance.leg, v.legGate); });
     fact('pending gates', (v.pendingGates || []).length
       ? (v.pendingGates || []).map(function (p) { return p.task + '@' + p.gate; }).join(' · ')
-      : 'none');
+      : 'none',
+      function () { drillGates(v.pendingGates || []); });
     facts.appendChild(el('span', step.what, 'k'));
 
-    // the integrity blockers — the reason the card CANNOT claim the journey can advance
+    // the integrity blockers — each is a DRILL too: the finding, its class, the read that
+    // derives it, and the operator's step (the card CANNOT claim the journey can advance)
     var list = byId('wn-blockers');
     list.replaceChildren();
     var blockers = (v.integrity && v.integrity.blockers) || [];
     blockers.forEach(function (b) {
-      var li = el('li', null, 'stale');
-      li.appendChild(el('span', 'blocker: ' + b, null));
-      li.appendChild(el('span', remedy(b), 'k'));
+      var li = el('li');
+      var btn = el('button', null, 'wn-blocker');
+      btn.appendChild(el('span', 'blocker: ' + b));
+      btn.appendChild(el('span', remedy(b) + ' ›', 'k'));
+      btn.addEventListener('click', function () { drillBlocker(b); });
+      li.appendChild(btn);
       list.appendChild(li);
     });
     if (blockers.length) list.appendChild(el('li', 'the approve re-checks all of this fail-closed first — with a blocker present it refuses and writes NOTHING.', 'muted'));
@@ -470,6 +508,158 @@ export const UI_HTML = `<!doctype html>
     if (!executable && !blockers.length && !step.run) wnMessage('nothing to approve — ' + step.what + '.');
     else if (!executable && !blockers.length) wnMessage('nothing to approve — no frontmost-ready task.');
     else if (!blockers.length) wnMessage('');
+  }
+
+  /* ── THE DRILL — every item on the WHAT'S NEXT card opens HERE, in the same pane the
+   *  gate queue uses, filled from the reads the service ALREADY exposes (no new route, no
+   *  new state): the item's own node / packet / derivation, and — for a gate — the
+   *  decision surface. A drilled item is PRESENTED, never decided (selected is cleared),
+   *  so no decision UI can appear for a node the operator did not pick from WAITING ON YOU. */
+  function drillHead(label, title, what) {
+    selected = { id: null, gate: null };
+    byId('card').hidden = false;
+    byId('card-step-label').textContent = label;
+    byId('card-title').textContent = title;
+    byId('card-what').textContent = what;
+    byId('card-next').replaceChildren();
+    byId('card-decide').hidden = true;
+    message('');
+    if (typeof byId('card').scrollIntoView === 'function') byId('card').scrollIntoView({ block: 'nearest' });
+  }
+  /** A drill's own fields; the views with no claims/checks/results hide those sections. */
+  function drillFields() {
+    var node = byId('card-node');
+    node.replaceChildren();
+    return node;
+  }
+  /** A drillable node id inside a blocker's text (the leg/task grammar), as task or leg. */
+  function nodeIdsIn(text) {
+    var out = [];
+    var re = new RegExp('[0-9]{2}-[a-z0-9-]+(/[0-9]{2}-[a-z0-9-]+)?', 'g');
+    var m;
+    while ((m = re.exec(String(text))) !== null) if (out.indexOf(m[0]) < 0) out.push(m[0]);
+    return out;
+  }
+  function nodeDrillButton(node, id, label) {
+    var b = el('button', (label || id + ' (drill in)') + ' ›', 'task');
+    b.addEventListener('click', function () { if (id.indexOf('/') > 0) drillTask(id); else drillLeg(id, null); });
+    node.appendChild(b);
+  }
+  /** WHICH READ derives a blocker — the card names the rule, never a bare refusal. */
+  function blockerSource(b) {
+    if (b.indexOf('uncommitted tracked change') === 0) return 'git status --porcelain -- .ann/journey docs — the change is real work; the OPERATOR commits it (the daemon never commits)';
+    if (b.indexOf('docs manifest out of sync') === 0) return 'ann docs --write — regenerate docs/manifest.json from docs/, then commit';
+    if (b.indexOf('verify:') === 0) return 'ann verify — the drift read (the log’s claims vs filesystem/git reality, D1-D5)';
+    if (b.indexOf('[') === 0) return 'ann check — the derived check rules (the rule id is in the bracket)';
+    return 'ann check — gate gaps, contract self-sufficiency, the conclusion predicate';
+  }
+  function blockerClass(b) {
+    if (b.indexOf('uncommitted tracked change') === 0) return 'a dirty tree: uncommitted tracked work';
+    if (b.indexOf('docs manifest out of sync') === 0) return 'a stale docs index';
+    if (b.indexOf('verify:') === 0) return 'DRIFT: the log and the filesystem disagree';
+    if (b.indexOf('[') === 0) return 'a check-rule finding';
+    return 'a check finding';
+  }
+  function drillBlocker(b) {
+    drillHead('WHAT’S NEXT · integrity blocker', 'why the journey cannot advance',
+      'this is ONE named blocker of the approve’s integrity re-check. The card never claims the journey can advance while one is present — the approve refuses fail-closed and writes NOTHING.');
+    sections({});
+    var node = drillFields();
+    field(node, 'class', blockerClass(b));
+    field(node, 'blocker', b);
+    field(node, 'your step', (remedy(b) || 'clear it, then approve again').replace(/^ — /, ''));
+    field(node, 'derived by', blockerSource(b));
+    var ids = nodeIdsIn(b);
+    if (ids.length) {
+      node.appendChild(el('h3', 'What this names — drill in'));
+      ids.forEach(function (id) { nodeDrillButton(node, id); });
+    }
+  }
+  /** The frontmost-ready task: its node card (contract · gates · claims · checks · results)
+   *  PLUS the context packet the frame will materialize — what the step needs, and what is
+   *  actually ready. The packet is derived on demand (/api/packet), never saved. */
+  function drillTask(task) {
+    return openCard(task, null).then(function () {
+      drillHead('WHAT’S NEXT · the frontmost-ready task', task,
+        'the task this derivation proposes to run through the frame. Above: its contract, gates, claims, checks and results. Below: the CONTEXT PACKET the frame materializes for it — what the step needs, and what is ready. Approving runs it; deciding happens in WAITING ON YOU.');
+      return api('/api/packet?id=' + encodeURIComponent(task));
+    }).then(function (r) {
+      if (!r || r.status !== 200) { message('context packet unavailable: ' + JSON.stringify(r && r.doc && r.doc.error), true); return null; }
+      var p = r.doc;
+      var node = byId('card-node');
+      node.appendChild(el('h3', 'Context packet — materialized by the frame, never saved'));
+      field(node, 'readiness', p.readiness && p.readiness.ready ? 'ready' : 'BLOCKED — ' + ((p.readiness && p.readiness.blockers) || []).join('; '));
+      (p.dependencies || []).forEach(function (d) {
+        field(node, 'input ' + d.name, d.status + (d.path ? ' · ' + d.path + (d.sha ? ' @ ' + d.sha : '') : '') + (d.blocker ? ' — ' + d.blocker : ''));
+      });
+      if (!(p.dependencies || []).length) field(node, 'inputs', 'none declared (requiredInputs is empty)');
+      var contracts = (p.nodeContract && p.nodeContract.expectedOutputs) || [];
+      if (contracts.length) field(node, 'expected outputs', contracts.join(' · '));
+      (p.openQuestions || []).forEach(function (q) { field(node, 'open question [' + q.impact + ']', (q.id ? q.id + ': ' : '') + q.question + (q.default ? ' (default: ' + q.default + ')' : '')); });
+      var sib = (p.siblingStatus && p.siblingStatus.siblings) || [];
+      if (sib.length) field(node, 'siblings', sib.map(function (s) { return s.id + ' (' + s.status + ')'; }).join(' · '));
+      return null;
+    });
+  }
+  /** The leg gate: the leg the derivation reads, every task it holds (each drillable), and
+   *  the gate verdict (the PREDECESSOR gate — what holds this leg shut). */
+  function drillLeg(leg, verdict) {
+    drillHead('WHAT’S NEXT · the leg gate', leg,
+      'the active leg this derivation reads. The leg gate is the PREDECESSOR gate: ' + (verdict && verdict.met ? 'MET — nothing holds this leg shut.' : 'UNMET — ' + ((verdict && verdict.blocker) || '(no blocker named)')) + ' The leg’s tasks and their derived statuses are below — drill into any one.');
+    sections({});
+    return api('/api/detail?id=' + encodeURIComponent(leg)).then(function (r) {
+      if (r.status !== 200) { var n0 = drillFields(); field(n0, 'error', JSON.stringify(r.doc.error)); return null; }
+      var d = r.doc;
+      var node = drillFields();
+      field(node, 'status', d.status + (d.createdAt ? ' · created ' + d.createdAt : ''));
+      var c = d.contract || {};
+      field(node, 'intent', c.intent || '(none)');
+      (c.acceptanceCriteria || []).forEach(function (ac, i) { field(node, 'AC-' + (i + 1), ac); });
+      (d.blockers || []).forEach(function (b) { field(node, 'blocker', b); });
+      var tasks = d.tasks || [];
+      node.appendChild(el('h3', 'Tasks (' + tasks.length + ') — drill into any one'));
+      tasks.forEach(function (t) { nodeDrillButton(node, t.id, t.id + ' · ' + t.status); });
+      if (!tasks.length) node.appendChild(el('p', '(this leg holds no tasks — an EMPTY front leg is advance-leg: the next leg is AUTHORED work, never a machine spawn)', 'muted'));
+      return null;
+    });
+  }
+  /** The pending gates: the human's OTHER move — each opens the gate card (the decision
+   *  surface), exactly as the WAITING ON YOU queue does. */
+  function drillGates(gates) {
+    drillHead('WHAT’S NEXT · pending gates', 'waiting on you',
+      'every undecided submission on the active leg: ' + gates.length + '. These are DECISIONS, not runs — open one to decide it (the same card the queue opens).');
+    sections({});
+    var node = drillFields();
+    if (!gates.length) { node.appendChild(el('p', 'none — no undecided submission on the active leg.', 'muted')); return; }
+    gates.forEach(function (p) {
+      var b = el('button', p.task + ' · ' + p.gate + ' (decide it) ›', 'task');
+      b.addEventListener('click', function () { openCard(p.task, p.gate); });
+      node.appendChild(b);
+    });
+  }
+  /** The derivation itself: the F5 pull proposal and everything it reads (the look-back).
+   *  Its own items are drillable in turn. */
+  function drillAdvance() {
+    drillHead('WHAT’S NEXT · the derivation', 'the F5 pull proposal',
+      'what the engine derives as the next step, and everything that derivation reads (the look-back). The approve on the card executes ONLY this — and re-derives it at execution.');
+    sections({});
+    return api('/api/next').then(function (r) {
+      if (r.status !== 200) { var n0 = drillFields(); field(n0, 'error', JSON.stringify(r.doc.error)); return null; }
+      var v = r.doc;
+      var lb = v.lookBack || {};
+      var node = drillFields();
+      field(node, 'advance', v.advance.action + ' — ' + v.advance.detail);
+      field(node, 'active leg', (lb.activeLeg || 'none') + (lb.activeLegStatus ? ' (' + lb.activeLegStatus + ')' : ''));
+      if (lb.frontmostReady) field(node, 'frontmost-ready', lb.frontmostReady.task + ' (' + lb.frontmostReady.status + ')');
+      (lb.alsoReady || []).forEach(function (t) { field(node, 'also ready', t.task + ' (' + t.status + ')'); });
+      field(node, 'leg gate', lb.legGate && lb.legGate.met ? 'MET' : 'UNMET — ' + ((lb.legGate && lb.legGate.blocker) || ''));
+      field(node, 'pending gates', (lb.pendingGates || []).length ? (lb.pendingGates || []).map(function (p) { return p.task + '@' + p.gate; }).join(' · ') : 'none');
+      if (v.goal) field(node, 'goal consult', v.goal.goalId + ' [' + v.goal.goalStatus + '] — verdict ' + v.goal.verdict);
+      node.appendChild(el('h3', 'Drill in from here'));
+      if (lb.activeLeg) nodeDrillButton(node, lb.activeLeg);
+      if (lb.frontmostReady) nodeDrillButton(node, lb.frontmostReady.task);
+      return null;
+    });
   }
 
   /** The approve: the SAME operator action the CLI's advance! runs, bound to the card the
@@ -515,6 +705,7 @@ export const UI_HTML = `<!doctype html>
     return l.task + ' stopped (' + l.frameStop + '): ' + (l.problems || []).join('; ');
   }
   byId('approve').addEventListener('click', approve);
+  byId('wn-action').addEventListener('click', drillAdvance); // the derivation itself drills in
 
   // ── boot: the reads, and a view that cannot go silently stale ──
   function refresh() {
