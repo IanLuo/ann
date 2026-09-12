@@ -51,6 +51,11 @@ export const UI_HTML = `<!doctype html>
 <style>
   :root { color-scheme: dark; --fg: #e8e6e3; --muted: #9a958e; --bg: #16151a; --panel: #1f1e25; --line: #322f3a; --accent: #7cc4ff; --warn: #ffb454; --ok: #7ddc9a; --entry: #7cc4ff; --exit: #ffb454; }
   * { box-sizing: border-box; }
+  /* THE HIDDEN GUARD: the UA rule for [hidden] loses to ANY class that sets display (e.g.
+     .actions { display: flex }), so setting el.hidden = true silently did NOTHING there — a
+     blocked card still offered a clickable approve. One rule makes the attribute
+     authoritative wherever this page uses it. */
+  [hidden] { display: none !important; }
   body { margin: 0; padding: 0 0 4rem; background: var(--bg); color: var(--fg); font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
   header { padding: 1.5rem 2rem 1rem; border-bottom: 1px solid var(--line); }
   h1 { margin: 0 0 .35rem; font-size: 1.15rem; letter-spacing: .02em; }
@@ -131,13 +136,11 @@ export const UI_HTML = `<!doctype html>
   .drill { margin: .15rem 0; font-size: .85rem; }
   a.task { text-decoration: none; }
   /* FOCUS MODE — a drilled item in its own tab: that item AND NOTHING ELSE. The journey
-     views are neither rendered nor READ (see parseDrill/renderFocus), the pane goes full
-     width, and the header keeps only a way back. */
-  body.focus .wn, body.focus .queue, body.focus .journey, body.focus #state { display: none; }
+     views are hidden by the SAME "hidden" flag the code sets (never rendered, never READ —
+     see parseDrill/renderFocus); this block only re-lays-out the page for one column. */
   body.focus main { grid-template-columns: minmax(0, 1fr); padding-top: 1rem; }
   body.focus header { padding-bottom: .5rem; }
   a.ghost { text-decoration: none; }
-  a.ghost[hidden] { display: none; }
   /* a DRILLED item (an exit-gate result / evidence pointer) and the drill's own output:
      every one is a NEW-TAB link carrying the item in its fragment */
   .ev.drill, a.ev.drill, li a.drill { display: block; padding: .1rem 0; color: var(--muted); font: inherit; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .8rem; text-align: left; text-decoration: none; cursor: pointer; }
@@ -611,6 +614,7 @@ export const UI_HTML = `<!doctype html>
     byId('wn').hidden = true;
     byId('queue-view').hidden = true;
     byId('journey-view').hidden = true;
+    byId('state').hidden = true; // no journey state line: this tab is one item
     byId('back').hidden = false;
     document.title = 'ann · ' + (spec.kind === 'blocker' ? 'an integrity blocker' : spec.kind + (spec.id ? ' · ' + spec.id : ''));
   }

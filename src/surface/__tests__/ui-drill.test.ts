@@ -135,6 +135,7 @@ async function openTab(link: FakeEl, reads: Record<string, unknown>): Promise<St
   expect(tab.get('wn').hidden, 'a focused tab hides the WHAT\'S NEXT card').toBe(true);
   expect(tab.get('queue-view').hidden).toBe(true);
   expect(tab.get('journey-view').hidden).toBe(true);
+  expect(tab.get('state').hidden, 'a focused tab hides the journey state line').toBe(true);
   expect(tab.get('back').hidden, 'a focused tab keeps the way back').toBe(false);
   // …and it does NOT load the page it is not showing
   expect(tab.fetched.filter((f) => f === '/api/journey' || f === '/api/gates')).toEqual([]);
@@ -379,6 +380,26 @@ describe('the served page — a drill opens its own tab, and the URL is the dril
     await flush();
     expect(tab.get('card-node').textContent).toContain('git show');
     expect(tab.get('card-decide').hidden, 'the gate is decided — no Accept/Reject that cannot land').toBe(true);
+  });
+
+  it('every hidden thing is REALLY hidden — the CSS guard the bare attribute does not give', async () => {
+    // THE BUG the operator hit: `.actions { display: flex }` outweighs the UA rule for
+    // [hidden], so `wn-actions.hidden = true` left the approve button visible and clickable
+    // on a card that could not advance. The page therefore carries ONE guard rule, and the
+    // two groups that need it are pinned here (a CSS-blind harness cannot catch this by
+    // running the page — it has no layout engine).
+    const style = UI_HTML.match(/<style>([\s\S]*?)<\/style>/)?.[1] ?? '';
+    expect(style).toContain('[hidden] { display: none !important; }');
+    // …and it is LOAD-BEARING: the approve group and the gate chips set display themselves
+    expect(style).toContain('.actions { display: flex;');
+    expect(style).toContain('.gates { display: flex;');
+    expect(UI_HTML).toContain('class="actions" id="wn-actions" hidden'); // absent until the approve can work
+    // the behaviour the guard makes true (the blocks the page hides):
+    const blocked = boot(reads(card({ integrity: { clean: false, blockers: [DIRTY] }, executable: false })));
+    await flush();
+    expect(blocked.get('wn-actions').hidden).toBe(true);
+    const tab = await openTab(blocked.get('wn-blockers').link('blocker:'), reads(card({ integrity: { clean: false, blockers: [DIRTY] }, executable: false })));
+    expect(tab.get('card-gates').hidden, 'a view with no gate chips hides the .gates row').toBe(true);
   });
 
   it('a boundary derivation offers no approve, and its frontmost-ready fact is inert text', async () => {
