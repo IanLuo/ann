@@ -468,6 +468,9 @@ export const HANDLERS: Record<string, Handler> = {
       frontmostReady: lb.frontmostReady ? { task: lb.frontmostReady.task, status: lb.frontmostReady.status } : undefined,
       alsoReady: lb.alsoReady.map((a) => ({ task: a.task, status: a.status })),
       legGate: lb.legGate,
+      // the outstanding deferred work rides the journey view (leg 12 task 01) — the
+      // same derivation `next` reads, never a second one
+      deferred: lb.deferred,
     };
     return { ok: true, value: { legs: rows, ahead } };
   },

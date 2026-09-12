@@ -199,6 +199,56 @@ describe('e2e — the CLI binary', () => {
     expect(out(chk)).toContain('State: 01-leg done');
   });
 
+  it('the DEFERRED surface — a deferred task stays visible in next + journey, beside the state line (leg 12 task 01)', () => {
+    prep(root, LEG, TASK);
+    cli(root, ['spawn!', LEG, CONTRACT('the first leg')]);
+    cli(root, ['spawn!', TASK, CONTRACT('do the thing')]);
+    const REASON =
+      "deferred: the goal's server/UI slice takes priority — the decisions remain recorded in .agents/plan/design-fidelity-plan.md; this work returns as its own later epic";
+    expect(out(cli(root, ['append!', TASK, JSON.stringify({ at: '2026-09-11', type: 'deferred', reason: REASON, note: 'deferred by the operator' })]))).toContain('appended');
+
+    // the journey MOVES ON — a later leg with a queued task (the pull surface names it)
+    prep(root, '02-next-leg', '02-next-leg/01-do');
+    cli(root, ['spawn!', '02-next-leg', CONTRACT('the next leg')]);
+    cli(root, ['spawn!', '02-next-leg/01-do', CONTRACT('do the next thing')]);
+
+    // `next` names the ready work AND the obligation — never one instead of the other
+    const n = out(cli(root, ['next']));
+    expect(n).toContain('frontmost-ready: 02-next-leg/01-do (queued)');
+    expect(n).toContain('DEFERRED — still owing');
+    expect(n).toContain(`${TASK} — deferred (2026-09-11)`);
+    expect(n).toContain(`reason: ${REASON}`);
+    expect(n).toContain('plan: .agents/plan/design-fidelity-plan.md');
+
+    // `journey`'s WHAT IS AHEAD shows the same, and the leg line still reads done
+    const j = out(cli(root, ['journey']));
+    expect(j).toContain('01-leg done — tasks: 01-a:deferred');
+    expect(j).toContain('frontmost-ready: 02-next-leg/01-do (queued)');
+    expect(j).toContain('DEFERRED — still owing');
+    expect(j).toContain('plan: .agents/plan/design-fidelity-plan.md');
+
+    // the JSON value (the shape the service route serves) carries the structured rows
+    const expected = [{ task: TASK, leg: LEG, since: '2026-09-11', reason: REASON, plan: '.agents/plan/design-fidelity-plan.md' }];
+    const nv = JSON.parse(cli(root, ['--json', 'next']).stdout) as { lookBack: { deferred: unknown[] } };
+    expect(nv.lookBack.deferred).toEqual(expected);
+    const jv = JSON.parse(cli(root, ['--json', 'journey']).stdout) as { ahead: { deferred: unknown[] } };
+    expect(jv.ahead.deferred).toEqual(expected);
+
+    // the deferred semantics are UNTOUCHED: the deferred task still closed its leg
+    expect(out(cli(root, ['status', LEG]))).toContain('done');
+    expect(out(cli(root, ['status', '02-next-leg']))).toContain('queued');
+  });
+
+  it('no deferred work → next/journey are unchanged (no DEFERRED section) (leg 12 task 01)', () => {
+    prep(root, LEG, TASK);
+    cli(root, ['spawn!', LEG, CONTRACT('the first leg')]);
+    cli(root, ['spawn!', TASK, CONTRACT('do the thing')]);
+    const n = out(cli(root, ['next']));
+    expect(n).not.toContain('DEFERRED');
+    expect(n).toContain(`frontmost-ready: ${TASK} (queued)`);
+    expect(out(cli(root, ['journey']))).not.toContain('DEFERRED');
+  });
+
   it('evidence! + complete! — the close gestures, with named refusals and no hand-written JSON', () => {
     prep(root, LEG, TASK);
     cli(root, ['spawn!', LEG, CONTRACT('the first leg')]);
@@ -349,6 +399,32 @@ describe('e2e — the goal-session lifecycle (v6: seed → docs/goal.md → work
     expect(out(cli(r, ['complete!', TASK]))).toContain('completed →');
     expect(out(cli(r, ['status', TASK]))).toContain('done');
   }
+
+  it('an EXHAUSTED session keeps its deferred obligation visible BESIDE the goal consult (leg 12 task 01)', () => {
+    seedGoalLeg(root);
+    prep(root, WORK, TASK);
+    cli(root, ['spawn!', WORK, CONTRACT('the work leg')]);
+    cli(root, ['spawn!', TASK, CONTRACT('do the work')]);
+    const REASON =
+      "deferred: the goal's server/UI slice takes priority — the decisions stay in .agents/plan/design-fidelity-plan.md; this work returns as its own later epic";
+    expect(out(cli(root, ['append!', TASK, JSON.stringify({ at: '2026-09-11', type: 'deferred', reason: REASON, note: 'deferred by the operator' })]))).toContain('appended');
+
+    // the deferred task closed its leg → the session derives exhausted-unconfirmed…
+    expect(out(cli(root, ['status', WORK]))).toContain('done');
+    expect(out(cli(root, ['goal']))).toContain('verdict: unconfirmed');
+
+    // …and `next` shows BOTH the consult and the obligation, never one instead of the other
+    const n = out(cli(root, ['next']));
+    expect(n).toContain('journey exhausted — verdict UNCONFIRMED');
+    expect(n).toContain('goal! met');
+    expect(n).toContain('DEFERRED — still owing');
+    expect(n).toContain(`${TASK} — deferred (2026-09-11)`);
+    expect(n).toContain(`reason: ${REASON}`);
+    expect(n).toContain('plan: .agents/plan/design-fidelity-plan.md');
+    // journey's WHAT IS AHEAD carries it too, and nothing took an integrity hit
+    expect(out(cli(root, ['journey']))).toContain('DEFERRED — still owing');
+    expect(cli(root, ['check']).code).toBe(0);
+  });
 
   it('goal! seed emits the grill failure EXACTLY ONCE on an empty journey (regression guard — Fix 2 of 186685d)', () => {
     // The grill's provider call fails closed (hermetic baseUrl refuses the connection).

@@ -1,5 +1,5 @@
 import { TaskDetail, ResultItem, CLOSED_TASK_STATUSES } from '../store/store.js';
-import type { GoalView } from '../commands/index.js';
+import type { GoalView, DeferredTask } from '../commands/index.js';
 
 /**
  * S8 — THE RENDERERS (functional-spec F10/F11/F12; ann-system-design §1 "Renderers":
@@ -92,6 +92,26 @@ export interface PlanAhead {
   alsoReady: Array<{ task: string; status: string }>;
   legGate: { met: boolean; blocker?: string };
   readyCount?: number;
+  /** The outstanding deferred work — the obligations a deferred task left behind when it
+   *  closed its leg (leg 12 task 01). Shown as their OWN section, never folded into the
+   *  active-leg state lines. */
+  deferred?: DeferredTask[];
+}
+
+/** THE DEFERRED SECTION — the outstanding deferred obligations, ONE pure formatter the
+ *  `next` renderer and `journey`'s WHAT IS AHEAD both print (and the UI renders the same
+ *  rows from its route). A deferred task closes its leg (store.ts closed set), so nothing
+ *  else in the pull surface names it: the id, the RECORDED reason (verbatim, never
+ *  re-worded), and the plan pointer the reason names when it names one. No probing, no
+ *  resolution, no count-as-progress — status words only (AC5). */
+export function deferredLines(deferred: DeferredTask[]): string[] {
+  const out = ['DEFERRED — still owing (a deferred task closes its leg; the obligation stands):'];
+  for (const d of deferred) {
+    out.push(`  ${redact(d.task)} — deferred${d.since ? ` (${d.since})` : ''}`);
+    out.push(`    reason: ${d.reason ? redact(d.reason) : '(no reason recorded)'}`);
+    if (d.plan) out.push(`    plan: ${redact(d.plan)}`);
+  }
+  return out;
 }
 
 export function renderPlan(legs: PlanLeg[], ahead: PlanAhead): string {
@@ -129,6 +149,12 @@ export function renderPlan(legs: PlanLeg[], ahead: PlanAhead): string {
     }
   } else {
     out.push('no active leg — previous leg derived done; LEG GATE REVIEW before spawning the next leg');
+  }
+  // The DEFERRED work rides the same section (leg 12 task 01): the state lines above are
+  // never replaced by it — the obligation is shown ALONGSIDE them.
+  if (ahead.deferred?.length) {
+    out.push('');
+    out.push(...deferredLines(ahead.deferred));
   }
   out.push('');
   out.push('(grounded in: statuses + gates + validation — run --check / validate.mjs for the proof)');

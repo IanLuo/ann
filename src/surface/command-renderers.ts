@@ -2,7 +2,8 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import type { TaskDetail, ResultItem } from '../store/store.js';
 import type { GoalView } from '../commands/index.js';
-import { renderStatusTree, renderGateCard, renderPlan, renderDrift, renderLedger, renderGoal, PlanLeg, PlanAhead } from './renderers.js';
+import { renderStatusTree, renderGateCard, renderPlan, renderDrift, renderLedger, renderGoal, deferredLines, PlanLeg, PlanAhead } from './renderers.js';
+import type { DeferredTask } from '../commands/index.js';
 import { MANIFEST_FILE } from '../store/docs.js';
 
 /**
@@ -294,6 +295,7 @@ export const RENDERS: Record<string, Renderer> = {
         alsoReady: Array<{ task: string; status: string }>;
         legGate: { met: boolean; blocker?: string };
         pendingGates: Array<{ task: string; gate: string }>;
+        deferred?: DeferredTask[];
       };
       advance: { action: string; detail: string };
       goal?: { goalId: string; goalStatus: string; verdict: string };
@@ -314,6 +316,10 @@ export const RENDERS: Record<string, Renderer> = {
       lines.push('  no ready action — resolve blocked tasks or close via a gated closure task');
     }
     lines.push(`  advance: ${v.advance.action} — ${v.advance.detail}`);
+    // The outstanding DEFERRED work, APPENDED as its own section (leg 12 task 01): the
+    // state line above is never replaced — the exhausted consult and the deferred
+    // obligation are both shown.
+    if (lb.deferred?.length) lines.push(...deferredLines(lb.deferred));
     return block(lines);
   },
 

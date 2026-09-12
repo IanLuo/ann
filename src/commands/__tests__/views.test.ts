@@ -115,6 +115,60 @@ describe('pendingGates — the WHOLE-JOURNEY gate queue (the service/UI WAITING 
   });
 });
 
+describe('deferredWork — the outstanding deferred read (leg 12 task 01)', () => {
+  const REASON =
+    "deferred: the goal's server/UI slice takes priority — the D1-D11 design-fidelity decisions remain recorded in .agents/plan/design-fidelity-plan.md; this leg's work returns as its own later epic";
+
+  it('names the deferred task, its leg, the recorded reason, and the plan the reason points at', () => {
+    writeNode('09-spec-fidelity', []);
+    writeNode('09-spec-fidelity/01-validate-decision-forks', [ev('created'), ev('deferred', { reason: REASON })]);
+    expect(commands().deferredWork()).toEqual([
+      {
+        task: '09-spec-fidelity/01-validate-decision-forks',
+        leg: '09-spec-fidelity',
+        since: '2026-08-27',
+        reason: REASON,
+        plan: '.agents/plan/design-fidelity-plan.md',
+      },
+    ]);
+  });
+
+  it('takes the LAST deferred record (a corrected reason supersedes) and omits `plan` when the reason names none', () => {
+    writeNode('01-leg', []);
+    writeNode('01-leg/01-a', [
+      ev('deferred', { reason: 'the first record garbled a word' }),
+      ev('deferred', { reason: 'the work returns later — no pointer named here' }),
+    ]);
+    expect(commands().deferredWork()).toEqual([
+      { task: '01-leg/01-a', leg: '01-leg', since: '2026-08-27', reason: 'the work returns later — no pointer named here' },
+    ]);
+  });
+
+  it('is empty when nothing is deferred — done / cancelled / superseded siblings are not obligations', () => {
+    writeNode('01-leg', []);
+    writeNode('01-leg/01-a', [ev('created'), ev('completed')]);
+    writeNode('01-leg/02-b', [ev('created'), ev('cancelled', { reason: 'not needed' })]);
+    writeNode('01-leg/03-c', [ev('created'), ev('superseded')]);
+    expect(commands().deferredWork()).toEqual([]);
+  });
+
+  it('rides the shared look-back — one derivation, every pull surface', () => {
+    writeNode('01-leg', []);
+    writeNode('01-leg/01-a', [ev('created'), ev('deferred', { reason: 'later' })]);
+    const lb = commands().lookBack();
+    expect(lb.deferred.map((d) => `${d.task}:${d.reason}`)).toEqual(['01-leg/01-a:later']);
+    expect(lb.pendingGates).toEqual([]); // the escape hatch is not a gate
+  });
+
+  it('the deferred SEMANTICS are unchanged — the deferred task still closes its leg', () => {
+    writeNode('01-leg', []);
+    writeNode('01-leg/01-a', [ev('created'), ev('deferred', { reason: 'later' })]);
+    expect(commands().status('01-leg')).toBe('done');
+    expect(commands().status('01-leg/01-a')).toBe('deferred');
+    expect(commands().lookBack().frontmostReady).toBeUndefined();
+  });
+});
+
 describe('advance — the leg gate validated from the logs, never assumed', () => {
   it('tasks remaining → continue-leg, naming the frontmost', () => {
     writeNode('01-leg', []);

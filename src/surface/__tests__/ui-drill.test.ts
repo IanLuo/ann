@@ -440,3 +440,80 @@ describe('the served page — a drill opens its own tab, and the URL is the dril
     expect(tab.get('card-step-label').textContent).toContain('the leg gate');
   });
 });
+
+/**
+ * Leg 12 task 01 — THE DEFERRED VIEW. A deferred task closes its leg, so it is neither a
+ * ready task nor a gate: without its own list the postponed obligation vanishes from the
+ * page while the pull surface reads exhausted. The rows come off the SAME `ahead.deferred`
+ * the journey route carries (`/api/journey`), and each one DRILLS into its node —
+ * presented, never decided.
+ */
+const DEF = '09-spec-fidelity/01-validate-decision-forks';
+const DEF_REASON =
+  "deferred: the goal's server/UI slice takes priority — the D1-D11 design-fidelity decisions remain recorded in .agents/plan/design-fidelity-plan.md; this leg's work returns as its own later epic";
+const deferredJourney = {
+  ahead: {
+    activeLeg: LEG,
+    activeLegStatus: 'queued',
+    frontmostReady: { task: TASK, status: 'queued' },
+    legGate: { met: true },
+    deferred: [{ task: DEF, leg: '09-spec-fidelity', since: '2026-09-11', reason: DEF_REASON, plan: '.agents/plan/design-fidelity-plan.md' }],
+  },
+  legs: [
+    { id: LEG, status: 'queued', tasks: [{ id: TASK, status: 'queued' }] },
+    { id: '09-spec-fidelity', status: 'done', tasks: [{ id: DEF, status: 'deferred' }] },
+  ],
+};
+const deferredReads = (): Record<string, unknown> => ({
+  ...reads(card()),
+  '/api/journey': deferredJourney,
+  [`/api/confirm?id=${DEF}`]: {
+    detail: {
+      id: DEF,
+      status: 'deferred',
+      contract: { intent: 'decide the forks', acceptanceCriteria: ['the forks are decided'] },
+      gates: { grill: { state: 'confirmed' }, confirm: { state: 'none' } },
+      inputs: [],
+      openQuestions: [],
+      claims: [],
+      checks: [],
+    },
+    results: [],
+  },
+});
+
+describe('the served page — the DEFERRED work is visible (leg 12 task 01)', () => {
+  it('renders the row: the id, the recorded reason, and the plan it names', async () => {
+    const page = boot(deferredReads());
+    await flush();
+    expect(page.get('journey-view').hidden).toBe(false);
+    expect(page.get('deferred-head').hidden).toBe(false);
+    const rows = page.get('deferred').text();
+    expect(rows).toContain(DEF);
+    expect(rows).toContain(DEF_REASON); // verbatim — the recorded reason, never re-worded
+    expect(rows).toContain('plan: .agents/plan/design-fidelity-plan.md');
+    expect(rows).toContain('deferred 2026-09-11');
+    // the leg line still reads done — the deferred task closed it (semantics unchanged)
+    expect(page.get('legs').text()).toContain('09-spec-fidelity · done');
+  });
+
+  it('a deferred row drills into its node — PRESENTED, never decided', async () => {
+    const page = boot(deferredReads());
+    await flush();
+    const row = page.get('deferred').descendants().find((c) => c.tag === 'button');
+    expect(row, 'the deferred row is not a drill').toBeDefined();
+    row!.click();
+    await flush();
+    expect(page.fetched).toContain(`/api/confirm?id=${DEF}`);
+    expect(page.get('card-title').textContent).toBe(DEF);
+    expect(page.get('card-next').textContent).toContain('next: deferred');
+    expect(page.get('card-decide').hidden).toBe(true); // nothing to decide on a deferred task
+  });
+
+  it('no deferred work → the section is HIDDEN, never left showing a stale row', async () => {
+    const page = boot({ ...reads(card()), '/api/journey': journey });
+    await flush();
+    expect(page.get('deferred-head').hidden).toBe(true);
+    expect(page.get('deferred').text()).toBe('');
+  });
+});

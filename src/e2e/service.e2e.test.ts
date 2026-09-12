@@ -409,3 +409,66 @@ describe('e2e — the minimal service + UI (AC-1: the thin binding over the comm
     expect(JSON.parse(verify.stdout)).toEqual({ drifts: [], count: 0 });
   });
 });
+
+/**
+ * E2E — THE DEFERRED SURFACE OVER HTTP (leg 12 task 01). A deferred task closes its leg,
+ * so it is neither a ready task nor a gate: the service's journey route must still carry
+ * the obligation, and the served page must ship the section it renders into. The route is
+ * the page's OWN read (the `ahead.deferred` rows), so the page shows what is outstanding
+ * rather than only what is gated; the DOM rendering of those rows is pinned in the
+ * ui-drill unit (this suite asserts the HTTP contract, never a DOM).
+ */
+describe('e2e — the DEFERRED surface in the service + the served page (leg 12 task 01)', () => {
+  let root!: string;
+  let server!: Server;
+  const DLEG = '01-spec-fidelity';
+  const DTASK = '01-spec-fidelity/01-validate-decision-forks';
+  const REASON =
+    "deferred: the goal's server/UI slice takes priority — the D1-D11 design-fidelity decisions remain recorded in .agents/plan/design-fidelity-plan.md; this leg's work returns as its own later epic";
+
+  beforeAll(async () => {
+    root = newProject();
+    cli(root, ['spawn!', DLEG, CONTRACT('the fidelity leg')]);
+    cli(root, ['spawn!', DTASK, CONTRACT('decide the forks')]);
+    cli(root, ['append!', DTASK, JSON.stringify({ at: '2026-09-11', type: 'deferred', reason: REASON, note: 'deferred by the operator' })]);
+    // the journey moves ON — a later leg with a queued task (so the state line is not empty)
+    cli(root, ['spawn!', LEG2, CONTRACT('the beta leg')]);
+    cli(root, ['spawn!', T2, CONTRACT('do the beta thing')]);
+    server = await serve(root, ['--port', '0']);
+  }, 60_000);
+
+  afterAll(() => {
+    server?.kill();
+    if (root) rmSync(root, { recursive: true, force: true });
+  });
+
+  it('the journey + next routes carry the deferred rows, byte-equal to the CLI --json', { timeout: 30_000 }, async () => {
+    const expected = [{ task: DTASK, leg: DLEG, since: '2026-09-11', reason: REASON, plan: '.agents/plan/design-fidelity-plan.md' }];
+    for (const [route, argv] of [['/api/journey', 'journey'], ['/api/next', 'next']] as const) {
+      const res = await get(server.url + route);
+      expect(res.status, `GET ${route} → ${res.status}: ${res.body.slice(0, 200)}`).toBe(200);
+      expect(res.body).toBe(cli(root, ['--json', argv]).stdout); // one state, two bindings, zero drift
+    }
+    const j = JSON.parse((await get(server.url + '/api/journey')).body) as { ahead: { deferred: unknown[]; activeLeg: string } };
+    expect(j.ahead.deferred).toEqual(expected);
+    expect(j.ahead.activeLeg).toBe(LEG2); // the deferred leg derived done — the next leg is the active one
+    const n = JSON.parse((await get(server.url + '/api/next')).body) as { lookBack: { deferred: unknown[] } };
+    expect(n.lookBack.deferred).toEqual(expected);
+    // the deferred SEMANTICS are unchanged: the task closed its leg, and it is no gate
+    const status = JSON.parse(cli(root, ['--json', 'status', DLEG]).stdout) as Array<{ id: string; status: string }>;
+    expect(status).toEqual([
+      { id: DLEG, status: 'done', superseded: false },
+      { id: DTASK, status: 'deferred', superseded: false },
+    ]);
+    expect(JSON.parse((await get(server.url + '/api/gates')).body)).toEqual([]);
+  });
+
+  it('the served page ships the deferred section and renders it from the journey route', { timeout: 30_000 }, async () => {
+    const page = await get(server.url + '/');
+    expect(page.status).toBe(200);
+    expect(page.body).toContain('id="deferred"'); // the list the rows render into
+    expect(page.body).toContain('id="deferred-head"'); // the heading, shown only when rows exist
+    expect(page.body).toContain('Deferred — still owing');
+    expect(page.body).toContain('renderDeferred((r[0].doc.ahead || {}).deferred)'); // fed by the journey route
+  });
+});

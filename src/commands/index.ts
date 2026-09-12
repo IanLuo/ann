@@ -151,6 +151,36 @@ export interface FrontmostReady {
   status: string;
 }
 
+/** ONE OUTSTANDING DEFERRED TASK (leg 12 task 01 — the visibility read): the task, the
+ *  leg it closed, when it was deferred, the recorded `reason` VERBATIM, and the plan
+ *  pointer the reason names when the reason holds one. Derived from the log alone: a
+ *  deferred task is terminal state (store.ts CLOSED_TASK_STATUSES), so the events are
+ *  the only place its WHY survives. */
+export interface DeferredTask {
+  task: string;
+  leg: string;
+  since: string;
+  reason: string;
+  /** The path the reason names — the token AS WRITTEN (never resolved, never probed: a
+   *  plan pointer is evidence of the author's intent, not a live file). Absent when the
+   *  reason names none. */
+  plan?: string;
+}
+
+/** The path-looking token in a deferred reason: a relative path with a doc/code
+ *  extension. Deliberately conservative — a token that is not OBVIOUSLY a path (a URL, a
+ *  bare word, a sentence fragment) is not one, and the reason is then printed verbatim
+ *  with no `plan:` line rather than a guessed pointer. */
+function planPointer(reason: string): string | undefined {
+  for (const raw of reason.split(/\s+/)) {
+    const tok = raw.replace(/^[([{"'`<]+/, '').replace(/[)\]}"'`,;:.>]+$/, '');
+    if (tok.includes('://')) continue; // a URL is not a plan pointer
+    if (!/^(?:[\w.~-]+\/)+[\w.~-]+\.(?:md|markdown|json|ya?ml|txt|ts|tsx)$/i.test(tok)) continue;
+    return tok;
+  }
+  return undefined;
+}
+
 /** The look-back view (flow-control v6 §2a — the observer action, derived from events). */
 export interface LookBack {
   activeLeg?: string;
@@ -159,6 +189,10 @@ export interface LookBack {
   alsoReady: FrontmostReady[];
   legGate: { met: boolean; blocker?: string };
   pendingGates: Array<{ task: string; gate: string }>;
+  /** The OUTSTANDING DEFERRED WORK (leg 12 task 01): a deferred task closes its leg, so
+   *  the pull surface (frontmost-ready / pending gates) never names it — this is the one
+   *  read that keeps the postponed obligation visible. Always present ([] when none). */
+  deferred: DeferredTask[];
 }
 
 /** ONE WAITING GATE, with what a human needs to SEE it (the queue's label): the gate's
@@ -914,6 +948,28 @@ export class Commands {
     return out;
   }
 
+  /** THE DEFERRED WORK READ (leg 12 task 01) — the outstanding obligations the pull
+   *  surface used to drop: a `deferred` task closes its leg (store.ts closed set), so the
+   *  journey can derive exhausted while the postponed work still owes a reason and a
+   *  plan, and nothing in frontmost-ready / the gate queue names it. Read-only, derived
+   *  on demand over the logs: no event, no state, no write path — the deferred SEMANTICS
+   *  (a deferred task closes its leg) are untouched.
+   *
+   *  The reason is the LAST `deferred` record's (a corrected reason supersedes an earlier
+   *  one — the live 09-spec-fidelity case), printed verbatim by the renderers. */
+  deferredWork(): DeferredTask[] {
+    const out: DeferredTask[] = [];
+    for (const id of this.store.ids()) {
+      if (!id.includes('/')) continue;
+      if (this.store.status(id) !== 'deferred') continue;
+      const last = this.store.events(id).filter((e) => e.type === 'deferred').pop();
+      const reason = typeof last?.reason === 'string' ? last.reason : '';
+      const plan = planPointer(reason);
+      out.push({ task: id, leg: id.split('/')[0], since: String(last?.at ?? ''), reason, ...(plan ? { plan } : {}) });
+    }
+    return out.sort((a, b) => a.task.localeCompare(b.task));
+  }
+
   /** Uncommitted TRACKED changes under the moving tree (.ann/journey) — `??` lines
    *  are untracked scratch and never a refusal basis. Non-git roots read clean (the
    *  guard is about not losing tracked work, not about git being present). */
@@ -1066,6 +1122,7 @@ export class Commands {
       alsoReady,
       legGate,
       pendingGates,
+      deferred: this.deferredWork(),
     };
   }
 

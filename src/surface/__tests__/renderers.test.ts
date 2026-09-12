@@ -115,6 +115,39 @@ describe('renderPlan (F12 — full plan)', () => {
     expect(text).toContain(`no ready tasks in leg — unfinished: 08-task-close/02-implementation-close-commands (${status})`);
   });
 
+  /* Leg 12 task 01 — the DEFERRED surface: a deferred task closes its leg, so the pull
+   * surface used to drop the obligation entirely. It is shown IN the WHAT IS AHEAD
+   * section, ALONGSIDE the state lines — never instead of them. */
+  it('surfaces the outstanding DEFERRED work beside the state lines', () => {
+    const text = renderPlan(
+      [{ id: '09-spec-fidelity', status: 'done', superseded: false, tasks: [{ id: '09-spec-fidelity/01-validate-decision-forks', status: 'deferred' }] }],
+      {
+        alsoReady: [],
+        legGate: { met: true },
+        deferred: [
+          {
+            task: '09-spec-fidelity/01-validate-decision-forks',
+            leg: '09-spec-fidelity',
+            since: '2026-09-11',
+            reason: 'the server/UI slice takes priority — see .agents/plan/design-fidelity-plan.md',
+            plan: '.agents/plan/design-fidelity-plan.md',
+          },
+        ],
+      },
+    );
+    expect(text).toContain('DEFERRED — still owing');
+    expect(text).toContain('09-spec-fidelity/01-validate-decision-forks — deferred (2026-09-11)');
+    expect(text).toContain('reason: the server/UI slice takes priority — see .agents/plan/design-fidelity-plan.md');
+    expect(text).toContain('plan: .agents/plan/design-fidelity-plan.md');
+    expect(text).toContain('no active leg — previous leg derived done; LEG GATE REVIEW'); // the state line survives
+    expect(hasScalarProgress(text)).toBe(false);
+  });
+
+  it('no deferred work → WHAT IS AHEAD is unchanged (no DEFERRED section)', () => {
+    const text = renderPlan([{ id: '01-goal', status: 'done', superseded: false }], { alsoReady: [], legGate: { met: true } });
+    expect(text).not.toContain('DEFERRED');
+  });
+
   it('a genuinely closed leg DOES print the leg-gate review line', () => {
     const text = renderPlan(
       [{ id: '07-operator-advance', status: 'done', superseded: false, tasks: [{ id: '07-operator-advance/01-implementation-advance', status: 'done' }] }],

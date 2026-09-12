@@ -82,6 +82,13 @@ export const UI_HTML = `<!doctype html>
   .count { color: var(--warn); }
   .leg { border-top: 1px solid var(--line); padding: .75rem 0; }
   .leg:first-child { border-top: 0; padding-top: 0; }
+  /* the DEFERRED rows: work the journey postponed — a deferred task closes its leg, so it
+     never appears as a ready task or a gate; without this list it vanishes from the page */
+  .deferred { margin: .75rem 0 0; }
+  .deferred li { border-top: 1px solid var(--line); }
+  .deferred button { display: block; width: 100%; padding: .6rem .25rem; background: none; border: 0; color: var(--fg); font: inherit; text-align: left; cursor: pointer; }
+  .deferred button:hover .q-title { color: var(--accent); }
+  .badge.deferred { color: var(--warn); }
   .task { display: block; width: 100%; padding: .3rem .35rem; background: none; border: 0; border-left: 2px solid var(--line); color: var(--muted); font: inherit; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .85rem; text-align: left; cursor: pointer; }
   .task:hover { color: var(--fg); border-left-color: var(--accent); }
   .status-done { color: var(--ok); }
@@ -178,6 +185,8 @@ export const UI_HTML = `<!doctype html>
   <section class="journey" id="journey-view">
     <h2>The journey</h2>
     <div id="legs"></div>
+    <h3 id="deferred-head" hidden>Deferred — still owing</h3>
+    <ul class="deferred" id="deferred"></ul>
   </section>
   <section class="card card-body" id="card" hidden>
     <h2 id="card-step-label">Gate card</h2>
@@ -263,6 +272,29 @@ export const UI_HTML = `<!doctype html>
       });
       if (!(leg.tasks || []).length) sec.appendChild(el('p', '(no tasks)', 'muted'));
       box.appendChild(sec);
+    });
+  }
+
+  /** THE DEFERRED ROWS (leg 12 task 01) — the work the journey postponed. A deferred task
+   *  CLOSES its leg, so it is neither a ready task nor a gate: without this list the
+   *  obligation vanishes from the page while the CLI reads exhausted. One row per task:
+   *  its id, the recorded reason, and the plan pointer the reason names. The row DRILLS
+   *  into the node (presented, never decided — a deferred task has no gate in hand). */
+  function renderDeferred(deferred) {
+    var rows = deferred || [];
+    var list = byId('deferred');
+    list.replaceChildren();
+    byId('deferred-head').hidden = !rows.length;
+    rows.forEach(function (d) {
+      var li = el('li');
+      var b = el('button');
+      b.appendChild(el('span', 'DEFERRED', 'badge deferred'));
+      b.appendChild(el('span', d.task + '  ·  leg ' + (d.leg || '') + '  ·  deferred ' + (d.since || '?'), 'q-title'));
+      b.appendChild(el('span', d.reason || '(no reason recorded)', 'q-meta'));
+      if (d.plan) b.appendChild(el('span', 'plan: ' + d.plan, 'q-meta'));
+      b.addEventListener('click', function () { openCard(d.task, null); });
+      li.appendChild(b);
+      list.appendChild(li);
     });
   }
 
@@ -910,6 +942,7 @@ export const UI_HTML = `<!doctype html>
       if (r[0].status !== 200) { byId('state').textContent = 'journey unavailable: ' + JSON.stringify(r[0].doc.error); return; }
       renderState(r[0].doc.ahead || {});
       renderLegs(r[0].doc.legs || []);
+      renderDeferred((r[0].doc.ahead || {}).deferred);
       renderQueue(r[1].status === 200 ? r[1].doc : []);
       if (r[2].status !== 200) wnMessage("what's-next unavailable: " + JSON.stringify(r[2].doc.error), true);
       else renderWhatsNext(r[2].doc);
