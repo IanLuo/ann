@@ -2,11 +2,17 @@ import { describe, it, expect } from 'vitest';
 import { UI_HTML } from '../ui.js';
 
 /**
- * THE SERVED PAGE'S DRILLS (leg 11 rework — the confirm rejection: "the card shows stuff,
- * but we can drill in to each item to see more information"). The e2e proves the ROUTES the
- * page issues; this runs the PAGE ITSELF against a MINIMAL DOM (hand-rolled — no jsdom, no
- * new dependency) with the reads stubbed, and asserts what the human asked for: every item
- * on the WHAT'S NEXT card opens the detail pane with that item's OWN data.
+ * THE SERVED PAGE'S DRILLS (leg 11 rework). The confirm rejection asked to "drill in to
+ * each item to see more information"; the follow-up asked for the drill to open IN A NEW
+ * TAB. Both are verified HERE, by RUNNING THE SERVED PAGE SCRIPT against a MINIMAL DOM
+ * (hand-rolled — no jsdom, no new dependency):
+ *
+ *   · every drill affordance is a LINK carrying its item in the FRAGMENT
+ *     (`#drill=<kind>&id=…`), with `target=_blank` + `rel=noopener`;
+ *   · the new tab is that same page booted at the link's own href — which is exactly how
+ *     the test opens it, so the URL contract is what is exercised, not a private call;
+ *   · a drill is PRESENTED, never decided — except a RESULT drilled from an exit gate,
+ *     which keeps the decision in hand (the fragment carries the gate).
  *
  * The stub's element ids are taken FROM the script (its `byId('…')` calls), so a renamed or
  * misspelled id cannot pass silently — the page would write into a node nobody asserts on.
@@ -16,6 +22,10 @@ class FakeEl {
   readonly tag: string;
   className = '';
   hidden = false;
+  href = '';
+  target = '';
+  rel = '';
+  title = '';
   private own = '';
   readonly children: FakeEl[] = [];
   readonly listeners: Record<string, Array<() => void>> = {};
@@ -50,14 +60,14 @@ class FakeEl {
   text(): string {
     return this.descendants().map((c) => c.textContent).join(' ');
   }
-  /** The first descendant button whose text contains `needle` — the drill affordance. */
-  button(needle: string): FakeEl {
-    const found = this.descendants().find((c) => c.tag === 'button' && c.textContent.includes(needle));
-    if (!found) throw new Error(`no button containing '${needle}' — saw: ${this.text().slice(0, 700)}`);
+  /** The first descendant LINK whose text contains `needle` — the drill affordance. */
+  link(needle: string): FakeEl {
+    const found = this.descendants().find((c) => c.tag === 'a' && c.textContent.includes(needle));
+    if (!found) throw new Error(`no link containing '${needle}' — saw: ${this.text().slice(0, 700)}`);
     return found;
   }
-  buttons(): FakeEl[] {
-    return this.descendants().filter((c) => c.tag === 'button');
+  links(): FakeEl[] {
+    return this.descendants().filter((c) => c.tag === 'a');
   }
 }
 
@@ -66,9 +76,11 @@ const SCRIPT = UI_HTML.match(/<script>([\s\S]*?)<\/script>/)?.[1] ?? '';
 interface Stub {
   get(id: string): FakeEl;
   fetched: string[];
+  href: string;
 }
 
-function boot(reads: Record<string, unknown>): Stub {
+/** Boot the served page — optionally AT a drill URL (that is what a new tab does). */
+function boot(reads: Record<string, unknown>, hash = ''): Stub {
   const ids = [...SCRIPT.matchAll(/byId\('([^']+)'\)/g)].map((m) => m[1]);
   const nodes = new Map<string, FakeEl>();
   for (const id of ids) nodes.set(id, new FakeEl('div'));
@@ -89,7 +101,7 @@ function boot(reads: Record<string, unknown>): Stub {
       json: async () => (body === undefined ? { error: { code: 'not-found', message: path } } : body),
     });
   };
-  new Function('document', 'window', 'fetch', SCRIPT)(document, { addEventListener: (): void => {} }, fetchStub);
+  new Function('document', 'window', 'fetch', 'location', SCRIPT)(document, { addEventListener: (): void => {} }, fetchStub, { hash });
   return {
     get: (id) => {
       const n = nodes.get(id);
@@ -97,6 +109,7 @@ function boot(reads: Record<string, unknown>): Stub {
       return n;
     },
     fetched,
+    href: hash,
   };
 }
 
@@ -105,9 +118,20 @@ const flush = async (): Promise<void> => {
   for (let i = 0; i < 4; i++) await new Promise((r) => setTimeout(r, 0));
 };
 
+/** THE NEW TAB: boot the page at a drill link's own href and hand back the rendered stub. */
+async function openTab(link: FakeEl, reads: Record<string, unknown>): Promise<Stub> {
+  expect(link.target, 'a drill must open in a new tab').toBe('_blank');
+  expect(link.rel).toBe('noopener');
+  expect(link.href.startsWith('#drill='), `link href must be a drill fragment: ${link.href}`).toBe(true);
+  const tab = boot(reads, link.href);
+  await flush();
+  return tab;
+}
+
 const TASK = '01-leg/01-a';
 const LEG = '01-leg';
 const DIRTY = 'uncommitted tracked change:  M .ann/journey/legs/01-leg/01-a/events.jsonl';
+const SHA = 'abc1234';
 
 const journey = {
   ahead: { activeLeg: LEG, frontmostReady: { task: TASK, status: 'queued' }, legGate: { met: true } },
@@ -122,8 +146,18 @@ const card = (over: Record<string, unknown> = {}) => ({
   executable: true,
   ...over,
 });
-const confirmRead = (id: string) => ({
-  detail: { id, status: 'queued', contract: { intent: 'do the thing', acceptanceCriteria: ['the thing is done'] }, gates: { grill: { state: 'confirmed' }, confirm: { state: 'none' } }, inputs: [], openQuestions: [], claims: [], checks: [] },
+const confirmRead = (over: Record<string, unknown> = {}) => ({
+  detail: {
+    id: TASK,
+    status: 'queued',
+    contract: { intent: 'do the thing', acceptanceCriteria: ['the thing is done'] },
+    gates: { grill: { state: 'confirmed' }, confirm: { state: 'none' } },
+    inputs: [],
+    openQuestions: [],
+    claims: [],
+    checks: [],
+    ...over,
+  },
   results: [],
 });
 const packetRead = {
@@ -158,139 +192,13 @@ const nextRead = {
     pendingGates: [{ task: TASK, gate: 'grill' }],
   },
 };
-
-const reads = (whatsnext: unknown): Record<string, unknown> => ({
-  '/api/journey': journey,
-  '/api/gates': [],
-  '/api/whatsnext': whatsnext,
-  [`/api/confirm?id=${TASK}`]: confirmRead(TASK),
-  [`/api/packet?id=${TASK}`]: packetRead,
-  [`/api/detail?id=${LEG}`]: detailRead,
-  '/api/next': nextRead,
-});
-
-describe('the served page — every WHAT\'S NEXT item drills into the detail pane', () => {
-  it('renders the card, then drills the frontmost-ready task into its node + context packet', async () => {
-    const stub = boot(reads(card()));
-    await flush();
-    expect(stub.get('wn-action').textContent).toBe('continue-leg');
-    expect(stub.get('wn-badge').textContent).toBe('MACHINE-EXECUTABLE');
-    expect(stub.get('wn-actions').hidden).toBe(false); // the approve is offered: clean + executable
-    // the facts are BUTTONS (the rejection: "we can drill in to each item")
-    expect(stub.get('wn-facts').buttons().length).toBe(3);
-    expect(stub.get('wn-facts').button('frontmost-ready').textContent).toContain(TASK);
-
-    stub.get('wn-facts').button('frontmost-ready').click();
-    await flush();
-    expect(stub.get('card-step-label').textContent).toContain('frontmost-ready');
-    expect(stub.get('card-title').textContent).toBe(TASK);
-    expect(stub.fetched).toContain(`/api/confirm?id=${TASK}`);
-    expect(stub.fetched).toContain(`/api/packet?id=${TASK}`);
-    // the drill's own data: the node card AND the packet the frame will materialize
-    expect(stub.get('card-node').textContent).toContain('intent: do the thing');
-    expect(stub.get('card-node').textContent).toContain('Context packet');
-    expect(stub.get('card-node').textContent).toContain('core-design');
-    expect(stub.get('card-node').textContent).toContain('docs/core-design.md @ abc1234');
-    expect(stub.get('card-node').textContent).toContain('which shape?');
-    expect(stub.get('card-decide').hidden).toBe(true); // a drill is PRESENTED, never decided
-  });
-
-  it('drills the leg gate into the leg and its tasks (each of which drills further)', async () => {
-    const stub = boot(reads(card()));
-    await flush();
-    stub.get('wn-facts').button('leg gate').click();
-    await flush();
-    expect(stub.get('card-step-label').textContent).toContain('the leg gate');
-    expect(stub.get('card-title').textContent).toBe(LEG);
-    expect(stub.fetched).toContain(`/api/detail?id=${LEG}`);
-    expect(stub.get('card-node').textContent).toContain('the leg is done');
-    expect(stub.get('card-node').textContent).toContain('Tasks (1)');
-    // …and the task inside is itself a drill
-    stub.get('card-node').button(TASK).click();
-    await flush();
-    expect(stub.get('card-step-label').textContent).toContain('frontmost-ready');
-    expect(stub.fetched).toContain(`/api/packet?id=${TASK}`);
-  });
-
-  it('drills the pending gates into the DECISION surface (the same card the queue opens)', async () => {
-    const stub = boot(reads(card()));
-    await flush();
-    stub.get('wn-facts').button('pending gates').click();
-    await flush();
-    expect(stub.get('card-step-label').textContent).toContain('pending gates');
-    expect(stub.get('card-node').textContent).toContain(TASK);
-    stub.get('card-node').button('decide it').click();
-    await flush();
-    // the gate card: the decision UI appears ONLY for a submitted gate chosen here
-    expect(stub.get('card-title').textContent).toBe(TASK);
-    expect(stub.get('card-gates').textContent).toContain('grill');
-  });
-
-  it('drills the derivation itself into the look-back, and its items in turn', async () => {
-    const stub = boot(reads(card()));
-    await flush();
-    stub.get('wn-action').click();
-    await flush();
-    expect(stub.get('card-step-label').textContent).toContain('the derivation');
-    expect(stub.get('card-title').textContent).toBe('the F5 pull proposal');
-    expect(stub.fetched).toContain('/api/next');
-    expect(stub.get('card-node').textContent).toContain('also ready');
-    expect(stub.get('card-node').textContent).toContain('01-leg/02-b');
-    expect(stub.get('card-node').button(LEG)).toBeTruthy();
-  });
-
-  it('drills an integrity blocker into its class, the read that derives it, and the node it names', async () => {
-    const stub = boot(reads(card({ integrity: { clean: false, blockers: [DIRTY] }, executable: false })));
-    await flush();
-    expect(stub.get('wn-badge').textContent).toBe('BLOCKED — CANNOT ADVANCE');
-    expect(stub.get('wn-actions').hidden).toBe(true); // no approve where it cannot work
-    const row = stub.get('wn-blockers').button('blocker:');
-    expect(row.textContent).toContain('uncommitted tracked journey changes — commit them'); // the operator's step
-    row.click();
-    await flush();
-    expect(stub.get('card-step-label').textContent).toContain('integrity blocker');
-    expect(stub.get('card-node').textContent).toContain('a dirty tree: uncommitted tracked work');
-    expect(stub.get('card-node').textContent).toContain('git status --porcelain -- .ann/journey docs');
-    expect(stub.get('card-node').textContent).toContain('your step');
-    // the node the blocker names is itself drillable
-    stub.get('card-node').button(TASK).click();
-    await flush();
-    expect(stub.fetched).toContain(`/api/packet?id=${TASK}`);
-  });
-
-  it('a boundary derivation offers no approve, and its facts still drill', async () => {
-    const stub = boot(
-      reads(card({ advance: { leg: LEG, action: 'closure-needed', detail: 'leg gate UNMET: 0 done, 1 blocked — close via a gated closure task' }, frontmost: undefined, executable: false })),
-    );
-    await flush();
-    expect(stub.get('wn-badge').textContent).toBe('PRESENTED AND STOPPED');
-    expect(stub.get('wn-actions').hidden).toBe(true);
-    expect(stub.get('wn-message').textContent).toContain('authored-work boundary');
-    stub.get('wn-facts').button('frontmost-ready').click(); // 'none' → says so instead of drilling nothing
-    await flush();
-    expect(stub.get('wn-message').textContent).toContain('no frontmost-ready task');
-    stub.get('wn-facts').button('leg gate').click();
-    await flush();
-    expect(stub.get('card-step-label').textContent).toContain('the leg gate');
-  });
-});
-
-/**
- * THE EXIT GATE'S DRILLS (leg 11, the SECOND confirm rejection): "on the exit gate, where
- * also lot of info can drill in, like the git submit, the local file path — first check if
- * we have command tool to access those resources, then build minimum UI to show them".
- *
- * The command layer already had it (`ann results <id> [n]` — commit → `git show`, ref →
- * the file/dir at its path); this proves the served page USES it: every result item, and
- * every claim-evidence pointer that NAMES a result item, drills into the same pane.
- */
-const COMMIT = 'abc1234deadbeef5678';
-const exitResults = [
-  { kind: 'commit', label: COMMIT, sha: COMMIT, note: '', at: '2026-09-12' },
-  { kind: 'ref', label: 'src/surface/approve.ts', path: 'src/surface/approve.ts', at: '2026-09-12' },
-];
-const PROSE = 'the rework answering the rejection, described in prose';
-const exitConfirm = {
+/** The exit gate's own card: a submitted confirm gate with results and a claim naming one. */
+const resultsRead = {
+  item: { kind: 'commit', label: SHA, sha: SHA, at: '2026-09-12' },
+  sha: `commit ${SHA}\n\n    the deliverable\n`,
+  stat: ' docs/thing.md | 2 ++',
+};
+const gateCard = (over: Record<string, unknown> = {}) => ({
   detail: {
     id: TASK,
     status: 'blocked',
@@ -298,101 +206,149 @@ const exitConfirm = {
     gates: { grill: { state: 'confirmed' }, confirm: { state: 'submitted', at: '2026-09-12' } },
     inputs: [],
     openQuestions: [],
-    claims: [
-      { ac: 'AC-1', statement: 'the thing is done', evidence: [`${COMMIT} [resolves in git]`, 'src/surface/approve.ts [258 lines]', PROSE] },
-    ],
-    checks: [{ command: 'npm test', result: 'pass', detail: '663 passed', sha: COMMIT, at: '2026-09-12' }],
+    claims: [{ ac: 'AC-1', statement: 'the thing is done', evidence: [`${SHA} [resolved]`] }],
+    checks: [{ command: 'npm test', result: 'pass', sha: SHA }],
+    ...over,
   },
-  results: exitResults,
-};
-const commitDrill = {
-  item: exitResults[0],
-  sha: `${COMMIT}\nian luo <ianluo63@gmail.com>\n\nfeat(serve): drill into every WHAT'S NEXT item`, // the git show body
-  stat: ' src/surface/ui.ts | 225 ++++++++++++++++++++++++++++++++++',
-};
-const refDrill = { item: exitResults[1], file: 'src/surface/approve.ts', head: ["import { join } from 'node:path';", 'export const ONCE = true;'] };
-
-const exitReads = (gates: unknown[] = [{ task: TASK, gate: 'confirm', role: 'exit', leg: LEG, intent: 'do the thing', since: '2026-09-12', delivered: { commits: 1, claims: 1, unclaimed: 0, checks: 1, bound: 1 } }]): Record<string, unknown> => ({
-  '/api/journey': {
-    ahead: { activeLeg: LEG, frontmostReady: { task: TASK, status: 'blocked' }, legGate: { met: true } },
-    legs: [{ id: LEG, status: 'queued', tasks: [{ id: TASK, status: 'blocked' }] }],
-  },
-  '/api/gates': gates,
-  '/api/whatsnext': card({ frontmost: undefined, executable: false }),
-  [`/api/confirm?id=${TASK}`]: exitConfirm,
-  [`/api/results?id=${TASK}&n=1`]: commitDrill,
-  [`/api/results?id=${TASK}&n=2`]: refDrill,
+  results: [{ kind: 'commit', label: SHA, sha: SHA }],
 });
-/** Open the EXIT gate card the way the operator does: from its WAITING ON YOU row. */
-async function openExitGate(stub: Stub): Promise<void> {
-  stub.get('queue').button('confirm').click();
-  await flush();
-}
 
-describe('the served page — the EXIT GATE drills into every result and evidence item', () => {
-  it('the exit-gate card makes every result a drill and every naming evidence pointer one too', async () => {
-    const stub = boot(exitReads());
+const reads = (whatsnext: unknown): Record<string, unknown> => ({
+  '/api/journey': journey,
+  '/api/gates': [],
+  '/api/whatsnext': whatsnext,
+  [`/api/confirm?id=${TASK}`]: confirmRead(),
+  [`/api/packet?id=${TASK}`]: packetRead,
+  [`/api/detail?id=${LEG}`]: detailRead,
+  '/api/next': nextRead,
+});
+
+describe('the served page — a drill opens its own tab, and the URL is the drill', () => {
+  it('the card renders, and every fact is a NEW-TAB link carrying its item', async () => {
+    const page = boot(reads(card()));
     await flush();
-    await openExitGate(stub);
-    expect(stub.get('card-step-label').textContent).toContain('EXIT');
-    expect(stub.get('card-decide').hidden).toBe(false); // the decision card is open
-    expect(stub.get('card-what').textContent).toContain('DRILLS IN');
-    // the results are BUTTONS now (they used to be plain 'kind · label' rows)
-    expect(stub.get('card-results').buttons().length).toBe(2);
-    expect(stub.get('card-results').button(COMMIT).textContent).toContain('commit · ' + COMMIT);
-    expect(stub.get('card-results').button('approve.ts').textContent).toContain('ref · src/surface/approve.ts');
-    // the two evidence pointers that NAME a result item are drills; the prose one is text
-    expect(stub.get('card-claims').buttons().length).toBe(2);
-    expect(stub.get('card-claims').textContent).toContain('evidence: ' + PROSE);
+    expect(page.get('wn-action').textContent).toBe('continue-leg');
+    expect(page.get('wn-badge').textContent).toBe('MACHINE-EXECUTABLE');
+    expect(page.get('wn-actions').hidden).toBe(false); // the approve is offered: clean + executable
+    // the derivation head is a link to its own drill
+    expect(page.get('wn-action').href).toBe('#drill=advance');
+    expect(page.get('wn-action').target).toBe('_blank');
+    // the facts are LINKS (the rejection: "we can drill in to each item")
+    const facts = page.get('wn-facts');
+    expect(facts.links().length).toBe(3);
+    expect(facts.link('frontmost-ready').href).toBe('#drill=task&id=' + encodeURIComponent(TASK));
+    expect(facts.link('frontmost-ready').target).toBe('_blank');
+    expect(facts.link('frontmost-ready').rel).toBe('noopener');
+    expect(facts.link('leg gate').href).toBe('#drill=leg&id=' + encodeURIComponent(LEG));
+    expect(facts.link('pending gates').href).toBe('#drill=gates');
   });
 
-  it("drills a COMMIT result into its git show — the command layer's own drill", async () => {
-    const stub = boot(exitReads());
+  it('the new tab for the frontmost-ready task shows its node + the context packet', async () => {
+    const page = boot(reads(card()));
     await flush();
-    await openExitGate(stub);
-    stub.get('card-results').button(COMMIT).click();
-    await flush();
-    expect(stub.fetched).toContain(`/api/results?id=${TASK}&n=1`); // the SAME drill the CLI addresses
-    expect(stub.get('card-step-label').textContent).toContain('EXIT STEP');
-    expect(stub.get('card-node').textContent).toContain('git show');
-    expect(stub.get('card-node').textContent).toContain("feat(serve): drill into every WHAT'S NEXT item");
-    expect(stub.get('card-node').textContent).toContain('src/surface/ui.ts | 225'); // the changeset
-    expect(stub.get('card-node').textContent).toContain('ann results ' + TASK + ' 1');
-    expect(stub.get('card-decide').hidden).toBe(false); // still INSIDE the exit decision
+    const tab = await openTab(page.get('wn-facts').link('frontmost-ready'), reads(card()));
+    expect(tab.get('card-step-label').textContent).toContain('frontmost-ready');
+    expect(tab.get('card-title').textContent).toBe(TASK);
+    expect(tab.fetched).toContain(`/api/confirm?id=${TASK}`);
+    expect(tab.fetched).toContain(`/api/packet?id=${TASK}`);
+    expect(tab.get('card-node').textContent).toContain('intent: do the thing');
+    expect(tab.get('card-node').textContent).toContain('Context packet');
+    expect(tab.get('card-node').textContent).toContain('docs/core-design.md @ abc1234');
+    expect(tab.get('card-node').textContent).toContain('which shape?');
+    expect(tab.get('card-decide').hidden).toBe(true); // a drill is PRESENTED, never decided
   });
 
-  it('drills a REF result into the local file at its path', async () => {
-    const stub = boot(exitReads());
+  it('the leg tab shows the leg and its tasks, each drilling into its own tab', async () => {
+    const page = boot(reads(card()));
     await flush();
-    await openExitGate(stub);
-    stub.get('card-results').button('approve.ts').click();
-    await flush();
-    expect(stub.fetched).toContain(`/api/results?id=${TASK}&n=2`);
-    expect(stub.get('card-node').textContent).toContain('file: src/surface/approve.ts');
-    expect(stub.get('card-node').textContent).toContain("import { join } from 'node:path';"); // the file's own bytes
-    expect(stub.get('card-node').textContent).toContain('export const ONCE = true;');
+    const tab = await openTab(page.get('wn-facts').link('leg gate'), reads(card()));
+    expect(tab.get('card-step-label').textContent).toContain('the leg gate');
+    expect(tab.get('card-title').textContent).toBe(LEG);
+    expect(tab.fetched).toContain(`/api/detail?id=${LEG}`);
+    expect(tab.get('card-node').textContent).toContain('the leg is done');
+    expect(tab.get('card-node').textContent).toContain('Tasks (1)');
+    // …and the task inside is itself a new-tab drill
+    const nested = tab.get('card-node').link(TASK);
+    const deeper = await openTab(nested, reads(card()));
+    expect(deeper.fetched).toContain(`/api/packet?id=${TASK}`);
   });
 
-  it('drills a CLAIM evidence pointer that names a result item (and leaves prose alone)', async () => {
-    const stub = boot(exitReads());
+  it('the derivation tab shows the whole look-back, its items drillable in turn', async () => {
+    const page = boot(reads(card()));
     await flush();
-    await openExitGate(stub);
-    stub.get('card-claims').button(COMMIT).click();
-    await flush();
-    expect(stub.fetched).toContain(`/api/results?id=${TASK}&n=1`); // the pointer resolves to the same item
-    expect(stub.get('card-node').textContent).toContain('git show');
+    const tab = await openTab(page.get('wn-action'), reads(card()));
+    expect(tab.get('card-step-label').textContent).toContain('the derivation');
+    expect(tab.get('card-title').textContent).toBe('the F5 pull proposal');
+    expect(tab.fetched).toContain('/api/next');
+    expect(tab.get('card-node').textContent).toContain('also ready');
+    expect(tab.get('card-node').textContent).toContain('01-leg/02-b');
+    expect(tab.get('card-node').link(LEG)).toBeTruthy();
   });
 
-  it('a drill from OUTSIDE the exit gate is still PRESENTED, never decided', async () => {
-    const stub = boot(exitReads([])); // nothing in the queue: this node has no undecided gate
+  it('the pending-gates tab lists them, and one gate opens the DECISION card', async () => {
+    const page = boot(reads(card()));
     await flush();
-    stub.get('legs').button(TASK).click(); // the journey view
+    const tab = await openTab(page.get('wn-facts').link('pending gates'), reads(card()));
+    expect(tab.get('card-step-label').textContent).toContain('pending gates');
+    expect(tab.get('card-node').textContent).toContain(TASK);
+    const gateLink = tab.get('card-node').link('decide it');
+    expect(gateLink.href).toBe('#drill=gate&id=' + encodeURIComponent(TASK) + '&gate=grill');
+    const gateTab = await openTab(gateLink, reads(card()));
+    expect(gateTab.get('card-title').textContent).toBe(TASK);
+    expect(gateTab.get('card-gates').textContent).toContain('grill');
+  });
+
+  it('a blocker tab names its class, the read that derives it, and the node it names', async () => {
+    const dirty = card({ integrity: { clean: false, blockers: [DIRTY] }, executable: false });
+    const page = boot(reads(dirty));
     await flush();
-    expect(stub.get('card-decide').hidden).toBe(true);
-    stub.get('card-results').button(COMMIT).click();
+    expect(page.get('wn-badge').textContent).toBe('BLOCKED — CANNOT ADVANCE');
+    expect(page.get('wn-actions').hidden).toBe(true); // no approve where it cannot work
+    const row = page.get('wn-blockers').link('blocker:');
+    expect(row.textContent).toContain('uncommitted tracked journey changes — commit them'); // the operator's step
+    expect(row.href).toContain('drill=blocker');
+    const tab = await openTab(row, reads(dirty));
+    expect(tab.get('card-step-label').textContent).toContain('integrity blocker');
+    expect(tab.get('card-node').textContent).toContain('a dirty tree: uncommitted tracked work');
+    expect(tab.get('card-node').textContent).toContain('git status --porcelain -- .ann/journey docs');
+    expect(tab.get('card-node').textContent).toContain('your step');
+    const named = await openTab(tab.get('card-node').link(TASK), reads(dirty)); // the node the blocker names
+    expect(named.fetched).toContain(`/api/packet?id=${TASK}`);
+  });
+
+  it('a RESULT drilled from the exit gate keeps the decision in hand (the fragment carries the gate)', async () => {
+    const gateReads: Record<string, unknown> = {
+      ...reads(card()),
+      [`/api/confirm?id=${TASK}`]: gateCard(),
+      [`/api/results?id=${TASK}&n=1`]: resultsRead,
+    };
+    // the exit gate's own card (opened from the queue / by its drill URL)
+    const gateTab = boot(gateReads, '#drill=gate&id=' + encodeURIComponent(TASK) + '&gate=confirm');
     await flush();
-    expect(stub.fetched).toContain(`/api/results?id=${TASK}&n=1`);
-    expect(stub.get('card-decide').hidden).toBe(true); // no decision UI for a node nobody picked
-    expect(stub.get('card-step-label').textContent).not.toContain('EXIT STEP');
+    expect(gateTab.get('card-decide').hidden).toBe(false); // the submitted gate IS decidable
+    const resultLink = gateTab.get('card-results').link('commit');
+    expect(resultLink.href).toBe('#drill=result&id=' + encodeURIComponent(TASK) + '&gate=confirm&n=1');
+    // …and the new tab for it shows the drill AND keeps Accept/Reject
+    const tab = await openTab(resultLink, gateReads);
+    expect(tab.get('card-step-label').textContent).toContain('EXIT STEP');
+    expect(tab.get('card-title').textContent).toBe(`${TASK} · result 1`);
+    expect(tab.fetched).toContain(`/api/results?id=${TASK}&n=1`);
+    expect(tab.get('card-node').textContent).toContain('git show');
+    expect(tab.get('card-decide').hidden).toBe(false); // the review survives the drill
+  });
+
+  it('a boundary derivation offers no approve, and its frontmost-ready fact is inert text', async () => {
+    const boundary = card({ advance: { leg: LEG, action: 'closure-needed', detail: 'leg gate UNMET: 0 done, 1 blocked — close via a gated closure task' }, frontmost: undefined, executable: false });
+    const page = boot(reads(boundary));
+    await flush();
+    expect(page.get('wn-badge').textContent).toBe('PRESENTED AND STOPPED');
+    expect(page.get('wn-actions').hidden).toBe(true);
+    expect(page.get('wn-message').textContent).toContain('authored-work boundary');
+    // 'frontmost-ready: none' is NOT a dead link — it is plain text (no anchor for it)
+    const facts = page.get('wn-facts');
+    expect(facts.links().some((l) => l.textContent.includes('frontmost-ready'))).toBe(false);
+    expect(facts.links().length).toBe(2); // leg gate + pending gates only
+    const tab = await openTab(facts.link('leg gate'), reads(boundary));
+    expect(tab.get('card-step-label').textContent).toContain('the leg gate');
   });
 });

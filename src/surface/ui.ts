@@ -3,12 +3,14 @@
  * gate card, and the WHAT'S NEXT card (leg 11) with its DRILL-INS, as ONE page: vanilla
  * JS, no framework, no bundler, no build step (the server serves this string as-is, `GET /`).
  *
- * ONE DETAIL PANE, EVERY DETAIL: a gate queue row opens the gate card; a WHAT'S NEXT item
- * (the derivation, the frontmost-ready task, the leg gate, each pending gate, each integrity
- * blocker) opens the SAME pane, filled from the reads the service already exposes — the
- * node/packet/detail reads for the items, the goal consult for a `none` derivation. A
- * drilled item is PRESENTED, never decided — EXCEPT inside the exit gate's own decision:
- * a result / evidence item drilled from THAT card keeps the Accept/Reject in hand.
+ * ONE DETAIL PANE, EVERY DETAIL — IN ITS OWN TAB: a gate queue row opens the gate card;
+ * a WHAT'S NEXT item (the derivation, the frontmost-ready task, the leg gate, each pending
+ * gate, each integrity blocker) and a gate card's result / evidence item are DRILLS. Every
+ * drill is a LINK that opens the item in a NEW TAB (`#drill=<kind>&id=…`, target=_blank):
+ * the new tab boots this same page and renders that item — deep-linkable, middle-clickable,
+ * no JS-only affordance. A drill is PRESENTED, never decided — EXCEPT a result/evidence item
+ * drilled from an exit gate, which keeps the Accept/Reject in hand (the fragment carries the
+ * gate) because the operator is reviewing the very node the queue opened.
  *
  * It is a CLIENT OF THE SERVICE'S HTTP CONTRACT ONLY — the same routes whose bodies are
  * the CLI's own `--json` values:
@@ -114,22 +116,24 @@ export const UI_HTML = `<!doctype html>
   .wn-head h3 { margin: 0; }
   .wn .badge.run { color: var(--ok); }
   .wn .badge.stop { color: var(--warn); }
-  .wn-action { padding: .1rem .5rem; margin-left: -.5rem; border: 1px solid transparent; border-radius: 8px; background: none; color: var(--fg); font: inherit; font-size: .95rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-weight: 600; cursor: pointer; }
+  .wn-action { display: inline-block; padding: .1rem .5rem; margin-left: -.5rem; border: 1px solid transparent; border-radius: 8px; color: var(--fg); font: inherit; font-size: .95rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-weight: 600; text-decoration: none; cursor: pointer; }
   .wn-action:hover { border-color: var(--line); color: var(--accent); }
   .wn-detail { margin: .4rem 0 .6rem; font-size: .9rem; }
   .wn-facts { margin: 0 0 .35rem; font-size: .85rem; }
-  .wn-facts button { display: inline-block; margin: 0 .35rem .35rem 0; padding: .15rem .6rem; border: 1px solid var(--line); border-radius: 999px; background: #26242e; color: var(--fg); font: inherit; font-size: .82rem; cursor: pointer; }
-  .wn-facts button:hover { border-color: var(--accent); }
-  .wn-facts button:hover .k { color: var(--accent); }
+  .wn-facts .wn-fact { display: inline-block; margin: 0 .35rem .35rem 0; padding: .15rem .6rem; border: 1px solid var(--line); border-radius: 999px; background: #26242e; color: var(--fg); font: inherit; font-size: .82rem; text-decoration: none; }
+  .wn-facts a.wn-fact:hover { border-color: var(--accent); }
+  .wn-facts a.wn-fact:hover .k { color: var(--accent); }
   .wn-facts .k { color: var(--muted); }
   .wn-blockers { margin: .35rem 0 .5rem; }
-  .wn-blockers button { display: block; width: 100%; padding: .25rem .3rem; border: 1px solid transparent; border-radius: 8px; background: none; color: var(--warn); font: inherit; font-size: .85rem; text-align: left; cursor: pointer; }
-  .wn-blockers button:hover { border-color: var(--warn); }
-  .wn-blockers button .k { color: var(--muted); }
+  .wn-blockers a.wn-blocker { display: block; width: 100%; padding: .25rem .3rem; border: 1px solid transparent; border-radius: 8px; color: var(--warn); font: inherit; font-size: .85rem; text-align: left; text-decoration: none; cursor: pointer; }
+  .wn-blockers a.wn-blocker:hover { border-color: var(--warn); }
+  .wn-blockers a.wn-blocker .k { color: var(--muted); }
   .drill { margin: .15rem 0; font-size: .85rem; }
-  /* a DRILLED item (an exit-gate result / evidence pointer) and the drill's own output */
-  .ev.drill, li button.drill { display: block; padding: .1rem 0; background: none; border: 0; color: var(--muted); font: inherit; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .8rem; text-align: left; cursor: pointer; }
-  .ev.drill:hover, li button.drill:hover { color: var(--accent); }
+  a.task { text-decoration: none; }
+  /* a DRILLED item (an exit-gate result / evidence pointer) and the drill's own output:
+     every one is a NEW-TAB link carrying the item in its fragment */
+  .ev.drill, a.ev.drill, li a.drill { display: block; padding: .1rem 0; color: var(--muted); font: inherit; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .8rem; text-align: left; text-decoration: none; cursor: pointer; }
+  .ev.drill:hover, a.ev.drill:hover, li a.drill:hover { color: var(--accent); }
   pre.drill-out { margin: .35rem 0; padding: .5rem .6rem; background: #121118; border: 1px solid var(--line); border-radius: 8px; overflow-x: auto; white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .8rem; }
 </style>
 </head>
@@ -145,7 +149,7 @@ export const UI_HTML = `<!doctype html>
   <section class="wn" id="wn">
     <h2>What's next</h2>
     <div class="wn-head">
-      <button class="wn-action" id="wn-action">loading…</button>
+      <a class="wn-action" id="wn-action" href="#drill=advance" target="_blank" rel="noopener" title="open in a new tab">loading…</a>
       <span class="badge" id="wn-badge"></span>
     </div>
     <p class="wn-detail" id="wn-detail"></p>
@@ -394,9 +398,7 @@ export const UI_HTML = `<!doctype html>
         (claim.evidence || []).forEach(function (e) {
           var n = resultIndexFor(e);
           if (!n) { li.appendChild(el('span', 'evidence: ' + e, 'ev')); return; }
-          var b = el('button', 'evidence: ' + e + ' ›', 'ev drill');
-          b.addEventListener('click', function () { drillResult(id, n, keep); });
-          li.appendChild(b);
+          li.appendChild(drillLink({ kind: 'result', id: id, n: n, gate: keep ? keep.gate : null }, 'ev drill', 'evidence: ' + e + ' ›'));
         });
         claims.appendChild(li);
       });
@@ -422,12 +424,11 @@ export const UI_HTML = `<!doctype html>
       var results = byId('card-results');
       results.replaceChildren();
       // EVERY result item is a DRILL — the SAME command-layer drill the CLI addresses with
-      // an index: a commit → its 'git show', a ref → the local file/dir at its path
+      // an index: a commit → its 'git show', a ref → the local file/dir at its path. Each
+      // is a NEW-TAB link carrying the item in its fragment, so the review survives the click.
       items.forEach(function (it, i) {
         var li = el('li');
-        var b = el('button', it.kind + ' · ' + it.label + ' ›', 'drill');
-        b.addEventListener('click', function () { drillResult(id, i + 1, keep); });
-        li.appendChild(b);
+        li.appendChild(drillLink({ kind: 'result', id: id, n: i + 1, gate: keep ? keep.gate : null }, 'drill', it.kind + ' · ' + it.label + ' ›'));
         results.appendChild(li);
       });
       if (!items.length) results.appendChild(el('li', 'no results recorded', 'muted'));
@@ -509,21 +510,20 @@ export const UI_HTML = `<!doctype html>
     // the facts: EVERY one is a DRILL — click it and the pane shows the item's own data
     var facts = byId('wn-facts');
     facts.replaceChildren();
-    function fact(k, val, drill) {
-      var b = el('button', null, 'wn-fact');
-      b.appendChild(el('span', k + ': ', 'k'));
-      b.appendChild(el('span', val));
-      b.appendChild(el('span', ' ›', 'k'));
-      b.addEventListener('click', drill);
-      facts.appendChild(b);
+    function fact(k, val, spec) {
+      var node = spec ? drillLink(spec, 'wn-fact') : el('span', null, 'wn-fact');
+      node.appendChild(el('span', k + ': ', 'k'));
+      node.appendChild(el('span', val));
+      if (spec) node.appendChild(el('span', ' ›', 'k'));
+      facts.appendChild(node);
     }
     fact('frontmost-ready', v.frontmost ? v.frontmost.task + ' (' + v.frontmost.status + ')' : 'none',
-      function () { if (v.frontmost) drillTask(v.frontmost.task); else wnMessage('no frontmost-ready task — nothing to drill (the derivation above says why).'); });
-    fact('leg gate', v.legGate && v.legGate.met ? 'MET' : 'UNMET — ' + ((v.legGate && v.legGate.blocker) || ''), function () { drillLeg(v.advance.leg, v.legGate); });
+      v.frontmost ? { kind: 'task', id: v.frontmost.task } : null);
+    fact('leg gate', v.legGate && v.legGate.met ? 'MET' : 'UNMET — ' + ((v.legGate && v.legGate.blocker) || ''), { kind: 'leg', id: v.advance.leg });
     fact('pending gates', (v.pendingGates || []).length
       ? (v.pendingGates || []).map(function (p) { return p.task + '@' + p.gate; }).join(' · ')
       : 'none',
-      function () { drillGates(v.pendingGates || []); });
+      { kind: 'gates' });
     facts.appendChild(el('span', step.what, 'k'));
 
     // the integrity blockers — each is a DRILL too: the finding, its class, the read that
@@ -533,11 +533,10 @@ export const UI_HTML = `<!doctype html>
     var blockers = (v.integrity && v.integrity.blockers) || [];
     blockers.forEach(function (b) {
       var li = el('li');
-      var btn = el('button', null, 'wn-blocker');
-      btn.appendChild(el('span', 'blocker: ' + b));
-      btn.appendChild(el('span', remedy(b) + ' ›', 'k'));
-      btn.addEventListener('click', function () { drillBlocker(b); });
-      li.appendChild(btn);
+      var a = drillLink({ kind: 'blocker', blocker: b }, 'wn-blocker');
+      a.appendChild(el('span', 'blocker: ' + b));
+      a.appendChild(el('span', remedy(b) + ' ›', 'k'));
+      li.appendChild(a);
       list.appendChild(li);
     });
     if (blockers.length) list.appendChild(el('li', 'the approve re-checks all of this fail-closed first — with a blocker present it refuses and writes NOTHING.', 'muted'));
@@ -551,11 +550,53 @@ export const UI_HTML = `<!doctype html>
     else if (!blockers.length) wnMessage('');
   }
 
-  /* ── THE DRILL — every item on the WHAT'S NEXT card opens HERE, in the same pane the
-   *  gate queue uses, filled from the reads the service ALREADY exposes (no new route, no
-   *  new state): the item's own node / packet / derivation, and — for a gate — the
-   *  decision surface. A drilled item is PRESENTED, never decided (selected is cleared),
-   *  so no decision UI can appear for a node the operator did not pick from WAITING ON YOU. */
+  /* ── THE DRILL — the fragment IS the drill: every affordance is a LINK that opens the
+   *  item in a NEW TAB, and the new tab boots this same page and renders it from the URL.
+   *  Nothing is shared between tabs but the service (both read the same reads), so a drill
+   *  is deep-linkable, middle-clickable, copyable — never a transient pane state. */
+  function drillHref(spec) {
+    var parts = ['drill=' + encodeURIComponent(spec.kind)];
+    if (spec.id) parts.push('id=' + encodeURIComponent(spec.id));
+    if (spec.gate) parts.push('gate=' + encodeURIComponent(spec.gate));
+    if (spec.n) parts.push('n=' + encodeURIComponent(spec.n));
+    if (spec.blocker) parts.push('blocker=' + encodeURIComponent(spec.blocker));
+    return '#' + parts.join('&');
+  }
+  function drillLink(spec, cls, text) {
+    var a = el('a', text, cls);
+    a.href = drillHref(spec);
+    a.target = '_blank';
+    a.rel = 'noopener';
+    a.title = 'open in a new tab';
+    return a;
+  }
+  /** THE NEW TAB'S ENTRY POINT: parse the fragment and render that drill. A malformed
+   *  fragment renders nothing (never a broken page); an unknown kind is ignored. */
+  function drillFromHash() {
+    var h = String((typeof location !== 'undefined' && location.hash) || '');
+    if (h.indexOf('#drill=') !== 0) return false;
+    var q = {};
+    try {
+      h.slice(1).split('&').forEach(function (kv) {
+        var i = kv.indexOf('=');
+        if (i > 0) q[decodeURIComponent(kv.slice(0, i))] = decodeURIComponent(kv.slice(i + 1));
+      });
+      if (q.drill === 'advance') { drillAdvance(); return true; }
+      if (q.drill === 'task' && q.id) { drillTask(q.id); return true; }
+      if (q.drill === 'leg' && q.id) { drillLeg(q.id, null); return true; }
+      if (q.drill === 'gates') { drillGates((whatsNext && whatsNext.pendingGates) || []); return true; }
+      if (q.drill === 'gate' && q.id && q.gate) { openCard(q.id, q.gate); return true; }
+      // a result drilled from a gate carries that gate, so the new tab keeps the decision in
+      // hand — the SAME rule the pane applies (decide() re-checks the gate before writing)
+      if (q.drill === 'result' && q.id && q.n) { drillResult(q.id, q.n, q.gate ? { id: q.id, gate: q.gate } : null); return true; }
+      if (q.drill === 'blocker' && q.blocker) { drillBlocker(q.blocker); return true; }
+    } catch (e) { /* a bad fragment is ignored */ }
+    return false;
+  }
+  /** Open the pane for a DRILLED item: the same pane the gate queue uses, headed by what
+   *  is shown. A drill is PRESENTED, never decided — the decision target is cleared, so no
+ *  decision
+   *  UI can appear for a node the operator did not pick from WAITING ON YOU. */
   function drillHead(label, title, what, keep) {
     // A drill from the EXIT GATE carries the decision it was opened inside ('keep'), so the
     // Accept/Reject survive the look (the operator is still reviewing that node); every
@@ -586,9 +627,7 @@ export const UI_HTML = `<!doctype html>
     return out;
   }
   function nodeDrillButton(node, id, label) {
-    var b = el('button', (label || id + ' (drill in)') + ' ›', 'task');
-    b.addEventListener('click', function () { if (id.indexOf('/') > 0) drillTask(id); else drillLeg(id, null); });
-    node.appendChild(b);
+    node.appendChild(drillLink({ kind: id.indexOf('/') > 0 ? 'task' : 'leg', id: id }, 'task', (label || id + ' (drill in)') + ' ›'));
   }
   /** WHICH READ derives a blocker — the card names the rule, never a bare refusal. */
   function blockerSource(b) {
@@ -721,9 +760,7 @@ export const UI_HTML = `<!doctype html>
     var node = drillFields();
     if (!gates.length) { node.appendChild(el('p', 'none — no undecided submission on the active leg.', 'muted')); return; }
     gates.forEach(function (p) {
-      var b = el('button', p.task + ' · ' + p.gate + ' (decide it) ›', 'task');
-      b.addEventListener('click', function () { openCard(p.task, p.gate); });
-      node.appendChild(b);
+      node.appendChild(drillLink({ kind: 'gate', id: p.task, gate: p.gate }, 'task', p.task + ' · ' + p.gate + ' (decide it) ›'));
     });
   }
   /** The derivation itself: the F5 pull proposal and everything it reads (the look-back).
@@ -794,7 +831,12 @@ export const UI_HTML = `<!doctype html>
     return l.task + ' stopped (' + l.frameStop + '): ' + (l.problems || []).join('; ');
   }
   byId('approve').addEventListener('click', approve);
-  byId('wn-action').addEventListener('click', drillAdvance); // the derivation itself drills in
+  // the head is itself a drill: a NEW-TAB link to the derivation (the markup carries the
+  // same href/target; this keeps it true wherever the render moves the action)
+  byId('wn-action').href = drillHref({ kind: 'advance' });
+  byId('wn-action').target = '_blank';
+  byId('wn-action').rel = 'noopener';
+  byId('wn-action').title = 'open in a new tab';
 
   // ── boot: the reads, and a view that cannot go silently stale ──
   function refresh() {
@@ -811,7 +853,9 @@ export const UI_HTML = `<!doctype html>
   byId('refresh').addEventListener('click', function () { refresh().catch(function (e) { message('refresh failed: ' + e.message, true); }); });
   window.addEventListener('focus', function () { refresh().catch(function () {}); });
   document.addEventListener('visibilitychange', function () { if (!document.hidden) refresh().catch(function () {}); });
-  refresh().catch(function (e) { byId('state').textContent = 'service unreachable: ' + e.message; });
+  refresh()
+    .then(function () { drillFromHash(); }) // a drill link's new tab renders its item
+    .catch(function (e) { byId('state').textContent = 'service unreachable: ' + e.message; });
 })();
 </script>
 </body>

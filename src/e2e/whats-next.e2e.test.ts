@@ -3,6 +3,7 @@ import { mkdtempSync, mkdirSync, cpSync, rmSync, writeFileSync, appendFileSync, 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync, execFileSync, spawn, type ChildProcess } from 'node:child_process';
+import net from 'node:net';
 
 /**
  * E2E — THE OPERATE LOOP (leg 11): the WHAT'S NEXT card's read + its APPROVE, over real
@@ -167,6 +168,48 @@ const post = async (url: string, payload: unknown): Promise<Res> => {
   return { status: r.status, body: await r.text() };
 };
 
+/**
+ * TWO REQUESTS, BOTH IN FLIGHT — written on two ALREADY-CONNECTED sockets in the same tick,
+ * so both bodies are buffered at the server before either is handled. That makes the
+ * single-flight (care b) a property of the fixture, not of client-side scheduling luck: a
+ * `fetch` pair races (the second request may only be written after the first response).
+ */
+async function postTwice(url: string, payload: unknown): Promise<Res[]> {
+  const target = new URL(url + '/api/approve');
+  const body = JSON.stringify(payload);
+  const request =
+    'POST /api/approve HTTP/1.1\r\n' +
+    `host: ${target.host}\r\n` +
+    'content-type: application/json\r\n' +
+    `content-length: ${Buffer.byteLength(body)}\r\n` +
+    'connection: close\r\n\r\n' +
+    body;
+  const connect = (): Promise<net.Socket> =>
+    new Promise((resolve, reject) => {
+      const socket = net.connect(Number(target.port), target.hostname, () => resolve(socket));
+      socket.on('error', reject);
+    });
+  const read = (socket: net.Socket): Promise<string> =>
+    new Promise((resolve) => {
+      let data = '';
+      socket.setEncoding('utf8');
+      socket.on('data', (c: string) => { data += c; });
+      socket.on('end', () => resolve(data));
+    });
+  const [a, b] = await Promise.all([connect(), connect()]);
+  const reads = Promise.all([read(a), read(b)]);
+  a.write(request);
+  b.write(request);
+  return (await reads).map((raw) => {
+    const status = Number(raw.split('\r\n')[0].split(' ')[1]);
+    const bodyStart = raw.indexOf('\r\n\r\n') + 4;
+    const rest = raw.slice(bodyStart);
+    // the response may be chunk-framed — take the first chunk's payload
+    const chunked = /^[0-9a-f]+\r\n/.exec(rest);
+    return { status, body: chunked ? rest.slice(chunked[0].length, rest.lastIndexOf('\r\n0\r\n')) : rest };
+  });
+}
+
 /** The WHAT'S NEXT card's read, parsed. */
 interface WhatsNext {
   advance: { leg: string; action: string; detail: string };
@@ -283,7 +326,7 @@ describe('e2e — the operate loop: the WHAT\'S NEXT card + the approve (leg 11)
     expect(v.frontmost?.task).toBe(SECOND);
     const before = await logTypes(server, SECOND);
     const body = boundTo(v);
-    const [a, b] = await Promise.all([post(server.url + '/api/approve', body), post(server.url + '/api/approve', body)]);
+    const [a, b] = await postTwice(server.url, body);
     const results = [a, b].sort((x, y) => x.status - y.status); // [200, 409]
     // ONE approve ran; the other was refused BY NAME before it touched the store
     expect(results.map((r) => r.status)).toEqual([200, 409]);
@@ -326,9 +369,12 @@ describe('e2e — the operate loop: the WHAT\'S NEXT card + the approve (leg 11)
     for (const route of ['/api/whatsnext', '/api/approve', '/api/journey', '/api/gates', '/api/confirm?id=', '/api/gate', '/api/packet?id=', '/api/detail?id=', '/api/next', '/api/results?id=']) expect(script).toContain(route);
     // the card's own words: the machine-executable derivation, the presented-and-stopped
     // boundary, how to clear a blocker, the approve affordance, and the DRILL-INS
-    for (const word of ['MACHINE-EXECUTABLE', 'PRESENTED AND STOPPED', 'NOT machine-executable', 'the authored-work boundary', 'uncommitted tracked journey changes — commit them', 'frontmost-ready', 'leg gate', 'UNMET — ', 'pending gates', 'drillTask', 'drillLeg', 'drillBlocker', 'drillAdvance', 'drillResult', 'git show', 'DRILLS IN', 'wn-fact', 'drill in'])
+    for (const word of ['MACHINE-EXECUTABLE', 'PRESENTED AND STOPPED', 'NOT machine-executable', 'the authored-work boundary', 'uncommitted tracked journey changes — commit them', 'frontmost-ready', 'leg gate', 'UNMET — ', 'pending gates', 'drillTask', 'drillLeg', 'drillBlocker', 'drillAdvance', 'drillResult', 'drillHref', 'drillFromHash', 'git show', 'DRILLS IN', 'wn-fact', 'drill in', '_blank', 'noopener', "kind: 'result'"])
       expect(script, `the served page lost '${word}'`).toContain(word);
     expect(page.body).toContain('Approve'); // the approve affordance itself
+    // every drill is a NEW-TAB link carrying its item in the fragment (`#drill=<kind>&id=…`)
+    expect(page.body).toContain('target="_blank"');
+    expect(page.body).toContain('#drill=advance');
     expect(page.body).not.toContain('innerHTML'); // data is rendered as text, never as markup
     const checkDir = mkdtempSync(join(tmpdir(), 'ann-ui-wn-check-'));
     const checkFile = join(checkDir, 'ui-page.js');
@@ -363,6 +409,13 @@ describe('e2e — the operate loop: the WHAT\'S NEXT card + the approve (leg 11)
     const n = JSON.parse(next.body) as { advance: { action: string }; lookBack: { activeLeg: string } };
     expect(n.advance.action).toBe('closure-needed'); // the state at this point in the suite: no ready task, the leg gate unmet
     expect(n.lookBack.activeLeg).toBe(LEG);
+
+    // a gate's result/evidence item drills through the same command-layer read
+    const results = await get(server.url + `/api/results?id=${encodeURIComponent(FIRST)}`);
+    expect(results.status).toBe(200);
+    const r = JSON.parse(results.body) as { id: string; kind: string; items: unknown[] };
+    expect(r.id).toBe(FIRST);
+    expect(Array.isArray(r.items)).toBe(true);
   });
 });
 
