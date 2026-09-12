@@ -1,0 +1,27 @@
+{
+  "id": "10-server-ui/08-implementation-gate-step-ui",
+  "contract": {
+    "intent": "The UI must say WHICH STEP a gate is. Today the WAITING ON YOU queue shows only an id + `gate grill` — no sign of whether it is the ENTRY gate (approve the contract, then work starts) or the EXIT gate (review the delivered work, then it lands), what the work is, or what has been delivered. Deliver it end to end: (a) the L1 whole-journey gate queue (`Commands.pendingGates`) carries the structural facts a label needs — the gate's ROLE (entry|exit), the leg, the contract's intent, how long it has waited, and what the log holds at that gate (cited commits · claims · unclaimed ACs · checks · checks bound to a cited commit); (b) the service serves that enriched queue on the existing `GET /api/gates`; (c) the UI renders it: a phase badge + role words + the task's intent as the title + the delivered summary + a one-line statement of what approving does, and the gate CARD header names the step; the card also renders the node data, the CLAIMS (with their resolved pointers) and the CHECKS the API already delivers, so a decision is made on the same screen the CLI shows.",
+    "acceptanceCriteria": [
+      "Commands.pendingGates() returns, per undecided submission: {task, gate, role: 'entry'|'exit', leg, intent, since, delivered:{commits, claims, unclaimed, checks, bound}} — derived on demand from the log, the same conclusion the close enforces (bound = checks passing AND bound to a cited commit)",
+      "GET /api/gates serves that value unchanged (the service stays a thin binding), and the queue's rows are byte-identical to the CLI's --json for the same state where the CLI exposes it",
+      "the UI queue row names the step: ENTRY/EXIT badge + gate name + what approving does + the task's intent as the title + the id/leg + the delivered summary (or an explicit 'nothing delivered yet'), and waiting-since; the card header names the same step",
+      "the UI gate card renders the node data (workType · inputs · open questions · createdAt), CLAIMS with their resolved pointers (and NO CLAIM RECORDED), CHECKS, results and gate states — the fields /api/confirm already carries",
+      "the full suite stays green (L1 unit + service e2e + the page's structural assertions) with ann check/verify clean on the live journey; committed with evidence incl. claims/checks"
+    ],
+    "targetAreas": [
+      "src/commands",
+      "src/surface",
+      "src/e2e"
+    ],
+    "requiredInputs": [
+      "journey-format-spec",
+      "functional-spec"
+    ],
+    "expectedOutputs": [
+      "code + tests committed (commit evidence)"
+    ],
+    "workType": "implementation"
+  },
+  "createdAt": "2026-09-12"
+}
