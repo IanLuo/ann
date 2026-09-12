@@ -499,10 +499,11 @@ export const UI_HTML = `<!doctype html>
     lines.forEach(function (line) { m.appendChild(el('div', line)); });
   }
   /** A blocker's own operator step: every blocker is NAMED, and the ones the operator can
-   *  clear say how (ann check / ann verify / ann docs --write / git). */
+   *  clear say how (ann check / ann verify / ann docs --write / git). What a blocker BLOCKS
+   *  is said once, below the list — the remedy is the same either way. */
   function remedy(b) {
-    if (b.indexOf('uncommitted tracked change') === 0) return ' — uncommitted tracked journey changes — commit them (the operator step: the daemon never commits), then approve again';
-    if (b.indexOf('docs manifest out of sync') === 0) return ' — run ann docs --write, commit, then approve again';
+    if (b.indexOf('uncommitted tracked change') === 0) return ' — uncommitted tracked journey changes — commit them (the operator step: the daemon never commits)';
+    if (b.indexOf('docs manifest out of sync') === 0) return ' — run ann docs --write and commit';
     if (b.indexOf('verify:') === 0) return ' — the log and the files disagree: run ann verify and reconcile';
     return '';
   }
@@ -514,9 +515,12 @@ export const UI_HTML = `<!doctype html>
     byId('wn-action').textContent = d.action;
     byId('wn-detail').textContent = d.detail;
     var badge = byId('wn-badge');
-    if (step.run && clean) { badge.textContent = 'MACHINE-EXECUTABLE'; badge.className = 'badge run'; }
-    else if (!clean) { badge.textContent = 'BLOCKED — CANNOT ADVANCE'; badge.className = 'badge stop'; }
-    else { badge.textContent = 'PRESENTED AND STOPPED'; badge.className = 'badge stop'; }
+    // THE HEADLINE IS WHAT THE HUMAN CAN DO, in this order: a boundary derivation is the
+    // point of the card (the move is the human's — a dirty tree does not change that), then
+    // a clean machine-executable advance, then a blocked one (the approve IS withheld).
+    if (!step.run) { badge.textContent = 'PRESENTED AND STOPPED'; badge.className = 'badge stop'; }
+    else if (clean) { badge.textContent = 'MACHINE-EXECUTABLE'; badge.className = 'badge run'; }
+    else { badge.textContent = 'BLOCKED — CANNOT ADVANCE'; badge.className = 'badge stop'; }
 
     // the facts: EVERY one is a DRILL — click it and the pane shows the item's own data
     var facts = byId('wn-facts');
@@ -550,15 +554,23 @@ export const UI_HTML = `<!doctype html>
       li.appendChild(a);
       list.appendChild(li);
     });
-    if (blockers.length) list.appendChild(el('li', 'the approve re-checks all of this fail-closed first — with a blocker present it refuses and writes NOTHING.', 'muted'));
+    // WHAT the blockers block — said once, and NOT overstated: with a boundary derivation
+    // there is no approve to refuse, so they are a heads-up for the next advance, not a
+    // gate on the human's move.
+    if (blockers.length) {
+      list.appendChild(el('li', step.run
+        ? 'the approve re-checks all of this fail-closed first — with a blocker present it refuses and writes NOTHING.'
+        : 'these would block an APPROVE — and none is offered here: the move above is the human step (the daemon never commits, closes, or spawns).', 'muted'));
+    }
 
     // the approve affordance exists ONLY where it can work: clean state · continue-leg ·
     // a ready task. Otherwise the card PRESENTS the state and stops (never a dead button).
     var executable = !!(v.executable && step.run && clean);
     byId('wn-actions').hidden = !executable;
-    if (!executable && !blockers.length && !step.run) wnMessage('nothing to approve — ' + step.what + '.');
-    else if (!executable && !blockers.length) wnMessage('nothing to approve — no frontmost-ready task.');
-    else if (!blockers.length) wnMessage('');
+    if (executable) wnMessage('');
+    else if (!step.run) wnMessage('nothing to approve — ' + step.what + '.'); // the human move is above
+    else if (clean) wnMessage('nothing to approve — no frontmost-ready task.');
+    // blocked-and-continuable: keep whatever the last action said — the blocker list is the message
   }
 
   /* ── THE DRILL — the fragment IS the drill: every affordance is a LINK that opens the

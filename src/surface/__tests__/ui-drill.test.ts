@@ -402,6 +402,29 @@ describe('the served page — a drill opens its own tab, and the URL is the dril
     expect(tab.get('card-gates').hidden, 'a view with no gate chips hides the .gates row').toBe(true);
   });
 
+  it('an EXHAUSTED journey with a dirty tree says so — the boundary is the headline, not the blocker', async () => {
+    // reported: with the journey done (derivation `none`) and an uncommitted journey tree,
+    // the card said BLOCKED — CANNOT ADVANCE. The blocker blocks an APPROVE, and there is
+    // none to offer: the move (goal! met / a subtle task / archive) is the human's.
+    const exhausted = card({
+      advance: { leg: '', action: 'none', detail: 'journey exhausted — verdict UNCONFIRMED: the human chooses — (1) goal! met (criteria met) · (2) a subtle task · (3) goal! archive & start a new goal' },
+      frontmost: undefined,
+      integrity: { clean: false, blockers: [DIRTY] },
+      executable: false,
+    });
+    const page = boot(reads(exhausted));
+    await flush();
+    expect(page.get('wn-badge').textContent).toBe('PRESENTED AND STOPPED'); // NOT 'BLOCKED'
+    expect(page.get('wn-detail').textContent).toContain('goal! met'); // the move, on the card
+    expect(page.get('wn-blockers').textContent).toContain('commit them');
+    expect(page.get('wn-blockers').textContent).toContain('none is offered here'); // it blocks an approve, not the move
+    expect(page.get('wn-message').textContent).toContain('nothing to approve');
+    expect(page.get('wn-actions').hidden).toBe(true);
+    // …and the blocker still drills (what it is, the read that derives it, its node)
+    const tab = await openTab(page.get('wn-blockers').link('blocker:'), reads(exhausted));
+    expect(tab.get('card-node').textContent).toContain('git status --porcelain -- .ann/journey docs');
+  });
+
   it('a boundary derivation offers no approve, and its frontmost-ready fact is inert text', async () => {
     const boundary = card({ advance: { leg: LEG, action: 'closure-needed', detail: 'leg gate UNMET: 0 done, 1 blocked — close via a gated closure task' }, frontmost: undefined, executable: false });
     const page = boot(reads(boundary));
