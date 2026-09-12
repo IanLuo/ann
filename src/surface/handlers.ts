@@ -1385,8 +1385,10 @@ export function outcomeOf(e: unknown): Outcome {
 
 /** The read-only chokepoint — BEFORE dispatch. When ANN_STORE resolves to a NON-ACTIVE
  *  journey, the journey-addressing writes refuse with a named message; config!/cred!/
- *  project! and plain reads never trip here (resolution is deferred to the lazy proxy). */
-function readOnlyRefuse(ctx: CliContext, canonical: string): void {
+ *  project! and plain reads never trip here (resolution is deferred to the lazy proxy).
+ *  Exported for the service binding: its approve IS the journey write the CLI's
+ *  `advance!` performs, so it passes the SAME chokepoint (never a second rule). */
+export function readOnlyRefuse(ctx: CliContext, canonical: string): void {
   const isJourneyWrite = JOURNEY_REFUSED_WRITES.has(canonical);
   const isDocsOrRulesWrite = (canonical === 'docs' || canonical === 'rules') && ctx.args.includes('--write');
   if (!isJourneyWrite && !isDocsOrRulesWrite) return;

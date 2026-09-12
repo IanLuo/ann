@@ -1,7 +1,7 @@
 /**
- * THE MINIMAL UI (the goal's AC-3) — the journey view, the WAITING ON YOU gate queue, and
- * the gate card, as ONE page: vanilla JS, no framework, no bundler, no build step (the
- * server serves this string as-is, `GET /`).
+ * THE MINIMAL UI (the goal's AC-3) — the journey view, the WAITING ON YOU gate queue, the
+ * gate card, and the WHAT'S NEXT card (leg 11), as ONE page: vanilla JS, no framework, no
+ * bundler, no build step (the server serves this string as-is, `GET /`).
  *
  * It is a CLIENT OF THE SERVICE'S HTTP CONTRACT ONLY — the same routes whose bodies are
  * the CLI's own `--json` values:
@@ -10,6 +10,9 @@
  *                                  across the WHOLE journey, each with its STEP (the gate's
  *                                  role — ENTRY before work / EXIT before the close — the
  *                                  task's own intent, what is DELIVERED there already)
+ *   GET  /api/whatsnext          → the WHAT'S NEXT card: the derived advance (action +
+ *                                  detail) · the frontmost-ready task · the leg gate · the
+ *                                  pending gates · the integrity blockers
  *   GET  /api/confirm?id=<node>  → the gate card: the complete node (contract · inputs ·
  *                                  open questions) · CLAIMS (with resolved pointers) ·
  *                                  CHECKS · gate states · results
@@ -17,6 +20,10 @@
  *                                  L1 `gate!` write the CLI performs; the page then
  *                                  RE-READS the journey + queue, so a landed decision is
  *                                  what the view shows (never an optimistic local edit)
+ *   POST /api/approve            → the APPROVE: {proposal:{action,detail}} → the operator
+ *                                  action's continue-leg path (the SAME machinery as the
+ *                                  CLI's `advance!`), bound to the card the human saw; then
+ *                                  a RE-READ, so a landed run is what the view shows
  *
  * A gate is a STEP, so the queue says which one: ENTRY (grill — confirm the contract, then
  * the work starts) or EXIT (confirm — review the delivered result, then it lands). Relative
@@ -92,6 +99,15 @@ export const UI_HTML = `<!doctype html>
   .next { margin: .35rem 0 1rem; font-size: .9rem; }
   .next .k { color: var(--muted); }
   .stale { color: var(--warn); }
+  .wn { grid-column: 1 / -1; }
+  .wn-head { display: flex; align-items: center; gap: .75rem; }
+  .wn-head h3 { margin: 0; }
+  .wn .badge.run { color: var(--ok); }
+  .wn .badge.stop { color: var(--warn); }
+  .wn-detail { margin: .4rem 0 .6rem; font-size: .9rem; }
+  .wn-facts { margin: 0 0 .35rem; font-size: .85rem; }
+  .wn-facts .k { color: var(--muted); }
+  .wn-blockers { margin: .35rem 0 .5rem; }
 </style>
 </head>
 <body>
@@ -103,6 +119,20 @@ export const UI_HTML = `<!doctype html>
   </div>
 </header>
 <main>
+  <section class="wn" id="wn">
+    <h2>What's next</h2>
+    <div class="wn-head">
+      <h3 id="wn-action">loading…</h3>
+      <span class="badge" id="wn-badge"></span>
+    </div>
+    <p class="wn-detail" id="wn-detail"></p>
+    <p class="wn-facts" id="wn-facts"></p>
+    <ul class="wn-blockers" id="wn-blockers"></ul>
+    <div class="actions" id="wn-actions" hidden>
+      <button class="accept" id="approve">Approve &amp; run the next step</button>
+    </div>
+    <p class="message" id="wn-message"></p>
+  </section>
   <section class="queue">
     <h2>Waiting on you <span id="queue-count" class="count"></span></h2>
     <ul id="queue"><li class="muted">loading…</li></ul>
@@ -369,13 +399,132 @@ export const UI_HTML = `<!doctype html>
   byId('accept').addEventListener('click', function () { decide('accept'); });
   byId('reject').addEventListener('click', function () { decide('reject'); });
 
+  // ── the WHAT'S NEXT card: the derived proposal + the honest blocker surface (leg 11) ──
+  var whatsNext = null; // the derivation the approve is bound to (the card the human saw)
+  /** The operator action's four derivations, in the card's own words: continue-leg is the
+   *  ONE the machine can execute; the other three are the AUTHORED-WORK BOUNDARY — the
+   *  card presents them and STOPS (never a dead approve button). */
+  var DERIVATION = {
+    'continue-leg': { run: true, what: 'the machine can run this step through the frame' },
+    'advance-leg': { run: false, what: 'NOT machine-executable — the authored-work boundary: the front leg is empty, so the next leg is AUTHORED work (a human writes the contract), never a machine spawn' },
+    'closure-needed': { run: false, what: 'NOT machine-executable — the authored-work boundary: the leg gate is unmet, so closing it is a GATED HUMAN move (a closure task: transfer or defer), never a machine close' },
+    'none': { run: false, what: 'NOT machine-executable — the authored-work boundary: every spawned leg is done; the goal consult is the human verdict (goal! met), never a machine seal' }
+  };
+  function wnMessage(text, isError) {
+    var m = byId('wn-message');
+    m.className = isError ? 'message error' : 'message';
+    m.replaceChildren();
+    var lines = Array.isArray(text) ? text : (text ? [text] : []);
+    lines.forEach(function (line) { m.appendChild(el('div', line)); });
+  }
+  /** A blocker's own operator step: every blocker is NAMED, and the ones the operator can
+   *  clear say how (ann check / ann verify / ann docs --write / git). */
+  function remedy(b) {
+    if (b.indexOf('uncommitted tracked change') === 0) return ' — uncommitted tracked journey changes — commit them (the operator step: the daemon never commits), then approve again';
+    if (b.indexOf('docs manifest out of sync') === 0) return ' — run ann docs --write, commit, then approve again';
+    if (b.indexOf('verify:') === 0) return ' — the log and the files disagree: run ann verify and reconcile';
+    return '';
+  }
+  function renderWhatsNext(v) {
+    whatsNext = v;
+    var d = v.advance || { action: 'none', detail: '' };
+    var step = DERIVATION[d.action] || { run: false, what: '' };
+    var clean = v.integrity && v.integrity.clean;
+    byId('wn-action').textContent = d.action;
+    byId('wn-detail').textContent = d.detail;
+    var badge = byId('wn-badge');
+    if (step.run && clean) { badge.textContent = 'MACHINE-EXECUTABLE'; badge.className = 'badge run'; }
+    else if (!clean) { badge.textContent = 'BLOCKED — CANNOT ADVANCE'; badge.className = 'badge stop'; }
+    else { badge.textContent = 'PRESENTED AND STOPPED'; badge.className = 'badge stop'; }
+
+    // the facts: the frontmost-ready task, the leg gate, the pending gates
+    var facts = byId('wn-facts');
+    facts.replaceChildren();
+    function fact(k, val) {
+      facts.appendChild(el('span', k + ': ', 'k'));
+      facts.appendChild(el('span', val + '   '));
+    }
+    fact('frontmost-ready', v.frontmost ? v.frontmost.task + ' (' + v.frontmost.status + ')' : 'none');
+    fact('leg gate', v.legGate && v.legGate.met ? 'MET' : 'UNMET — ' + ((v.legGate && v.legGate.blocker) || ''));
+    fact('pending gates', (v.pendingGates || []).length
+      ? (v.pendingGates || []).map(function (p) { return p.task + '@' + p.gate; }).join(' · ')
+      : 'none');
+    facts.appendChild(el('span', step.what, 'k'));
+
+    // the integrity blockers — the reason the card CANNOT claim the journey can advance
+    var list = byId('wn-blockers');
+    list.replaceChildren();
+    var blockers = (v.integrity && v.integrity.blockers) || [];
+    blockers.forEach(function (b) {
+      var li = el('li', null, 'stale');
+      li.appendChild(el('span', 'blocker: ' + b, null));
+      li.appendChild(el('span', remedy(b), 'k'));
+      list.appendChild(li);
+    });
+    if (blockers.length) list.appendChild(el('li', 'the approve re-checks all of this fail-closed first — with a blocker present it refuses and writes NOTHING.', 'muted'));
+
+    // the approve affordance exists ONLY where it can work: clean state · continue-leg ·
+    // a ready task. Otherwise the card PRESENTS the state and stops (never a dead button).
+    var executable = !!(v.executable && step.run && clean);
+    byId('wn-actions').hidden = !executable;
+    if (!executable && !blockers.length && !step.run) wnMessage('nothing to approve — ' + step.what + '.');
+    else if (!executable && !blockers.length) wnMessage('nothing to approve — no frontmost-ready task.');
+    else if (!blockers.length) wnMessage('');
+  }
+
+  /** The approve: the SAME operator action the CLI's advance! runs, bound to the card the
+   *  human is looking at. A refusal is SHOWN (the named blockers / the stale
+   *  re-derivation), never swallowed; a landing re-reads the journey. */
+  function approve() {
+    if (!whatsNext || !whatsNext.advance) return;
+    var proposal = { action: whatsNext.advance.action, detail: whatsNext.advance.detail };
+    var button = byId('approve');
+    button.disabled = true;
+    wnMessage('approving ' + proposal.action + '…');
+    fetch('/api/approve', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ proposal: proposal })
+    })
+      .then(function (r) { return r.json().then(function (doc) { return { status: r.status, doc: doc }; }); })
+      .then(function (r) {
+        if (r.status !== 200) {
+          var e = r.doc.error || {};
+          var lines = ['approve refused — ' + (e.message || '')];
+          (r.doc.blockers || []).forEach(function (b) { lines.push('blocker: ' + b + remedy(b)); });
+          if (r.doc.reDerivation) lines.push('now: ' + r.doc.reDerivation.action + ' — ' + r.doc.reDerivation.detail);
+          wnMessage(lines, true);
+          return null;
+        }
+        wnMessage(landingText(r.doc.value), false);
+        return refresh();
+      })
+      .catch(function (e) { wnMessage('approve request failed: ' + e.message, true); })
+      .then(function () { button.disabled = false; });
+  }
+  /** Where the run landed — the NEXT human decision, in the card's words (never silent). */
+  function landingText(v) {
+    if (!v) return 'the action stopped.';
+    if (v.stop === 'boundary') return 'nothing to execute — ' + v.derivation.detail;
+    if (v.stop === 'declined') return 'declined — nothing executed.';
+    var l = v.landing;
+    if (!l) return 'the action stopped: ' + v.stop + (v.frame ? ' (' + v.frame.stop + ')' : '');
+    if (l.where === 'gate') return 'landed at the next human gate — ' + l.task + ' gate ' + l.gate + ' is a submission awaiting YOUR decision (see WAITING ON YOU).';
+    if (l.where === 'awaiting-runner') return 'ran ' + l.task + ' through the frame (' + l.frameStop + ') — it now awaits the RUNNER (the work + its commit evidence); the confirm-result gate is the next human decision.';
+    if (l.where === 'completed') return l.task + ' completed.' + (l.advance ? ' next: ' + l.advance : '');
+    return l.task + ' stopped (' + l.frameStop + '): ' + (l.problems || []).join('; ');
+  }
+  byId('approve').addEventListener('click', approve);
+
   // ── boot: the reads, and a view that cannot go silently stale ──
   function refresh() {
-    return Promise.all([api('/api/journey'), api('/api/gates')]).then(function (r) {
+    return Promise.all([api('/api/journey'), api('/api/gates'), api('/api/whatsnext')]).then(function (r) {
       if (r[0].status !== 200) { byId('state').textContent = 'journey unavailable: ' + JSON.stringify(r[0].doc.error); return; }
       renderState(r[0].doc.ahead || {});
       renderLegs(r[0].doc.legs || []);
       renderQueue(r[1].status === 200 ? r[1].doc : []);
+      if (r[2].status !== 200) wnMessage("what's-next unavailable: " + JSON.stringify(r[2].doc.error), true);
+      else renderWhatsNext(r[2].doc);
       byId('updated').textContent = 'as of ' + new Date().toLocaleTimeString();
     });
   }
