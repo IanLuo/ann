@@ -7,7 +7,8 @@
  * (the derivation, the frontmost-ready task, the leg gate, each pending gate, each integrity
  * blocker) opens the SAME pane, filled from the reads the service already exposes — the
  * node/packet/detail reads for the items, the goal consult for a `none` derivation. A
- * drilled item is PRESENTED, never decided.
+ * drilled item is PRESENTED, never decided — EXCEPT inside the exit gate's own decision:
+ * a result / evidence item drilled from THAT card keeps the Accept/Reject in hand.
  *
  * It is a CLIENT OF THE SERVICE'S HTTP CONTRACT ONLY — the same routes whose bodies are
  * the CLI's own `--json` values:
@@ -22,6 +23,9 @@
  *   GET  /api/confirm?id=<node>  → the gate card: the complete node (contract · inputs ·
  *                                  open questions) · CLAIMS (with resolved pointers) ·
  *                                  CHECKS · gate states · results
+ *   GET  /api/results?id=<node>&n=<n> → ONE result item, DRILLED: a commit's `git show`,
+ *                                  the local file/dir at a ref's path, an evidence event,
+ *                                  a link — the exit gate's review, item by item
  *   POST /api/gate               → the decision: {id, gate, decision, feedback} → the same
  *                                  L1 `gate!` write the CLI performs; the page then
  *                                  RE-READS the journey + queue, so a landed decision is
@@ -123,6 +127,10 @@ export const UI_HTML = `<!doctype html>
   .wn-blockers button:hover { border-color: var(--warn); }
   .wn-blockers button .k { color: var(--muted); }
   .drill { margin: .15rem 0; font-size: .85rem; }
+  /* a DRILLED item (an exit-gate result / evidence pointer) and the drill's own output */
+  .ev.drill, li button.drill { display: block; padding: .1rem 0; background: none; border: 0; color: var(--muted); font: inherit; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .8rem; text-align: left; cursor: pointer; }
+  .ev.drill:hover, li button.drill:hover { color: var(--accent); }
+  pre.drill-out { margin: .35rem 0; padding: .5rem .6rem; background: #121118; border: 1px solid var(--line); border-radius: 8px; overflow-x: auto; white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .8rem; }
 </style>
 </head>
 <body>
@@ -326,6 +334,11 @@ export const UI_HTML = `<!doctype html>
       var at = gateState(detail, gate);
       var decidable = !!gate && at.state === 'submitted'; // the NODE decides, not the page's snapshot
       var step = gate ? STEP[gate] : null;
+      // THE EXIT GATE'S DRILL CONTEXT: a drill opened from THIS card stays inside the
+      // decision in hand (the operator is reviewing the very node the queue opened), so the
+      // Accept/Reject stay available — 'decide()' re-checks the node's own gate state
+      // immediately before it writes, so a stale decision still cannot land.
+      var keep = decidable ? { id: id, gate: gate } : null;
       byId('card').hidden = false;
       byId('card-step-label').textContent = decidable
         ? step.badge + ' STEP · the ' + step.role + ' gate (' + gate + ')'
@@ -334,7 +347,10 @@ export const UI_HTML = `<!doctype html>
           : 'TASK · ' + detail.status;
       byId('card-title').textContent = id;
       byId('card-what').textContent = decidable
-        ? step.what
+        ? step.what +
+          (gate === 'confirm'
+            ? ' — every result and evidence item below DRILLS IN: the commit’s git show, the local file at its path'
+            : '')
         : gate
           ? 'this gate was decided already — the view was showing a stale submission; press Refresh to see the current queue'
           : 'no undecided gate on this node — nothing to decide here';
@@ -358,14 +374,30 @@ export const UI_HTML = `<!doctype html>
       });
       (detail.openQuestions || []).forEach(function (q) { field(node, 'open question' + (q.blocking ? ' [BLOCKING]' : ''), (q.id ? q.id + ': ' : '') + (q.question || '')); });
 
-      // CLAIMS — how each acceptance criterion is met (resolved pointers), gaps named
+      // CLAIMS — how each acceptance criterion is met (resolved pointers), gaps named.
+      // A pointer that NAMES a result item is itself a DRILL (the git submit, the local
+      // file path) — one list, one numbering ('ann results <id> <n>'); prose stays text.
+      var items = r.doc.results || [];
+      function resultIndexFor(pointer) {
+        for (var i = 0; i < items.length; i++) {
+          var key = items[i].sha || items[i].path || items[i].url;
+          if (key && String(pointer).indexOf(key) === 0) return i + 1;
+        }
+        return 0;
+      }
       var claims = byId('card-claims');
       claims.replaceChildren();
       (detail.claims || []).forEach(function (claim) {
         var li = el('li', null, claim.statement ? '' : 'gap');
         li.appendChild(el('span', claim.ac + ': ', 'ac'));
         li.appendChild(el('span', claim.statement || 'NO CLAIM RECORDED — ' + (claim.acText || '')));
-        (claim.evidence || []).forEach(function (e) { li.appendChild(el('span', 'evidence: ' + e, 'ev')); });
+        (claim.evidence || []).forEach(function (e) {
+          var n = resultIndexFor(e);
+          if (!n) { li.appendChild(el('span', 'evidence: ' + e, 'ev')); return; }
+          var b = el('button', 'evidence: ' + e + ' ›', 'ev drill');
+          b.addEventListener('click', function () { drillResult(id, n, keep); });
+          li.appendChild(b);
+        });
         claims.appendChild(li);
       });
       if (!(detail.claims || []).length) claims.appendChild(el('li', 'no claims recorded', 'muted'));
@@ -389,7 +421,16 @@ export const UI_HTML = `<!doctype html>
       });
       var results = byId('card-results');
       results.replaceChildren();
-      (r.doc.results || []).forEach(function (it) { results.appendChild(el('li', it.kind + ' · ' + it.label)); });
+      // EVERY result item is a DRILL — the SAME command-layer drill the CLI addresses with
+      // an index: a commit → its 'git show', a ref → the local file/dir at its path
+      items.forEach(function (it, i) {
+        var li = el('li');
+        var b = el('button', it.kind + ' · ' + it.label + ' ›', 'drill');
+        b.addEventListener('click', function () { drillResult(id, i + 1, keep); });
+        li.appendChild(b);
+        results.appendChild(li);
+      });
+      if (!items.length) results.appendChild(el('li', 'no results recorded', 'muted'));
       if (!decidable && !gate) message('no undecided gate on this node — nothing to decide here');
       return null;
     });
@@ -515,14 +556,18 @@ export const UI_HTML = `<!doctype html>
    *  new state): the item's own node / packet / derivation, and — for a gate — the
    *  decision surface. A drilled item is PRESENTED, never decided (selected is cleared),
    *  so no decision UI can appear for a node the operator did not pick from WAITING ON YOU. */
-  function drillHead(label, title, what) {
-    selected = { id: null, gate: null };
+  function drillHead(label, title, what, keep) {
+    // A drill from the EXIT GATE carries the decision it was opened inside ('keep'), so the
+    // Accept/Reject survive the look (the operator is still reviewing that node); every
+    // OTHER drill is PRESENTED, never decided — 'selected' is cleared, so no decision UI
+    // can appear for a node the operator did not pick from WAITING ON YOU.
+    selected = keep ? { id: keep.id, gate: keep.gate } : { id: null, gate: null };
     byId('card').hidden = false;
     byId('card-step-label').textContent = label;
     byId('card-title').textContent = title;
     byId('card-what').textContent = what;
     byId('card-next').replaceChildren();
-    byId('card-decide').hidden = true;
+    byId('card-decide').hidden = !(keep && keep.gate);
     message('');
     if (typeof byId('card').scrollIntoView === 'function') byId('card').scrollIntoView({ block: 'nearest' });
   }
@@ -574,6 +619,50 @@ export const UI_HTML = `<!doctype html>
       node.appendChild(el('h3', 'What this names — drill in'));
       ids.forEach(function (id) { nodeDrillButton(node, id); });
     }
+  }
+  /** ONE result item — the command layer's 'ann results <id> <n>' drill, over the route the
+   *  pane already calls: a commit → its 'git show' (message + changeset), a ref → the local
+   *  file's head (or a directory's entries), an evidence event → the raw record, a link →
+   *  its URL. The git/fs work is the COMMAND's; this renders what the command returns. */
+  function drillResult(id, n, keep) {
+    drillHead(
+      (keep ? STEP[keep.gate].badge + ' STEP · ' : '') + 'a result item',
+      id + ' · result ' + n,
+      'one item of the results read on this node — a git commit (its git show), a ref (the local file or directory at that path), an evidence event, or a link. The SAME drill the CLI addresses, read through the service; no git or file logic is done here.',
+      keep,
+    );
+    sections({});
+    return api('/api/results?id=' + encodeURIComponent(id) + '&n=' + n).then(function (r) {
+      var node = drillFields();
+      if (r.status !== 200) { field(node, 'error', JSON.stringify(r.doc.error)); return null; }
+      var v = r.doc;
+      var it = v.item || {};
+      field(node, 'item', it.kind + ' · ' + it.label + (it.at ? ' · ' + it.at : ''));
+      field(node, 'drill', 'ann results ' + id + ' ' + n);
+      if (v.commitError) field(node, 'commit', v.commitError);
+      if (v.refError) field(node, 'ref', v.refError);
+      if (v.sha) {
+        node.appendChild(el('h3', 'git show'));
+        node.appendChild(el('pre', v.sha, 'drill-out'));
+      }
+      if (v.stat) node.appendChild(el('pre', v.stat, 'drill-out'));
+      if (v.dir) {
+        field(node, 'directory', v.dir);
+        (v.entries || []).forEach(function (f) { field(node, 'entry', f); });
+      }
+      if (v.file) {
+        field(node, 'file', v.file);
+        // the file's own leading bytes; the newline is built, not escaped — the served
+        // script is ONE template literal, so a backslash escape would not survive it
+        node.appendChild(el('pre', (v.head || []).join(String.fromCharCode(10)), 'drill-out'));
+      }
+      if (v.event) {
+        node.appendChild(el('h3', 'the evidence event (raw)'));
+        node.appendChild(el('pre', JSON.stringify(v.event, null, 2), 'drill-out'));
+      }
+      if (v.url) field(node, 'url', v.url);
+      return null;
+    });
   }
   /** The frontmost-ready task: its node card (contract · gates · claims · checks · results)
    *  PLUS the context packet the frame will materialize — what the step needs, and what is

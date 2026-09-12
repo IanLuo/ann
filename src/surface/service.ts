@@ -13,7 +13,8 @@ import { UI_HTML } from './ui.js';
  * of a command context), and no way for the two bindings to drift.
  *
  * SCOPE (the goal's AC-1/AC-4, the ONE thin vertical): the reads `journey · status ·
- * next · detail · confirm · results · packet`, the whole-journey gate queue (`gates` —
+ * next · detail · confirm · results · packet` — with `results`/`events` carrying their
+ * optional DRILL INDEX (`?n=`, the item/event number the CLI addresses) — the whole-journey gate queue (`gates` —
  * the L1 read the UI's WAITING ON YOU view needs, `Commands.pendingGates`), the gate
  * WRITE (`POST /api/gate` → the same L1 `gate!` composite: accept|reject + feedback),
  * the OPERATE LOOP's read + write (`GET /api/whatsnext` — the WHAT'S NEXT card's
@@ -38,7 +39,7 @@ import { UI_HTML } from './ui.js';
  *  through the CLI's own handlers (an id-less read is a named usage refusal). */
 const READ_ROUTES = new Set(['journey', 'status', 'next', 'detail', 'confirm', 'results', 'packet', 'events']);
 /** The reads addressed by a node id (`?id=<node>`). */
-const ID_READS = new Set(['detail', 'confirm', 'results', 'packet']);
+const ID_READS = new Set(['detail', 'confirm', 'packet']);
 
 /** A request body is bounded (untrusted input over a socket): a gate decision carries a
  *  feedback STRING, nothing bigger. */
@@ -232,11 +233,15 @@ async function route(root: string, approver: Approver, req: IncomingMessage, res
   if (name === 'status') {
     const filter = url.searchParams.get('filter');
     argv = filter ? ['status', filter] : ['status'];
-  } else if (name === 'events') {
+  } else if (name === 'events' || name === 'results') {
+    // The ONE-VIEW DRILLS: both reads take an OPTIONAL index — `events` drills the event
+    // record + its links, `results` drills one result item (a commit's `git show`, a ref's
+    // file/dir, an evidence event). The index is passed straight to the CLI's own handler;
+    // no git/fs logic lives here (the binding stays thin).
     const id = url.searchParams.get('id');
-    if (!id) return sendJson(res, 400, jsonDoc(usageError('GET /api/events?id=<node>[&n=<n>]')));
+    if (!id) return sendJson(res, 400, jsonDoc(usageError(`GET /api/${name}?id=<node>[&n=<n>]`)));
     const n = url.searchParams.get('n');
-    argv = n ? ['events', id, n] : ['events', id];
+    argv = n ? [name, id, n] : [name, id];
   } else if (ID_READS.has(name)) {
     const id = url.searchParams.get('id');
     if (!id) return sendJson(res, 400, jsonDoc(usageError(`GET /api/${name}?id=<node>`)));

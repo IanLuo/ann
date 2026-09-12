@@ -323,10 +323,10 @@ describe('e2e — the operate loop: the WHAT\'S NEXT card + the approve (leg 11)
     expect(page.status).toBe(200);
     expect(page.body).toContain("What's next"); // the card
     const script = page.body.match(/<script>([\s\S]*?)<\/script>/)?.[1] ?? '';
-    for (const route of ['/api/whatsnext', '/api/approve', '/api/journey', '/api/gates', '/api/confirm?id=', '/api/gate', '/api/packet?id=', '/api/detail?id=', '/api/next']) expect(script).toContain(route);
+    for (const route of ['/api/whatsnext', '/api/approve', '/api/journey', '/api/gates', '/api/confirm?id=', '/api/gate', '/api/packet?id=', '/api/detail?id=', '/api/next', '/api/results?id=']) expect(script).toContain(route);
     // the card's own words: the machine-executable derivation, the presented-and-stopped
     // boundary, how to clear a blocker, the approve affordance, and the DRILL-INS
-    for (const word of ['MACHINE-EXECUTABLE', 'PRESENTED AND STOPPED', 'NOT machine-executable', 'the authored-work boundary', 'uncommitted tracked journey changes — commit them', 'frontmost-ready', 'leg gate', 'UNMET — ', 'pending gates', 'drillTask', 'drillLeg', 'drillBlocker', 'drillAdvance', 'wn-fact', 'drill in'])
+    for (const word of ['MACHINE-EXECUTABLE', 'PRESENTED AND STOPPED', 'NOT machine-executable', 'the authored-work boundary', 'uncommitted tracked journey changes — commit them', 'frontmost-ready', 'leg gate', 'UNMET — ', 'pending gates', 'drillTask', 'drillLeg', 'drillBlocker', 'drillAdvance', 'drillResult', 'git show', 'DRILLS IN', 'wn-fact', 'drill in'])
       expect(script, `the served page lost '${word}'`).toContain(word);
     expect(page.body).toContain('Approve'); // the approve affordance itself
     expect(page.body).not.toContain('innerHTML'); // data is rendered as text, never as markup
@@ -430,6 +430,106 @@ describe('e2e — the approve FAILS CLOSED: no submission (care a) and a dirty s
     expect((JSON.parse(again.body) as { error: { code: string } }).error.code).toBe('daemon-prompt'); // care a — never a prompt
   });
 });
+
+describe('e2e — the exit gate drills into a result: `ann results <id> <n>` over the route the UI calls', () => {
+  let root: string;
+  let server!: Server;
+  let sha: string;
+
+  beforeAll(async () => {
+    root = newProject();
+    sha = driveExitGateJourney(root);
+    server = await serve(root);
+  }, 60_000);
+  afterAll(() => {
+    server?.kill();
+    if (root) rmSync(root, { recursive: true, force: true });
+  });
+
+  it('the exit-gate card\'s results index IS the drill index — one list, one numbering', { timeout: 30_000 }, async () => {
+    // the card the operator opens (the confirm gate, submitted) carries the node AND its
+    // results — the page numbers the drill from THIS list's order
+    const card = await get(server.url + '/api/confirm?id=' + encodeURIComponent(FIRST));
+    expect(card.status).toBe(200);
+    const doc = JSON.parse(card.body) as { detail: { gates: { confirm: { state: string } } }; results: Array<{ kind: string; sha?: string; path?: string }> };
+    expect(doc.detail.gates.confirm.state).toBe('submitted'); // the EXIT gate
+    expect(doc.results.map((r) => r.kind)).toEqual(['commit', 'ref']);
+    expect(doc.results[0].sha).toBe(sha);
+    expect(doc.results[1].path).toBe('src/thing.ts');
+    // …and the same item comes back from the drill route at that index
+    const one = await get(server.url + `/api/results?id=${encodeURIComponent(FIRST)}&n=1`);
+    expect((JSON.parse(one.body) as { item: { sha: string } }).item.sha).toBe(doc.results[0].sha);
+    const two = await get(server.url + `/api/results?id=${encodeURIComponent(FIRST)}&n=2`);
+    expect((JSON.parse(two.body) as { item: { path: string } }).item.path).toBe(doc.results[1].path);
+  });
+
+  it('a COMMIT item drills into its `git show` — byte-identical to the CLI\'s own drill', { timeout: 30_000 }, async () => {
+    const cliJson = cli(root, ['--json', 'results', FIRST, '1']);
+    expect(cliJson.code, `ann --json results ${FIRST} 1: ${cliJson.stderr.trim()}`).toBe(0);
+    const route = await get(server.url + `/api/results?id=${encodeURIComponent(FIRST)}&n=1`);
+    expect(route.status, route.body.slice(0, 300)).toBe(200);
+    // THE SERVICE DOES NO GIT OR FS WORK OF ITS OWN: the body IS the CLI's own value
+    expect(route.body).toBe(cliJson.stdout);
+    const body = JSON.parse(route.body) as { item: { kind: string; sha: string }; sha: string; stat: string };
+    expect(body.item.kind).toBe('commit');
+    expect(body.item.sha).toBe(sha);
+    expect(body.sha).toContain('feat(thing): the deliverable'); // the commit subject — `git show`
+    expect(body.sha).toContain('e2e <e2e@ann.test>'); // the author line, from the repo's own git
+    expect(body.stat).toContain('src/thing.ts'); // the changeset
+  });
+
+  it('a REF item drills into the LOCAL FILE at its path — byte-identical to the CLI\'s drill', { timeout: 30_000 }, async () => {
+    const cliJson = cli(root, ['--json', 'results', FIRST, '2']);
+    expect(cliJson.code, `ann --json results ${FIRST} 2: ${cliJson.stderr.trim()}`).toBe(0);
+    const route = await get(server.url + `/api/results?id=${encodeURIComponent(FIRST)}&n=2`);
+    expect(route.status, route.body.slice(0, 300)).toBe(200);
+    expect(route.body).toBe(cliJson.stdout);
+    const body = JSON.parse(route.body) as { item: { kind: string; path: string }; file: string; head: string[] };
+    expect(body.item.kind).toBe('ref');
+    expect(body.file).toBe('src/thing.ts');
+    expect(body.head[0]).toBe('export const thing = 1;'); // the file's own bytes, no re-reading here
+  });
+
+  it('an index that does not exist is refused fail-closed, by name', { timeout: 30_000 }, async () => {
+    const r = await get(server.url + `/api/results?id=${encodeURIComponent(FIRST)}&n=99`);
+    expect(r.status).toBeGreaterThanOrEqual(400);
+    const doc = JSON.parse(r.body) as { error: { message: string } };
+    expect(doc.error.message).toContain('no item 99'); // never a silent empty drill
+    // …and the LISTING route is unchanged by the optional index (no `&n=` → the whole list)
+    const list = await get(server.url + `/api/results?id=${encodeURIComponent(FIRST)}`);
+    expect(list.status).toBe(200);
+    expect((JSON.parse(list.body) as { items: unknown[] }).items.length).toBe(2);
+  });
+});
+
+/** The EXIT-GATE fixture: ONE task carrying a REAL commit and a REAL file ref in the temp
+ *  repo, submitted at the confirm gate — the state whose card the exit gate shows. */
+function driveExitGateJourney(root: string): string {
+  cli(root, ['spawn!', LEG, CONTRACT('the alpha leg')]);
+  cli(root, ['spawn!', FIRST, CONTRACT('do the thing')]);
+  cli(root, ['submit!', FIRST, 'grill']);
+  cli(root, ['gate!', FIRST, 'grill', 'accept', 'the contract is right']);
+  mkdirSync(join(root, 'src'), { recursive: true });
+  writeFileSync(join(root, 'src', 'thing.ts'), 'export const thing = 1;\nexport const other = 2;\n');
+  commit(root, 'feat(thing): the deliverable');
+  const sha = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  cli(root, [
+    'evidence!',
+    FIRST,
+    sha,
+    '--refs',
+    'src/thing.ts',
+    '--note',
+    'the deliverable',
+    '--claims',
+    JSON.stringify([{ ac: 'AC-1', statement: 'the thing is done', evidence: [sha, 'src/thing.ts'] }]),
+    '--checks',
+    JSON.stringify([{ command: 'npm test', result: 'pass', detail: 'fixture', sha }]),
+  ]);
+  cli(root, ['submit!', FIRST, 'confirm']); // the EXIT gate is now in WAITING ON YOU
+  commit(root, 'the exit-gate drill fixture journey');
+  return sha;
+}
 
 describe('e2e — the boundary derivations that are NOT machine-executable (advance-leg · none)', () => {
   const servers: Array<{ server: Server; root: string }> = [];

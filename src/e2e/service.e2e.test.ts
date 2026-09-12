@@ -201,6 +201,7 @@ describe('e2e — the minimal service + UI (AC-1: the thin binding over the comm
       { route: `/api/detail?id=${T2}`, argv: ['detail', T2] },
       { route: `/api/confirm?id=${T2}`, argv: ['confirm', T2] },
       { route: `/api/results?id=${T2}`, argv: ['results', T2] },
+      { route: `/api/results?id=${T1}&n=1`, argv: ['results', T1, '1'] }, // the DRILL index (a commit's `git show`)
       { route: `/api/packet?id=${T2}`, argv: ['packet', T2] },
       { route: `/api/events?id=${T2}`, argv: ['events', T2] },
       { route: `/api/events?id=${T2}&n=2`, argv: ['events', T2, '2'] },

@@ -274,3 +274,125 @@ describe('the served page — every WHAT\'S NEXT item drills into the detail pan
     expect(stub.get('card-step-label').textContent).toContain('the leg gate');
   });
 });
+
+/**
+ * THE EXIT GATE'S DRILLS (leg 11, the SECOND confirm rejection): "on the exit gate, where
+ * also lot of info can drill in, like the git submit, the local file path — first check if
+ * we have command tool to access those resources, then build minimum UI to show them".
+ *
+ * The command layer already had it (`ann results <id> [n]` — commit → `git show`, ref →
+ * the file/dir at its path); this proves the served page USES it: every result item, and
+ * every claim-evidence pointer that NAMES a result item, drills into the same pane.
+ */
+const COMMIT = 'abc1234deadbeef5678';
+const exitResults = [
+  { kind: 'commit', label: COMMIT, sha: COMMIT, note: '', at: '2026-09-12' },
+  { kind: 'ref', label: 'src/surface/approve.ts', path: 'src/surface/approve.ts', at: '2026-09-12' },
+];
+const PROSE = 'the rework answering the rejection, described in prose';
+const exitConfirm = {
+  detail: {
+    id: TASK,
+    status: 'blocked',
+    contract: { intent: 'do the thing', acceptanceCriteria: ['the thing is done'] },
+    gates: { grill: { state: 'confirmed' }, confirm: { state: 'submitted', at: '2026-09-12' } },
+    inputs: [],
+    openQuestions: [],
+    claims: [
+      { ac: 'AC-1', statement: 'the thing is done', evidence: [`${COMMIT} [resolves in git]`, 'src/surface/approve.ts [258 lines]', PROSE] },
+    ],
+    checks: [{ command: 'npm test', result: 'pass', detail: '663 passed', sha: COMMIT, at: '2026-09-12' }],
+  },
+  results: exitResults,
+};
+const commitDrill = {
+  item: exitResults[0],
+  sha: `${COMMIT}\nian luo <ianluo63@gmail.com>\n\nfeat(serve): drill into every WHAT'S NEXT item`, // the git show body
+  stat: ' src/surface/ui.ts | 225 ++++++++++++++++++++++++++++++++++',
+};
+const refDrill = { item: exitResults[1], file: 'src/surface/approve.ts', head: ["import { join } from 'node:path';", 'export const ONCE = true;'] };
+
+const exitReads = (gates: unknown[] = [{ task: TASK, gate: 'confirm', role: 'exit', leg: LEG, intent: 'do the thing', since: '2026-09-12', delivered: { commits: 1, claims: 1, unclaimed: 0, checks: 1, bound: 1 } }]): Record<string, unknown> => ({
+  '/api/journey': {
+    ahead: { activeLeg: LEG, frontmostReady: { task: TASK, status: 'blocked' }, legGate: { met: true } },
+    legs: [{ id: LEG, status: 'queued', tasks: [{ id: TASK, status: 'blocked' }] }],
+  },
+  '/api/gates': gates,
+  '/api/whatsnext': card({ frontmost: undefined, executable: false }),
+  [`/api/confirm?id=${TASK}`]: exitConfirm,
+  [`/api/results?id=${TASK}&n=1`]: commitDrill,
+  [`/api/results?id=${TASK}&n=2`]: refDrill,
+});
+/** Open the EXIT gate card the way the operator does: from its WAITING ON YOU row. */
+async function openExitGate(stub: Stub): Promise<void> {
+  stub.get('queue').button('confirm').click();
+  await flush();
+}
+
+describe('the served page — the EXIT GATE drills into every result and evidence item', () => {
+  it('the exit-gate card makes every result a drill and every naming evidence pointer one too', async () => {
+    const stub = boot(exitReads());
+    await flush();
+    await openExitGate(stub);
+    expect(stub.get('card-step-label').textContent).toContain('EXIT');
+    expect(stub.get('card-decide').hidden).toBe(false); // the decision card is open
+    expect(stub.get('card-what').textContent).toContain('DRILLS IN');
+    // the results are BUTTONS now (they used to be plain 'kind · label' rows)
+    expect(stub.get('card-results').buttons().length).toBe(2);
+    expect(stub.get('card-results').button(COMMIT).textContent).toContain('commit · ' + COMMIT);
+    expect(stub.get('card-results').button('approve.ts').textContent).toContain('ref · src/surface/approve.ts');
+    // the two evidence pointers that NAME a result item are drills; the prose one is text
+    expect(stub.get('card-claims').buttons().length).toBe(2);
+    expect(stub.get('card-claims').textContent).toContain('evidence: ' + PROSE);
+  });
+
+  it("drills a COMMIT result into its git show — the command layer's own drill", async () => {
+    const stub = boot(exitReads());
+    await flush();
+    await openExitGate(stub);
+    stub.get('card-results').button(COMMIT).click();
+    await flush();
+    expect(stub.fetched).toContain(`/api/results?id=${TASK}&n=1`); // the SAME drill the CLI addresses
+    expect(stub.get('card-step-label').textContent).toContain('EXIT STEP');
+    expect(stub.get('card-node').textContent).toContain('git show');
+    expect(stub.get('card-node').textContent).toContain("feat(serve): drill into every WHAT'S NEXT item");
+    expect(stub.get('card-node').textContent).toContain('src/surface/ui.ts | 225'); // the changeset
+    expect(stub.get('card-node').textContent).toContain('ann results ' + TASK + ' 1');
+    expect(stub.get('card-decide').hidden).toBe(false); // still INSIDE the exit decision
+  });
+
+  it('drills a REF result into the local file at its path', async () => {
+    const stub = boot(exitReads());
+    await flush();
+    await openExitGate(stub);
+    stub.get('card-results').button('approve.ts').click();
+    await flush();
+    expect(stub.fetched).toContain(`/api/results?id=${TASK}&n=2`);
+    expect(stub.get('card-node').textContent).toContain('file: src/surface/approve.ts');
+    expect(stub.get('card-node').textContent).toContain("import { join } from 'node:path';"); // the file's own bytes
+    expect(stub.get('card-node').textContent).toContain('export const ONCE = true;');
+  });
+
+  it('drills a CLAIM evidence pointer that names a result item (and leaves prose alone)', async () => {
+    const stub = boot(exitReads());
+    await flush();
+    await openExitGate(stub);
+    stub.get('card-claims').button(COMMIT).click();
+    await flush();
+    expect(stub.fetched).toContain(`/api/results?id=${TASK}&n=1`); // the pointer resolves to the same item
+    expect(stub.get('card-node').textContent).toContain('git show');
+  });
+
+  it('a drill from OUTSIDE the exit gate is still PRESENTED, never decided', async () => {
+    const stub = boot(exitReads([])); // nothing in the queue: this node has no undecided gate
+    await flush();
+    stub.get('legs').button(TASK).click(); // the journey view
+    await flush();
+    expect(stub.get('card-decide').hidden).toBe(true);
+    stub.get('card-results').button(COMMIT).click();
+    await flush();
+    expect(stub.fetched).toContain(`/api/results?id=${TASK}&n=1`);
+    expect(stub.get('card-decide').hidden).toBe(true); // no decision UI for a node nobody picked
+    expect(stub.get('card-step-label').textContent).not.toContain('EXIT STEP');
+  });
+});
