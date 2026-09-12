@@ -12,3 +12,8 @@ coverage/
 # so it must never be committed).
 .direnv/
 logs/
+
+# The canvas skill's local scratch — one directory per topic (generated shell, notes,
+# history, worker cards). Local collaboration state on this disk, never source data;
+# gitignored so a `git add -A` cannot sweep a canvas into the repo.
+.agents/canvas/
