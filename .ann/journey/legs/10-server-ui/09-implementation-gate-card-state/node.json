@@ -1,0 +1,26 @@
+{
+  "id": "10-server-ui/09-implementation-gate-card-state",
+  "contract": {
+    "intent": "The gate card must tell the TRUTH about the node it is showing, not about the page's snapshot. Today clicking a task with no undecided gate renders the gate-card chrome with a (disabled) Accept/Reject pair, which reads as 'you can decide this'; and if a gate was decided elsewhere (CLI, another tab) the page still offers the decision — and a click would write a REDUNDANT decision (gate! auto-submits when nothing is undecided). Fix: the card is bound to the NODE's actual gate state from /api/confirm (detail.gates), so it (a) shows the decision UI ONLY when the addressed gate is genuinely `submitted`, (b) otherwise says what is true — the gate is already decided (with its state and date) or there is no undecided gate — plus a `next` line saying what the task is waiting for (queued with no submission · entry confirmed, work not started · work in progress · waiting on a decision in the queue · accepted, awaiting the close · closed), (c) re-checks the gate state immediately before writing and refuses locally when it went stale, and (d) refreshes on focus/visibility and via a Refresh control so an external decision lands in the view.",
+    "acceptanceCriteria": [
+      "the card's decision UI is shown ONLY when the addressed gate's state is `submitted` (from the card's own /api/confirm read); otherwise it is absent (not disabled-and-visible) and the card states what is true: the gate is already <confirmed|rejected> on <date>, or the node has no undecided gate",
+      "every card carries a `next` line derived from the node's status + gate states — one of: queued and not yet submitted at the entry gate · entry confirmed, work not started · work in progress · waiting on a decision (naming the gate in the queue) · accepted, awaiting the close (naming complete!) · closed — so a `queued` task never looks decidable",
+      "a decision is re-checked immediately before the write: if the addressed gate is no longer `submitted`, the page refuses locally, says it was stale and refreshes — it never posts a redundant decision (the write path that gate! auto-submits on)",
+      "the page refreshes the journey + queue on window focus/visibility change and has an explicit Refresh control with an 'as of' timestamp, so an external decision cannot leave the view silently stale",
+      "the full suite stays green (the served-page structural assertions cover the state-truth words + the guard), ann check/verify stay clean, committed with evidence incl. claims/checks"
+    ],
+    "targetAreas": [
+      "src/surface",
+      "src/e2e"
+    ],
+    "requiredInputs": [
+      "journey-format-spec",
+      "flow-control-spec"
+    ],
+    "expectedOutputs": [
+      "code + tests committed (commit evidence)"
+    ],
+    "workType": "implementation"
+  },
+  "createdAt": "2026-09-12"
+}
