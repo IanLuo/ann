@@ -89,7 +89,18 @@ describe('pendingGates — the WHOLE-JOURNEY gate queue (the service/UI WAITING 
     writeNode('02-leg/01-a', [ev('created')]);
     expect(commands().status('01-leg')).toBe('done');
     expect(commands().lookBack().pendingGates).toEqual([]); // the active leg is 02-leg
-    expect(commands().pendingGates()).toEqual([{ task: '01-leg/01-a', gate: 'grill' }]);
+    // the row carries the STEP (v08/10): role · whose step (leg + intent) · what is delivered
+    expect(commands().pendingGates()).toEqual([
+      {
+        task: '01-leg/01-a',
+        gate: 'grill',
+        role: 'entry',
+        leg: '01-leg',
+        intent: 'Build the thing',
+        since: '2026-08-27',
+        delivered: { commits: 0, claims: 0, unclaimed: 1, checks: 0, bound: 0 },
+      },
+    ]);
   });
 
   it('covers every leg, in id order, and skips cancelled/deferred escape hatches', () => {
@@ -98,10 +109,9 @@ describe('pendingGates — the WHOLE-JOURNEY gate queue (the service/UI WAITING 
     writeNode('01-leg/02-b', [ev('created'), ev('submitted', { gate: 'grill' }), ev('cancelled', { reason: 'not needed' })]);
     writeNode('02-leg', []);
     writeNode('02-leg/01-a', [ev('created'), ev('submitted', { gate: 'confirm' })]);
-    expect(commands().pendingGates()).toEqual([
-      { task: '01-leg/01-a', gate: 'grill' },
-      { task: '02-leg/01-a', gate: 'confirm' },
-    ]);
+    const rows = commands().pendingGates();
+    expect(rows.map((r) => `${r.task}@${r.gate}(${r.role})`)).toEqual(['01-leg/01-a@grill(entry)', '02-leg/01-a@confirm(exit)']);
+    expect(rows.map((r) => r.leg)).toEqual(['01-leg', '02-leg']);
   });
 });
 

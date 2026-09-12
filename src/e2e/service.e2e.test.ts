@@ -220,11 +220,19 @@ describe('e2e — the minimal service + UI (AC-1: the thin binding over the comm
   it('the whole-journey gate queue covers what the active-leg look-back scopes away', { timeout: 30_000 }, async () => {
     const gates = await get(server.url + '/api/gates');
     expect(gates.status).toBe(200);
-    expect(JSON.parse(gates.body)).toEqual([
-      { task: T1, gate: 'grill' }, // hidden: leg 01 derives done, the task stays done
-      { task: T2, gate: 'grill' },
-      { task: T3, gate: 'grill' },
-    ]);
+    const rows = JSON.parse(gates.body) as Array<{ task: string; gate: string; role: string; leg: string; intent: string; delivered: { commits: number; claims: number; checks: number; bound: number } }>;
+    expect(rows.map((r) => `${r.task}@${r.gate}`)).toEqual([`${T1}@grill`, `${T2}@grill`, `${T3}@grill`]); // T1 hidden: leg 01 derives done, the task stays done
+    // every row says WHICH STEP it is: the role, the leg, the task's own intent, what is delivered
+    for (const r of rows) {
+      expect(r.role).toBe('entry'); // the grill gate is the entry step
+      expect(r.leg).toBe(r.task.split('/')[0]);
+      expect(r.intent.length).toBeGreaterThan(0);
+    }
+    // …and what is DELIVERED at that gate: T1 was completed (a full v18 conclusion on the
+    // log), T2/T3 are merely submitted — so the queue can tell "review the contract" from
+    // "the work is already here"
+    expect(rows[0].delivered).toEqual({ commits: 1, claims: 1, unclaimed: 0, checks: 1, bound: 1 });
+    expect(rows[1].delivered).toEqual({ commits: 0, claims: 0, unclaimed: 1, checks: 0, bound: 0 });
     // the CLI's own look-back sees only the ACTIVE leg's — the reason /api/gates exists
     const next = JSON.parse(cli(root, ['--json', 'next']).stdout) as { lookBack: { activeLeg: string; pendingGates: unknown[] } };
     expect(next.lookBack.activeLeg).toBe(LEG2);
@@ -331,6 +339,8 @@ describe('e2e — the minimal service + UI (AC-1: the thin binding over the comm
     const script = page.body.match(/<script>([\s\S]*?)<\/script>/)?.[1] ?? '';
     expect(script.length).toBeGreaterThan(0);
     for (const route of ['/api/journey', '/api/gates', '/api/confirm?id=', '/api/gate']) expect(script).toContain(route);
+    // …and the page names the STEP each gate is (the reason /api/gates carries role/intent/delivered)
+    for (const word of ['ENTRY', 'EXIT', 'the contract gate', 'the result gate', 'delivered: ', 'NO CLAIM RECORDED', 'PASS  ']) expect(script, `the served page lost '${word}'`).toContain(word);
     // the page must be runnable JS: `node --check` parses it (no browser needed)
     const checkDir = mkdtempSync(join(tmpdir(), 'ann-ui-check-'));
     const checkFile = join(checkDir, 'ui-page.js');
@@ -345,11 +355,7 @@ describe('e2e — the minimal service + UI (AC-1: the thin binding over the comm
 
   it('a decision made through the page\'s own HTTP contract lands as the journey\'s gate event', { timeout: 30_000 }, async () => {
     // the state BEFORE: T2 waits at the grill gate (the queue + the node's derived status)
-    expect(JSON.parse((await get(server.url + '/api/gates')).body)).toEqual([
-      { task: T1, gate: 'grill' },
-      { task: T2, gate: 'grill' },
-      { task: T3, gate: 'grill' },
-    ]);
+    expect((JSON.parse((await get(server.url + '/api/gates')).body) as Array<{ task: string }>).map((r) => r.task)).toEqual([T1, T2, T3]);
     const before = JSON.parse((await get(server.url + `/api/journey`)).body) as { legs: Array<{ id: string; tasks: Array<{ id: string; status: string }> }> };
     expect(before.legs.find((l) => l.id === LEG2)?.tasks.find((t) => t.id === T2)?.status).toBe('blocked');
 
@@ -374,8 +380,8 @@ describe('e2e — the minimal service + UI (AC-1: the thin binding over the comm
     expect(confirmed?.feedback).toBe('ui card decision');
 
     // …and the VIEW reflects it after the re-read (the queue loses the row; the status moves)
-    const after = JSON.parse((await get(server.url + '/api/gates')).body) as unknown[];
-    expect(after).toEqual([{ task: T1, gate: 'grill' }]); // T2 decided, T3 decided by the CLI — only the hidden one waits
+    const after = JSON.parse((await get(server.url + '/api/gates')).body) as Array<{ task: string; gate: string }>;
+    expect(after.map((r) => `${r.task}@${r.gate}`)).toEqual([`${T1}@grill`]); // T2 decided, T3 decided by the CLI — only the hidden one waits
     const journey = JSON.parse((await get(server.url + '/api/journey')).body) as { legs: Array<{ id: string; tasks: Array<{ id: string; status: string }> }> };
     expect(journey.legs.find((l) => l.id === LEG2)?.tasks.find((t) => t.id === T2)?.status).toBe('queued');
     const cardAfter = JSON.parse((await get(server.url + `/api/confirm?id=${T2}`)).body) as { detail: { gates: { grill: { state: string } } } };

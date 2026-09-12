@@ -1,22 +1,27 @@
 /**
- * THE MINIMAL UI (the goal's AC-3) — the journey view, the WAITING ON YOU gate queue,
- * and the gate card, as ONE page: vanilla JS, no framework, no bundler, no build step
- * (the server serves this string as-is, `GET /`).
+ * THE MINIMAL UI (the goal's AC-3) — the journey view, the WAITING ON YOU gate queue, and
+ * the gate card, as ONE page: vanilla JS, no framework, no bundler, no build step (the
+ * server serves this string as-is, `GET /`).
  *
  * It is a CLIENT OF THE SERVICE'S HTTP CONTRACT ONLY — the same routes whose bodies are
  * the CLI's own `--json` values:
  *   GET  /api/journey            → the journey view: legs · tasks · the ahead/state line
  *   GET  /api/gates              → the WAITING ON YOU queue: EVERY undecided submission
- *                                  across the WHOLE journey (not just the active leg)
- *   GET  /api/confirm?id=<node>  → the gate card: contract (intent · ACs) · gate states
- *                                  · results
- *   POST /api/gate               → the decision: {id, gate, decision, feedback} → the
- *                                  same L1 `gate!` write the CLI performs; the page then
+ *                                  across the WHOLE journey, each with its STEP (the gate's
+ *                                  role — ENTRY before work / EXIT before the close — the
+ *                                  task's own intent, what is DELIVERED there already)
+ *   GET  /api/confirm?id=<node>  → the gate card: the complete node (contract · inputs ·
+ *                                  open questions) · CLAIMS (with resolved pointers) ·
+ *                                  CHECKS · gate states · results
+ *   POST /api/gate               → the decision: {id, gate, decision, feedback} → the same
+ *                                  L1 `gate!` write the CLI performs; the page then
  *                                  RE-READS the journey + queue, so a landed decision is
  *                                  what the view shows (never an optimistic local edit)
  *
- * Relative URLs only — the page assumes nothing about where it is served from (local or
- * remote). No credentials, no state: rendering is a pure function of those three reads.
+ * A gate is a STEP, so the queue says which one: ENTRY (grill — confirm the contract, then
+ * the work starts) or EXIT (confirm — review the delivered result, then it lands). Relative
+ * URLs only — the page assumes nothing about where it is served from. No credentials, no
+ * state: rendering is a pure function of those reads.
  */
 export const UI_HTML = `<!doctype html>
 <html lang="en">
@@ -25,7 +30,7 @@ export const UI_HTML = `<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ann — the journey</title>
 <style>
-  :root { color-scheme: dark; --fg: #e8e6e3; --muted: #9a958e; --bg: #16151a; --panel: #1f1e25; --line: #322f3a; --accent: #7cc4ff; --warn: #ffb454; --ok: #7ddc9a; }
+  :root { color-scheme: dark; --fg: #e8e6e3; --muted: #9a958e; --bg: #16151a; --panel: #1f1e25; --line: #322f3a; --accent: #7cc4ff; --warn: #ffb454; --ok: #7ddc9a; --entry: #7cc4ff; --exit: #ffb454; }
   * { box-sizing: border-box; }
   body { margin: 0; padding: 0 0 4rem; background: var(--bg); color: var(--fg); font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
   header { padding: 1.5rem 2rem 1rem; border-bottom: 1px solid var(--line); }
@@ -34,15 +39,22 @@ export const UI_HTML = `<!doctype html>
   h3 { margin: 0 0 .5rem; font-size: .95rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
   .muted { color: var(--muted); }
   .state { margin: 0; font-size: .85rem; color: var(--muted); }
-  main { display: grid; grid-template-columns: minmax(320px, 1fr) minmax(360px, 1.2fr); gap: 1.5rem; padding: 1.5rem 2rem; align-items: start; }
+  main { display: grid; grid-template-columns: minmax(320px, 1fr) minmax(380px, 1.15fr); gap: 1.5rem; padding: 1.5rem 2rem; align-items: start; }
   section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 1rem 1.15rem; }
   .queue { grid-column: 1 / -1; }
   ul { list-style: none; margin: 0; padding: 0; }
   .queue li { border-top: 1px solid var(--line); }
   .queue li:first-child { border-top: 0; }
-  .queue button { display: flex; justify-content: space-between; gap: 1rem; width: 100%; padding: .55rem .25rem; background: none; border: 0; color: var(--fg); font: inherit; text-align: left; cursor: pointer; }
-  .queue button:hover { color: var(--accent); }
-  .gate-tag { color: var(--warn); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .85rem; }
+  .queue button { display: block; width: 100%; padding: .7rem .25rem; background: none; border: 0; color: var(--fg); font: inherit; text-align: left; cursor: pointer; }
+  .queue button:hover .q-title { color: var(--accent); }
+  .badge { display: inline-block; min-width: 3.6rem; margin-right: .6rem; padding: .05rem .5rem; border-radius: 999px; border: 1px solid currentColor; font-size: .72rem; letter-spacing: .08em; text-transform: uppercase; }
+  .badge.entry { color: var(--entry); }
+  .badge.exit { color: var(--exit); }
+  .q-title { display: inline; font-weight: 600; }
+  .q-meta { display: block; margin-top: .25rem; color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .8rem; }
+  .q-do { display: block; margin-top: .3rem; font-size: .85rem; }
+  .q-do.entry { color: var(--entry); }
+  .q-do.exit { color: var(--exit); }
   .count { color: var(--warn); }
   .leg { border-top: 1px solid var(--line); padding: .75rem 0; }
   .leg:first-child { border-top: 0; padding-top: 0; }
@@ -52,8 +64,19 @@ export const UI_HTML = `<!doctype html>
   .status-blocked { color: var(--warn); }
   .status-active { color: var(--accent); }
   .card-body h3 { font-size: 1rem; }
-  .card-body p.intent { margin: .25rem 0 .75rem; }
-  .card-body ul.acs { margin: 0 0 .75rem; padding-left: 1.1rem; list-style: disc; }
+  .card-step { display: flex; align-items: baseline; gap: .6rem; margin: 0 0 .35rem; }
+  .card-what { margin: 0 0 1rem; font-size: .9rem; }
+  .field { margin: .15rem 0; }
+  .field .k { color: var(--muted); }
+  .claims { margin: .35rem 0 .75rem; padding: 0; }
+  .claims li { border-top: 1px solid var(--line); padding: .45rem 0; }
+  .claims li:first-child { border-top: 0; }
+  .claims .ac { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--accent); }
+  .claims .ev { display: block; margin-top: .15rem; color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .8rem; }
+  .claims li.gap .ac { color: var(--warn); }
+  .checks { margin: .35rem 0 .75rem; padding: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .85rem; }
+  .checks .pass { color: var(--ok); }
+  .checks .fail { color: var(--warn); }
   .gates { display: flex; gap: .75rem; margin-bottom: .75rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .85rem; }
   .gates span { border: 1px solid var(--line); border-radius: 999px; padding: .1rem .6rem; }
   textarea { width: 100%; min-height: 4.5rem; margin: .35rem 0 .75rem; padding: .5rem; background: #121118; color: var(--fg); border: 1px solid var(--line); border-radius: 8px; font: inherit; }
@@ -80,11 +103,16 @@ export const UI_HTML = `<!doctype html>
     <div id="legs"></div>
   </section>
   <section class="card card-body" id="card" hidden>
-    <h2>Gate card</h2>
+    <h2 id="card-step-label">Gate card</h2>
     <h3 id="card-title"></h3>
-    <p class="intent" id="card-intent"></p>
-    <ul class="acs" id="card-acs"></ul>
+    <p class="card-what" id="card-what"></p>
+    <div id="card-node"></div>
+    <h2>Claims</h2>
+    <ul class="claims" id="card-claims"></ul>
+    <h2>Checks</h2>
+    <ul class="checks" id="card-checks"></ul>
     <div class="gates" id="card-gates"></div>
+    <h2>Results</h2>
     <ul id="card-results"></ul>
     <textarea id="feedback" placeholder="feedback for the decision (the rejection's why)"></textarea>
     <div class="actions">
@@ -98,6 +126,12 @@ export const UI_HTML = `<!doctype html>
 (function () {
   'use strict';
   var selected = { id: null, gate: null };
+
+  // the STEP words: a gate is a step — entry (grill) before the work, exit (confirm) before the close
+  var STEP = {
+    grill: { role: 'entry', badge: 'ENTRY', what: 'the contract gate — approving it lets the work start' },
+    confirm: { role: 'exit', badge: 'EXIT', what: 'the result gate — approving it lets the delivered work land (complete!)' }
+  };
 
   function byId(id) { return document.getElementById(id); }
   function el(tag, text, cls) {
@@ -115,6 +149,16 @@ export const UI_HTML = `<!doctype html>
     var m = byId('card-message');
     m.textContent = text || '';
     m.className = isError ? 'message error' : 'message';
+  }
+  function shorten(s, n) { s = String(s || ''); return s.length > n ? s.slice(0, n - 1) + '…' : s; }
+  function delivered(g) {
+    var d = g.delivered || { commits: 0, claims: 0, unclaimed: 0, checks: 0, bound: 0 };
+    if (!d.commits && !d.claims && !d.checks) return 'nothing delivered yet';
+    var parts = [];
+    parts.push(d.commits + ' commit' + (d.commits === 1 ? '' : 's'));
+    parts.push(d.claims + ' claim' + (d.claims === 1 ? '' : 's') + (d.unclaimed ? ' (' + d.unclaimed + ' AC unclaimed)' : ''));
+    parts.push(d.checks + ' check' + (d.checks === 1 ? '' : 's') + (d.bound ? ' · ' + d.bound + ' bound to the cited bytes' : ' · none bound'));
+    return parts.join(' · ');
   }
 
   // ── the journey view: legs · tasks · the ahead/state line ──
@@ -142,7 +186,7 @@ export const UI_HTML = `<!doctype html>
     });
   }
 
-  // ── the WAITING ON YOU queue: every undecided submission across the whole journey ──
+  // ── the WAITING ON YOU queue: every undecided submission, EACH NAMED AS ITS STEP ──
   var queue = [];
   function undecidedGate(id) {
     for (var i = 0; i < queue.length; i++) if (queue[i].task === id) return queue[i].gate;
@@ -155,35 +199,82 @@ export const UI_HTML = `<!doctype html>
     byId('queue-count').textContent = gates.length ? String(gates.length) : '';
     if (!gates.length) { list.appendChild(el('li', 'nothing waiting — no undecided submission anywhere in the journey', 'muted')); return; }
     gates.forEach(function (g) {
+      var step = STEP[g.gate] || { role: g.role || '', badge: String(g.gate).toUpperCase(), what: '' };
       var li = el('li');
       var b = el('button');
-      b.appendChild(el('span', g.task));
-      b.appendChild(el('span', 'gate ' + g.gate, 'gate-tag'));
+      b.appendChild(el('span', step.badge + ' · ' + g.gate, 'badge ' + step.role));
+      b.appendChild(el('span', shorten(g.intent, 110), 'q-title'));
+      b.appendChild(el('span', g.task + '  ·  leg ' + (g.leg || '') + '  ·  waiting since ' + (g.since || '?'), 'q-meta'));
+      b.appendChild(el('span', step.what, 'q-do ' + step.role));
+      b.appendChild(el('span', 'delivered: ' + delivered(g), 'q-meta'));
       b.addEventListener('click', function () { openCard(g.task, g.gate); });
       li.appendChild(b);
       list.appendChild(li);
     });
   }
 
-  // ── the gate card: the node's contract · gate states · results + the decision ──
+  // ── the gate card: the complete node · claims · checks · results, for the STEP in hand ──
+  function field(parent, k, v) {
+    var p = el('p', null, 'field');
+    p.appendChild(el('span', k + ': ', 'k'));
+    p.appendChild(el('span', v));
+    parent.appendChild(p);
+  }
   function openCard(id, gate) {
     selected = { id: id, gate: gate };
     message('');
     return api('/api/confirm?id=' + encodeURIComponent(id)).then(function (r) {
       if (r.status !== 200) { message('card unavailable: ' + JSON.stringify(r.doc.error), true); return; }
       var detail = r.doc.detail;
+      var step = gate ? STEP[gate] : null;
       byId('card').hidden = false;
-      byId('card-title').textContent = id + (gate ? ' · gate ' + gate : '');
-      byId('card-intent').textContent = (detail.contract && detail.contract.intent) || '(no contract)';
-      var acs = byId('card-acs');
-      acs.replaceChildren();
-      var list = (detail.contract && detail.contract.acceptanceCriteria) || [];
-      list.forEach(function (ac) { acs.appendChild(el('li', ac)); });
+      byId('card-step-label').textContent = step ? step.badge + ' STEP · the ' + step.role + ' gate (' + gate + ')' : 'Gate card';
+      byId('card-title').textContent = id;
+      byId('card-what').textContent = step ? step.what : 'no undecided gate on this node';
+
+      // NODE — the contract as node.json holds it (the fields the CLI card prints)
+      var node = byId('card-node');
+      node.replaceChildren();
+      var c = detail.contract || {};
+      field(node, 'status', detail.status + (detail.createdAt ? ' · created ' + detail.createdAt : ''));
+      field(node, 'intent', c.intent || '(none)');
+      var acs = c.acceptanceCriteria || [];
+      acs.forEach(function (ac, i) { field(node, 'AC-' + (i + 1), ac); });
+      if (c.workType) field(node, 'workType', c.workType);
+      if (c.model) field(node, 'model', c.model);
+      (detail.inputs || []).forEach(function (i) {
+        field(node, 'input ' + i.name, i.resolved ? i.path + ' @ ' + (i.sha || '(no sha)') : 'UNRESOLVED');
+      });
+      (detail.openQuestions || []).forEach(function (q) { field(node, 'open question' + (q.blocking ? ' [BLOCKING]' : ''), (q.id ? q.id + ': ' : '') + (q.question || '')); });
+
+      // CLAIMS — how each acceptance criterion is met (resolved pointers), gaps named
+      var claims = byId('card-claims');
+      claims.replaceChildren();
+      (detail.claims || []).forEach(function (claim) {
+        var li = el('li', null, claim.statement ? '' : 'gap');
+        li.appendChild(el('span', claim.ac + ': ', 'ac'));
+        li.appendChild(el('span', claim.statement || 'NO CLAIM RECORDED — ' + (claim.acText || '')));
+        (claim.evidence || []).forEach(function (e) { li.appendChild(el('span', 'evidence: ' + e, 'ev')); });
+        claims.appendChild(li);
+      });
+      if (!(detail.claims || []).length) claims.appendChild(el('li', 'no claims recorded', 'muted'));
+
+      // CHECKS — what was run, and against which bytes
+      var checks = byId('card-checks');
+      checks.replaceChildren();
+      (detail.checks || []).forEach(function (k) {
+        var li = el('li');
+        li.appendChild(el('span', k.result === 'pass' ? 'PASS  ' : 'FAIL  ', k.result));
+        li.appendChild(el('span', k.command + (k.sha ? ' @ ' + k.sha : '') + (k.detail ? ' — ' + k.detail : '')));
+        checks.appendChild(li);
+      });
+      if (!(detail.checks || []).length) checks.appendChild(el('li', 'no checks recorded', 'muted'));
+
       var gates = byId('card-gates');
       gates.replaceChildren();
       ['grill', 'confirm'].forEach(function (g) {
         var state = (detail.gates && detail.gates[g] && detail.gates[g].state) || 'none';
-        gates.appendChild(el('span', g + ': ' + state));
+        gates.appendChild(el('span', g + ' (' + STEP[g].role + '): ' + state));
       });
       var results = byId('card-results');
       results.replaceChildren();
@@ -204,7 +295,7 @@ export const UI_HTML = `<!doctype html>
       .then(function (r) { return r.json().then(function (doc) { return { status: r.status, doc: doc }; }); })
       .then(function (r) {
         if (r.status !== 200) { message(decision + ' refused: ' + JSON.stringify(r.doc.error), true); return null; }
-        message(decision + ' recorded — ' + selected.id + ' gate ' + selected.gate + ' (the view re-reads the log)');
+        message(decision + ' recorded — ' + selected.id + ' ' + selected.gate + ' gate (the view re-reads the log)');
         byId('feedback').value = '';
         return refresh();
       })

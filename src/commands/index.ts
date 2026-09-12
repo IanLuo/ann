@@ -154,6 +154,23 @@ export interface LookBack {
   pendingGates: Array<{ task: string; gate: string }>;
 }
 
+/** ONE WAITING GATE, with what a human needs to SEE it (the queue's label): the gate's
+ *  ROLE in the step (entry = the contract gate before work, exit = the result gate before
+ *  the close), whose step it is (the leg + the contract's own intent), how long it has
+ *  waited, and what the log already holds there (the deliverable, as `complete!` reads
+ *  it: cited commits · claims · ACs still unclaimed · checks · checks bound to a cited
+ *  commit). Structural facts only — each binding words them (the UI says ENTRY/EXIT, the
+ *  CLI says grilling (entry)). */
+export interface PendingGate {
+  task: string;
+  gate: string;
+  role: 'entry' | 'exit';
+  leg: string;
+  intent: string;
+  since: string;
+  delivered: { commits: number; claims: number; unclaimed: number; checks: number; bound: number };
+}
+
 /** The advance view (flow-control v6 §2/§5 — the leg gate validated from logs). */
 export interface AdvanceView {
   leg: string;
@@ -830,15 +847,31 @@ export class Commands {
    *  Leg 08 task 01: a cancelled task is closed work — its undecided submission is
    *  exactly what the cancellation was recorded to escape, so the sweep skips it; a
    *  deferred task (the same escape hatch, the work postponed) is skipped the same way. */
-  pendingGates(): Array<{ task: string; gate: string }> {
-    const out: Array<{ task: string; gate: string }> = [];
+  pendingGates(): PendingGate[] {
+    const out: PendingGate[] = [];
     for (const id of this.store.ids()) {
       if (!id.includes('/')) continue;
       if (['cancelled', 'deferred'].includes(this.store.status(id))) continue;
       for (const e of this.store.events(id)) {
         if (e.type !== 'submitted' || typeof e.gate !== 'string') continue;
         if (!this.undecidedSubmission(id, e.gate)) continue;
-        if (!out.some((p) => p.task === id && p.gate === e.gate)) out.push({ task: id, gate: e.gate });
+        if (out.some((p) => p.task === id && p.gate === e.gate)) continue;
+        const c = this.conclusion(id);
+        out.push({
+          task: id,
+          gate: e.gate,
+          role: e.gate === 'grill' ? 'entry' : 'exit',
+          leg: id.split('/')[0],
+          intent: String(this.store.contractOf(id)?.intent ?? ''),
+          since: String(e.at ?? ''),
+          delivered: {
+            commits: c.cited.length,
+            claims: c.claims.length,
+            unclaimed: c.unclaimed.length,
+            checks: c.checks.length,
+            bound: c.checks.filter((k) => k.result === 'pass' && k.sha && c.cited.includes(k.sha)).length,
+          },
+        });
       }
     }
     return out;
