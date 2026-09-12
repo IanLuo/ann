@@ -98,8 +98,7 @@ function driveLifecycle(root: string): string {
     JSON.stringify([{ command: 'npm test', result: 'pass', detail: 'fixture', sha }]),
   ]);
   cli(root, ['submit!', TASK, 'confirm']);
-  cli(root, ['gate!', TASK, 'confirm', 'accept', 'done']);
-  cli(root, ['complete!', TASK]);
+  cli(root, ['gate!', TASK, 'confirm', 'accept', 'done']); // the accept closes it — the evidence is already in the log
   git(root, ['add', '-A']);
   git(root, ['commit', '-qm', 'close the task']);
   return sha;

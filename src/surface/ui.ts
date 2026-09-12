@@ -142,7 +142,7 @@ export const UI_HTML = `<!doctype html>
   // the STEP words: a gate is a step — entry (grill) before the work, exit (confirm) before the close
   var STEP = {
     grill: { role: 'entry', badge: 'ENTRY', what: 'the contract gate — approving it lets the work start' },
-    confirm: { role: 'exit', badge: 'EXIT', what: 'the result gate — approving it lets the delivered work land (complete!)' }
+    confirm: { role: 'exit', badge: 'EXIT', what: 'the result gate — approving it closes the task when the conclusion evidence is recorded (the same rule the frame runs), otherwise it awaits complete!' }
   };
 
   function byId(id) { return document.getElementById(id); }
@@ -245,7 +245,7 @@ export const UI_HTML = `<!doctype html>
       return 'decide it now — accepting ' + gate + ' ' + (STEP[gate].role === 'entry' ? 'lets the work start' : 'lets it land');
     }
     if (st === 'done') return 'closed';
-    if (st === 'accepted') return 'the exit gate is accepted — awaiting the close: complete! ' + detail.id;
+    if (st === 'accepted') return 'the exit gate is accepted but the conclusion evidence is MISSING — record it, then close: complete! ' + detail.id;
     if (st === 'blocked') {
       var which = confirm === 'submitted' ? 'confirm (exit)' : grill === 'submitted' ? 'grill (entry)' : 'a decision';
       return 'waiting on a decision — ' + which + ' is in WAITING ON YOU';

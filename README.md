@@ -87,9 +87,9 @@ session (unchanged); a bad/absent target fails closed at startup (named error, e
 | `append!` | `<id> '<json>'` | WRITE — single-writer append; REFUSES the composite-owned kinds (created/submitted/confirmed/rejected/goal-met) and the RETIRED doc-artifact vocab (artifact-locked/superseded). `cancelled` (a task no longer needed — the counterpart of the submit!/gate! close) is recordable here with a REQUIRED reason | `yes` |
 | `spawn!` | `<id> '<contract-json>'` | WRITE — create a node; enforces the v14 contract schema + F-AC19 + id naming + the conclusion (commit-evidence)/leg gates | `yes` |
 | `submit!` | `<id> grill|confirm [confirmedSha]` | WRITE — submit finished work at a gate for the human decision (the SUCCESS half of the task close; the counterpart is cancel — no longer needed): records `submitted` — the task blocks and waits for `gate! accept|reject`; an interrupted gate stays blocked (resumable), never looks un-started. `[confirmedSha]` (confirm gate only) binds the decision to the exact bytes under review | `yes` |
-| `gate!` | `<id> grill|confirm accept|reject [feedback]` | WRITE — human gate decision (submit + decide; the 3-reject bound is a CONSTANT owned here) | `yes` |
+| `gate!` | `<id> grill|confirm accept|reject [feedback]` | WRITE — human gate decision (submit + decide; the 3-reject bound is a CONSTANT owned here); a CONFIRM accept AUTO-CLOSES the task when the conclusion evidence is already present (the same rule the frame runs) — with the evidence missing the task stays `accepted` and the result names the `complete!` still owed | `yes` |
 | `evidence!` | `<id> <sha>[,<sha>…] [--refs a.md,b.md] [--note '<text>'] [--claims '<json>'] [--checks '<json>']` | WRITE — the CONCLUSION record (F-AC18): structured commit evidence naming the committed doc/code that carries the deliverable (commits[] non-empty, a sha per entry) plus the OPTIONAL structured conclusion (format v18): --claims = one {ac, statement, evidence?} per acceptance criterion (how it is met; evidence entries are POINTERS — commit sha · ref path · doc name — resolved at READ time) and --checks = {command, result: pass|fail, detail?, sha?} (what was RUN, sha binding it to the bytes); the shape stays the store's — a validated front over the same L1 write, provenance from RECORDED_BY, and a bad JSON argument writes nothing | `yes` |
-| `complete!` | `<id> [--note '<text>']` | WRITE — the DONE terminal: refuses without the confirm gate's LAST decision being an ACCEPT and without conclusion evidence (evidence.commits[]); gates decide, commands complete — gate! confirm accept never auto-completes | `yes` |
+| `complete!` | `<id> [--note '<text>']` | WRITE — the EXPLICIT DONE terminal (a confirm accept auto-closes on evidence, so this gesture is the accepted-without-evidence exception; an already-completed task gets an idempotent refusal): refuses without the confirm gate's LAST decision being an ACCEPT and without the conclusion evidence — the F-AC18 predicate: evidence.commits[] AND the structured conclusion (a claim per acceptance criterion · at least one PASSING check bound to a cited commit) | `yes` |
 | `goal!` | `met [feedback]` | WRITE — the HUMAN verdict that seals a structurally-exhausted session (goal-met on the goal root); refused for automated (agent) initiators, double-met, and any undecided submission | `yes` |
 | `goal!` | `archive [--override]` | WRITE — guarded structural reset: move .ann/journey → .ann/archive/sessions/<ts>-<slug>/ for a fresh goal; refuses without a met verdict (or --override), on store-external verify drifts, and on uncommitted tracked .ann/journey changes | `yes` |
 | `goal!` | `seed [goal-statement]` | WRITE — grill a goal at SESSION scope (EMPTY journey seeds new; a RE-SEEDABLE sole unconsumed goal is REPLACED after re-grilling — consumed/met goals refuse): the interactive idea-validation session (grill → batch-ask → research → re-grill → human verdict); on solid, synthesize goal.md (Goal:/Success criteria:) + seed/re-seed the goal leg + write docs/goal.md + regenerate the manifest; revise/reject seeds nothing | `yes` |
@@ -141,16 +141,19 @@ will execute) · `chain` (the flow config as data) · `steps` (the step registry
    `evidence! <id> <sha> [--refs a.md,b.md] [--note '<text>']` (commits[] non-empty, a
    sha per entry). The retired artifact-lock/supersede vocab (v16) is refused by `append!`.
 4. Close: `submit! <id> confirm` then `gate! <id> confirm accept` — GATE② (exit): the
-   human confirms the result. The gate writes the DECISION, never the delivery: an
-   accepted task with no `completed` reads `accepted`, and `complete! <id>` (which
-   refuses without the accept and without `evidence.commits[]`) records the `completed`
-   event — `done` follows only from that event (gates decide, commands complete).
+   human confirms the result. When the conclusion evidence is already in the log the
+   ACCEPT closes the task in the same gesture (`completed` rides the accept — the same
+   rule the frame runs, one rule everywhere). Without the evidence the task honestly
+   reads `accepted`, and `complete! <id>` (which refuses without the accept and without
+   the conclusion evidence) records the explicit `completed` — `done` follows only from
+   that event.
 
 **Automate.** `run! <id>` drives a task through the frame (materialize → grill →
 activate → execute → verify → confirm → commit) and stops at the first block
 (fail-closed when no provider is configured). It is resumable, but re-enters the frame
 — do **not** run it on an already-`completed` task to "close" it: it re-executes and
-can regress the status. Close via the gate + `evidence!` + `complete!` flow instead.
+can regress the status. Close via the gate + `evidence!` (+ `complete!` when the
+accepted task still lacks the evidence) flow instead.
 `advance!` (the operator action) is the approved-execute half of `run next`
 (functional-spec v2 F5): `next` proposes the frontmost-ready action, the builder's ONE
 approve makes `advance!` re-check integrity (fail-closed on dirty state), re-derive the

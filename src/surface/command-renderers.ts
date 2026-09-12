@@ -665,8 +665,10 @@ export const RENDERS: Record<string, Renderer> = {
     return `submitted ${v.gate} → ${env.args[1]}${v.confirmedSha ? ` (confirmedSha ${v.confirmedSha})` : ''}\n`;
   },
   'gate!': (value, env) => {
-    const v = (value as { ok: true; value: { gate: string; decision: string; escalated: boolean } }).value;
+    const v = (value as { ok: true; value: { gate: string; decision: string; escalated: boolean; completed?: boolean; pending?: string } }).value;
     const lines = [`gate ${v.gate}: ${v.decision} → ${env.args[1]}`];
+    if (v.completed) lines.push('  (completed with the accept — the conclusion evidence was already present)');
+    if (v.pending) lines.push(`  ${v.pending}`);
     if (v.escalated) lines.push('  (reject bound reached — the next rejection escalates to a human design decision)');
     return block(lines);
   },
@@ -887,7 +889,8 @@ function advancedLines(v: AdvanceValue): string[] {
     } else if (l.where === 'awaiting-runner') {
       lines.push(`  landing: ${l.task} awaits the RUNNER (${l.frameStop}) — do the work, git commit, and record`);
       lines.push(`           evidence (ann evidence! ${l.task} <sha>); the confirm-result gate then decides`);
-      lines.push(`           — a human gate, never passed silently (then ann complete! ${l.task}, or re-run: ann run! ${l.task}).`);
+      lines.push(`           — a human gate, never passed silently (accepting it closes the task when the conclusion`);
+      lines.push(`           evidence is recorded; without the evidence it awaits ann complete! ${l.task}).`);
     } else if (l.where === 'completed') {
       lines.push(`  landing: ${l.task} completed — its gates were decided by the human channel`);
       if (l.advance) lines.push(`  next: ${l.advance}`);

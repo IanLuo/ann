@@ -187,6 +187,32 @@ describe('submit! + gate! — the two-write gate sequence (core-design §4)', ()
   it('the store refuses a confirm gate with no confirmed grill (the sequence is L0-enforced)', () => {
     expect(errorOf(cmds().gate('01-leg/01-a', 'confirm', 'accept')).code).toBe('store-refused');
   });
+
+  /* The ONE close rule (leg 08 task 02, CORRECTIVE): the accept auto-completes on evidence,
+   * and NOTHING ELSE does. These pin the two non-closing directions — the entry gate and the
+   * reject — against the same fixture shape the closing path uses. */
+  it('a GRILL accept never completes — GATE① opens the work; only the CONFIRM accept closes', () => {
+    writeNode('01-leg/02-grill', CONTRACT, [ev('created')]);
+    const c = cmds();
+    valueOf(c.evidence('01-leg/02-grill', [{ sha: realSha() }]));
+    const out = valueOf(c.gate('01-leg/02-grill', 'grill', 'accept'));
+    expect(out.completed).toBeUndefined();
+    expect(out.pending).toBeUndefined(); // the pending hint is a CONFIRM-gate fact only
+    expect(c.events('01-leg/02-grill').some((e) => e.type === 'completed')).toBe(false);
+    expect(c.status('01-leg/02-grill')).toBe('queued'); // GATE① accepted, the work has not started
+  });
+
+  it('a REJECT never completes — even with the conclusion evidence already present', () => {
+    writeNode('01-leg/03-reject', CONTRACT, [ev('created'), ev('submitted', { gate: 'grill' }), ev('confirmed', { gate: 'grill' })]);
+    const c = cmds();
+    valueOf(c.evidence('01-leg/03-reject', [{ sha: realSha() }]));
+    valueOf(c.submit('01-leg/03-reject', 'confirm'));
+    const out = valueOf(c.gate('01-leg/03-reject', 'confirm', 'reject', 'not this time'));
+    expect(out.completed).toBeUndefined();
+    expect(out.pending).toBeUndefined(); // a rejection is a decision, not a missing gesture
+    expect(c.events('01-leg/03-reject').some((e) => e.type === 'completed')).toBe(false);
+    expect(c.status('01-leg/03-reject')).not.toBe('done');
+  });
 });
 
 describe('append! — refuses what the composites own (§8:289)', () => {
@@ -413,18 +439,40 @@ describe('evidence! + complete! — the close gesture commands (leg 08 task 02)'
     expect(cmds().status('01-leg/01-a')).toBe('accepted'); // the honest intermediate state STANDS
   });
 
-  it('AC-2 RESOLVED: gate! confirm accept does NOT auto-complete — `accepted` stands until complete!', () => {
+  it('CORRECTIVE (leg 08 task 02 REVERSED): gate! confirm accept AUTO-COMPLETES when the conclusion evidence is present — ONE gesture', () => {
     writeNode('01-leg/01-a', CONTRACT, [ev('created'), ev('submitted', { gate: 'grill' }), ev('confirmed', { gate: 'grill' })]);
     const c = cmds();
     conclude(c, '01-leg/01-a', realSha());
     valueOf(c.submit('01-leg/01-a', 'confirm'));
-    valueOf(c.gate('01-leg/01-a', 'confirm', 'accept', 'looks right'));
-    // the human accepted a task that ALREADY carried commit evidence — still not done:
-    // gates decide, commands complete (the gate writes the decision, never the delivery)
-    expect(c.status('01-leg/01-a')).toBe('accepted');
-    valueOf(c.complete('01-leg/01-a'));
+    const out = valueOf(c.gate('01-leg/01-a', 'confirm', 'accept', 'looks right'));
+    expect(out.completed).toBe(true);
+    expect(out.pending).toBeUndefined();
     expect(c.status('01-leg/01-a')).toBe('done');
+    // BOTH events, in order — the close RIDES the accept, it is not a second gesture
+    expect(c.events('01-leg/01-a').map((e) => e.type).slice(-2)).toEqual(['confirmed', 'completed']);
+    expect(String(c.events('01-leg/01-a').at(-1)!.note)).toContain('completed with the confirm accept (evidence present)');
     expect(c.check()).toEqual([]);
+    // the done terminal is recorded ONCE: a re-accept never writes a second `completed`,
+    // and the explicit gesture is the idempotent refusal (complete! stays exactly as today)
+    valueOf(c.gate('01-leg/01-a', 'confirm', 'accept'));
+    expect(c.events('01-leg/01-a').filter((e) => e.type === 'completed')).toHaveLength(1);
+    expect(errorOf(c.complete('01-leg/01-a')).code).toBe('already-completed');
+    expect(c.status('01-leg/01-a')).toBe('done');
+  });
+
+  it('the honest EXCEPTION stands: a confirm accept WITHOUT conclusion evidence leaves `accepted`, and names the gesture owed', () => {
+    writeNode('01-leg/01-a', CONTRACT, [ev('created'), ev('submitted', { gate: 'grill' }), ev('confirmed', { gate: 'grill' })]);
+    const c = cmds();
+    valueOf(c.submit('01-leg/01-a', 'confirm'));
+    const out = valueOf(c.gate('01-leg/01-a', 'confirm', 'accept'));
+    expect(out.completed).toBeUndefined();
+    expect(String(out.pending)).toContain('complete! 01-leg/01-a');
+    expect(String(out.pending)).toContain('no-evidence');
+    expect(c.status('01-leg/01-a')).toBe('accepted');
+    expect(c.events('01-leg/01-a').some((e) => e.type === 'completed')).toBe(false);
+    // the explicit path still refuses it — the EVIDENCE is the precondition, not the gesture
+    expect(errorOf(c.complete('01-leg/01-a')).code).toBe('no-evidence');
+    expect(c.status('01-leg/01-a')).toBe('accepted');
   });
 
   it('complete! is recorded once, and never on a leg root or an unknown node', () => {

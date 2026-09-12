@@ -137,14 +137,14 @@ describe('e2e — the CLI binary', () => {
     const sha = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
     expect(out(conclude(root, TASK, sha, ['--note', 'the thing is committed']))).toContain(`evidence recorded → ${TASK} (1 commit`);
 
-    // gate ②: confirm is not 'done' on its own — complete! closes it, and only behind the
-    // human's accept + the evidence (gates decide, commands complete; AC-2 resolved)
+    // gate ②: the confirm ACCEPT closes the task in ONE gesture when the conclusion
+    // evidence is already present — the same rule the frame runs (leg 08 task 02 corrective)
     expect(out(cli(root, ['submit!', TASK, 'confirm']))).toContain('submitted confirm');
-    expect(out(cli(root, ['gate!', TASK, 'confirm', 'accept', 'done']))).toContain('gate confirm: accept');
-    expect(out(cli(root, ['status', TASK]))).toContain('accepted'); // the honest intermediate state
-    expect(out(cli(root, ['status', TASK]))).not.toContain('done');
-    expect(out(cli(root, ['complete!', TASK]))).toContain(`completed → ${TASK}`);
+    const acceptOut = out(cli(root, ['gate!', TASK, 'confirm', 'accept', 'done']));
+    expect(acceptOut).toContain('gate confirm: accept');
+    expect(acceptOut).toContain('completed with the accept');
     expect(out(cli(root, ['status', TASK]))).toContain('done');
+    expect(out(cli(root, ['complete!', TASK]))).toContain('already-completed'); // the done terminal is recorded once
 
     // commit the whole tree so the check's manifest-freshness + traceability read a clean git
     git(root, ['add', '-A']);
@@ -219,13 +219,14 @@ describe('e2e — the CLI binary', () => {
     expect(out(noSha)).toContain('usage: ann evidence!');
     expect(out(cli(root, ['evidence', TASK, sha]))).toContain("writes are marked with '!'");
 
-    // the gestures, in order: evidence! then the gates then complete!
+    // the gestures, in order: evidence! then the gates — the confirm ACCEPT closes the
+    // task when the evidence is present (leg 08 task 02 corrective), so the explicit
+    // `complete!` is the idempotent refusal here
     expect(out(conclude(root, TASK, sha, ['--refs', 'docs/thing.md', '--note', 'the deliverable is committed']))).toContain('1 commit · 1 ref');
     cli(root, ['submit!', TASK, 'confirm']);
     cli(root, ['gate!', TASK, 'confirm', 'accept', 'done']);
-    expect(out(cli(root, ['complete!', TASK, '--note', 'closed by the operator']))).toContain(`completed → ${TASK}`);
     expect(out(cli(root, ['status', TASK]))).toContain('done');
-    expect(out(cli(root, ['complete!', TASK]))).toContain('already-completed');
+    expect(out(cli(root, ['complete!', TASK, '--note', 'closed by the operator']))).toContain('already-completed');
 
     git(root, ['add', '-A']);
     git(root, ['commit', '-qm', 'close the task']);
@@ -339,7 +340,10 @@ describe('e2e — the goal-session lifecycle (v6: seed → docs/goal.md → work
     expect(out(cli(r, ['submit!', TASK, 'grill']))).toContain('submitted grill');
     expect(out(cli(r, ['gate!', TASK, 'grill', 'accept', 'grilled']))).toContain('gate grill: accept');
     expect(out(cli(r, ['submit!', TASK, 'confirm']))).toContain('submitted confirm');
-    expect(out(cli(r, ['gate!', TASK, 'confirm', 'accept', 'done']))).toContain('gate confirm: accept');
+    const earlyAccept = out(cli(r, ['gate!', TASK, 'confirm', 'accept', 'done']));
+    expect(earlyAccept).toContain('gate confirm: accept');
+    // accepted with NO evidence yet: the honest exception — the result names the gesture owed
+    expect(earlyAccept).toContain(`complete! ${TASK}`);
     const sha = execFileSync('git', ['-C', r, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
     expect(out(conclude(r, TASK, sha))).toContain('evidence recorded');
     expect(out(cli(r, ['complete!', TASK]))).toContain('completed →');
@@ -455,7 +459,7 @@ describe('e2e — the OPERATOR ACTION advance! (F5 approve→execute, leg 07 tas
     conclude(root, TASK, sha, ['--note', 'committed']);
     expect(out(cli(root, ['submit!', TASK, 'confirm']))).toContain('submitted confirm');
     expect(out(cli(root, ['gate!', TASK, 'confirm', 'accept', 'done']))).toContain('gate confirm: accept');
-    cli(root, ['complete!', TASK]);
+    expect(out(cli(root, ['status', TASK]))).toContain('done'); // the accept closed it — the evidence was already in the log
     git(root, ['add', '-A']);
     git(root, ['commit', '-qm', 'close 01-leg/01-a']);
     // the EMPTY front leg — an advance points AT it but cannot author its task (v7 §5)

@@ -23,12 +23,13 @@ const artifactNameOf = (file: string): string => file.replace(/\.[^./]*$/, '');
  *
  *   spawn!      the v14 node.json contract schema + F-AC19 + id naming + the
  *               commit-evidence conclusion gate + the leg gate  (from the CLI)
- *   gate!       the reject bound (3/gate, a CONSTANT) + the two-write sequence
+ *   gate!       the reject bound (3/gate, a CONSTANT) + the two-write sequence +
+ *               the ONE close rule: a confirm ACCEPT auto-completes on evidence
  *   submit!     the other half of that sequence + the gate② content binding
  *   evidence!   the CONCLUSION record (F-AC18): commits[] non-empty, the shape stays
  *               the store's — a validated front, never a second validator
- *   complete!   the DONE terminal: refused without a confirm-gate ACCEPT + commit
- *               evidence (leg 08 task 02: gates decide, commands complete)
+ *   complete!   the EXPLICIT DONE terminal: the accepted-without-evidence exception
+ *               (leg 08 task 02 CORRECTED: the accept auto-closes on evidence)
  *   append!     refuses the composite-owned kinds, `created`, and the RETIRED
  *               doc-artifact vocab (artifact-locked / superseded — D3)
  *
@@ -121,6 +122,12 @@ export interface GateOutcome {
   decision: 'accept' | 'reject';
   /** L2 reads THIS ONLY — the bound itself stays inside `gate!` (core-design §4). */
   escalated: boolean;
+  /** A CONFIRM accept AUTO-CLOSES when the conclusion evidence is already present — the
+   *  ONE rule (leg 08 task 02, corrective): true when `completed` rode the same gesture. */
+  completed?: boolean;
+  /** A confirm accept that left the task `accepted` because the conclusion evidence is
+   *  MISSING: the explicit gesture still owed (`complete!`, with its no-evidence refusal). */
+  pending?: string;
 }
 
 /** The STRUCTURED CONCLUSION as the log holds it (format v18) — the ONE derivation the
@@ -374,6 +381,14 @@ export class Commands {
    * `rejected`** (the store's own derivation). The v13 predicate looked only for
    * `confirmed`, so after a rejection it saw the old submission as still pending and
    * skipped the write; a rework then never re-entered `blocked`.
+   *
+   * A CONFIRM-gate ACCEPT also CLOSES the task when the conclusion evidence is already
+   * present — ONE RULE EVERYWHERE (leg 08 task 02, CORRECTIVE): the frame already
+   * appended `completed` off the same gate decision, so the CLI/service/UI path behaved
+   * differently on the same state. The SAME F-AC18 predicate decides here
+   * (`parentConcluded` — what `spawn!`, `check()` and `complete!` read), never a second
+   * predicate. With the evidence ABSENT the task stays honestly `accepted` and the
+   * result names the gesture still owed. Grill accepts and rejects never complete.
    */
   gate(id: string, gate: string, decision: string, feedback = ''): CommandResult<GateOutcome> {
     if (!getVOCAB().gates.includes(gate)) return fail('unknown-gate', `gate must be one of ${getVOCAB().gates.join('|')}`);
@@ -388,6 +403,10 @@ export class Commands {
         `${REJECT_BOUND} rejection cycles exhausted at gate '${gate}' — escalate to a human design decision (force-approve / restructure / block)`,
       );
     }
+    // The ONE closing rule: a confirm ACCEPT with the conclusion evidence present is the
+    // only continuation there is (leg 08 task 02, corrective — the single-branch argument).
+    const autoClose = decision === 'accept' && gate === 'confirm' && this.store.parentConcluded(id)
+      && !this.store.events(id).some((e) => e.type === 'completed');
     try {
       if (!this.undecidedSubmission(id, gate)) {
         this.store.appendEvent(this.node(id), { at: this.today, type: 'submitted', gate, note: `submitted with the decision (${this.who})` });
@@ -398,11 +417,28 @@ export class Commands {
           ? { at: this.today, type: 'confirmed', gate, ...(feedback ? { feedback } : {}), note: `accepted (${this.who})` }
           : { at: this.today, type: 'rejected', gate, feedback, note: `rejected (${this.who})` },
       );
+      // The auto-close rides the SAME gesture — the event names itself, so the log never
+      // reads like a separate `complete!`. Never on a re-accept of an already-closed task.
+      if (autoClose) {
+        this.store.appendEvent(this.node(id), {
+          at: this.today,
+          type: 'completed',
+          note: `completed with the confirm accept (evidence present) (${this.who})`,
+        });
+      }
     } catch (e) {
       return fail('store-refused', (e as Error).message);
     }
     const after = decision === 'reject' ? rejects + 1 : rejects;
-    return ok({ gate, decision, escalated: after >= REJECT_BOUND });
+    return ok({
+      gate,
+      decision,
+      escalated: after >= REJECT_BOUND,
+      ...(autoClose ? { completed: true } : {}),
+      ...(decision === 'accept' && gate === 'confirm' && !autoClose
+        ? { pending: `${id}: the confirm gate is ACCEPTED but the conclusion evidence is missing — the task honestly reads 'accepted'; close it with the explicit gesture \`complete! ${id}\` once the evidence is recorded (it refuses with 'no-evidence' until then)` }
+        : {}),
+    });
   }
 
   /**
@@ -458,14 +494,15 @@ export class Commands {
   }
 
   /**
-   * `complete!` — the DONE terminal (leg 08 task 02 AC-2, RESOLVED: gates decide,
-   * commands complete — `gate! confirm accept` does NOT auto-complete; the rationale is
-   * recorded on that task). `completed` therefore always cites a REAL gate decision and
-   * REAL committed work: refused unless the confirm gate's LAST decision is an accept and
-   * the task carries conclusion evidence (`evidence.commits[]` — the SAME F-AC18
-   * predicate the store's spawn gate and check() read). GATE-2 and F-AC18 then hold by
-   * construction, and the honest `accepted` status (leg 08 task 01) names the missing
-   * gesture instead of hiding it behind an auto-complete.
+   * `complete!` — the EXPLICIT DONE terminal (leg 08 task 02 AC-2, CORRECTED: a confirm
+   * accept auto-completes when the conclusion evidence is present — see `gate!`; this
+   * gesture stays for the honest exception, an ACCEPTED task whose evidence is missing,
+   * and is an idempotent `already-completed` refusal on a closed one). `completed`
+   * therefore always cites a REAL gate decision and REAL committed work: refused unless
+   * the confirm gate's LAST decision is an accept and the task carries conclusion
+   * evidence (`evidence.commits[]` — the SAME F-AC18 predicate the store's spawn gate
+   * and check() read). GATE-2 and F-AC18 then hold by construction, and the honest
+   * `accepted` status (leg 08 task 01) names the missing evidence, never a missing rule.
    */
   complete(id: string, opts: { note?: string } = {}): CommandResult<{ at: string }> {
     if (!id.includes('/')) return fail('leg-gate-write', 'leg roots carry no lifecycle — gates and completion live on tasks (flow-control v6 §3)');

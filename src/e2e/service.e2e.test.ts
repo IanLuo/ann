@@ -100,8 +100,7 @@ function driveJourney(root: string): void {
     JSON.stringify([{ command: 'npm test', result: 'pass', detail: 'fixture', sha }]),
   ]);
   cli(root, ['submit!', T1, 'confirm']);
-  cli(root, ['gate!', T1, 'confirm', 'accept', 'done']);
-  cli(root, ['complete!', T1]);
+  cli(root, ['gate!', T1, 'confirm', 'accept', 'done']); // the accept closes it — the evidence is already in the log
   // the STRAY submission that hides in a done leg (status stays `done`)
   cli(root, ['submit!', T1, 'grill']);
   // leg 02 — the active leg, with two undecided grill submissions
