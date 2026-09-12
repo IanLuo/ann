@@ -369,12 +369,15 @@ describe('e2e — the operate loop: the WHAT\'S NEXT card + the approve (leg 11)
     for (const route of ['/api/whatsnext', '/api/approve', '/api/journey', '/api/gates', '/api/confirm?id=', '/api/gate', '/api/packet?id=', '/api/detail?id=', '/api/next', '/api/results?id=']) expect(script).toContain(route);
     // the card's own words: the machine-executable derivation, the presented-and-stopped
     // boundary, how to clear a blocker, the approve affordance, and the DRILL-INS
-    for (const word of ['MACHINE-EXECUTABLE', 'PRESENTED AND STOPPED', 'NOT machine-executable', 'the authored-work boundary', 'uncommitted tracked journey changes — commit them', 'frontmost-ready', 'leg gate', 'UNMET — ', 'pending gates', 'drillTask', 'drillLeg', 'drillBlocker', 'drillAdvance', 'drillResult', 'drillHref', 'drillFromHash', 'git show', 'DRILLS IN', 'wn-fact', 'drill in', '_blank', 'noopener', "kind: 'result'"])
+    for (const word of ['MACHINE-EXECUTABLE', 'PRESENTED AND STOPPED', 'NOT machine-executable', 'the authored-work boundary', 'uncommitted tracked journey changes — commit them', 'frontmost-ready', 'leg gate', 'UNMET — ', 'pending gates', 'drillTask', 'drillLeg', 'drillBlocker', 'drillAdvance', 'drillResult', 'drillHref', 'parseDrill', 'renderFocus', 'enterFocus', 'git show', 'DRILLS IN', 'wn-fact', 'drill in', '_blank', 'noopener', "kind: 'result'"])
       expect(script, `the served page lost '${word}'`).toContain(word);
     expect(page.body).toContain('Approve'); // the approve affordance itself
     // every drill is a NEW-TAB link carrying its item in the fragment (`#drill=<kind>&id=…`)
     expect(page.body).toContain('target="_blank"');
     expect(page.body).toContain('#drill=advance');
+    // …and a drill tab is FOCUSED: it renders that item only, with its own way back
+    expect(page.body).toContain('id="back"');
+    expect(page.body).toContain("document.body.className = 'focus'");
     expect(page.body).not.toContain('innerHTML'); // data is rendered as text, never as markup
     const checkDir = mkdtempSync(join(tmpdir(), 'ann-ui-wn-check-'));
     const checkFile = join(checkDir, 'ui-page.js');

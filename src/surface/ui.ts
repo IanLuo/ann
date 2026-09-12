@@ -130,6 +130,14 @@ export const UI_HTML = `<!doctype html>
   .wn-blockers a.wn-blocker .k { color: var(--muted); }
   .drill { margin: .15rem 0; font-size: .85rem; }
   a.task { text-decoration: none; }
+  /* FOCUS MODE — a drilled item in its own tab: that item AND NOTHING ELSE. The journey
+     views are neither rendered nor READ (see parseDrill/renderFocus), the pane goes full
+     width, and the header keeps only a way back. */
+  body.focus .wn, body.focus .queue, body.focus .journey, body.focus #state { display: none; }
+  body.focus main { grid-template-columns: minmax(0, 1fr); padding-top: 1rem; }
+  body.focus header { padding-bottom: .5rem; }
+  a.ghost { text-decoration: none; }
+  a.ghost[hidden] { display: none; }
   /* a DRILLED item (an exit-gate result / evidence pointer) and the drill's own output:
      every one is a NEW-TAB link carrying the item in its fragment */
   .ev.drill, a.ev.drill, li a.drill { display: block; padding: .1rem 0; color: var(--muted); font: inherit; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .8rem; text-align: left; text-decoration: none; cursor: pointer; }
@@ -142,7 +150,7 @@ export const UI_HTML = `<!doctype html>
   <h1>ann · the journey</h1>
   <div class="hrow">
     <p id="state" class="state">loading…</p>
-    <span><span id="updated" class="muted"></span> <button class="ghost" id="refresh">Refresh</button></span>
+    <span><a id="back" class="ghost" href="./" hidden>‹ the journey</a> <span id="updated" class="muted"></span> <button class="ghost" id="refresh">Refresh</button></span>
   </div>
 </header>
 <main>
@@ -160,11 +168,11 @@ export const UI_HTML = `<!doctype html>
     </div>
     <p class="message" id="wn-message"></p>
   </section>
-  <section class="queue">
+  <section class="queue" id="queue-view">
     <h2>Waiting on you <span id="queue-count" class="count"></span></h2>
     <ul id="queue"><li class="muted">loading…</li></ul>
   </section>
-  <section class="journey">
+  <section class="journey" id="journey-view">
     <h2>The journey</h2>
     <div id="legs"></div>
   </section>
@@ -462,7 +470,7 @@ export const UI_HTML = `<!doctype html>
             byId('feedback').value = '';
             return refresh();
           })
-          .then(function () { return openCard(id, undecidedGate(id)); });
+          .then(function () { if (focus) return null; return openCard(id, undecidedGate(id)); });
       })
       .catch(function (e) { message('request failed: ' + e.message, true); });
   }
@@ -570,33 +578,74 @@ export const UI_HTML = `<!doctype html>
     a.title = 'open in a new tab';
     return a;
   }
-  /** THE NEW TAB'S ENTRY POINT: parse the fragment and render that drill. A malformed
-   *  fragment renders nothing (never a broken page); an unknown kind is ignored. */
-  function drillFromHash() {
+  /** THE FRAGMENT IS THE DRILL: parse it into the ONE item this page presents (null = the
+   *  full journey view). Pure — renderFocus() renders it. A malformed fragment renders
+   *  nothing (never a broken page); an unknown kind is ignored. */
+  function parseDrill() {
     var h = String((typeof location !== 'undefined' && location.hash) || '');
-    if (h.indexOf('#drill=') !== 0) return false;
+    if (h.indexOf('#drill=') !== 0) return null;
     var q = {};
     try {
       h.slice(1).split('&').forEach(function (kv) {
         var i = kv.indexOf('=');
         if (i > 0) q[decodeURIComponent(kv.slice(0, i))] = decodeURIComponent(kv.slice(i + 1));
       });
-      if (q.drill === 'advance') { drillAdvance(); return true; }
-      if (q.drill === 'task' && q.id) { drillTask(q.id); return true; }
-      if (q.drill === 'leg' && q.id) { drillLeg(q.id, null); return true; }
-      if (q.drill === 'gates') { drillGates((whatsNext && whatsNext.pendingGates) || []); return true; }
-      if (q.drill === 'gate' && q.id && q.gate) { openCard(q.id, q.gate); return true; }
-      // a result drilled from a gate carries that gate, so the new tab keeps the decision in
-      // hand — the SAME rule the pane applies (decide() re-checks the gate before writing)
-      if (q.drill === 'result' && q.id && q.n) { drillResult(q.id, q.n, q.gate ? { id: q.id, gate: q.gate } : null); return true; }
-      if (q.drill === 'blocker' && q.blocker) { drillBlocker(q.blocker); return true; }
-    } catch (e) { /* a bad fragment is ignored */ }
-    return false;
+    } catch (e) {
+      return null;
+    }
+    if (q.drill === 'advance') return { kind: 'advance' };
+    if (q.drill === 'task' && q.id) return { kind: 'task', id: q.id };
+    if (q.drill === 'leg' && q.id) return { kind: 'leg', id: q.id };
+    if (q.drill === 'gates') return { kind: 'gates' };
+    if (q.drill === 'gate' && q.id && q.gate) return { kind: 'gate', id: q.id, gate: q.gate };
+    if (q.drill === 'result' && q.id && q.n) return { kind: 'result', id: q.id, n: q.n, gate: q.gate };
+    if (q.drill === 'blocker' && q.blocker) return { kind: 'blocker', blocker: q.blocker };
+    return null;
   }
-  /** Open the pane for a DRILLED item: the same pane the gate queue uses, headed by what
-   *  is shown. A drill is PRESENTED, never decided — the decision target is cleared, so no
- *  decision
-   *  UI can appear for a node the operator did not pick from WAITING ON YOU. */
+  /** THE FOCUSED TAB — the drilled item AND NOTHING ELSE: the journey views are hidden and
+   *  never READ (renderFocus issues only that item’s own read), the pane takes the width,
+   *  and the header keeps only the way back. */
+  function enterFocus(spec) {
+    focus = spec;
+    document.body.className = 'focus';
+    byId('wn').hidden = true;
+    byId('queue-view').hidden = true;
+    byId('journey-view').hidden = true;
+    byId('back').hidden = false;
+    document.title = 'ann · ' + (spec.kind === 'blocker' ? 'an integrity blocker' : spec.kind + (spec.id ? ' · ' + spec.id : ''));
+  }
+  /** Render the focused drill — also the Refresh path in a focused tab, so a drill tab
+   *  never re-reads the journey it is not showing. */
+  function renderFocus() {
+    var s = focus;
+    if (!s) return Promise.resolve(null);
+    var stamped = function () { byId('updated').textContent = 'as of ' + new Date().toLocaleTimeString(); return null; };
+    if (s.kind === 'advance') return Promise.resolve(drillAdvance()).then(stamped);
+    if (s.kind === 'task') return drillTask(s.id).then(stamped);
+    if (s.kind === 'leg') return drillLeg(s.id, null).then(stamped);
+    if (s.kind === 'gate') return openCard(s.id, s.gate).then(stamped);
+    if (s.kind === 'blocker') return Promise.resolve(drillBlocker(s.blocker)).then(stamped);
+    if (s.kind === 'result') return (s.gate ? drillResultFromGate(s.id, s.n, s.gate) : drillResult(s.id, s.n, null)).then(stamped);
+    if (s.kind === 'gates') {
+      return api('/api/whatsnext').then(function (r) {
+        drillGates(r.status === 200 ? (r.doc.pendingGates || []) : []);
+        return stamped();
+      });
+    }
+    return Promise.resolve(null);
+  }
+  /** A result drilled from a gate keeps the decision in hand — but the NODE decides whether
+   *  there IS one (the SAME rule the pane applies): re-derive it here, so a gate decided
+   *  since the link was made never shows an Accept/Reject that cannot land. */
+  function drillResultFromGate(id, n, gate) {
+    return api('/api/confirm?id=' + encodeURIComponent(id)).then(function (r) {
+      var state = r.status === 200 ? gateState(r.doc.detail, gate).state : 'none';
+      return drillResult(id, n, state === 'submitted' ? { id: id, gate: gate } : null);
+    });
+  }
+  /** Open the pane for a DRILLED item: the same pane the gate queue uses, headed by what is
+   *  shown. A drill is PRESENTED, never decided — the decision target is cleared, so no
+   *  decision UI can appear for a node the operator did not pick from WAITING ON YOU. */
   function drillHead(label, title, what, keep) {
     // A drill from the EXIT GATE carries the decision it was opened inside ('keep'), so the
     // Accept/Reject survive the look (the operator is still reviewing that node); every
@@ -838,8 +887,9 @@ export const UI_HTML = `<!doctype html>
   byId('wn-action').rel = 'noopener';
   byId('wn-action').title = 'open in a new tab';
 
-  // ── boot: the reads, and a view that cannot go silently stale ──
+  // ── boot: the FULL journey view, or the ONE drilled item a new tab was opened at ──
   function refresh() {
+    if (focus) return renderFocus(); // a focused tab re-reads its item, NEVER the journey
     return Promise.all([api('/api/journey'), api('/api/gates'), api('/api/whatsnext')]).then(function (r) {
       if (r[0].status !== 200) { byId('state').textContent = 'journey unavailable: ' + JSON.stringify(r[0].doc.error); return; }
       renderState(r[0].doc.ahead || {});
@@ -850,12 +900,20 @@ export const UI_HTML = `<!doctype html>
       byId('updated').textContent = 'as of ' + new Date().toLocaleTimeString();
     });
   }
+  var focus = null; // the drilled item this tab presents (null = the whole journey)
   byId('refresh').addEventListener('click', function () { refresh().catch(function (e) { message('refresh failed: ' + e.message, true); }); });
   window.addEventListener('focus', function () { refresh().catch(function () {}); });
   document.addEventListener('visibilitychange', function () { if (!document.hidden) refresh().catch(function () {}); });
-  refresh()
-    .then(function () { drillFromHash(); }) // a drill link's new tab renders its item
-    .catch(function (e) { byId('state').textContent = 'service unreachable: ' + e.message; });
+  var focusSpec = parseDrill();
+  if (focusSpec) {
+    // A DRILLED ITEM IN ITS OWN TAB: only that item is read and rendered — the journey
+    // views are neither fetched nor shown.
+    enterFocus(focusSpec);
+    renderFocus().catch(function (e) { message('drill failed: ' + e.message, true); });
+  } else {
+    byId('back').hidden = true; // the way back belongs to a focused tab only
+    refresh().catch(function (e) { byId('state').textContent = 'service unreachable: ' + e.message; });
+  }
 })();
 </script>
 </body>

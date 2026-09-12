@@ -77,6 +77,7 @@ interface Stub {
   get(id: string): FakeEl;
   fetched: string[];
   href: string;
+  title: string;
 }
 
 /** Boot the served page — optionally AT a drill URL (that is what a new tab does). */
@@ -84,10 +85,13 @@ function boot(reads: Record<string, unknown>, hash = ''): Stub {
   const ids = [...SCRIPT.matchAll(/byId\('([^']+)'\)/g)].map((m) => m[1]);
   const nodes = new Map<string, FakeEl>();
   for (const id of ids) nodes.set(id, new FakeEl('div'));
-  const document = {
+  const document: { title: string; body: FakeEl } & Record<string, unknown> = {
+    title: '',
+    body: new FakeEl('body'),
     getElementById: (id: string): FakeEl | null => nodes.get(id) ?? null,
     createElement: (tag: string): FakeEl => new FakeEl(tag),
     addEventListener: (): void => {},
+    hidden: false,
   };
   const fetched: string[] = [];
   const fetchStub = (path: string): Promise<{ status: number; json: () => Promise<unknown> }> => {
@@ -110,6 +114,7 @@ function boot(reads: Record<string, unknown>, hash = ''): Stub {
     },
     fetched,
     href: hash,
+    title: document.title,
   };
 }
 
@@ -118,13 +123,21 @@ const flush = async (): Promise<void> => {
   for (let i = 0; i < 4; i++) await new Promise((r) => setTimeout(r, 0));
 };
 
-/** THE NEW TAB: boot the page at a drill link's own href and hand back the rendered stub. */
+/** THE NEW TAB: boot the page at a drill link's own href and hand back the rendered stub —
+ *  asserting on every drill that the tab is FOCUSED: the item is shown and the journey
+ *  views are neither rendered nor READ. */
 async function openTab(link: FakeEl, reads: Record<string, unknown>): Promise<Stub> {
   expect(link.target, 'a drill must open in a new tab').toBe('_blank');
   expect(link.rel).toBe('noopener');
   expect(link.href.startsWith('#drill='), `link href must be a drill fragment: ${link.href}`).toBe(true);
   const tab = boot(reads, link.href);
   await flush();
+  expect(tab.get('wn').hidden, 'a focused tab hides the WHAT\'S NEXT card').toBe(true);
+  expect(tab.get('queue-view').hidden).toBe(true);
+  expect(tab.get('journey-view').hidden).toBe(true);
+  expect(tab.get('back').hidden, 'a focused tab keeps the way back').toBe(false);
+  // …and it does NOT load the page it is not showing
+  expect(tab.fetched.filter((f) => f === '/api/journey' || f === '/api/gates')).toEqual([]);
   return tab;
 }
 
@@ -227,6 +240,12 @@ describe('the served page — a drill opens its own tab, and the URL is the dril
   it('the card renders, and every fact is a NEW-TAB link carrying its item', async () => {
     const page = boot(reads(card()));
     await flush();
+    // the FULL page still reads and renders the journey views
+    expect(page.fetched).toEqual(['/api/journey', '/api/gates', '/api/whatsnext']);
+    expect(page.get('wn').hidden).toBe(false);
+    expect(page.get('queue-view').hidden).toBe(false);
+    expect(page.get('journey-view').hidden).toBe(false);
+    expect(page.get('back').hidden).toBe(true); // no way-back from the full page
     expect(page.get('wn-action').textContent).toBe('continue-leg');
     expect(page.get('wn-badge').textContent).toBe('MACHINE-EXECUTABLE');
     expect(page.get('wn-actions').hidden).toBe(false); // the approve is offered: clean + executable
@@ -335,6 +354,31 @@ describe('the served page — a drill opens its own tab, and the URL is the dril
     expect(tab.fetched).toContain(`/api/results?id=${TASK}&n=1`);
     expect(tab.get('card-node').textContent).toContain('git show');
     expect(tab.get('card-decide').hidden).toBe(false); // the review survives the drill
+  });
+
+  it('a focused tab RE-READS only its item (Refresh) — never the journey it is not showing', async () => {
+    const page = boot(reads(card()));
+    await flush();
+    const tab = await openTab(page.get('wn-facts').link('frontmost-ready'), reads(card()));
+    const before = tab.fetched.length;
+    tab.get('refresh').click(); // the Refresh button
+    await flush();
+    const after = tab.fetched.slice(before);
+    expect(after).toContain(`/api/packet?id=${TASK}`); // the item's own read, again
+    expect(after.filter((f) => f === '/api/journey' || f === '/api/gates' || f === '/api/whatsnext')).toEqual([]);
+    expect(tab.get('updated').textContent).toContain('as of ');
+  });
+
+  it('a result drill from a gate DECIDED since the link was made shows no decision it cannot take', async () => {
+    const decided: Record<string, unknown> = {
+      ...reads(card()),
+      [`/api/confirm?id=${TASK}`]: gateCard({ gates: { grill: { state: 'confirmed' }, confirm: { state: 'confirmed', at: '2026-09-12' } } }),
+      [`/api/results?id=${TASK}&n=1`]: resultsRead,
+    };
+    const tab = boot(decided, '#drill=result&id=' + encodeURIComponent(TASK) + '&gate=confirm&n=1');
+    await flush();
+    expect(tab.get('card-node').textContent).toContain('git show');
+    expect(tab.get('card-decide').hidden, 'the gate is decided — no Accept/Reject that cannot land').toBe(true);
   });
 
   it('a boundary derivation offers no approve, and its frontmost-ready fact is inert text', async () => {
