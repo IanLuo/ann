@@ -1,0 +1,21 @@
+{
+  "id": "12-operate-loop/02-implementation-semantic-driver",
+  "contract": {
+    "intent": "Implement the SEMANTIC DRIVER per the design record at .agents/plan/semantic-driver-design.md: an LLM loop that takes a COMMAND's output (the value-canonical JSON), decides, and emits the NEXT COMMAND CALL — the recorded follow-up to flow-control-spec v7 §5 (LLM-surface work, NEVER an L1/engine derivation). The model PROPOSES; CODE validates the proposal against the CLOSED SET of commands; execution goes through the existing command layer; the loop is bounded; it stops at every human gate; and at the authored-work boundary it DRAFTS (labeled GENERATED) for the human's approval — never a machine spawn.",
+    "acceptanceCriteria": [
+      "THE LOOP: read a command's JSON output → the LLM proposes the next call → CODE validates the proposed call against the CLOSED SET of commands (no free-form call, no raw write, an unknown/out-of-set proposal is a NAMED REFUSAL, never a silent clamp) → execute through the EXISTING command layer → repeat. Bounded: a max turn count, a route reason on every stop, a checkpoint at every human gate, resume by re-derivation (never a replay of a stale plan)",
+      "IT NEVER ANSWERS A GATE and never self-closes: it may submit/present, and it lands at the next human decision; the human gates stay human",
+      "THE AUTHORED-WORK BOUNDARY: when the derived advance is a boundary (advance-leg = an empty front leg / closure-needed / none), the driver DRAFTS the authored content (a leg/task contract grounded on the epic + the goal + the upstream artifacts) labeled GENERATED (model · provider · turn · run) for the HUMAN's approval — the spawn! remains a human/push act, never a machine spawn",
+      "CREDENTIALS + FAILURE: the provider key is server-side only and never reaches a response body or the client; a provider failure is a NAMED stop with ZERO writes (no fabricated advance); provenance is recorded on every landed write (RECORDED_BY)",
+      "NO NEW WRITE PATH: it composes the existing commands (the same L1 writes); it lives in L2/L3 (flow/surface), NEVER an L1/engine derivation (flow-control v7 §5, binding); scope-bound it honestly (name what the first slice does NOT do)",
+      "The design record's open forks (Q1 persistence, Q2 UI wiring, Q3 the none-consult drafting) are resolved or recorded as explicit open decisions on this task — never silently assumed; full suite green; ann check/verify clean; committed with evidence"
+    ],
+    "workType": "implementation",
+    "targetAreas": [
+      "src/flow",
+      "src/surface",
+      "src/e2e"
+    ]
+  },
+  "createdAt": "2026-09-12"
+}

@@ -41,6 +41,7 @@ The card executes the machine-derivable advance; the driver supplies the authore
 
 ## Spawn state
 
-Ids chosen: **`12-semantic-driver`** (leg) + **`12-semantic-driver/01-implementation-driver-loop`** (task, workType implementation).
-**NOT spawned** — the leg gate correctly refused: `11-whats-next/01-implementation-whats-next-card` is a submitted (undecided) grill gate, so leg 11 has unfinished tasks.
-To land it: the human decides leg 11's entry gate → re-run the two `spawn!` calls → `submit! <task> grill` → the human accepts.
+**SPAWNED (2026-09-12)** as leg `12-operate-loop` (the epic: the operate loop completed — the deferred surface + the driver):
+- `12-operate-loop/01-implementation-deferred-surface` — a deferred task must stay VISIBLE in next/journey/the UI (found live: `09-spec-fidelity/01` is deferred and invisible to `next`)
+- `12-operate-loop/02-implementation-semantic-driver` — this design
+Both entry gates are SUBMITTED and await the human's confirm on the web UI. Q1-Q3 are the task's open decisions (to be resolved or explicitly recorded).

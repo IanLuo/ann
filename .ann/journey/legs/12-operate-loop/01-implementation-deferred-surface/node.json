@@ -1,0 +1,19 @@
+{
+  "id": "12-operate-loop/01-implementation-deferred-surface",
+  "contract": {
+    "intent": "Surface the DEFERRED work: a deferred task currently closes its leg and then vanishes from the pull surface — `ann next` says `journey exhausted` while an outstanding deferred obligation (with a recorded reason and a plan) exists. Make deferred work VISIBLE where the human steers: in `next` and `journey` (each deferred task: id · reason · where its plan lives) and in the UI. A derived read only — no new state, no new event, no new write path.",
+    "acceptanceCriteria": [
+      "`ann next` (and the shared look-back) surfaces every outstanding deferred task: the id, its recorded `reason` (from the deferred event), and its plan pointer when one is named — as a distinct section/deferred line, never folded into 'no ready action' or the exhausted consult",
+      "`ann journey`'s WHAT IS AHEAD (or the leg lines) makes the same deferred obligation visible without breaking the existing state line; the UI's journey view shows the same (a deferred row/section or filter)",
+      "Derived only: no new event type, no new state, no new write path; the deferred status/leg-closure behaviour is UNCHANGED (a deferred task still closes its leg — this task is visibility, not semantics)",
+      "Proof by test: a journey with a deferred task renders it in next + journey (and the service route); the exhausted-journey case still reads honestly (the deferred obligation shown ALONGSIDE the goal consult, not instead of it); the no-deferred case is unchanged; full suite green; ann check/verify clean; committed with evidence"
+    ],
+    "workType": "implementation",
+    "targetAreas": [
+      "src/surface",
+      "src/commands",
+      "src/e2e"
+    ]
+  },
+  "createdAt": "2026-09-12"
+}

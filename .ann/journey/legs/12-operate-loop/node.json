@@ -1,0 +1,18 @@
+{
+  "id": "12-operate-loop",
+  "contract": {
+    "intent": "THE OPERATE LOOP, COMPLETE — the two pieces between what the engine can do and what the human can SEE and steer. (a) THE DEFERRED SURFACE: a `deferred` task closes its leg (by design — CLOSED_TASK_STATUSES) and then DISAPPEARS from the pull surface: `next` reports `journey exhausted` and silently drops the outstanding obligation (found live: `09-spec-fidelity/01-validate-decision-forks` is deferred and invisible to next and to the UI's gate queue, yet it carries the D1-D11 fidelity decisions + the contract amendment still owed). The surface must show outstanding deferred work — each deferred task, its reason, and where its plan lives. (b) THE SEMANTIC DRIVER: the LLM loop that takes a COMMAND's output (the value-canonical JSON), decides, and emits the NEXT COMMAND CALL — the recorded follow-up to flow-control-spec v7 §5 (LLM-surface work, NEVER an L1/engine derivation). The model PROPOSES; CODE validates the proposal against the closed set of commands; execution goes through the existing command layer; the loop is bounded; it stops at every human gate; and at the AUTHORED-WORK boundary it DRAFTS (labeled GENERATED) for the human's approval — never a machine spawn. Design record: .agents/plan/semantic-driver-design.md.",
+    "acceptanceCriteria": [
+      "(a) THE DEFERRED SURFACE: next and journey surface every outstanding deferred task — the id, its recorded reason, and where its plan lives — so a deferred obligation is never invisible where the human steers; the UI shows the same (the journey view and/or a deferred view/filter). A DERIVED read only: no new state, no new event, no new write path. Proof: a test with a deferred task showing it rendered in next + journey (and the route), plus the exhausted-journey case still reading honestly",
+      "(b) THE SEMANTIC DRIVER per the design record (.agents/plan/semantic-driver-design.md): the loop (read the command's JSON output → the LLM proposes → CODE validates the proposed call against the CLOSED SET of commands → execute through the existing command layer → repeat); BOUNDED (a max turn count; an out-of-range proposal is a REFUSAL, never a silent clamp; a checkpoint at every human gate; resume = re-derive); it NEVER answers a gate and never self-closes; at the authored-work boundary it DRAFTS the authored content (a leg/task contract from the epic + the goal + upstream artifacts) labeled GENERATED (model · provider · turn · run) for the HUMAN's approval, the spawn! remaining a human/push act; CREDENTIALS server-side only, asserted absent from every response body; a provider failure = a named stop with ZERO writes; it lives in L2/L3 and adds NO new write path (it composes the existing commands)",
+      "(c) The human-decision forks left open by the design record (Q1 persistence, Q2 UI wiring of the driver, Q3 the `none`-consult drafting) are RESOLVED or explicitly recorded as open — never silently assumed",
+      "(d) The full suite stays green and ann check/verify stay clean on the live journey; each slice is committed with evidence"
+    ],
+    "targetAreas": [
+      "src/surface",
+      "src/flow",
+      "src/e2e"
+    ]
+  },
+  "createdAt": "2026-09-12"
+}
