@@ -1,0 +1,18 @@
+{
+  "id": "11-whats-next",
+  "contract": {
+    "intent": "THE UI OPERATE LOOP — a WHAT'S NEXT card: render the derived next action (the F5 pull proposal: action + detail + the frontmost-ready task + the leg gate + the pending gates) and let the human APPROVE it in the browser, executing the operator action's continue-leg path. This is the web F5 approve button recorded as a follow-up in 07-operator-advance/01's AC-6 decision ('the approve is the builder's single HUMAN decision over the ADVANCE card … a future server/web F5 approve button is a human surface slice of its own'). With it, the whole loop lives in the browser: the human confirms gates AND approves the next step; the assistant/worker only supplies the work.",
+    "acceptanceCriteria": [
+      "The service exposes an APPROVE endpoint over the operator action's continue-leg execute path (the advance! machinery: integrity re-check fail-closed FIRST → the advance re-derived at execution → execute through the sanctioned writers → land at the next human gate). It carries the human identity (RECORDED_BY), refuses fail-closed with the NAMED blockers on a dirty state, refuses a STALE proposal (a re-derivation that no longer matches), NEVER answers a gate, NEVER authors a contract, NEVER self-closes, and adds NO new write path (it reuses the existing L1 writes / the Frame)",
+      "The NOT-machine-executable derivations (advance-leg = an empty front leg, closure-needed, none) present their card and STOP — no machine action, the honest authored-work boundary (flow-control v7 section 5); the UI must show the boundary state plainly, not a dead button",
+      "The UI renders the WHAT'S NEXT card: the derived action + detail, the frontmost-ready task, the leg gate, and the pending gates; the integrity blockers are surfaced honestly when present (including 'uncommitted tracked journey changes — commit them', the operator's step) so the card never claims the journey can advance when it cannot",
+      "AC-4: the loop round-trips LIVE: approving on the card runs the frontmost-ready through the frame and lands at the next human gate; the card then reflects the new derived state (proven by an e2e over real HTTP against a temp journey, and by one live run on this journey)",
+      "AC-5: the full suite stays green (new service + UI e2e tests) and ann check/verify stay clean on the live journey; committed with evidence"
+    ],
+    "targetAreas": [
+      "src/surface",
+      "src/e2e"
+    ]
+  },
+  "createdAt": "2026-09-12"
+}

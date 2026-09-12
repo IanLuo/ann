@@ -1,0 +1,19 @@
+{
+  "id": "11-whats-next/01-implementation-whats-next-card",
+  "contract": {
+    "intent": "Implement the WHAT'S NEXT card + its approve path: the service exposes the approve over the operator action's continue-leg execute path (advance! machinery — integrity fail-closed, stale-proposal refusal, sanctioned writers only, land at the next gate) with the human identity carried; the UI renders the derived proposal (action + detail + frontmost-ready + leg gate + pending gates) and lets the human approve it, with the boundary derivations (advance-leg/closure-needed/none) presented and stopped, never machine-executed. The read the card needs (/api/next) already exists; this task adds the approve write + the card + the honest blocker surface.",
+    "acceptanceCriteria": [
+      "The approve endpoint executes ONLY the operator action's continue-leg path (reuse the existing machinery — do NOT re-implement its rules, do NOT add a new write path): integrity re-check FIRST with the named blockers surfaced fail-closed; the advance re-derived at execution (a stale proposal refuses, nothing executes); execution through the sanctioned writers / the Frame; it lands at the next human gate; it never answers a gate, never authors a contract, never self-closes",
+      "A DIRTY state refuses with the named blockers (including 'uncommitted tracked journey changes — commit them'), and a STALE proposal refuses — both surfaced on the card, never a silent failure; the boundary derivations (advance-leg / closure-needed / none) are PRESENTED and STOP with no machine action (the authored-work boundary, flow-control v7 section 5) — the UI shows the boundary state, not a dead approve",
+      "The UI's WHAT'S NEXT card renders: the derived action + detail, the frontmost-ready task (if any), the leg gate (MET/UNMET + blocker), and the pending gates; it sits alongside the journey view + the gate queue, in the same minimal style (no new deps, vanilla JS)",
+      "AC-4: round-trip proven by an e2e over real HTTP against a TEMP journey (approve → the frontmost-ready runs through the frame → the card reflects the new derived state; a dirty-state refusal; a boundary stop) AND by one live run on this journey (the first live continue-leg through the operator action)",
+      "AC-5: full suite green (634+ baseline + the new tests), npm run typecheck clean, ann check/verify clean on the live journey; committed with evidence"
+    ],
+    "workType": "implementation",
+    "targetAreas": [
+      "src/surface",
+      "src/e2e"
+    ]
+  },
+  "createdAt": "2026-09-12"
+}
