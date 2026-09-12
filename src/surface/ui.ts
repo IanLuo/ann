@@ -86,12 +86,21 @@ export const UI_HTML = `<!doctype html>
   .actions button.reject:hover { border-color: var(--warn); color: var(--warn); }
   .message { margin: .75rem 0 0; font-size: .85rem; color: var(--muted); white-space: pre-wrap; }
   .message.error { color: var(--warn); }
+  .hrow { display: flex; justify-content: space-between; align-items: center; gap: 1rem; }
+  .ghost { padding: .3rem .85rem; border-radius: 8px; border: 1px solid var(--line); background: #26242e; color: var(--fg); font: inherit; cursor: pointer; }
+  .ghost:hover { border-color: var(--accent); color: var(--accent); }
+  .next { margin: .35rem 0 1rem; font-size: .9rem; }
+  .next .k { color: var(--muted); }
+  .stale { color: var(--warn); }
 </style>
 </head>
 <body>
 <header>
   <h1>ann · the journey</h1>
-  <p id="state" class="state">loading…</p>
+  <div class="hrow">
+    <p id="state" class="state">loading…</p>
+    <span><span id="updated" class="muted"></span> <button class="ghost" id="refresh">Refresh</button></span>
+  </div>
 </header>
 <main>
   <section class="queue">
@@ -106,6 +115,7 @@ export const UI_HTML = `<!doctype html>
     <h2 id="card-step-label">Gate card</h2>
     <h3 id="card-title"></h3>
     <p class="card-what" id="card-what"></p>
+    <p class="next" id="card-next"></p>
     <div id="card-node"></div>
     <h2>Claims</h2>
     <ul class="claims" id="card-claims"></ul>
@@ -114,10 +124,12 @@ export const UI_HTML = `<!doctype html>
     <div class="gates" id="card-gates"></div>
     <h2>Results</h2>
     <ul id="card-results"></ul>
-    <textarea id="feedback" placeholder="feedback for the decision (the rejection's why)"></textarea>
-    <div class="actions">
-      <button class="accept" id="accept">Accept</button>
-      <button class="reject" id="reject">Reject</button>
+    <div id="card-decide" hidden>
+      <textarea id="feedback" placeholder="feedback for the decision (the rejection's why)"></textarea>
+      <div class="actions">
+        <button class="accept" id="accept">Accept</button>
+        <button class="reject" id="reject">Reject</button>
+      </div>
     </div>
     <p class="message" id="card-message"></p>
   </section>
@@ -220,17 +232,58 @@ export const UI_HTML = `<!doctype html>
     p.appendChild(el('span', v));
     parent.appendChild(p);
   }
+  function gateState(detail, gate) {
+    return gate && detail.gates && detail.gates[gate] ? detail.gates[gate] : { state: 'none' };
+  }
+  /** What the task is WAITING FOR — derived from its status + gate states, never assumed:
+   *  a queued task with nothing submitted is NOT decidable, and must not look it. */
+  function nextLine(detail, gate) {
+    var st = detail.status;
+    var grill = gateState(detail, 'grill').state;
+    var confirm = gateState(detail, 'confirm').state;
+    if (gate && gateState(detail, gate).state === 'submitted') {
+      return 'decide it now — accepting ' + gate + ' ' + (STEP[gate].role === 'entry' ? 'lets the work start' : 'lets it land');
+    }
+    if (st === 'done') return 'closed';
+    if (st === 'accepted') return 'the exit gate is accepted — awaiting the close: complete! ' + detail.id;
+    if (st === 'blocked') {
+      var which = confirm === 'submitted' ? 'confirm (exit)' : grill === 'submitted' ? 'grill (entry)' : 'a decision';
+      return 'waiting on a decision — ' + which + ' is in WAITING ON YOU';
+    }
+    if (st === 'failed' || st === 'deferred' || st === 'cancelled' || st === 'superseded') return st;
+    if (st === 'active') return 'work in progress';
+    return grill === 'submitted'
+      ? 'submitted at the entry gate — waiting on a decision (in WAITING ON YOU)'
+      : grill === 'confirmed'
+        ? 'the entry (grill) gate is confirmed — the work has not started'
+        : 'queued — the entry (grill) gate has not been submitted yet; nothing to decide here';
+  }
+
   function openCard(id, gate) {
     selected = { id: id, gate: gate };
     message('');
     return api('/api/confirm?id=' + encodeURIComponent(id)).then(function (r) {
       if (r.status !== 200) { message('card unavailable: ' + JSON.stringify(r.doc.error), true); return; }
       var detail = r.doc.detail;
+      var at = gateState(detail, gate);
+      var decidable = !!gate && at.state === 'submitted'; // the NODE decides, not the page's snapshot
       var step = gate ? STEP[gate] : null;
       byId('card').hidden = false;
-      byId('card-step-label').textContent = step ? step.badge + ' STEP · the ' + step.role + ' gate (' + gate + ')' : 'Gate card';
+      byId('card-step-label').textContent = decidable
+        ? step.badge + ' STEP · the ' + step.role + ' gate (' + gate + ')'
+        : gate
+          ? 'the ' + (step ? step.role : '') + ' gate (' + gate + ') — ALREADY ' + at.state.toUpperCase() + (at.at ? ' on ' + at.at : '')
+          : 'TASK · ' + detail.status;
       byId('card-title').textContent = id;
-      byId('card-what').textContent = step ? step.what : 'no undecided gate on this node';
+      byId('card-what').textContent = decidable
+        ? step.what
+        : gate
+          ? 'this gate was decided already — the view was showing a stale submission; press Refresh to see the current queue'
+          : 'no undecided gate on this node — nothing to decide here';
+      byId('card-next').replaceChildren();
+      byId('card-next').appendChild(el('span', 'next: ', 'k'));
+      byId('card-next').appendChild(el('span', nextLine(detail, gate)));
+      byId('card-decide').hidden = !decidable; // ABSENT when there is nothing to decide
 
       // NODE — the contract as node.json holds it (the fields the CLI card prints)
       var node = byId('card-node');
@@ -273,15 +326,13 @@ export const UI_HTML = `<!doctype html>
       var gates = byId('card-gates');
       gates.replaceChildren();
       ['grill', 'confirm'].forEach(function (g) {
-        var state = (detail.gates && detail.gates[g] && detail.gates[g].state) || 'none';
-        gates.appendChild(el('span', g + ' (' + STEP[g].role + '): ' + state));
+        var gs = gateState(detail, g);
+        gates.appendChild(el('span', g + ' (' + STEP[g].role + '): ' + gs.state + (gs.at ? ' · ' + gs.at : '')));
       });
       var results = byId('card-results');
       results.replaceChildren();
       (r.doc.results || []).forEach(function (it) { results.appendChild(el('li', it.kind + ' · ' + it.label)); });
-      byId('accept').disabled = gate === null;
-      byId('reject').disabled = gate === null;
-      if (gate === null) message('no undecided gate on this node — nothing to decide here');
+      if (!decidable && !gate) message('no undecided gate on this node — nothing to decide here');
       return null;
     });
   }
@@ -289,31 +340,48 @@ export const UI_HTML = `<!doctype html>
   // ── the decision: the SAME L1 gate! write the CLI performs, then a re-read ──
   function decide(decision) {
     if (!selected.id || !selected.gate) { message('select a gate from WAITING ON YOU first', true); return; }
-    var body = { id: selected.id, gate: selected.gate, decision: decision, feedback: byId('feedback').value };
+    var id = selected.id, gate = selected.gate;
+    var body = { id: id, gate: gate, decision: decision, feedback: byId('feedback').value };
     message('recording ' + decision + '…');
-    fetch('/api/gate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
-      .then(function (r) { return r.json().then(function (doc) { return { status: r.status, doc: doc }; }); })
-      .then(function (r) {
-        if (r.status !== 200) { message(decision + ' refused: ' + JSON.stringify(r.doc.error), true); return null; }
-        message(decision + ' recorded — ' + selected.id + ' ' + selected.gate + ' gate (the view re-reads the log)');
-        byId('feedback').value = '';
-        return refresh();
+    // RE-CHECK the node immediately before writing: a submission decided elsewhere in the
+    // meantime must not be re-decided (gate! would auto-submit + accept, recording a
+    // redundant decision). The card's own read is the authority.
+    api('/api/confirm?id=' + encodeURIComponent(id))
+      .then(function (fresh) {
+        if (fresh.status !== 200) { message('card unavailable: ' + JSON.stringify(fresh.doc.error), true); return null; }
+        var st = gateState(fresh.doc.detail, gate).state;
+        if (st !== 'submitted') {
+          message('stale — the ' + gate + ' gate on ' + id + ' is already ' + st + ' (decided elsewhere); nothing was written. Refreshing.', true);
+          return refresh().then(function () { return openCard(id, undecidedGate(id)); });
+        }
+        return fetch('/api/gate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+          .then(function (r) { return r.json().then(function (doc) { return { status: r.status, doc: doc }; }); })
+          .then(function (r) {
+            if (r.status !== 200) { message(decision + ' refused: ' + JSON.stringify(r.doc.error), true); return null; }
+            message(decision + ' recorded — ' + id + ' ' + gate + ' gate (the view re-reads the log)');
+            byId('feedback').value = '';
+            return refresh();
+          })
+          .then(function () { return openCard(id, undecidedGate(id)); });
       })
-      .then(function () { return openCard(selected.id, undecidedGate(selected.id)); })
       .catch(function (e) { message('request failed: ' + e.message, true); });
   }
   byId('accept').addEventListener('click', function () { decide('accept'); });
   byId('reject').addEventListener('click', function () { decide('reject'); });
 
-  // ── boot: the three reads ──
+  // ── boot: the reads, and a view that cannot go silently stale ──
   function refresh() {
     return Promise.all([api('/api/journey'), api('/api/gates')]).then(function (r) {
       if (r[0].status !== 200) { byId('state').textContent = 'journey unavailable: ' + JSON.stringify(r[0].doc.error); return; }
       renderState(r[0].doc.ahead || {});
       renderLegs(r[0].doc.legs || []);
       renderQueue(r[1].status === 200 ? r[1].doc : []);
+      byId('updated').textContent = 'as of ' + new Date().toLocaleTimeString();
     });
   }
+  byId('refresh').addEventListener('click', function () { refresh().catch(function (e) { message('refresh failed: ' + e.message, true); }); });
+  window.addEventListener('focus', function () { refresh().catch(function () {}); });
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) refresh().catch(function () {}); });
   refresh().catch(function (e) { byId('state').textContent = 'service unreachable: ' + e.message; });
 })();
 </script>

@@ -341,6 +341,11 @@ describe('e2e — the minimal service + UI (AC-1: the thin binding over the comm
     for (const route of ['/api/journey', '/api/gates', '/api/confirm?id=', '/api/gate']) expect(script).toContain(route);
     // …and the page names the STEP each gate is (the reason /api/gates carries role/intent/delivered)
     for (const word of ['ENTRY', 'EXIT', 'the contract gate', 'the result gate', 'delivered: ', 'NO CLAIM RECORDED', 'PASS  ']) expect(script, `the served page lost '${word}'`).toContain(word);
+    // …and the card tells the TRUTH about the node: the decision UI exists only for a
+    // gate that is genuinely submitted, a stale click is refused before it writes, the
+    // card always says what the task waits for, and the view refreshes itself
+    for (const word of ['card-decide', 'stale — the ', 'nothing was written', 'next: ', 'as of ', 'Refresh', 'decided already', 'the entry (grill) gate has not been submitted yet'])
+      expect(script, `the served page lost its state-truth guard: '${word}'`).toContain(word);
     // the page must be runnable JS: `node --check` parses it (no browser needed)
     const checkDir = mkdtempSync(join(tmpdir(), 'ann-ui-check-'));
     const checkFile = join(checkDir, 'ui-page.js');
