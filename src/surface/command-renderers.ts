@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import type { TaskDetail, ResultItem } from '../store/store.js';
+import type { TaskDetail, ResultItem, CheckView } from '../store/store.js';
 import type { GoalView } from '../commands/index.js';
 import { renderStatusTree, renderGateCard, renderPlan, renderDrift, renderLedger, renderGoal, deferredLines, PlanLeg, PlanAhead } from './renderers.js';
 import type { DeferredTask } from '../commands/index.js';
@@ -46,10 +46,19 @@ export interface NodeCard extends TaskDetail {
   createdAt: string;
   openQuestions: Array<{ id?: string; question?: string; blocking?: boolean; defaultIfUnanswered?: string }>;
   inputs: Array<{ name: string; resolved: boolean; path?: string; sha?: string }>;
-  /** v18 §3 — the structured conclusion, lined up against the contract's ACs. */
-  claims: Array<{ ac: string; statement: string; evidence: string[]; acText?: string }>;
-  /** The verification RUN HISTORY as the log holds it (newest last). */
-  checks: Array<{ command: string; result: 'pass' | 'fail'; detail?: string; sha?: string; at: string }>;
+  /** v18 §3 — the structured conclusion, lined up against the contract's ACs. `check` is
+   *  the ac→check MAPPING and `bound` is that mapping resolved against the log (leg 12/03). */
+  claims: Array<{
+    ac: string;
+    statement: string;
+    evidence: string[];
+    acText?: string;
+    check?: string;
+    bound?: { command: string; result: 'pass' | 'fail'; source: 'captured' | 'reported'; detail?: string; sha?: string };
+  }>;
+  /** The verification RUN HISTORY as the log holds it (newest last) — each check marked
+   *  `captured` (a FACT: the engine ran it) or `reported` (a CLAIM: the runner typed it). */
+  checks: CheckView[];
 }
 
 /** One event as a LIST ROW — the numbering `journey <id>` prints and `events <id> <n>`
@@ -139,14 +148,21 @@ const nodeCardLines = (c: NodeCard): string[] => {
       continue;
     }
     lines.push(`  ${claim.ac}: ${claim.statement}`);
+    // the MECHANICAL mapping (leg 12/03): which act covers the AC, and whether that act
+    // is in the log (a mapping that names nothing is the finding, never dropped)
+    if (claim.check) {
+      const b = claim.bound;
+      const resolution = b ? `[${b.source} ${b.result}${b.sha ? ` @ ${b.sha}` : ''}]` : '[NO SUCH RUN IN THE LOG]';
+      lines.push(`        check: ${claim.check} ${resolution}`);
+    }
     if (claim.evidence.length) lines.push(`        evidence: ${claim.evidence.join(' · ')}`);
   }
-  lines.push('---', 'CHECKS (what was run — result · command · against which bytes)');
+  lines.push('---', 'CHECKS (what was run — result · command · against which bytes; [captured] = the engine ran it, [reported] = a claim)');
   if (!c.checks.length) lines.push('  (none recorded — the verification is not in the log)');
   for (const k of c.checks) {
     const sha = k.sha ? ` @ ${k.sha}` : '';
     const detail = k.detail ? ` — ${k.detail}` : '';
-    lines.push(`  ${k.result === 'pass' ? 'PASS' : 'FAIL'}  ${k.command}${sha}${detail}`);
+    lines.push(`  ${k.result === 'pass' ? 'PASS' : 'FAIL'}  ${k.command} [${k.source}]${sha}${detail}`);
   }
   lines.push('---', 'GATES (derived)');
   const gateLine = (g: { state: string; at?: string }) =>
@@ -684,6 +700,13 @@ export const RENDERS: Record<string, Renderer> = {
     const extra = [v.refs ? plural(v.refs, 'ref') : '', v.claims ? plural(v.claims, 'claim') : '', v.checks ? plural(v.checks, 'check') : ''].filter(Boolean);
     return `evidence recorded → ${env.args[1]} (${plural(v.commits, 'commit')}${extra.length ? ` · ${extra.join(' · ')}` : ''})\n`;
   },
+  'capture!': (value, env) => {
+    const v = (value as { ok: true; value: CapturedCheckValue }).value;
+    return block([
+      `captured ${v.command} → ${v.result.toUpperCase()} (exit ${v.exitCode}) → ${env.args[1]}`,
+      `  fact: source=captured · sha ${v.sha} (the bytes the run saw) · ${v.detail}`,
+    ]);
+  },
   'complete!': (_value, env) => `completed → ${env.args[1]}\n`,
   'config!': (value, env) => {
     const v = (value as { ok: true; value: { key: string; file: string; problems?: string[]; masked?: boolean } }).value;
@@ -906,6 +929,15 @@ function advancedLines(v: AdvanceValue): string[] {
     }
   }
   return lines;
+}
+/** The `capture!` write's value — the fact the engine recorded (leg 12/03). */
+interface CapturedCheckValue {
+  command: string;
+  result: 'pass' | 'fail';
+  exitCode: number;
+  detail: string;
+  sha: string;
+  at: string;
 }
 interface ProvidersValue {
   defaultProvider: string;

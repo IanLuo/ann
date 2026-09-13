@@ -221,38 +221,88 @@ export const legacyPath = (p: string): string =>
  *  A CHECK-REPORTING rule only: no write path reads it. */
 const V9_CUTOFF = '2026-08-21';
 
-/** A CLAIM's shape (format v18 §3): {ac, statement, evidence?} — how one acceptance
- *  criterion is met. `evidence[]` entries are POINTERS (a commit sha, a ref path, a doc
- *  name): they are resolved at READ time by the views, never here — a pointer that stops
- *  resolving IS the finding, so write-time only polices the shape. */
+/** A CLAIM's shape (format v18 §3, MECHANICAL since leg 12/03): {ac, check?, statement?,
+ *  evidence?} — how one acceptance criterion is met. `check` is the MECHANICAL MAPPING:
+ *  the act (a recorded check's command) that substantiates THIS AC; `statement` is
+ *  optional prose (derived at read time from the mapping when absent) — the record states
+ *  WHICH act covers the AC, never only an argument about it. At least one of the two must
+ *  be present: a claim that says nothing maps nothing. `evidence[]` entries stay POINTERS
+ *  (a commit sha, a ref path, a doc name) resolved at READ time by the views. */
 function claimShapeProblem(c: unknown): string | undefined {
   if (!c || typeof c !== 'object' || Array.isArray(c)) return 'each claim must be an object';
   const r = c as Record<string, unknown>;
-  const unknown = Object.keys(r).filter((k) => !['ac', 'statement', 'evidence'].includes(k));
-  if (unknown.length) return `unknown field(s) '${unknown.join(', ')}' on a claim (ac · statement · evidence)`;
+  const unknown = Object.keys(r).filter((k) => !['ac', 'statement', 'evidence', 'check'].includes(k));
+  if (unknown.length) return `unknown field(s) '${unknown.join(', ')}' on a claim (ac · check · statement · evidence)`;
   if (typeof r.ac !== 'string' || !r.ac.trim()) return "a claim needs 'ac' — the acceptance criterion it speaks to (its id or its text)";
-  if (typeof r.statement !== 'string' || !r.statement.trim()) return `claim '${String(r.ac)}' needs 'statement' — HOW the AC is met`;
+  if (r.check !== undefined && (typeof r.check !== 'string' || !r.check.trim())) {
+    return `claim '${String(r.ac)}'.check must be the non-blank COMMAND of the check that covers the AC when present`;
+  }
+  const hasProse = typeof r.statement === 'string' && r.statement.trim();
+  const hasCheck = typeof r.check === 'string' && r.check.trim();
+  if (!hasProse && !hasCheck) {
+    return `claim '${String(r.ac)}' needs a 'check' (the act that covers the AC) or a 'statement' — a claim that maps no act and says nothing substantiates nothing`;
+  }
+  if (r.statement !== undefined && typeof r.statement !== 'string') return `claim '${String(r.ac)}'.statement must be a string when present`;
   if (r.evidence !== undefined && (!Array.isArray(r.evidence) || !r.evidence.length || !r.evidence.every((x) => typeof x === 'string' && x.trim()))) {
     return `claim '${String(r.ac)}'.evidence must be a non-empty [commit-sha | ref-path | doc-name, …] when present`;
   }
   return undefined;
 }
 
-/** A CHECK's shape (format v18 §3): {command, result, detail?, sha?} — what was RUN.
- *  `sha` is OPTIONAL and, when present, binds the verification to the bytes it ran
- *  against; the traceability read refuses one that does not resolve in git. */
-function checkShapeProblem(c: unknown): string | undefined {
+/** A CHECK's shape (format v18 §3, TYPED vs CAPTURED since leg 12/03).
+ *
+ *  `source` is the marker that tells a FACT from a CLAIM: `captured` = the engine ran the
+ *  allowlisted command and read its real exit code; `reported` = the runner typed it. An
+ *  unlabeled check is NORMALIZED to `reported` by the single writer, so the log never
+ *  holds an unlabeled one — a reader can always tell which it is.
+ *
+ *  A `captured` check must be self-consistent and complete: `sha` (the bytes the run saw),
+ *  `exitCode` (the real exit status) and `detail` (the output digest/summary) are
+ *  REQUIRED, and `result` must be DERIVED from the exit code — 0 is pass, anything else is
+ *  fail. `exitCode` is refused on a reported check (a typed exit code would be a fact
+ *  asserted by the reporter). */
+function checkShapeProblem(c: unknown, allowCaptured: boolean): string | undefined {
   if (!c || typeof c !== 'object' || Array.isArray(c)) return 'each check must be an object';
   const r = c as Record<string, unknown>;
-  const unknown = Object.keys(r).filter((k) => !['command', 'result', 'detail', 'sha'].includes(k));
-  if (unknown.length) return `unknown field(s) '${unknown.join(', ')}' on a check (command · result · detail · sha)`;
+  const unknown = Object.keys(r).filter((k) => !['command', 'result', 'detail', 'sha', 'source', 'exitCode'].includes(k));
+  if (unknown.length) return `unknown field(s) '${unknown.join(', ')}' on a check (command · result · detail · sha · source · exitCode)`;
   if (typeof r.command !== 'string' || !r.command.trim()) return 'a check needs a non-blank command — what was RUN';
   if (r.result !== 'pass' && r.result !== 'fail') return `check '${String(r.command)}'.result must be 'pass' or 'fail', got ${JSON.stringify(r.result)}`;
   if (r.detail !== undefined && typeof r.detail !== 'string') return `check '${String(r.command)}'.detail must be a string when present`;
   if (r.sha !== undefined && (typeof r.sha !== 'string' || !/^[0-9a-f]{7,40}$/.test(r.sha))) {
     return `check '${String(r.command)}'.sha must be a commit sha (7-40 hex) when present — the bytes it ran against`;
   }
+  if (r.source !== undefined && r.source !== 'captured' && r.source !== 'reported') {
+    return `check '${String(r.command)}'.source must be 'captured' or 'reported' when present`;
+  }
+  if (r.source === 'captured' && !allowCaptured) {
+    return `check '${String(r.command)}' claims source:'captured' — a captured check is ENGINE-PRODUCED: the capture path runs the allowlisted command and records its real exit code (the general writer may not assert a fact; run ann capture!)`;
+  }
+  if (r.source !== 'captured' && r.exitCode !== undefined) {
+    return `check '${String(r.command)}'.exitCode is the CAPTURE's own evidence — refused on a reported check (a typed exit code is a fact the reporter did not observe)`;
+  }
+  if (r.source === 'captured') {
+    if (typeof r.sha !== 'string' || !r.sha) return `captured check '${String(r.command)}' needs 'sha' — the bytes the run saw (read from git, never typed)`;
+    if (typeof r.exitCode !== 'number' || !Number.isInteger(r.exitCode)) return `captured check '${String(r.command)}'.exitCode must be the run's integer exit status`;
+    if (typeof r.detail !== 'string' || !r.detail.trim()) return `captured check '${String(r.command)}' needs 'detail' — the output digest/summary of the run`;
+    const derived = r.exitCode === 0 ? 'pass' : 'fail';
+    if (r.result !== derived) return `captured check '${String(r.command)}'.result must be DERIVED from the real exit code: ${r.exitCode} → '${derived}', got ${JSON.stringify(r.result)}`;
+  }
   return undefined;
+}
+
+/** ONE recorded CHECK as the log holds it — the shared reading of a run: the command,
+ *  the result, and `source` (captured = the engine ran it and read the real exit code — a
+ *  FACT; reported = the runner typed it — a CLAIM). One shape, so the card, the close and
+ *  the predicates can never read a run differently. */
+export interface CheckView {
+  command: string;
+  result: 'pass' | 'fail';
+  source: 'captured' | 'reported';
+  detail?: string;
+  sha?: string;
+  exitCode?: number;
+  at: string;
 }
 
 /** Logical name from a filename: strip .md and any -vN version suffix
@@ -700,6 +750,67 @@ export class Store {
     return this.events(parent).some((e) => e.type === 'evidence' && Array.isArray(e.commits) && e.commits.length > 0);
   }
 
+  /** The commits a task's conclusion cites (evidence.commits[].sha, deduped, in log
+   *  order) — the set a captured check's `sha` must belong to (F-AC18, tightened). */
+  citedCommits(id: string): string[] {
+    const out: string[] = [];
+    for (const e of this.events(id)) {
+      if (e.type !== 'evidence') continue;
+      for (const c of Array.isArray(e.commits) ? e.commits : []) {
+        const sha = (c as { sha?: unknown })?.sha;
+        if (typeof sha === 'string' && sha.trim() && !out.includes(sha.trim())) out.push(sha.trim());
+      }
+    }
+    return out;
+  }
+
+  /** EVERY check the log holds for a node, in order — the verification history, each
+   *  carrying the `source` marker that says whether it is a FACT (captured = the engine
+   *  ran it and read the real exit code) or a CLAIM (reported = the runner typed it).
+   *  Derived here (never in a binding), so the card, the close and the predicates read
+   *  ONE list. */
+  checksOf(id: string): CheckView[] {
+    const out: CheckView[] = [];
+    for (const e of this.events(id)) {
+      if (e.type !== 'evidence') continue;
+      for (const k of Array.isArray(e.checks) ? e.checks : []) {
+        const r = k as { command?: unknown; result?: unknown; source?: unknown; detail?: unknown; sha?: unknown; exitCode?: unknown };
+        out.push({
+          command: String(r.command ?? ''),
+          result: r.result === 'fail' ? 'fail' : 'pass',
+          // a legacy/unlabeled check reads as REPORTED — the conservative reading
+          source: r.source === 'captured' ? 'captured' : 'reported',
+          ...(typeof r.detail === 'string' && r.detail ? { detail: r.detail } : {}),
+          ...(typeof r.sha === 'string' && r.sha ? { sha: r.sha } : {}),
+          ...(typeof r.exitCode === 'number' ? { exitCode: r.exitCode } : {}),
+          at: String(e.at ?? ''),
+        });
+      }
+    }
+    return out;
+  }
+
+  /**
+   * THE TIGHTENED F-AC18 PREDICATE (leg 12/03) — the record is a consequence, not a
+   * claim: `complete!` and the confirm-accept auto-close (both in Commands, one
+   * predicate) require a CAPTURED PASS bound to a cited commit.
+   *
+   * The LATEST check per command governs (the rework reading): a failing re-run closes
+   * nothing even if an earlier run passed, and a passing re-run clears it. A reported
+   * check never satisfies this — a typed `pass` is a claim, and a claim is exactly what
+   * the close stopped accepting. `sha` must be one of the commits the conclusion cites:
+   * the bytes verified are the bytes under review.
+   */
+  capturedPassBound(id: string): boolean {
+    const cited = new Set(this.citedCommits(id));
+    const latest = new Map<string, ReturnType<Store['checksOf']>[number]>();
+    for (const c of this.checksOf(id)) latest.set(c.command, c);
+    for (const c of latest.values()) {
+      if (c.source === 'captured' && c.result === 'pass' && c.sha && cited.has(c.sha)) return true;
+    }
+    return false;
+  }
+
   /* ---------------------------------------------------------------- */
   /* detail() — the full task/leg card (drives `ann detail <id>`).      */
   /* The store DERIVES; the CLI renders.                                */
@@ -1009,9 +1120,42 @@ export class Store {
    * Write confinement (AC-2): the event goes to the ADDRESSED node only — the handle
    * mints the one write target (`join(node.dir, 'events.jsonl')`), so a caller can
    * never aim an append at a sibling, a parent, or the store root.
+   *
+   * TYPED vs CAPTURED (leg 12/03): this is the general path — a check that arrives here
+   * without a `source` marker is LABELLED `reported` (the log never holds an unlabeled
+   * one) and a check that claims `source: 'captured'` is REFUSED by name: a captured
+   * fact is engine-produced through `appendCaptured` (the capture path runs the
+   * allowlisted command), never typed. One write path, two entry points, one validator.
    */
   appendEvent(node: NodeDir, event: JourneyEvent): void {
+    this.writeEvent(node, event, { allowCaptured: false });
+  }
+
+  /**
+   * THE CAPTURE ENTRY (leg 12/03) — the ONE other caller of the same single writer.
+   * `Commands.capture` produced the checks by RUNNING the allowlisted command and
+   * reading its real exit code; this entry point is what accepts `source: 'captured'`
+   * (the general path refuses it, so a captured fact cannot be typed in). It is not a
+   * second write path: same validation, same leg-root/goal guards, same ledger guard,
+   * same gate check, same append. A caller must present captured checks (an empty or
+   * reported-only set is a refusal — the entry point exists for the capture, nothing
+   * else).
+   */
+  appendCaptured(node: NodeDir, event: JourneyEvent): void {
+    const checks = Array.isArray(event.checks) ? event.checks : [];
+    if (!checks.length || !checks.every((c) => (c as { source?: unknown })?.source === 'captured')) {
+      throw new Error("capture rejected: appendCaptured records engine-produced checks only — every check must carry source: 'captured' (this is the capture path, not a general writer)");
+    }
+    this.writeEvent(node, event, { allowCaptured: true });
+  }
+
+  private writeEvent(node: NodeDir, event: JourneyEvent, opts: { allowCaptured: boolean }): void {
     this.assertWritable('append');
+    // The TYPED default (leg 12/03 AC-2): an unlabeled check is a REPORT — the writer
+    // labels it, so every check in the log says which it is (fact vs claim).
+    if (event.type === 'evidence' && Array.isArray(event.checks)) {
+      event = { ...event, checks: event.checks.map((c) => (c && typeof c === 'object' && !('source' in c) ? { ...(c as object), source: 'reported' } : c)) };
+    }
     // v6 goal session (goal-session-design §2): the designated childless goal leg is
     // the ONE leg root that may carry events — the seed (`created`/`completed`, written
     // by seedGoal, never through the general append), `goal-met`, and the one-off
@@ -1029,7 +1173,7 @@ export class Store {
     if (!event.at || !event.type || !getVOCAB().eventTypes.includes(event.type)) {
       throw new Error(`append rejected: bad schema (at + known type required, got ${event.type})`);
     }
-    this.validateEventShape(event); // strict schema (format v12 §3): unknown fields + shapes rejected
+    this.validateEventShape(event, opts); // strict schema (format v12 §3): unknown fields + shapes rejected
     const entry = this.nodes.get(node.id);
     if (!entry) throw new Error(`append rejected: no node ${node.id}`);
     // The ledger guard — fail-closed, AFTER schema (a bad incoming event still gets its
@@ -1125,7 +1269,7 @@ export class Store {
    *  the structured field shapes. Unknown fields or malformed shapes are REJECTED at
    *  the single writer — fail-closed, never let garbage into the log. Legacy prose
    *  events (no structured artifact/successor) remain valid HISTORY; this guards new writes. */
-  private validateEventShape(e: JourneyEvent): void {
+  private validateEventShape(e: JourneyEvent, opts: { allowCaptured: boolean } = { allowCaptured: false }): void {
     const allowed: Record<string, string[]> = {
       created: ['at', 'type', 'note'],
       activated: ['at', 'type', 'note'],
@@ -1227,10 +1371,10 @@ export class Store {
       }
       if (e.checks !== undefined) {
         if (!Array.isArray(e.checks) || !e.checks.length) {
-          throw new Error("append rejected: evidence.checks must be a non-empty [{command, result: 'pass'|'fail', detail?, sha?}, …] — what was run");
+          throw new Error("append rejected: evidence.checks must be a non-empty [{command, result: 'pass'|'fail', detail?, sha?, source?}, …] — what was run");
         }
         for (const c of e.checks) {
-          const problem = checkShapeProblem(c);
+          const problem = checkShapeProblem(c, opts.allowCaptured === true);
           if (problem) throw new Error(`append rejected: evidence.checks — ${problem}`);
         }
       }

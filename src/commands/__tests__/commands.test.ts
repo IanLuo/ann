@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store, JourneyEvent } from '../../store/store.js';
 import { Commands, CommandResult } from '../index.js';
+import type { CaptureEnv } from '../capture.js';
 import { scanDocsDir, writeDocsManifest } from '../../store/docs.js';
 
 /**
@@ -49,11 +50,22 @@ const valueOf = <T>(r: CommandResult<T>): T => {
   return r.value;
 };
 
-const cmds = () => new Commands(new Store(root), 'test');
+const cmds = (capture: CaptureEnv = stubCapture()) => new Commands(new Store(root), 'test', capture);
 
 /** A sha that RESOLVES in the ann repo — required for evidence.commits[] that check()
  *  traces (`git cat-file -t`, run against process.cwd()). */
 const realSha = () => execFileSync('git', ['rev-parse', 'HEAD'], { cwd: process.cwd() }).toString().trim().slice(0, 7);
+
+/** A STUBBED capture seam (leg 12/03): the engine's exec surface is the ONE thing the
+ *  capture injects, so a pass and a fail are exercised without running a suite inside a
+ *  test. Everything else — the allowlist, the guards, the sha, the write — stays the
+ *  engine's, which is why `head`/`dirty` stub the same seam rather than bypass it. */
+const stubCapture = (o: { exitCode?: number; exits?: Record<string, number>; output?: string; dirty?: string[]; head?: string | undefined } = {}): CaptureEnv => ({
+  // `head: undefined` means NO GIT — spelled by PRESENCE, so the stub can express it
+  head: () => ('head' in o ? o.head : realSha()),
+  dirty: () => o.dirty ?? [],
+  run: (name) => ({ exitCode: o.exits?.[name] ?? o.exitCode ?? 0, output: o.output ?? 'Tests  3 passed (3)' }),
+});
 
 describe('spawn! — the contract schema gate (core-design §1, §8:289)', () => {
   beforeEach(() => { makeStore(); writeNode('01-leg', {}); });
@@ -303,7 +315,7 @@ describe('evidence! + complete! — the close gesture commands (leg 08 task 02)'
     expect(c.status('01-leg/01-a')).toBe('accepted');
   });
 
-  it('evidence! carries the STRUCTURED conclusion too (v18: claims per AC + the checks run)', () => {
+  it('evidence! carries the STRUCTURED conclusion too (v18: claims per AC + the checks run; leg 12/03: the ac→check MAPPING + the reported label)', () => {
     accepted();
     const c = cmds();
     const claims = [{ ac: 'AC-1', statement: 'the store holds it', evidence: ['abc1234', 'src/store'] }];
@@ -311,11 +323,17 @@ describe('evidence! + complete! — the close gesture commands (leg 08 task 02)'
     expect(valueOf(c.evidence('01-leg/01-a', [{ sha: 'abc1234' }], { claims, checks }))).toEqual({ commits: 1, refs: 0, claims: 1, checks: 1 });
     const e = c.events('01-leg/01-a').at(-1)!;
     expect(e.claims).toEqual(claims);
-    expect(e.checks).toEqual(checks);
+    // the WRITER labels a check the runner typed (AC-2): the log holds no unlabeled one
+    expect(e.checks).toEqual([{ ...checks[0], source: 'reported' }]);
     // the SHAPE stays the store's: a malformed claim is refused through this front too
     const bad = errorOf(c.evidence('01-leg/01-a', [{ sha: 'abc1234' }], { claims: [{ ac: 'AC-1' }] }));
     expect(bad.code).toBe('store-refused');
-    expect(bad.blocker).toContain("needs 'statement'");
+    expect(bad.blocker).toContain("needs a 'check'");
+    // …and a check that CLAIMS to be captured is refused here BY NAME — a fact is
+    // engine-produced (capture!), never typed into the conclusion record
+    const forged = errorOf(c.evidence('01-leg/01-a', [{ sha: 'abc1234' }], { checks: [{ command: 'npm test', result: 'pass', source: 'captured', exitCode: 0, sha: 'abc1234', detail: 'sha1:0 · ok' }] }));
+    expect(forged.code).toBe('store-refused');
+    expect(forged.blocker).toContain('ENGINE-PRODUCED');
   });
 
   it('evidence! refuses the shapes a conclusion cannot have (named refusals, nothing written)', () => {
@@ -336,13 +354,13 @@ describe('evidence! + complete! — the close gesture commands (leg 08 task 02)'
     expect(e.blocker).toContain('concludes nothing');
   });
 
-  /** A COMPLIANT v18 conclusion: a claim for every contract AC + a passing check bound to
-   *  a cited commit (the sha the checks ran against) — what `complete!` now requires. */
-  const conclude = (c: Commands, id: string, sha: string) =>
-    c.evidence(id, [{ sha }], {
-      claims: [{ ac: 'AC-1', statement: 'the AC is met', evidence: [sha] }],
-      checks: [{ command: 'npm test', result: 'pass' as const, detail: '3/3', sha }],
-    });
+  /** A COMPLIANT conclusion (leg 12/03): the CAPTURED pass — the engine ran an
+   *  allowlisted command through the stubbed seam and recorded the real exit code — plus a
+   *  claim per AC MAPPED to it by check. The sha the capture binds is the stubbed HEAD. */
+  const conclude = (c: Commands, id: string, sha: string) => {
+    valueOf(c.capture(id, 'npm test'));
+    return c.evidence(id, [{ sha }], { claims: [{ ac: 'AC-1', check: 'npm test', evidence: [sha] }] });
+  };
 
   it('complete! records the DONE terminal on an accepted + evidenced task', () => {
     accepted();
@@ -361,7 +379,8 @@ describe('evidence! + complete! — the close gesture commands (leg 08 task 02)'
   it('complete! refuses when an AC carries no claim — named, with the AC listed, nothing written', () => {
     accepted();
     const c = cmds();
-    c.evidence(ID, [{ sha: realSha() }], { checks: [{ command: 'npm test', result: 'pass', sha: realSha() }] });
+    valueOf(c.capture(ID, 'npm test')); // the fact alone claims nothing about any AC
+    c.evidence(ID, [{ sha: realSha() }]);
     const e = errorOf(c.complete(ID));
     expect(e.code).toBe('no-structured-conclusion');
     expect(e.blocker).toContain('carry no claim');
@@ -372,48 +391,90 @@ describe('evidence! + complete! — the close gesture commands (leg 08 task 02)'
     expect(c.conclusion(ID).unclaimed).toEqual([{ ac: 'AC-1', acText: 'it is done' }]);
   });
 
-  it('complete! refuses when no PASSING check is bound to a cited commit — no checks · a foreign sha · a failing check', () => {
+  it('complete! refuses when no CAPTURED pass is bound to a cited commit — no checks · a REPORTED pass · a foreign sha · a failing run', () => {
     // one node per case: the fixture hand-writes node.json/events.jsonl, and the store's
     // ledger guard (correctly) refuses a WRITE over a node that was rewritten behind it.
     const at = (id: string) => writeNode(id, CONTRACT, [ev('created'), ...GATE]);
-    const close = (id: string, opts: Parameters<Commands['evidence']>[2]) => {
+    const close = (id: string, capture: CaptureEnv, opts: Parameters<Commands['evidence']>[2] = {}) => {
       at(id);
-      const c = cmds();
+      const c = cmds(capture);
       valueOf(c.evidence(id, [{ sha: realSha() }], opts));
       return { c, err: errorOf(c.complete(id)) };
     };
     // (a) claims, but no checks at all
-    const a = close('01-leg/02-nochecks', { claims: [{ ac: 'AC-1', statement: 'met', evidence: [realSha()] }] });
-    expect(a.err.code).toBe('no-structured-conclusion');
-    expect(a.err.blocker).toContain('no checks');
-    // (b) a passing check bound to a sha the task does NOT cite (verification of nothing)
-    const b = close('01-leg/03-foreign', {
+    const a = close('01-leg/02-nochecks', stubCapture(), { claims: [{ ac: 'AC-1', statement: 'met', evidence: [realSha()] }] });
+    expect(a.err.code).toBe('no-captured-pass');
+    expect(a.err.blocker).toContain('no checks at all');
+    // (b) a REPORTED pass is a CLAIM: it is labelled in the log and refuses the close BY
+    // NAME — the tightening (leg 12/03 AC-4), no reason-string escape hatch
+    const b = close('01-leg/03-reported', stubCapture(), {
       claims: [{ ac: 'AC-1', statement: 'met', evidence: [realSha()] }],
-      checks: [{ command: 'npm test', result: 'pass', sha: 'deadbeef00000000000000000000000000000000' }],
+      checks: [{ command: 'npm test', result: 'pass', sha: realSha() }],
     });
-    expect(b.err.code).toBe('no-structured-conclusion');
-    expect(b.err.blocker).toContain('none PASSING against a cited commit');
-    expect(b.c.status('01-leg/03-foreign')).toBe('accepted'); // nothing written
-    // (c) a FAILING check does not satisfy it
-    const d = close('01-leg/04-failing', {
-      claims: [{ ac: 'AC-1', statement: 'met', evidence: [realSha()] }],
-      checks: [{ command: 'npm test', result: 'fail', detail: '1 failed', sha: realSha() }],
-    });
-    expect(d.err.code).toBe('no-structured-conclusion');
-    expect(d.c.status('01-leg/04-failing')).toBe('accepted');
+    expect(b.err.code).toBe('no-captured-pass');
+    expect(b.err.blocker).toContain('a REPORTED check (--checks) is what the runner says');
+    expect(b.err.blocker).toContain("ann capture! 01-leg/03-reported");
+    expect(b.c.status('01-leg/03-reported')).toBe('accepted'); // nothing written
+    expect(b.c.store.checksOf('01-leg/03-reported')[0].source).toBe('reported');
+    // (c) a FAILING captured run records the real result and blocks the close (AC-5)
+    at('01-leg/05-failing');
+    const fc = cmds(stubCapture({ exitCode: 1, output: '1 failed' }));
+    valueOf(fc.capture('01-leg/05-failing', 'npm test'));
+    valueOf(fc.evidence('01-leg/05-failing', [{ sha: realSha() }], { claims: [{ ac: 'AC-1', check: 'npm test' }] }));
+    const f = { c: fc, err: errorOf(fc.complete('01-leg/05-failing')) };
+    expect(f.err.code).toBe('no-captured-pass');
+    expect(f.err.blocker).toContain('the latest captured run FAILED: npm test');
+    expect(f.c.store.checksOf('01-leg/05-failing')[0]).toMatchObject({ source: 'captured', result: 'fail', exitCode: 1 });
+    expect(f.c.status('01-leg/05-failing')).toBe('accepted');
+  });
+
+  it('a claim mapped to a FAILING check refuses by name even when another command has a captured pass', () => {
+    accepted();
+    const c = cmds(stubCapture({ exits: { 'ann check': 1 } }));
+    valueOf(c.capture(ID, 'npm test')); // a captured PASS (the global predicate is satisfied)
+    valueOf(c.capture(ID, 'ann check')); // …and a FAILED run for the AC's own act
+    valueOf(c.evidence(ID, [{ sha: realSha() }], { claims: [{ ac: 'AC-1', check: 'ann check' }] }));
+    const e = errorOf(c.complete(ID));
+    expect(e.code).toBe('claim-failed');
+    expect(e.blocker).toContain("'AC-1'");
+    expect(e.blocker).toContain('LATEST run FAILED');
+    expect(c.status(ID)).toBe('accepted');
+  });
+
+  it('a claim mapping an act the log does NOT hold refuses by name (a mapping is not prose)', () => {
+    accepted();
+    const c = cmds();
+    valueOf(c.capture(ID, 'npm test'));
+    valueOf(c.evidence(ID, [{ sha: realSha() }], { claims: [{ ac: 'AC-1', check: 'ann verify' }] }));
+    const e = errorOf(c.complete(ID));
+    expect(e.code).toBe('claim-unsubstantiated');
+    expect(e.blocker).toContain("'AC-1' → 'ann verify'");
+    expect(e.blocker).toContain('ann capture!');
+    expect(c.status(ID)).toBe('accepted');
+  });
+
+  it('a captured run against a FOREIGN sha (a different commit than the one cited) closes nothing', () => {
+    accepted();
+    const c = cmds(stubCapture());
+    valueOf(c.capture('01-leg/01-a', 'npm test')); // captured against HEAD
+    valueOf(c.evidence('01-leg/01-a', [{ sha: 'deadbeef' }], { claims: [{ ac: 'AC-1', check: 'npm test' }] }));
+    const e = errorOf(c.complete('01-leg/01-a'));
+    expect(e.code).toBe('no-captured-pass');
+    expect(e.blocker).toContain('none a CAPTURED pass bound to a cited commit');
+    expect(c.status('01-leg/01-a')).toBe('accepted');
   });
 
   it('a claim recorded in a LATER evidence event counts (the rework model) — matched by the AC text or its AC-N', () => {
     accepted();
     const c = cmds();
     const sha = realSha();
-    c.evidence(ID, [{ sha }]); // evidence first — thin
+    valueOf(c.capture(ID, 'npm test')); // the FACT first (nothing to claim against yet)
+    c.store.appendEvent(c.store.resolveNode(ID), ev('evidence', { commits: [{ sha }] }) as JourneyEvent);
     expect(errorOf(c.complete(ID)).code).toBe('no-structured-conclusion');
-    // the claim names the criterion by its TEXT, the check passes against the cited commit
-    c.evidence(ID, [{ sha }], { claims: [{ ac: 'it is done', statement: 'met — the criterion named by its text', evidence: [sha] }] });
-    c.evidence(ID, [{ sha }], { checks: [{ command: 'npm test', result: 'pass', detail: '3/3', sha }] });
+    // the claim names the criterion by its TEXT and maps it to the recorded act
+    c.store.appendEvent(c.store.resolveNode(ID), ev('evidence', { commits: [{ sha }], claims: [{ ac: 'it is done', check: 'npm test' }] }) as JourneyEvent);
     expect(valueOf(c.complete(ID)).at).toMatch(/^\d{4}-\d{2}-\d{2}$/);
-    expect(c.check()).toEqual([]);
+    expect(c.store.checksOf(ID).map((k) => k.source)).toEqual(['captured']);
   });
 
   it('complete! refuses without the human ACCEPT — none · rejected · an undecided re-submission after an accept', () => {
@@ -478,7 +539,7 @@ describe('evidence! + complete! — the close gesture commands (leg 08 task 02)'
   it('complete! is recorded once, and never on a leg root or an unknown node', () => {
     accepted();
     const c = cmds();
-    conclude(c, '01-leg/01-a', 'abc1234');
+    conclude(c, '01-leg/01-a', realSha());
     valueOf(c.complete('01-leg/01-a'));
     expect(errorOf(c.complete('01-leg/01-a')).code).toBe('already-completed');
     expect(errorOf(c.complete('01-leg')).code).toBe('leg-gate-write');
@@ -488,10 +549,110 @@ describe('evidence! + complete! — the close gesture commands (leg 08 task 02)'
   it('adds NO new write path — every event lands through the single writer', () => {
     accepted();
     const c = cmds();
-    conclude(c, '01-leg/01-a', 'abc1234');
+    conclude(c, '01-leg/01-a', realSha());
     valueOf(c.complete('01-leg/01-a'));
-    expect(c.events('01-leg/01-a').map((e) => e.type)).toEqual(['created', 'submitted', 'confirmed', 'submitted', 'confirmed', 'evidence', 'completed']);
+    // the capture is an evidence event on the SAME log — one writer, one path
+    expect(c.events('01-leg/01-a').map((e) => e.type)).toEqual(['created', 'submitted', 'confirmed', 'submitted', 'confirmed', 'evidence', 'evidence', 'completed']);
     expect(c.verify()).toEqual([]);
+  });
+});
+
+describe('capture! — the CAPTURED check (leg 12 task 03: the record is a consequence, not a claim)', () => {
+  beforeEach(() => { makeStore(); writeNode('01-leg', CONTRACT); });
+  afterEach(() => { rmSync(root, { recursive: true, force: true }); });
+  const ID = '01-leg/01-a';
+  const task = () => writeNode(ID, CONTRACT, [ev('created')]);
+
+  it('records the REAL outcome as a FACT: the exit code decides the result, the sha comes from git, the detail is the output digest/summary', () => {
+    task();
+    const c = cmds(stubCapture({ exitCode: 0, output: '\nTests  3 passed (3)\n' }));
+    const v = valueOf(c.capture(ID, 'npm test'));
+    expect(v).toMatchObject({ command: 'npm test', result: 'pass', exitCode: 0, sha: realSha() });
+    expect(v.detail).toMatch(/^sha1:[0-9a-f]{12} · Tests 3 passed \(3\)$/);
+    // the FACT lands on the node's own log, as an evidence record, with provenance
+    const e = c.events(ID).at(-1)!;
+    expect(e.type).toBe('evidence');
+    expect(e.commits).toBeUndefined(); // a check is not a conclusion — it cites nothing by itself
+    expect(e.checks).toEqual([{ command: 'npm test', result: 'pass', exitCode: 0, detail: v.detail, sha: realSha(), source: 'captured' }]);
+    expect(String(e.note)).toContain("captured 'npm test' → pass (exit 0)");
+    expect(String(e.note)).toContain('test'); // RECORDED_BY
+    expect(c.verify()).toEqual([]);
+  });
+
+  it('records a FAILING run as result=fail with the real exit code — never softened', () => {
+    task();
+    const c = cmds(stubCapture({ exitCode: 2, output: 'boom\n3 failed | 5 passed' }));
+    const v = valueOf(c.capture(ID, 'ann verify'));
+    expect(v).toMatchObject({ command: 'ann verify', result: 'fail', exitCode: 2 });
+    expect(v.detail).toContain('3 failed | 5 passed');
+    expect(c.store.checksOf(ID)[0]).toMatchObject({ source: 'captured', result: 'fail', exitCode: 2 });
+    expect(c.store.capturedPassBound(ID)).toBe(false);
+  });
+
+  it('is NOT A SHELL: only the five allowlisted names run — anything else is refused by name, having executed nothing', () => {
+    task();
+    let ran = 0;
+    const env = stubCapture();
+    const c = cmds({ ...env, run: (n, d) => { ran += 1; return env.run(n, d); } });
+    for (const bad of ['rm -rf /', 'npm test -- --watch', 'sh', 'node -e "1"', 'npm  test', 'NPM TEST']) {
+      const e = errorOf(c.capture(ID, bad));
+      expect(e.code).toBe('unknown-command');
+      expect(e.blocker).toContain('not on the ALLOWLIST');
+      expect(e.blocker).toContain('not a shell');
+    }
+    expect(ran).toBe(0); // nothing reached the exec seam
+    expect(c.events(ID).filter((e) => e.type === 'evidence')).toEqual([]);
+    // task-addressed only (a leg carries no verification; an unknown node is refused)
+    expect(errorOf(c.capture('01-leg', 'npm test')).code).toBe('leg-gate-write');
+    expect(errorOf(c.capture('01-leg/09-x', 'npm test')).code).toBe('no-node');
+  });
+
+  it('refuses a DIRTY tree and a missing HEAD fail-closed — the sha must be the bytes the run really saw', () => {
+    task();
+    let ran = 0;
+    const dirtyEnv = stubCapture({ dirty: ['src/store/store.ts', 'docs/x.md'] });
+    const c = cmds({ ...dirtyEnv, run: (n, d) => { ran += 1; return dirtyEnv.run(n, d); } });
+    const d = errorOf(c.capture(ID, 'npm test'));
+    expect(d.code).toBe('dirty-tree');
+    expect(d.blocker).toContain('src/store/store.ts');
+    expect(d.blocker).toContain('commit first');
+    expect(ran).toBe(0);
+    const g = errorOf(cmds(stubCapture({ head: undefined })).capture(ID, 'npm test'));
+    expect(g.code).toBe('no-git');
+    expect(cmds().events(ID).filter((e) => e.type === 'evidence')).toEqual([]);
+  });
+
+  it('the log DISTINGUISHES a fact from a claim: an unlabeled --checks entry is labelled reported, a capture is marked captured', () => {
+    task();
+    const c = cmds();
+    valueOf(c.capture(ID, 'npm test'));
+    valueOf(c.evidence(ID, [{ sha: realSha() }], { claims: [{ ac: 'AC-1', check: 'npm test' }], checks: [{ command: 'npm run build', result: 'pass', detail: 'typed by a runner' }] }));
+    const checks = c.store.checksOf(ID);
+    expect(checks.map((k) => [k.command, k.source, k.result])).toEqual([
+      ['npm test', 'captured', 'pass'],
+      ['npm run build', 'reported', 'pass'],
+    ]);
+    // only the captured one can satisfy the predicate
+    expect(c.store.capturedPassBound(ID)).toBe(true);
+    // …and a reported check alone never does (same command, typed instead of run)
+    valueOf(c.evidence(ID, [{ sha: realSha() }], { checks: [{ command: 'npm run typecheck', result: 'pass' }] }));
+    expect(c.store.checksOf(ID).at(-1)!.source).toBe('reported');
+    expect(c.store.checksOf(ID).filter((k) => k.source === 'reported')).toHaveLength(2);
+  });
+
+  it('the ac→CHECK MAPPING is derived by the store: the claim resolves to the recorded run, and the prose is derived when omitted', () => {
+    task();
+    const c = cmds();
+    valueOf(c.capture(ID, 'npm test'));
+    valueOf(c.evidence(ID, [{ sha: realSha() }], { claims: [{ ac: 'AC-1', check: 'npm test' }] }));
+    const [claim] = c.conclusion(ID).claims;
+    expect(claim.check).toBe('npm test');
+    expect(claim.bound).toMatchObject({ command: 'npm test', result: 'pass', source: 'captured' });
+    expect(claim.statement).toBe('verified by npm test'); // prose optional OR DERIVED
+    // a reported run resolves too — and says so (the reader can tell a fact from a claim)
+    valueOf(c.evidence(ID, [{ sha: realSha() }], { checks: [{ command: 'ann check', result: 'pass' }] }));
+    expect(c.conclusion(ID).claims[0].bound).toMatchObject({ source: 'captured' });
+    expect(c.conclusion(ID).checks.map((k) => k.source)).toEqual(['captured', 'reported']);
   });
 });
 

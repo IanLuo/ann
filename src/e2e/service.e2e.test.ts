@@ -86,8 +86,10 @@ function driveJourney(root: string): void {
   git(root, ['add', '-A']);
   git(root, ['commit', '-qm', 'stage the deliverable']);
   const sha = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
-  // v18: complete! requires a structured conclusion — claims for every AC + a passing
-  // check bound to the cited commit
+  // v18 + leg 12/03: complete! requires a structured conclusion — a claim per AC MAPPED to
+  // a check the log holds, and at least one CAPTURED pass bound to the cited commit (the
+  // capture really RUNS `ann verify` against the fixture journey)
+  cli(root, ['capture!', T1, 'ann verify']);
   cli(root, [
     'evidence!',
     T1,
@@ -95,9 +97,7 @@ function driveJourney(root: string): void {
     '--note',
     'committed',
     '--claims',
-    JSON.stringify([{ ac: 'AC-1', statement: 'the alpha thing is done', evidence: [sha] }]),
-    '--checks',
-    JSON.stringify([{ command: 'npm test', result: 'pass', detail: 'fixture', sha }]),
+    JSON.stringify([{ ac: 'AC-1', check: 'ann verify', evidence: [sha] }]),
   ]);
   cli(root, ['submit!', T1, 'confirm']);
   cli(root, ['gate!', T1, 'confirm', 'accept', 'done']); // the accept closes it — the evidence is already in the log

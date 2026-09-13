@@ -75,18 +75,23 @@ function driveLifecycle(root: string): void {
   git(root, ['commit', '-qm', 'stage the deliverable']);
   // v18: the structured conclusion rides the evidence event (claims per AC + the checks
   // that were run) — the card's CLAIMS/CHECKS sections must survive the render parity.
+  // leg 12/03: the AC is MAPPED to a CAPTURED check (the engine runs `ann verify` for
+  // real) — the close refuses a typed-only record, and this fixture is a real conclusion.
+  const sha = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  cli(root, ['capture!', TASK, 'ann verify']);
   cli(root, [
     'evidence!',
     TASK,
-    'abc1234',
+    sha,
     '--claims',
     JSON.stringify([
-      { ac: 'AC-1', statement: 'the thing works', evidence: ['abc1234', 'docs/thing.md'] },
+      { ac: 'AC-1', check: 'ann verify' },
       { ac: 'AC-2', statement: 'nobody reviewed it yet' },
     ]),
     '--checks',
-    // the passing check must be BOUND to a cited commit (v18: complete! refuses otherwise)
-    JSON.stringify([{ command: 'npm test', result: 'pass', detail: '3/3', sha: 'abc1234' }, { command: 'ann check', result: 'fail', detail: 'known' }]),
+    // a REPORTED check stays available and is LABELLED as such (the card must show the
+    // difference between a fact and a claim)
+    JSON.stringify([{ command: 'ann check', result: 'fail', detail: 'known' }]),
   ]);
   cli(root, ['submit!', TASK, 'confirm']);
   cli(root, ['gate!', TASK, 'confirm', 'accept', 'done']); // the accept closes it — the evidence is already in the log

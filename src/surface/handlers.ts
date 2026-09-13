@@ -13,6 +13,7 @@ import { Store, resolveStoreLocation, storeJourneyDir } from '../store/store.js'
 import type { StoreLocation, JourneyEvent, ResultItem, TaskDetail } from '../store/store.js';
 import { scanDocsDir, loadDocsManifest, writeDocsManifest, docsIndexFresh, docSha } from '../store/docs.js';
 import { Commands, CommandResult, GOAL_SEED_GUARD } from '../commands/index.js';
+import { ALLOWLIST_NAMES } from '../commands/capture.js';
 import {
   loadProviderRegistry,
   resolveSetting,
@@ -241,6 +242,11 @@ const NUMERIC_CONFIG_LEAVES = new Set(['verifyFailCycles', 'port']);
 
 /** The command table (one source — text rows, JSON rows, markdown rows) */
 
+/** The `capture!` command's own recording of the DECISION (leg 12/03 AC-1) — the
+ *  mechanism, its guard, and the rejected alternative, in the one place every initiator
+ *  reads (`ann --commands`, the README table, the help). */
+export const CAPTURE_COMMAND_DESC = `WRITE — THE CAPTURED CHECK (leg 12/03: the record is a consequence, not a claim): the engine RUNS one project command and records what happened as a FACT — {command, result (the REAL exit code: 0 → pass, else fail), exitCode, detail (output digest/summary), sha (the repo bytes the run saw), source:'captured'} — distinguishable in the log from a REPORTED check (--checks on evidence!, which stays available but is LABELLED 'reported' by the writer). MECHANISM: (a) engine-run with a CLOSED ALLOWLIST (${ALLOWLIST_NAMES.join(' · ')}); GUARD: the caller names a command — the name must be one of those literals, each mapped to a fixed argv spawned with shell:false, so no arbitrary string ever reaches an exec and the engine does not become a general shell (the shell ability is contract-declared and UNBUILT); the tree must be clean outside the ann store, and the sha is READ FROM GIT, never typed. REJECTED: (b) runner-supplied capture with engine validation (sha resolves · command allowlisted · result ∈ pass|fail) — it cannot produce the outcome (the result stays typed by the reporter, which is the hole this closes) and its guards are a strict subset of (a). The write is the SAME L1 write (store.appendCaptured; the general writer refuses a captured check by name) and provenance comes from RECORDED_BY. A failing run records result=fail and the close REFUSES (no-captured-pass).`;
+
 const COMMANDS: Array<{ name: string; args: string; desc: string }> = [
   { name: '<name>', args: '', desc: 'the path for one doc (docs manifest) or a current artifact\'s logical name' },
   { name: 'journey', args: '[id]', desc: 'the look-back (no id) · the COMPLETE NODE VIEW (with id): every node.json field (workType · flow · model too) + openQuestions · createdAt · the RESOLVED requiredInputs + status/gates/artifacts/blockers + the full numbered event walk · alias --journey' },
@@ -279,8 +285,9 @@ const COMMANDS: Array<{ name: string; args: string; desc: string }> = [
   { name: 'spawn!', args: '<id> \'<contract-json>\'', desc: 'WRITE — create a node; enforces the v14 contract schema + F-AC19 + id naming + the conclusion (commit-evidence)/leg gates' },
   { name: 'submit!', args: '<id> grill|confirm [confirmedSha]', desc: 'WRITE — submit finished work at a gate for the human decision (the SUCCESS half of the task close; the counterpart is cancel — no longer needed): records `submitted` — the task blocks and waits for `gate! accept|reject`; an interrupted gate stays blocked (resumable), never looks un-started. `[confirmedSha]` (confirm gate only) binds the decision to the exact bytes under review' },
   { name: 'gate!', args: '<id> grill|confirm accept|reject [feedback]', desc: 'WRITE — human gate decision (submit + decide; the 3-reject bound is a CONSTANT owned here); a CONFIRM accept AUTO-CLOSES the task when the conclusion evidence is already present (the same rule the frame runs) — with the evidence missing the task stays `accepted` and the result names the `complete!` still owed' },
-  { name: 'evidence!', args: "<id> <sha>[,<sha>…] [--refs a.md,b.md] [--note '<text>'] [--claims '<json>'] [--checks '<json>']", desc: "WRITE — the CONCLUSION record (F-AC18): structured commit evidence naming the committed doc/code that carries the deliverable (commits[] non-empty, a sha per entry) plus the OPTIONAL structured conclusion (format v18): --claims = one {ac, statement, evidence?} per acceptance criterion (how it is met; evidence entries are POINTERS — commit sha · ref path · doc name — resolved at READ time) and --checks = {command, result: pass|fail, detail?, sha?} (what was RUN, sha binding it to the bytes); the shape stays the store's — a validated front over the same L1 write, provenance from RECORDED_BY, and a bad JSON argument writes nothing" },
-  { name: 'complete!', args: '<id> [--note \'<text>\']', desc: 'WRITE — the EXPLICIT DONE terminal (a confirm accept auto-closes on evidence, so this gesture is the accepted-without-evidence exception; an already-completed task gets an idempotent refusal): refuses without the confirm gate\'s LAST decision being an ACCEPT and without the conclusion evidence — the F-AC18 predicate: evidence.commits[] AND the structured conclusion (a claim per acceptance criterion · at least one PASSING check bound to a cited commit)' },
+  { name: 'evidence!', args: "<id> <sha>[,<sha>…] [--refs a.md,b.md] [--note '<text>'] [--claims '<json>'] [--checks '<json>']", desc: "WRITE — the CONCLUSION record (F-AC18): structured commit evidence naming the committed doc/code that carries the deliverable (commits[] non-empty, a sha per entry) plus the OPTIONAL structured conclusion (format v18, MECHANICAL since leg 12/03): --claims = one {ac, check?, statement?, evidence?} per acceptance criterion — `check` is the ac→CHECK MAPPING (the recorded run that covers the AC; `statement` is optional prose, derived from the mapping when absent) and evidence entries are POINTERS (commit sha · ref path · doc name) resolved at READ time; --checks = {command, result: pass|fail, detail?, sha?, source?} (what was RUN) — a check without a `source` is LABELLED `reported` by the writer, and `source:'captured'` is REFUSED here (engine-produced: run capture!); the shape stays the store's — a validated front over the same L1 write, provenance from RECORDED_BY, and a bad JSON argument writes nothing" },
+  { name: 'capture!', args: "<id> '<command>'", desc: CAPTURE_COMMAND_DESC },
+  { name: 'complete!', args: '<id> [--note \'<text>\']', desc: 'WRITE — the EXPLICIT DONE terminal (a confirm accept auto-closes on evidence, so this gesture is the accepted-without-evidence exception; an already-completed task gets an idempotent refusal): refuses without the confirm gate\'s LAST decision being an ACCEPT and without the conclusion evidence — the F-AC18 predicate (TIGHTENED, leg 12/03: a REPORTED check is refused by name): evidence.commits[] AND the structured conclusion (a claim per acceptance criterion, each mapped to a check the log holds) AND at least one CAPTURED pass bound to a cited commit' },
   { name: 'goal!', args: 'met [feedback]', desc: 'WRITE — the HUMAN verdict that seals a structurally-exhausted session (goal-met on the goal root); refused for automated (agent) initiators, double-met, and any undecided submission' },
   { name: 'goal!', args: 'archive [--override]', desc: 'WRITE — guarded structural reset: move .ann/journey → .ann/archive/sessions/<ts>-<slug>/ for a fresh goal; refuses without a met verdict (or --override), on store-external verify drifts, and on uncommitted tracked .ann/journey changes' },
   { name: 'goal!', args: 'seed [goal-statement]', desc: 'WRITE — grill a goal at SESSION scope (EMPTY journey seeds new; a RE-SEEDABLE sole unconsumed goal is REPLACED after re-grilling — consumed/met goals refuse): the interactive idea-validation session (grill → batch-ask → research → re-grill → human verdict); on solid, synthesize goal.md (Goal:/Success criteria:) + seed/re-seed the goal leg + write docs/goal.md + regenerate the manifest; revise/reject seeds nothing' },
@@ -1098,6 +1105,14 @@ export const HANDLERS: Record<string, Handler> = {
       }),
     );
   },
+  'capture!': (ctx) => {
+    const note = takeFlag(ctx.args.slice(1), '--note');
+    const stray = strayFlag(note.rest);
+    if (stray) return usage(`usage: ann capture! <id> '<command>' [--note '<text>'] — unknown flag ${stray}`);
+    const [id, command] = note.rest;
+    if (!id || !command) return usage(`usage: ann capture! <id> '<command>' [--note '<text>'] — the command is one of the ALLOWLIST: ${ALLOWLIST_NAMES.join(' · ')}`);
+    return writeResult(ctx.commands.capture(id, command, { ...(note.value ? { note: note.value } : {}) }));
+  },
   'complete!': (ctx) => {
     const note = takeFlag(ctx.args.slice(1), '--note');
     const stray = strayFlag(note.rest);
@@ -1249,9 +1264,9 @@ const ALIAS: Record<string, string> = {
 
 /** The journey-addressing WRITES a read-only target refuses (config!/cred!/project!
  *  never touch the store, so they stay available). docs/rules --write refuse too. */
-const JOURNEY_REFUSED_WRITES = new Set(['append!', 'spawn!', 'submit!', 'gate!', 'evidence!', 'complete!', 'goal!', 'run!', 'spec!', 'advance!']);
+const JOURNEY_REFUSED_WRITES = new Set(['append!', 'spawn!', 'submit!', 'gate!', 'evidence!', 'capture!', 'complete!', 'goal!', 'run!', 'spec!', 'advance!']);
 /** Bare write names (no `!`) — a named hint, never silent. */
-const WRITES = ['append', 'spawn', 'submit', 'gate', 'evidence', 'complete', 'cred'];
+const WRITES = ['append', 'spawn', 'submit', 'gate', 'evidence', 'capture', 'complete', 'cred'];
 
 const isProjectRoot = (dir: string): boolean => existsSync(join(dir, '.ann')) || existsSync(join(dir, 'journey'));
 

@@ -75,20 +75,23 @@ function prep(root: string, ...ids: string[]): void {
 
 const LEG = '01-leg';
 const TASK = '01-leg/01-a';
-/** v18 — a COMPLIANT conclusion: every contract AC claimed + a passing check bound to the
- *  cited commit. `complete!` refuses a thin conclusion, so every fixture that closes a task
- *  must produce one (the fixtures double as examples of the rule). */
-const conclude = (root: string, id: string, sha: string, extra: string[] = []): CliResult =>
-  cli(root, [
+/** v18 + leg 12/03 — a COMPLIANT conclusion: every contract AC MAPPED to a CAPTURED
+ *  check bound to the cited commit. The capture RUNS one allowlisted project command for
+ *  real (`ann verify` — clean in a fixture journey) and records its exit code; `complete!`
+ *  refuses a typed-only record, so every fixture that closes a task walks the same two
+ *  gestures a runner would (the fixtures double as examples of the rule). */
+const conclude = (root: string, id: string, sha: string, extra: string[] = []): CliResult => {
+  const captured = cli(root, ['capture!', id, 'ann verify']);
+  if (captured.code !== 0) throw new Error(`capture! refused in the fixture: ${out(captured)}`);
+  return cli(root, [
     'evidence!',
     id,
     sha,
     ...extra,
     '--claims',
-    JSON.stringify([{ ac: 'AC-1', statement: 'the criterion is met', evidence: [sha] }]),
-    '--checks',
-    JSON.stringify([{ command: 'npm test', result: 'pass', detail: 'fixture', sha }]),
+    JSON.stringify([{ ac: 'AC-1', check: 'ann verify', evidence: [sha] }]),
   ]);
+};
 
 const CONTRACT = (intent: string) => JSON.stringify({ intent, acceptanceCriteria: [`${intent} is done`] });
 const EVENT = (type: string, extra: Record<string, string> = {}) =>

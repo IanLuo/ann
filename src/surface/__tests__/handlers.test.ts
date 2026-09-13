@@ -256,7 +256,8 @@ describe('STRUCTURED EVIDENCE — claims/checks at the gate (format v18)', () =>
     expect(out.value.value).toEqual({ commits: 1, refs: 0, claims: 1, checks: 1 });
     const event = new Store(root).events(id).find((e) => e.type === 'evidence');
     expect(event?.claims).toEqual([{ ac: 'AC-1', statement: 'the thing works', evidence: [s, 'docs/core-design.md', 'ghost'] }]);
-    expect(event?.checks).toEqual([{ command: 'npm test', result: 'pass', detail: '622/622', sha: s }]);
+    // the WRITER labels a typed check (leg 12/03 AC-2: the log tells a fact from a claim)
+    expect(event?.checks).toEqual([{ command: 'npm test', result: 'pass', detail: '622/622', sha: s, source: 'reported' }]);
 
     // a non-JSON or non-array argument is a NAMED usage failure — nothing appended
     const before = new Store(root).events(id).length;
@@ -265,6 +266,31 @@ describe('STRUCTURED EVIDENCE — claims/checks at the gate (format v18)', () =>
     expect(new Store(root).events(id).length).toBe(before);
     // …and a malformed claim is refused by the single writer, by NAME
     expect(() => HANDLERS['evidence!'](createContext(root, ['evidence!', id, s, '--claims', JSON.stringify([{ ac: 'AC-1', statement: 'x', bogus: 1 }])]))).toThrow(/unknown field/);
+    // a check that CLAIMS to be captured is refused here: the fact is engine-produced
+    expect(() => HANDLERS['evidence!'](createContext(root, ['evidence!', id, s, '--checks', JSON.stringify([{ command: 'npm test', result: 'pass', source: 'captured', exitCode: 0, sha: s, detail: 'sha1:0 · ok' }])]))).toThrow(/ENGINE-PRODUCED/);
+    expect(new Store(root).events(id).length).toBe(before);
+  });
+
+  it('capture! — the closed allowlist and the task-addressed guard fail CLOSED, named (this fixture is not a git repo)', () => {
+    mk();
+    // the write path throws the named failure the binary turns into an exit 1 (writeResult)
+    const refused = (args: string[]): { code: string; text: string } => {
+      try {
+        HANDLERS['capture!'](createContext(root, args));
+        return { code: 'NO-THROW', text: '' };
+      } catch (e) {
+        return { code: (e as { code?: string }).code ?? 'error', text: (e as Error).message };
+      }
+    };
+    expect(refused(['capture!', id, 'rm -rf /']).code).toBe('unknown-command');
+    expect(refused(['capture!', id, 'rm -rf /']).text).toContain('not a shell');
+    expect(refused(['capture!', id, 'npm test', '--bogus', 'x']).code).toBe('usage');
+    expect(refused(['capture!', id]).code).toBe('usage');
+    expect(refused(['capture!', '08-leg', 'npm test']).code).toBe('leg-gate-write');
+    expect(refused(['capture!', '08-leg/09-nope', 'npm test']).code).toBe('no-node');
+    // an allowlisted name with no git HEAD refuses by name — the sha IS the binding
+    expect(refused(['capture!', id, 'npm test']).code).toBe('no-git');
+    expect(new Store(root).events(id).filter((e) => e.type === 'evidence')).toEqual([]);
   });
 
   it('the card states how each AC is met, resolves the pointers, and names the gaps', () => {
@@ -291,9 +317,37 @@ describe('STRUCTURED EVIDENCE — claims/checks at the gate (format v18)', () =>
     expect(text).toContain('CLAIMS (how each acceptance criterion is met');
     expect(text).toContain('AC-1: the first thing works — proven by the suite');
     expect(text).toContain('AC-2: NO CLAIM RECORDED');
-    expect(text).toContain('PASS  npm test @');
-    expect(text).toContain('FAIL  ann check — 1 problem');
+    // leg 12/03 — the check list marks the FACT/CLAIM distinction
+    expect(text).toContain('PASS  npm test [reported] @');
+    expect(text).toContain('FAIL  ann check [reported] — 1 problem');
+    expect(text).toContain('[captured] = the engine ran it, [reported] = a claim');
     expect(text).toContain('CHECKS (what was run');
+  });
+
+  it('a claim MAPPED to a check renders the resolution (leg 12/03): the act, whether it was captured, and an unmapped act named as missing', () => {
+    mk();
+    const s = sha();
+    // a captured check is engine-produced — the fixture writes the fact THROUGH the
+    // store's capture entry point (the same one captured by capture!), then claims map to it
+    const store = new Store(root);
+    store.appendCaptured(store.resolveNode(id), {
+      at: '2026-09-01',
+      type: 'evidence',
+      note: 'captured npm test',
+      checks: [{ command: 'npm test', result: 'pass', exitCode: 0, detail: 'sha1:abc123456789 · 622 passed', sha: s, source: 'captured' }],
+    });
+    HANDLERS['evidence!'](
+      createContext(root, ['evidence!', id, s, '--claims', JSON.stringify([{ ac: 'AC-1', check: 'npm test' }, { ac: 'AC-2', check: 'ann verify' }])]),
+    );
+    const ctx = createContext(root, ['confirm', id]);
+    const card = (HANDLERS.confirm(ctx) as { value: { detail: NodeCard } }).value.detail;
+    expect(card.claims[0].check).toBe('npm test');
+    expect(card.claims[0].statement).toBe('verified by npm test'); // prose DERIVED from the mapping
+    expect(card.claims[0].bound).toMatchObject({ command: 'npm test', result: 'pass', source: 'captured' });
+    expect(card.claims[1].bound).toBeUndefined(); // the act the record names does not exist
+    const text = RENDERS.confirm({ detail: card, results: [] }, ctx.renderEnv());
+    expect(text).toContain('check: npm test [captured pass @');
+    expect(text).toContain('check: ann verify [NO SUCH RUN IN THE LOG]');
   });
 
   it('a LATER claim for the same AC supersedes the earlier one (the rework model)', () => {

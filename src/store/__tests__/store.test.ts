@@ -957,18 +957,22 @@ describe('Store — strict event schema (format v12 §3: unknown fields + shapes
 
   // v18 §3 — the STRUCTURED VERIFICATION shapes (claims[]/checks[]), policed here at
   // the single writer: a malformed claim/check is refused BY NAME, never stored as prose.
-  it('rejects malformed claims on evidence (shape, unknown key, empty ac/statement)', () => {
+  it('rejects malformed claims on evidence (shape, unknown key, empty ac, no act and no prose)', () => {
     writeNode('06-engine-build/20-h', {}, [ev('created')]);
     const E = (claims: unknown): JourneyEvent => ({ at: '2026-08-22', type: 'evidence', claims } as unknown as JourneyEvent);
     expectReject('06-engine-build/20-h', E([]), /claims must be a non-empty/);
     expectReject('06-engine-build/20-h', E(['AC-1']), /each claim must be an object/);
     expectReject('06-engine-build/20-h', E([{ ac: 'AC-1', statement: 'x', bogus: 1 }]), /unknown field\(s\) 'bogus'/);
     expectReject('06-engine-build/20-h', E([{ statement: 'x' }]), /needs 'ac'/);
-    expectReject('06-engine-build/20-h', E([{ ac: 'AC-1', statement: '   ' }]), /needs 'statement'/);
+    // leg 12/03 — the mapping is MECHANICAL: a claim must name an act or say something;
+    // `statement` alone is still valid (prose is optional, never required).
+    expectReject('06-engine-build/20-h', E([{ ac: 'AC-1', statement: '   ' }]), /needs a 'check'/);
+    expectReject('06-engine-build/20-h', E([{ ac: 'AC-1', check: '  ' }]), /check must be the non-blank COMMAND/);
+    expectReject('06-engine-build/20-h', E([{ ac: 'AC-1', statement: 'x', check: 42 }]), /check must be the non-blank COMMAND/);
     expectReject('06-engine-build/20-h', E([{ ac: 'AC-1', statement: 'x', evidence: [] }]), /evidence must be a non-empty/);
   });
 
-  it('rejects malformed checks (command, result domain, sha shape)', () => {
+  it('rejects malformed checks (command, result domain, sha shape, source marker)', () => {
     writeNode('06-engine-build/20-i', {}, [ev('created')]);
     const E = (checks: unknown): JourneyEvent => ({ at: '2026-08-22', type: 'evidence', checks } as unknown as JourneyEvent);
     expectReject('06-engine-build/20-i', E([]), /checks must be a non-empty/);
@@ -976,21 +980,52 @@ describe('Store — strict event schema (format v12 §3: unknown fields + shapes
     expectReject('06-engine-build/20-i', E([{ command: 'npm test', result: 'green' }]), /result must be 'pass' or 'fail'/);
     expectReject('06-engine-build/20-i', E([{ command: 'npm test', result: 'pass', sha: 'not-a-sha' }]), /sha must be a commit sha/);
     expectReject('06-engine-build/20-i', E([{ command: 'npm test', result: 'pass', kind: 'x' }]), /unknown field\(s\) 'kind'/);
+    expectReject('06-engine-build/20-i', E([{ command: 'npm test', result: 'pass', source: 'maybe' }]), /source must be 'captured' or 'reported'/);
   });
 
-  it('accepts the valid claim/check shapes and carries them on the event', () => {
+  // leg 12/03 — A CAPTURED CHECK IS A FACT, SO IT CANNOT BE TYPED IN. The general
+  // writer (appendEvent) refuses source:'captured' by name; the capture path
+  // (appendCaptured) is the only entry, and it requires the whole fact.
+  it('refuses a TYPED captured check — the fact is engine-produced, never asserted', () => {
+    writeNode('06-engine-build/20-k', {}, [ev('created')]);
+    const s2 = s();
+    const E = (checks: unknown): JourneyEvent => ({ at: '2026-08-22', type: 'evidence', checks } as unknown as JourneyEvent);
+    expectReject('06-engine-build/20-k', E([{ command: 'npm test', result: 'pass', source: 'captured', exitCode: 0, sha: 'abc1234', detail: 'sha1:0 · ok' }]), /ENGINE-PRODUCED/);
+    // the capture entry point refuses a set that is not captured (it is not a general writer)
+    expect(() => s2.appendCaptured(s2.resolveNode('06-engine-build/20-k'), E([{ command: 'npm test', result: 'pass' }]))).toThrow(/engine-produced checks only/);
+    expect(s2.events('06-engine-build/20-k').filter((e) => e.type === 'evidence')).toEqual([]);
+  });
+
+  it('a captured check must be self-consistent: sha + exitCode + detail, result DERIVED from the exit code', () => {
+    writeNode('06-engine-build/20-l', {}, [ev('created')]);
+    const s2 = s();
+    const cap = (check: unknown): void =>
+      s2.appendCaptured(s2.resolveNode('06-engine-build/20-l'), { at: '2026-08-22', type: 'evidence', checks: [{ source: 'captured', ...(check as object) }] } as unknown as JourneyEvent);
+    expect(() => cap({ command: 'npm test', result: 'pass', exitCode: 0, detail: 'sha1:0 · ok' })).toThrow(/needs 'sha'/);
+    expect(() => cap({ command: 'npm test', result: 'pass', exitCode: 0, sha: 'abc1234' })).toThrow(/needs 'detail'/);
+    expect(() => cap({ command: 'npm test', result: 'pass', sha: 'abc1234', detail: 'sha1:0 · ok' })).toThrow(/exitCode must be the run's integer exit status/);
+    expect(() => cap({ command: 'npm test', result: 'pass', exitCode: 1, sha: 'abc1234', detail: 'sha1:0 · ok' })).toThrow(/must be DERIVED from the real exit code: 1 → 'fail'/);
+    // the honest fact lands (and ONLY through this entry point)
+    cap({ command: 'npm test', result: 'fail', exitCode: 1, sha: 'abc1234', detail: 'sha1:0 · 1 failed' });
+    const e = s2.events('06-engine-build/20-l').find((x) => x.type === 'evidence');
+    expect(e?.checks).toEqual([{ source: 'captured', command: 'npm test', result: 'fail', exitCode: 1, sha: 'abc1234', detail: 'sha1:0 · 1 failed' }]);
+  });
+
+  it('accepts the valid claim/check shapes and carries them on the event (an unlabeled check reads REPORTED)', () => {
     writeNode('06-engine-build/20-j', {}, [ev('created')]);
     const s2 = s();
     s2.appendEvent(s2.resolveNode('06-engine-build/20-j'), {
       at: '2026-08-22',
       type: 'evidence',
       commits: [{ sha: 'abc1234' }],
-      claims: [{ ac: 'AC-1', statement: 'it works', evidence: ['abc1234', 'src/x.ts'] }, { ac: 'AC-2', statement: 'it is reviewed' }],
+      claims: [{ ac: 'AC-1', check: 'npm test', evidence: ['abc1234', 'src/x.ts'] }, { ac: 'AC-2', statement: 'it is reviewed' }],
       checks: [{ command: 'npm test', result: 'pass', detail: '622/622', sha: 'abc1234' }],
     } as unknown as JourneyEvent);
     const e = s2.events('06-engine-build/20-j').find((x) => x.type === 'evidence');
     expect(e?.claims).toHaveLength(2);
-    expect(e?.checks).toEqual([{ command: 'npm test', result: 'pass', detail: '622/622', sha: 'abc1234' }]);
+    // the WRITER labels it — the log never holds an unlabeled check (fact vs claim)
+    expect(e?.checks).toEqual([{ command: 'npm test', result: 'pass', detail: '622/622', sha: 'abc1234', source: 'reported' }]);
+    expect(s2.checksOf('06-engine-build/20-j')[0].source).toBe('reported');
   });
 
   it('accepts the valid shapes the engine itself writes (dogfood)', () => {

@@ -438,6 +438,12 @@ export const UI_HTML = `<!doctype html>
         var li = el('li', null, claim.statement ? '' : 'gap');
         li.appendChild(el('span', claim.ac + ': ', 'ac'));
         li.appendChild(el('span', claim.statement || 'NO CLAIM RECORDED — ' + (claim.acText || '')));
+        // the ac→check MAPPING (leg 12/03): which act covers the AC, and whether the log
+        // actually holds it — a mapping that names nothing IS the finding
+        if (claim.check) {
+          var b = claim.bound;
+          li.appendChild(el('span', 'check: ' + claim.check + ' ' + (b ? '[' + b.source + ' ' + b.result + (b.sha ? ' @ ' + b.sha : '') + ']' : '[NO SUCH RUN IN THE LOG]'), 'ev'));
+        }
         (claim.evidence || []).forEach(function (e) {
           var n = resultIndexFor(e);
           if (!n) { li.appendChild(el('span', 'evidence: ' + e, 'ev')); return; }
@@ -453,7 +459,7 @@ export const UI_HTML = `<!doctype html>
       (detail.checks || []).forEach(function (k) {
         var li = el('li');
         li.appendChild(el('span', k.result === 'pass' ? 'PASS  ' : 'FAIL  ', k.result));
-        li.appendChild(el('span', k.command + (k.sha ? ' @ ' + k.sha : '') + (k.detail ? ' — ' + k.detail : '')));
+        li.appendChild(el('span', k.command + ' [' + (k.source || 'reported') + ']' + (k.sha ? ' @ ' + k.sha : '') + (k.detail ? ' — ' + k.detail : '')));
         checks.appendChild(li);
       });
       if (!(detail.checks || []).length) checks.appendChild(el('li', 'no checks recorded', 'muted'));

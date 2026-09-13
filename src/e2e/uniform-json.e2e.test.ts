@@ -85,7 +85,8 @@ function driveLifecycle(root: string): string {
   git(root, ['add', '-A']);
   git(root, ['commit', '-qm', 'stage the deliverable']);
   const sha = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
-  // v18: a compliant conclusion (claims per AC + a passing check bound to the cited commit)
+  // v18 + leg 12/03: a compliant conclusion (the AC mapped to a CAPTURED pass)
+  cli(root, ['capture!', TASK, 'ann verify']);
   cli(root, [
     'evidence!',
     TASK,
@@ -93,9 +94,7 @@ function driveLifecycle(root: string): string {
     '--note',
     'committed',
     '--claims',
-    JSON.stringify([{ ac: 'AC-1', statement: 'the thing is done', evidence: [sha] }]),
-    '--checks',
-    JSON.stringify([{ command: 'npm test', result: 'pass', detail: 'fixture', sha }]),
+    JSON.stringify([{ ac: 'AC-1', check: 'ann verify', evidence: [sha] }]),
   ]);
   cli(root, ['submit!', TASK, 'confirm']);
   cli(root, ['gate!', TASK, 'confirm', 'accept', 'done']); // the accept closes it — the evidence is already in the log

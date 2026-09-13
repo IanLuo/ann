@@ -1,9 +1,10 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join, relative } from 'node:path';
-import { Store, JourneyEvent, NodeDir, ResultItem, TaskDetail, CLOSED_TASK_STATUSES } from '../store/store.js';
+import { Store, JourneyEvent, NodeDir, ResultItem, TaskDetail, CLOSED_TASK_STATUSES, type CheckView } from '../store/store.js';
 import { blobSha, stripMarkers } from '../store/sha.js';
 import { getVOCAB } from '../store/vocab.js';
+import { ALLOWLIST, ALLOWLIST_NAMES, outputDetail, defaultCaptureEnv, type CaptureEnv } from './capture.js';
 
 /** A producer artifact's LOGICAL NAME from its file — the stem (last extension
  *  stripped): the thin model names an artifact by the file that carries it
@@ -28,8 +29,12 @@ const artifactNameOf = (file: string): string => file.replace(/\.[^./]*$/, '');
  *   submit!     the other half of that sequence + the gate② content binding
  *   evidence!   the CONCLUSION record (F-AC18): commits[] non-empty, the shape stays
  *               the store's — a validated front, never a second validator
+ *   capture!    the CAPTURED CHECK (leg 12/03): RUNS one allowlisted project command and
+ *               records the real exit code as a FACT (source:captured) — the record is a
+ *               consequence, not a claim
  *   complete!   the EXPLICIT DONE terminal: the accepted-without-evidence exception
- *               (leg 08 task 02 CORRECTED: the accept auto-closes on evidence)
+ *               (leg 08 task 02 CORRECTED: the accept auto-closes on evidence; leg 12/03:
+ *               only on a CAPTURED pass bound to a cited commit)
  *   append!     refuses the composite-owned kinds, `created`, and the RETIRED
  *               doc-artifact vocab (artifact-locked / superseded — D3)
  *
@@ -62,6 +67,18 @@ export interface CommandError {
 }
 
 export type CommandResult<T = undefined> = { ok: true; value: T } | { ok: false; error: CommandError };
+
+/** A CAPTURED check — the FACT `capture!` records (leg 12/03): the command the engine
+ *  RAN, the result DERIVED from its real exit code, the output digest/summary, and the
+ *  sha of the bytes the run saw (read from git, never typed). */
+export interface CapturedCheck {
+  command: string;
+  result: 'pass' | 'fail';
+  exitCode: number;
+  detail: string;
+  sha: string;
+  at: string;
+}
 
 const ok = <T>(value: T): CommandResult<T> => ({ ok: true, value });
 const fail = (code: string, blocker: string): CommandResult<never> => ({ ok: false, error: { code, blocker } });
@@ -135,10 +152,24 @@ export interface GateOutcome {
 export interface ConclusionView {
   /** The latest claim per acceptance criterion (a later claim supersedes an earlier one
    *  for the same AC — the rework model), each lined up with the contract AC it speaks
-   *  to. Unclaimed ACs are NOT here: they are reported in `unclaimed`. */
-  claims: Array<{ ac: string; statement: string; evidence: string[]; acText: string }>;
-  /** Every check the log holds, in order (the verification run history). */
-  checks: Array<{ command: string; result: 'pass' | 'fail'; detail?: string; sha?: string; at: string }>;
+   *  to. Unclaimed ACs are NOT here: they are reported in `unclaimed`.
+   *
+   *  `check` is the MECHANICAL MAPPING (leg 12/03): the command of the check that covers
+   *  the AC; `bound` is that mapping RESOLVED against the log — the latest recorded check
+   *  with that command, or undefined when no such run exists (an act the record names but
+   *  the log does not hold is a finding, not prose). */
+  claims: Array<{
+    ac: string;
+    statement: string;
+    evidence: string[];
+    acText: string;
+    check?: string;
+    bound?: { command: string; result: 'pass' | 'fail'; source: 'captured' | 'reported'; detail?: string; sha?: string };
+  }>;
+  /** Every check the log holds, in order (the verification run history) — each labelled
+   *  `captured` (the engine ran it and read the exit code: a FACT) or `reported` (the
+   *  runner typed it: a CLAIM). */
+  checks: CheckView[];
   /** The contract ACs with NO claim — the reviewer's signal, and `complete!`'s refusal. */
   unclaimed: Array<{ ac: string; acText: string }>;
   /** The commits this task's conclusion cites (evidence.commits[].sha). */
@@ -199,9 +230,9 @@ export interface LookBack {
  *  ROLE in the step (entry = the contract gate before work, exit = the result gate before
  *  the close), whose step it is (the leg + the contract's own intent), how long it has
  *  waited, and what the log already holds there (the deliverable, as `complete!` reads
- *  it: cited commits · claims · ACs still unclaimed · checks · checks bound to a cited
- *  commit). Structural facts only — each binding words them (the UI says ENTRY/EXIT, the
- *  CLI says grilling (entry)). */
+ *  it: cited commits · claims · ACs still unclaimed · checks · a CAPTURED pass bound to a
+ *  cited commit — leg 12/03's tightening). Structural facts only — each binding words them
+ *  (the UI says ENTRY/EXIT, the CLI says grilling (entry)). */
 export interface PendingGate {
   task: string;
   gate: string;
@@ -254,6 +285,11 @@ export class Commands {
   constructor(
     readonly store: Store,
     private readonly who = 'agent',
+    /** The capture seam (leg 12/03) — PRODUCTION: the real allowlisted spawns; tests
+     *  substitute a stub so a pass and a fail are exercised without running a suite.
+     *  It is the ONLY thing the capture mechanism injects: the allowlist, the guards,
+     *  the sha and the write all stay the engine's. */
+    private readonly captureEnv: CaptureEnv = defaultCaptureEnv,
   ) {}
 
   private get today(): string {
@@ -419,10 +455,11 @@ export class Commands {
    * A CONFIRM-gate ACCEPT also CLOSES the task when the conclusion evidence is already
    * present — ONE RULE EVERYWHERE (leg 08 task 02, CORRECTIVE): the frame already
    * appended `completed` off the same gate decision, so the CLI/service/UI path behaved
-   * differently on the same state. The SAME F-AC18 predicate decides here
-   * (`parentConcluded` — what `spawn!`, `check()` and `complete!` read), never a second
-   * predicate. With the evidence ABSENT the task stays honestly `accepted` and the
-   * result names the gesture still owed. Grill accepts and rejects never complete.
+   * differently on the same state. The SAME predicate decides here (`closeEvidenceBlocker`
+   * — what `complete!` reads, leg 12/03 tightening included: commit evidence AND a
+   * CAPTURED pass bound to a cited commit), never a second predicate. With the evidence
+   * ABSENT — or reported-only — the task stays honestly `accepted` and the result names
+   * the gesture still owed. Grill accepts and rejects never complete.
    */
   gate(id: string, gate: string, decision: string, feedback = ''): CommandResult<GateOutcome> {
     if (!getVOCAB().gates.includes(gate)) return fail('unknown-gate', `gate must be one of ${getVOCAB().gates.join('|')}`);
@@ -439,7 +476,10 @@ export class Commands {
     }
     // The ONE closing rule: a confirm ACCEPT with the conclusion evidence present is the
     // only continuation there is (leg 08 task 02, corrective — the single-branch argument).
-    const autoClose = decision === 'accept' && gate === 'confirm' && this.store.parentConcluded(id)
+    // leg 12/03: "present" means the TIGHTENED predicate — commit evidence AND a captured
+    // pass bound to a cited commit (the SAME predicate complete! reads, one place).
+    const closeBlocker = this.closeEvidenceBlocker(id);
+    const autoClose = decision === 'accept' && gate === 'confirm' && closeBlocker === undefined
       && !this.store.events(id).some((e) => e.type === 'completed');
     try {
       if (!this.undecidedSubmission(id, gate)) {
@@ -470,7 +510,7 @@ export class Commands {
       escalated: after >= REJECT_BOUND,
       ...(autoClose ? { completed: true } : {}),
       ...(decision === 'accept' && gate === 'confirm' && !autoClose
-        ? { pending: `${id}: the confirm gate is ACCEPTED but the conclusion evidence is missing — the task honestly reads 'accepted'; close it with the explicit gesture \`complete! ${id}\` once the evidence is recorded (it refuses with 'no-evidence' until then)` }
+        ? { pending: `${id}: the confirm gate is ACCEPTED but the task cannot close (${closeBlocker?.code ?? 'already-completed'}) — the task honestly reads 'accepted'; close it with the explicit gesture \`complete! ${id}\` once the evidence is recorded (it refuses with '${closeBlocker?.code ?? 'no-evidence'}' until then)` }
         : {}),
     });
   }
@@ -528,6 +568,101 @@ export class Commands {
   }
 
   /**
+   * `capture!` — THE CAPTURED CHECK (leg 12 task 03: "the record is a consequence, not a
+   * claim"). It RUNS one project command from the CLOSED ALLOWLIST and records what
+   * happened as a FACT: `{command, result, exitCode, detail, sha, source:'captured'}` —
+   * the real exit code, an output digest/summary, and the sha of the bytes the run saw.
+   *
+   * GUARDS (capture.ts holds the mechanism + the rejected alternative): the caller names
+   * a command, never a command line — the name must be one of FIVE literals, each mapped
+   * to a fixed argv spawned with `shell:false`, so no arbitrary string reaches an exec and
+   * the engine stays no general shell (the shell ability is contract-declared, UNBUILT);
+   * the tree must be clean outside the ann store (the sha binds REALLY, it is not a
+   * guess); the sha is READ FROM GIT, never typed. `result` is DERIVED from the exit code
+   * (0 → pass, anything else → fail), so a failing run cannot be recorded as a pass.
+   *
+   * The write is the SAME L1 write: `store.appendCaptured` is the single writer's capture
+   * entry point (identical validation, ledger guard, gate check) — and the GENERAL writer
+   * refuses a `captured` check by name, so this fact can be produced here or not at all.
+   */
+  capture(id: string, name: string, opts: { note?: string } = {}): CommandResult<CapturedCheck> {
+    if (!id.includes('/')) return fail('leg-gate-write', 'leg roots carry no verification — a captured check belongs to a task');
+    if (!this.store.ids().includes(id)) return fail('no-node', `no node ${id}`);
+    const command = String(name ?? '').trim();
+    if (!Object.prototype.hasOwnProperty.call(ALLOWLIST, command)) {
+      return fail(
+        'unknown-command',
+        `capture! '${command}' is not on the ALLOWLIST — the engine runs ONLY these, by name (${ALLOWLIST_NAMES.join(' · ')}); it is not a shell: no arbitrary command is ever executed`,
+      );
+    }
+    const cwd = this.store.root;
+    const sha = this.captureEnv.head(cwd);
+    if (!sha) {
+      return fail(
+        'no-git',
+        `${id}: no git HEAD at ${cwd} — a captured check binds to the bytes it ran against (checks[].sha), so the capture needs a git repo with a commit`,
+      );
+    }
+    const dirty = this.captureEnv.dirty(cwd);
+    if (dirty.length) {
+      return fail(
+        'dirty-tree',
+        `${id}: the working tree has uncommitted changes (${dirty.slice(0, 5).join(', ')}${dirty.length > 5 ? `, +${dirty.length - 5} more` : ''}) — a captured check runs against COMMITTED bytes: commit first (the record's sha is the run's real input, never a guess)`,
+      );
+    }
+    const run = this.captureEnv.run(command, cwd);
+    const result: 'pass' | 'fail' = run.exitCode === 0 ? 'pass' : 'fail';
+    const check: CapturedCheck = { command, result, exitCode: run.exitCode, detail: outputDetail(run.output), sha, at: this.today };
+    try {
+      this.store.appendCaptured(this.node(id), {
+        at: this.today,
+        type: 'evidence',
+        note: opts.note?.trim() ? opts.note : `captured '${command}' → ${result} (exit ${run.exitCode}) against ${sha} (${this.who})`,
+        // the recorded FACT is the four facts + the marker (the event carries the date)
+        checks: [{ command, result, exitCode: run.exitCode, detail: check.detail, sha, source: 'captured' }],
+      });
+    } catch (e) {
+      return fail('store-refused', (e as Error).message);
+    }
+    return ok(check);
+  }
+
+  /**
+   * THE TIGHTENED F-AC18 CLOSE PREDICATE (leg 12/03), in ONE place: `complete!` and the
+   * confirm-accept AUTO-CLOSE both call it, so "the accept closed it" and "complete!
+   * would close it" can never disagree. Two steps, both about ACTS:
+   *   1. the conclusion cites commit evidence (F-AC18, unchanged), and
+   *   2. at least one CAPTURED pass is bound to a cited commit (the tightening): a
+   *      reported check is a claim, and a conclusion may no longer rest on one.
+   * Undefined = the evidence closes. The refusal is BY NAME — there is no reason-string
+   * escape hatch (a conclusion that rests on typed checks stays open).
+   */
+  private closeEvidenceBlocker(id: string): { code: string; blocker: string } | undefined {
+    if (!this.store.parentConcluded(id)) {
+      return {
+        code: 'no-evidence',
+        blocker: `${id}: no conclusion evidence — F-AC18: a task completes only on structured commit evidence (evidence.commits[]); run evidence! ${id} <sha> with the commit that carries the deliverable`,
+      };
+    }
+    if (!this.store.capturedPassBound(id)) {
+      const checks = this.store.checksOf(id);
+      const reported = checks.filter((c) => c.source === 'reported').length;
+      const facts = checks.length - reported;
+      const latest = new Map<string, (typeof checks)[number]>();
+      for (const c of checks) latest.set(c.command, c);
+      const failed = [...latest.values()].find((c) => c.source === 'captured' && c.result === 'fail');
+      const held = checks.length
+        ? `${checks.length} check(s) (${facts} captured, ${reported} reported), none a CAPTURED pass bound to a cited commit${failed ? ` — the latest captured run FAILED: ${failed.command} → fail (exit ${failed.exitCode}) — ${failed.detail ?? 'no detail'}` : ''}`
+        : 'no checks at all';
+      return {
+        code: 'no-captured-pass',
+        blocker: `${id}: the conclusion holds ${held} — a close needs a FACT, not a claim: a REPORTED check (--checks) is what the runner says, a CAPTURED one is what the engine ran. Run the verification: ann capture! ${id} '${ALLOWLIST_NAMES[0]}' (the closed allowlist: ${ALLOWLIST_NAMES.join(' · ')}), then cite the sha it ran against: ann evidence! ${id} <sha> --claims '[{"ac":"AC-1","check":"${ALLOWLIST_NAMES[0]}"}]'`,
+      };
+    }
+    return undefined;
+  }
+
+  /**
    * `complete!` — the EXPLICIT DONE terminal (leg 08 task 02 AC-2, CORRECTED: a confirm
    * accept auto-completes when the conclusion evidence is present — see `gate!`; this
    * gesture stays for the honest exception, an ACCEPTED task whose evidence is missing,
@@ -554,29 +689,33 @@ export class Commands {
         `${id}: the confirm-result gate is not accepted (last decision: ${gateState}) — complete! records a delivery the HUMAN accepted: submit! ${id} confirm, then gate! ${id} confirm accept`,
       );
     }
-    if (!this.store.parentConcluded(id)) {
-      return fail(
-        'no-evidence',
-        `${id}: no conclusion evidence — F-AC18: a task completes only on structured commit evidence (evidence.commits[]); run evidence! ${id} <sha> with the commit that carries the deliverable`,
-      );
-    }
+    const evidenceBlocker = this.closeEvidenceBlocker(id);
+    if (evidenceBlocker) return fail(evidenceBlocker.code, evidenceBlocker.blocker);
     // v18 (the conclusion GATE): a close is a REVIEW — the log must be able to say how
     // every AC is met and what was actually run. The SAME `conclusion()` the card renders
     // decides it here, so "the card shows NO CLAIM RECORDED" and "the close succeeded"
-    // cannot both be true for one state.
+    // cannot both be true for one state. The claim→check MAPPING has teeth too (leg 12/03):
+    // a claim naming an act the log does not hold, or one whose latest run FAILED, is a
+    // record that does not state a fact.
     const conclusion = this.conclusion(id);
     if (conclusion.unclaimed.length) {
       return fail(
         'no-structured-conclusion',
-        `${id}: ${conclusion.unclaimed.length} acceptance criterion(s) carry no claim — ${conclusion.unclaimed.map((u) => `'${u.ac}' (${u.acText})`).join(' · ')}. Record how each is met: ann evidence! ${id} <sha> --claims '[{"ac":"AC-1","statement":"…","evidence":["<sha|path|doc>"]}]'`,
+        `${id}: ${conclusion.unclaimed.length} acceptance criterion(s) carry no claim — ${conclusion.unclaimed.map((u) => `'${u.ac}' (${u.acText})`).join(' · ')}. Record how each is met: ann evidence! ${id} <sha> --claims '[{"ac":"AC-1","check":"npm test"}]' (the ac→check mapping; prose is optional)`,
       );
     }
-    const passing = conclusion.checks.find((c) => c.result === 'pass' && c.sha && conclusion.cited.includes(c.sha));
-    if (!passing) {
-      const checks = conclusion.checks.length ? `${conclusion.checks.length} check(s), none PASSING against a cited commit` : 'no checks';
+    const unbound = conclusion.claims.filter((c) => c.check && !c.bound);
+    if (unbound.length) {
       return fail(
-        'no-structured-conclusion',
-        `${id}: the conclusion has ${checks} — a close must cite at least one PASSING check bound to the bytes under review (checks[].sha in evidence.commits[] ${conclusion.cited.length ? conclusion.cited.join(', ') : '(none cited)'}). Record it: ann evidence! ${id} <sha> --checks '[{"command":"npm test","result":"pass","sha":"<cited sha>"}]'`,
+        'claim-unsubstantiated',
+        `${id}: ${unbound.map((c) => `'${c.ac}' → '${c.check}'`).join(' · ')} — the claim names a check the log does NOT hold: an ac→check mapping states which act covers the AC, so the act has to exist. Record the run: ann capture! ${id} '<command>'`,
+      );
+    }
+    const failedClaim = conclusion.claims.find((c) => c.bound?.result === 'fail');
+    if (failedClaim) {
+      return fail(
+        'claim-failed',
+        `${id}: '${failedClaim.ac}' is mapped to '${failedClaim.check}', whose LATEST run FAILED (${failedClaim.bound?.source} · ${failedClaim.bound?.detail ?? 'no detail'}) — a claim cannot rest on a failing act; fix the work and re-run: ann capture! ${id} '${failedClaim.check}'`,
       );
     }
     try {
@@ -940,7 +1079,10 @@ export class Commands {
             claims: c.claims.length,
             unclaimed: c.unclaimed.length,
             checks: c.checks.length,
-            bound: c.checks.filter((k) => k.result === 'pass' && k.sha && c.cited.includes(k.sha)).length,
+            // BOUND = what actually closes the task (leg 12/03): a CAPTURED pass against
+            // a cited commit — the SAME reading `complete!` and the auto-close make, so a
+            // gate card never promises a close the predicate would refuse.
+            bound: this.store.capturedPassBound(id) ? 1 : 0,
           },
         });
       }
@@ -1171,41 +1313,44 @@ export class Commands {
     return { leg: front, action: 'advance-leg', detail: `leg gate MET: all previous-leg tasks done — spawn tasks into ${front} carrying the epic goal` };
   }
 
-  /** THE STRUCTURED CONCLUSION, derived from the log (format v18) — the ONE place the
-   *  claims/checks structure is read: the card renders it, `complete!` enforces it, and
-   *  `unclaimed` is the AC list neither may ignore. Pointer RESOLUTION (git/fs probing)
-   *  is a render-time concern and stays in the binding. */
+  /** THE STRUCTURED CONCLUSION, derived from the log (format v18; leg 12/03: the ac→check
+   *  MAPPING + the captured/reported marker) — the ONE place the claims/checks structure is
+   *  read: the card renders it, `complete!` enforces it, and `unclaimed` is the AC list
+   *  neither may ignore. Pointer RESOLUTION (git/fs probing) is a render-time concern and
+   *  stays in the binding; the ac→check mapping is resolved AGAINST THE LOG here (the check
+   *  list `this.store.checksOf` derives), because "the act exists" is store truth, not a
+   *  display detail. */
   conclusion(id: string): ConclusionView {
-    const latest = new Map<string, { ac: string; statement: string; evidence: string[] }>();
-    const checks: ConclusionView['checks'] = [];
-    const cited: string[] = [];
+    const latest = new Map<string, { ac: string; statement: string; evidence: string[]; check?: string }>();
+    const checks = this.store.checksOf(id);
+    const cited = this.store.citedCommits(id);
     for (const e of this.store.events(id)) {
       if (e.type !== 'evidence') continue;
-      for (const c of Array.isArray(e.commits) ? e.commits : []) {
-        const sha = (c as { sha?: unknown })?.sha;
-        if (typeof sha === 'string' && sha.trim() && !cited.includes(sha.trim())) cited.push(sha.trim());
-      }
       for (const c of Array.isArray(e.claims) ? e.claims : []) {
-        const r = c as { ac?: unknown; statement?: unknown; evidence?: unknown };
+        const r = c as { ac?: unknown; statement?: unknown; evidence?: unknown; check?: unknown };
         const ac = String(r.ac ?? '');
         if (!ac) continue;
+        const check = typeof r.check === 'string' && r.check.trim() ? r.check.trim() : undefined;
         latest.set(this.acKey(ac), {
           ac,
-          statement: String(r.statement ?? ''),
+          // PROSE OPTIONAL OR DERIVED (AC-3): a claim that maps an act needs no argument —
+          // the record states which run covers the AC, and the statement says so.
+          statement: String(r.statement ?? '').trim() || (check ? `verified by ${check}` : ''),
           evidence: (Array.isArray(r.evidence) ? r.evidence : []).map((x) => String(x)),
-        });
-      }
-      for (const k of Array.isArray(e.checks) ? e.checks : []) {
-        const r = k as { command?: unknown; result?: unknown; detail?: unknown; sha?: unknown };
-        checks.push({
-          command: String(r.command ?? ''),
-          result: r.result === 'fail' ? 'fail' : 'pass',
-          ...(typeof r.detail === 'string' && r.detail ? { detail: r.detail } : {}),
-          ...(typeof r.sha === 'string' && r.sha ? { sha: r.sha } : {}),
-          at: String(e.at ?? ''),
+          ...(check ? { check } : {}),
         });
       }
     }
+    // The MAPPING, resolved: the LATEST recorded run of the named command (the rework
+    // reading — a re-run supersedes), or nothing when the log holds no such act.
+    const latestCheck = new Map<string, CheckView>();
+    for (const c of checks) latestCheck.set(c.command, c);
+    const bound = (check: string | undefined) => {
+      if (!check) return undefined;
+      const c = latestCheck.get(check);
+      if (!c) return undefined;
+      return { command: c.command, result: c.result, source: c.source, ...(c.detail ? { detail: c.detail } : {}), ...(c.sha ? { sha: c.sha } : {}) };
+    };
     const acs = ((this.store.contractOf(id)?.acceptanceCriteria as string[] | undefined) ?? []).filter((a) => typeof a === 'string');
     const used = new Set<string>();
     const claims: ConclusionView['claims'] = [];
@@ -1218,10 +1363,11 @@ export class Commands {
         return;
       }
       used.add(match[0]);
-      claims.push({ ...match[1], ac: `AC-${i + 1}`, acText: ac });
+      const c = match[1];
+      claims.push({ ...c, ac: `AC-${i + 1}`, acText: ac, ...(bound(c.check) ? { bound: bound(c.check)! } : {}) });
     });
     // a claim that matched no AC is KEPT (an author's extra claim is data, never dropped)
-    for (const [k, c] of latest.entries()) if (!used.has(k)) claims.push({ ...c, acText: '' });
+    for (const [k, c] of latest.entries()) if (!used.has(k)) claims.push({ ...c, acText: '', ...(bound(c.check) ? { bound: bound(c.check)! } : {}) });
     return { claims, checks, unclaimed, cited };
   }
 

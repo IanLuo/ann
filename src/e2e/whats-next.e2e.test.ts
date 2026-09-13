@@ -509,7 +509,9 @@ describe('e2e — the exit gate drills into a result: `ann results <id> <n>` ove
     expect(card.status).toBe(200);
     const doc = JSON.parse(card.body) as { detail: { gates: { confirm: { state: string } } }; results: Array<{ kind: string; sha?: string; path?: string }> };
     expect(doc.detail.gates.confirm.state).toBe('submitted'); // the EXIT gate
-    expect(doc.results.map((r) => r.kind)).toEqual(['commit', 'ref']);
+    // commit · ref (the conclusion's structured evidence) · the CAPTURE's own evidence
+    // record (leg 12/03 — a recorded act is a result too, and it is numbered like the rest)
+    expect(doc.results.map((r) => r.kind)).toEqual(['commit', 'ref', 'evidence']);
     expect(doc.results[0].sha).toBe(sha);
     expect(doc.results[1].path).toBe('src/thing.ts');
     // …and the same item comes back from the drill route at that index
@@ -554,7 +556,7 @@ describe('e2e — the exit gate drills into a result: `ann results <id> <n>` ove
     // …and the LISTING route is unchanged by the optional index (no `&n=` → the whole list)
     const list = await get(server.url + `/api/results?id=${encodeURIComponent(FIRST)}`);
     expect(list.status).toBe(200);
-    expect((JSON.parse(list.body) as { items: unknown[] }).items.length).toBe(2);
+    expect((JSON.parse(list.body) as { items: unknown[] }).items.length).toBe(3);
   });
 });
 
@@ -569,6 +571,9 @@ function driveExitGateJourney(root: string): string {
   writeFileSync(join(root, 'src', 'thing.ts'), 'export const thing = 1;\nexport const other = 2;\n');
   commit(root, 'feat(thing): the deliverable');
   const sha = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  // leg 12/03 — the card shows the CONCLUSION bound to acts: the AC mapped to a CAPTURED
+  // check (the engine really ran `ann verify`) plus a REPORTED one, labelled as such
+  cli(root, ['capture!', FIRST, 'ann verify']);
   cli(root, [
     'evidence!',
     FIRST,
@@ -578,9 +583,9 @@ function driveExitGateJourney(root: string): string {
     '--note',
     'the deliverable',
     '--claims',
-    JSON.stringify([{ ac: 'AC-1', statement: 'the thing is done', evidence: [sha, 'src/thing.ts'] }]),
+    JSON.stringify([{ ac: 'AC-1', check: 'ann verify', evidence: [sha, 'src/thing.ts'] }]),
     '--checks',
-    JSON.stringify([{ command: 'npm test', result: 'pass', detail: 'fixture', sha }]),
+    JSON.stringify([{ command: 'ann check', result: 'pass', detail: 'fixture (reported)' }]),
   ]);
   cli(root, ['submit!', FIRST, 'confirm']); // the EXIT gate is now in WAITING ON YOU
   commit(root, 'the exit-gate drill fixture journey');
