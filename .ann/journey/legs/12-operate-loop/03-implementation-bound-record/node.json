@@ -1,0 +1,22 @@
+{
+  "id": "12-operate-loop/03-implementation-bound-record",
+  "contract": {
+    "intent": "THE RECORD IS A CONSEQUENCE, NOT A CLAIM — bind the conclusion record to the acts that produce it. Today `evidence! --checks '[{\"command\":\"npm test\",\"result\":\"pass\"}]'` is a REPORTED claim: nothing verifies the command ran or passed (only `checks[].sha` ties it to bytes), and `claims[].statement` is prose. Make the record mechanical: the checks' outcomes become FACTS (captured, not typed), the claims reduce to an ac→check MAPPING, and the F-AC18 conclusion predicate requires a CAPTURED pass bound to a cited commit. This is the precondition for the SEMANTIC DRIVER: with the record bound, the driver has nothing semantic to write — it runs, presents, and the record is produced by the acts. (The v18 format already anticipated this: pointers resolved at read time, `checks[].sha` traceability, and the close refusing an unclaimed AC or a conclusion with no passing check.)",
+    "acceptanceCriteria": [
+      "A CAPTURE MECHANISM is decided, recorded, and implemented: the check outcomes are produced by ACT rather than typed. The decision must be explicit about the engine's execution surface — (a) engine-run with an ALLOWLIST of project commands (npm test · npm run typecheck · npm run build · ann check · ann verify), or (b) runner-supplied capture with the engine validating what it can (the sha resolves in git · the command is on the allowlist · result ∈ pass|fail) — the chosen mechanism named WITH its guard, and the rejected one recorded with why. Security matters: the engine must not become a general shell (the shell ability is contract-declared but UNBUILT — do not silently build it)",
+      "A captured check is a FACT in the record: {command, result (from the real exit code), detail (an output digest/summary), sha (the repo bytes the run saw)} — distinguishable in the log from a REPORTED check (the existing --checks input), which stays available but is labelled as reported",
+      "The claims reduce to a MECHANICAL mapping: ac → the check/run that covers it (prose optional or derived) — so the record states WHICH act substantiates each AC, not a free-form argument; the shape stays the store's single validation point",
+      "The F-AC18 conclusion predicate is TIGHTENED: the close (and the confirm-accept auto-close) requires at least one CAPTURED PASS bound to a cited commit; a reported-only conclusion is refused by name (or accepted only with an explicit, recorded reason — pick one and record it)",
+      "Fail-closed: a failing captured run records result=fail and the close REFUSES; no new write path (the same L1 write); provenance from RECORDED_BY; the human's gate remains the only semantic judgement",
+      "Tests: the capture records the real result (pass and fail); a failing run blocks the close; the ac→check mapping; the tightened predicate; the reported-vs-captured distinction; full suite green; ann check/verify clean; committed with evidence"
+    ],
+    "workType": "implementation",
+    "targetAreas": [
+      "src/surface",
+      "src/commands",
+      "src/store",
+      "src/e2e"
+    ]
+  },
+  "createdAt": "2026-09-13"
+}
