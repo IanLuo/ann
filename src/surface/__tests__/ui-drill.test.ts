@@ -157,6 +157,7 @@ const card = (over: Record<string, unknown> = {}) => ({
   legGate: { met: true },
   pendingGates: [{ task: TASK, gate: 'grill' }],
   integrity: { clean: true, blockers: [] },
+  chainSteps: 3, // the frontmost-ready task's RESOLVED chain has content steps (the machine executes it)
   executable: true,
   ...over,
 });
@@ -250,6 +251,8 @@ describe('the served page — a drill opens its own tab, and the URL is the dril
     expect(page.get('wn-action').textContent).toBe('continue-leg');
     expect(page.get('wn-badge').textContent).toBe('MACHINE-EXECUTABLE');
     expect(page.get('wn-actions').hidden).toBe(false); // the approve is offered: clean + executable
+    // …and the derivation's own words still promise the run: the chain HAS content steps
+    expect(page.get('wn-facts').text()).toContain('the machine can run this step through the frame');
     // the derivation head is a link to its own drill
     expect(page.get('wn-action').href).toBe('#drill=advance');
     expect(page.get('wn-action').target).toBe('_blank');
@@ -423,6 +426,25 @@ describe('the served page — a drill opens its own tab, and the URL is the dril
     // …and the blocker still drills (what it is, the read that derives it, its node)
     const tab = await openTab(page.get('wn-blockers').link('blocker:'), reads(exhausted));
     expect(tab.get('card-node').textContent).toContain('git status --porcelain -- .ann/journey docs');
+  });
+
+  it('an EMPTY resolved chain is never MACHINE-EXECUTABLE — the card says ACTIVATE & WAIT', async () => {
+    // REPORTED BUG: the badge promised execution for a task whose resolved chain has NO
+    // content steps (an `implementation` task: the runner does the work). The read carries
+    // the chain's step count; the badge must follow it.
+    const page = boot(reads(card({ chainSteps: 0 })));
+    await flush();
+    expect(page.get('wn-action').textContent).toBe('continue-leg'); // the derivation is unchanged
+    expect(page.get('wn-badge').textContent).toBe('ACTIVATE & WAIT');
+    // the card QUOTES what the frame really does — never 'the machine can run this step'
+    expect(page.get('wn-facts').text()).toContain('nothing to execute — the frame activates the task and waits for the runner (empty chain)');
+    expect(page.get('wn-facts').text()).not.toContain('the machine can run this step through the frame');
+    expect(page.get('wn-actions').hidden).toBe(false); // the move IS available: it activates the task
+    // …and a DIRTY tree still wins the headline (the approve is withheld, not merely un-runnable)
+    const dirty = boot(reads(card({ chainSteps: 0, integrity: { clean: false, blockers: [DIRTY] }, executable: false })));
+    await flush();
+    expect(dirty.get('wn-badge').textContent).toBe('BLOCKED — CANNOT ADVANCE');
+    expect(dirty.get('wn-actions').hidden).toBe(true);
   });
 
   it('a boundary derivation offers no approve, and its frontmost-ready fact is inert text', async () => {

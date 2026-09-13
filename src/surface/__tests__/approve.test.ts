@@ -134,6 +134,28 @@ describe("care c — the card's read names the integrity blockers (and stops off
     expect(dirty.executable).toBe(false);
   });
 
+  it('the read says whether the frontmost-ready chain has CONTENT STEPS — an empty chain has nothing to execute', () => {
+    // the fixture task is an `implementation` one → the deliberate EMPTY chain (flow data):
+    // the frame only activates it and waits for the runner, so there is nothing to execute
+    readyTask();
+    docs();
+    expect(whatsNext(root).frontmost?.task).toBe(TASK);
+    expect(whatsNext(root).chainSteps).toBe(0);
+  });
+
+  it('…and a chain that RESOLVES to steps reports them (the work-type chain · the flow override)', () => {
+    // no workType → the project 'default' (shaping) chain the frame would run
+    writeNode('01-leg', []);
+    writeNode(TASK, [ev('created'), ev('submitted', { gate: 'grill' }), ev('confirmed', { gate: 'grill' })], { intent: 'shape it', acceptanceCriteria: ['shaped'] });
+    docs();
+    expect(whatsNext(root).chainSteps).toBeGreaterThan(0);
+
+    // a per-task contract.flow override is what the read counts (highest precedence)
+    writeNode(TASK, [ev('created'), ev('submitted', { gate: 'grill' }), ev('confirmed', { gate: 'grill' })], { intent: 'shape it', acceptanceCriteria: ['shaped'], workType: 'default', flow: ['spec'] });
+    docs();
+    expect(whatsNext(root).chainSteps).toBe(1);
+  });
+
   it('a boundary derivation (advance-leg) is never executable', () => {
     writeNode('01-leg', []);
     writeNode('01-leg/01-a', [ev('created'), ev('completed')], { intent: 'the done work', acceptanceCriteria: ['done'] }, '2026-08-20');

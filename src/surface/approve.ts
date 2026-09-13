@@ -1,5 +1,6 @@
 import { AdvanceView, FrontmostReady } from '../commands/index.js';
-import { CommandExit, createContext, readOnlyRefuse } from './handlers.js';
+import { CliContext, CommandExit, createContext, readOnlyRefuse } from './handlers.js';
+import { resolveChain } from '../flow/chain.js';
 import { buildAbilities } from '../abilities/index.js';
 import { getAdapter } from '../abilities/llm/index.js';
 import { buildStepRegistry } from '../flow/steps/index.js';
@@ -137,10 +138,25 @@ export interface WhatsNextView {
   /** The `ann check` + `ann verify` + manifest + git-status blockers the action
    *  re-checks fail-closed BEFORE anything executes. */
   integrity: { clean: boolean; blockers: string[] };
+  /** The frontmost-ready task's RESOLVED chain — how many CONTENT steps the frame would
+   *  run (`ann flow <id>`: contract.flow → workType chain → project default). 0 = there is
+   *  NOTHING to execute: an `implementation` task's chain is deliberately empty, so the run
+   *  only activates the task and waits for the runner. The card needs this fact to promise
+   *  execution only where there is something to execute (a chain that resolves WITH a
+   *  problem counts 0 — the frame fails closed at config, so nothing executes either). */
+  chainSteps: number;
   /** TRUE iff the approve will execute: a clean state, the machine-executable
    *  derivation, and a ready task. FALSE = present the card and stop (the UI offers no
    *  approve) — never a button that cannot work. */
   executable: boolean;
+}
+
+/** The frontmost-ready task's resolved chain LENGTH — the derived fact behind
+ *  `chainSteps` (the SAME `resolveChain` the CLI's `ann flow <id>` and the Frame use). */
+function frontmostChainSteps(ctx: CliContext, root: string, frontmost: FrontmostReady | undefined): number {
+  if (!frontmost) return 0;
+  const flow = resolveChain(ctx.store, frontmost.task, root);
+  return flow.problem ? 0 : flow.chain.length;
 }
 
 export function whatsNext(root: string): WhatsNextView {
@@ -154,6 +170,7 @@ export function whatsNext(root: string): WhatsNextView {
     legGate: lb.legGate,
     pendingGates: lb.pendingGates,
     integrity: { clean: blockers.length === 0, blockers },
+    chainSteps: frontmostChainSteps(ctx, root, lb.frontmostReady),
     executable: blockers.length === 0 && advance.action === 'continue-leg' && !!lb.frontmostReady,
   };
 }

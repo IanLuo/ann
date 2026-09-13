@@ -217,6 +217,10 @@ interface WhatsNext {
   legGate: { met: boolean; blocker?: string };
   pendingGates: Array<{ task: string; gate: string }>;
   integrity: { clean: boolean; blockers: string[] };
+  /** The frontmost-ready task's RESOLVED chain length — 0 for these fixtures: an
+   *  `implementation` task's chain is EMPTY (the runner does the work), so the page says
+   *  ACTIVATE & WAIT, never MACHINE-EXECUTABLE. */
+  chainSteps: number;
   executable: boolean;
 }
 const card = async (s: Server): Promise<WhatsNext> => {
@@ -268,6 +272,7 @@ describe('e2e — the operate loop: the WHAT\'S NEXT card + the approve (leg 11)
     expect(v.legGate.met).toBe(true); // leg 01 has no predecessor
     expect(v.pendingGates).toEqual([]);
     expect(v.integrity).toEqual({ clean: true, blockers: [] });
+    expect(v.chainSteps).toBe(0); // the resolved chain really is EMPTY (rules/flow/default.json)
     expect(v.executable).toBe(true);
   });
 
@@ -369,7 +374,7 @@ describe('e2e — the operate loop: the WHAT\'S NEXT card + the approve (leg 11)
     for (const route of ['/api/whatsnext', '/api/approve', '/api/journey', '/api/gates', '/api/confirm?id=', '/api/gate', '/api/packet?id=', '/api/detail?id=', '/api/next', '/api/results?id=']) expect(script).toContain(route);
     // the card's own words: the machine-executable derivation, the presented-and-stopped
     // boundary, how to clear a blocker, the approve affordance, and the DRILL-INS
-    for (const word of ['MACHINE-EXECUTABLE', 'PRESENTED AND STOPPED', 'NOT machine-executable', 'the authored-work boundary', 'uncommitted tracked journey changes — commit them', 'frontmost-ready', 'leg gate', 'UNMET — ', 'pending gates', 'drillTask', 'drillLeg', 'drillBlocker', 'drillAdvance', 'drillResult', 'drillHref', 'parseDrill', 'renderFocus', 'enterFocus', 'git show', 'DRILLS IN', 'wn-fact', 'drill in', '_blank', 'noopener', "kind: 'result'"])
+    for (const word of ['MACHINE-EXECUTABLE', 'ACTIVATE & WAIT', 'PRESENTED AND STOPPED', 'NOT machine-executable', 'the authored-work boundary', 'uncommitted tracked journey changes — commit them', 'frontmost-ready', 'leg gate', 'UNMET — ', 'pending gates', 'drillTask', 'drillLeg', 'drillBlocker', 'drillAdvance', 'drillResult', 'drillHref', 'parseDrill', 'renderFocus', 'enterFocus', 'git show', 'DRILLS IN', 'wn-fact', 'drill in', '_blank', 'noopener', "kind: 'result'"])
       expect(script, `the served page lost '${word}'`).toContain(word);
     expect(page.body).toContain('Approve'); // the approve affordance itself
     // every drill is a NEW-TAB link carrying its item in the fragment (`#drill=<kind>&id=…`)

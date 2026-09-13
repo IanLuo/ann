@@ -21,7 +21,9 @@
  *                                  task's own intent, what is DELIVERED there already)
  *   GET  /api/whatsnext          → the WHAT'S NEXT card: the derived advance (action +
  *                                  detail) · the frontmost-ready task · the leg gate · the
- *                                  pending gates · the integrity blockers
+ *                                  pending gates · the integrity blockers · the
+ *                                  frontmost-ready task's resolved chain LENGTH (0 content
+ *                                  steps = the machine can only ACTIVATE it, and so it says)
  *   GET  /api/confirm?id=<node>  → the gate card: the complete node (contract · inputs ·
  *                                  open questions) · CLAIMS (with resolved pointers) ·
  *                                  CHECKS · gate states · results
@@ -521,14 +523,17 @@ export const UI_HTML = `<!doctype html>
   // ── the WHAT'S NEXT card: the derived proposal + the honest blocker surface (leg 11) ──
   var whatsNext = null; // the derivation the approve is bound to (the card the human saw)
   /** The operator action's four derivations, in the card's own words: continue-leg is the
-   *  ONE the machine can execute; the other three are the AUTHORED-WORK BOUNDARY — the
-   *  card presents them and STOPS (never a dead approve button). */
+   *  ONE the machine can run — and only when the frontmost-ready task's RESOLVED chain has
+   *  CONTENT steps (an implementation task's chain is empty — nothing to execute, the
+   *  runner does the work). The other three are the AUTHORED-WORK BOUNDARY — the card
+   *  presents them and STOPS (never a dead approve button). */
   var DERIVATION = {
     'continue-leg': { run: true, what: 'the machine can run this step through the frame' },
     'advance-leg': { run: false, what: 'NOT machine-executable — the authored-work boundary: the front leg is empty, so the next leg is AUTHORED work (a human writes the contract), never a machine spawn' },
     'closure-needed': { run: false, what: 'NOT machine-executable — the authored-work boundary: the leg gate is unmet, so closing it is a GATED HUMAN move (a closure task: transfer or defer), never a machine close' },
     'none': { run: false, what: 'NOT machine-executable — the authored-work boundary: every spawned leg is done; the goal consult is the human verdict (goal! met), never a machine seal' }
   };
+  var EMPTY_CHAIN = 'nothing to execute — the frame activates the task and waits for the runner (empty chain)';
   function wnMessage(text, isError) {
     var m = byId('wn-message');
     m.className = isError ? 'message error' : 'message';
@@ -550,15 +555,18 @@ export const UI_HTML = `<!doctype html>
     var d = v.advance || { action: 'none', detail: '' };
     var step = DERIVATION[d.action] || { run: false, what: '' };
     var clean = v.integrity && v.integrity.clean;
+    var steps = v.chainSteps || 0; // the frontmost-ready task's RESOLVED chain: 0 = NOTHING to execute
     byId('wn-action').textContent = d.action;
     byId('wn-detail').textContent = d.detail;
     var badge = byId('wn-badge');
     // THE HEADLINE IS WHAT THE HUMAN CAN DO, in this order: a boundary derivation is the
     // point of the card (the move is the human's — a dirty tree does not change that), then
-    // a clean machine-executable advance, then a blocked one (the approve IS withheld).
+    // a clean MACHINE-EXECUTABLE advance, then an EMPTY CHAIN — the machine can only
+    // activate it (the runner does the work), never execute anything — then a blocked one.
     if (!step.run) { badge.textContent = 'PRESENTED AND STOPPED'; badge.className = 'badge stop'; }
-    else if (clean) { badge.textContent = 'MACHINE-EXECUTABLE'; badge.className = 'badge run'; }
-    else { badge.textContent = 'BLOCKED — CANNOT ADVANCE'; badge.className = 'badge stop'; }
+    else if (!clean) { badge.textContent = 'BLOCKED — CANNOT ADVANCE'; badge.className = 'badge stop'; }
+    else if (steps) { badge.textContent = 'MACHINE-EXECUTABLE'; badge.className = 'badge run'; }
+    else { badge.textContent = 'ACTIVATE & WAIT'; badge.className = 'badge stop'; }
 
     // the facts: EVERY one is a DRILL — click it and the pane shows the item's own data
     var facts = byId('wn-facts');
@@ -577,7 +585,10 @@ export const UI_HTML = `<!doctype html>
       ? (v.pendingGates || []).map(function (p) { return p.task + '@' + p.gate; }).join(' · ')
       : 'none',
       { kind: 'gates' });
-    facts.appendChild(el('span', step.what, 'k'));
+    // the derivation's own words — for a continue-leg with an EMPTY chain the honest
+    // sentence is what the frame really does (activate + wait), never 'the machine can run
+    // this step' (the badge above says the same, and this is why)
+    facts.appendChild(el('span', step.run && !steps ? EMPTY_CHAIN : step.what, 'k'));
 
     // the integrity blockers — each is a DRILL too: the finding, its class, the read that
     // derives it, and the operator's step (the card CANNOT claim the journey can advance)
