@@ -1,2 +1,3 @@
 {"at":"2026-09-13","type":"created","note":"spawned by bookkeeper (agent)"}
 {"at":"2026-09-13","type":"submitted","gate":"grill","note":"submitted for the grill gate (agent)"}
+{"at":"2026-09-13","type":"confirmed","gate":"grill","feedback":"entry gate accepted (the human confirmed; the delegated operator proxy ran the write, testing the service write path). Approach approved: bind the record to the acts — captured checks, the ac-to-check mapping, the tightened F-AC18 predicate; the capture-mechanism decision (allowlist vs runner-supplied) with the no-general-shell guard is the task's to resolve.","note":"accepted (ianluo)"}
