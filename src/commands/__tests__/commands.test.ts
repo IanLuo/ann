@@ -64,7 +64,7 @@ const stubCapture = (o: { exitCode?: number; exits?: Record<string, number>; out
   // `head: undefined` means NO GIT — spelled by PRESENCE, so the stub can express it
   head: () => ('head' in o ? o.head : realSha()),
   dirty: () => o.dirty ?? [],
-  run: (name) => ({ exitCode: o.exits?.[name] ?? o.exitCode ?? 0, output: o.output ?? 'Tests  3 passed (3)' }),
+  run: (name) => ({ exitCode: o.exits?.[name] ?? o.exitCode ?? 0, stdout: o.output ?? 'Tests  3 passed (3)\n', stderr: '' }),
 });
 
 describe('spawn! — the contract schema gate (core-design §1, §8:289)', () => {

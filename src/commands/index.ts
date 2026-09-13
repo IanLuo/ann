@@ -612,7 +612,7 @@ export class Commands {
     }
     const run = this.captureEnv.run(command, cwd);
     const result: 'pass' | 'fail' = run.exitCode === 0 ? 'pass' : 'fail';
-    const check: CapturedCheck = { command, result, exitCode: run.exitCode, detail: outputDetail(run.output), sha, at: this.today };
+    const check: CapturedCheck = { command, result, exitCode: run.exitCode, detail: outputDetail(run.stdout, run.stderr), sha, at: this.today };
     try {
       this.store.appendCaptured(this.node(id), {
         at: this.today,

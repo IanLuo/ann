@@ -57,8 +57,10 @@ export interface CaptureEnv {
   head(cwd: string): string | undefined;
   /** Tracked changes OUTSIDE the ann store — the clean-tree guard (empty = clean). */
   dirty(cwd: string): string[];
-  /** RUN one allowlisted name; the outcome is the REAL exit code + the combined output. */
-  run(name: string, cwd: string): { exitCode: number; output: string };
+  /** RUN one allowlisted name; the outcome is the REAL exit code + the run's output
+   *  (the two streams kept apart: the digest covers both, the summary is taken from the
+   *  one that carries the verdict — a build tool's stderr tail is `$ tsc`, not a result). */
+  run(name: string, cwd: string): { exitCode: number; stdout: string; stderr: string };
 }
 
 const git = (cwd: string, args: string[]): string | undefined => {
@@ -92,20 +94,26 @@ export const defaultCaptureEnv: CaptureEnv = {
       // no status = the process never exited (a signal / a failed spawn): recorded as a
       // non-zero status, which is what fail-closed means here.
       exitCode: typeof r.status === 'number' ? r.status : 1,
-      output: `${r.stdout ?? ''}${r.stderr ?? ''}`,
+      stdout: r.stdout ?? '',
+      stderr: r.stderr ?? '',
     };
   },
 };
 
-/** The output DIGEST + a one-line SUMMARY — the run's `detail`. The digest makes two
- *  records of the same run comparable; the summary is what a reader sees in the card. */
-export function outputDetail(output: string): string {
-  const digest = createHash('sha1').update(output).digest('hex').slice(0, 12);
-  const lastLine = output
+/** The output DIGEST + a one-line SUMMARY — the run's `detail`. The digest covers BOTH
+ *  streams (it is what makes two records of a run comparable); the summary is the last
+ *  non-empty line of STDOUT — where a test runner or a type-checker states its verdict —
+ *  falling back to stderr only when stdout says nothing. */
+export function outputDetail(stdout: string, stderr: string): string {
+  const digest = createHash('sha1').update(stdout + stderr).digest('hex').slice(0, 12);
+  const lastLine = lastLineOf(stdout) ?? lastLineOf(stderr);
+  const summary = lastLine ? (lastLine.length > 160 ? lastLine.slice(0, 160) + '…' : lastLine) : '(no output)';
+  return `sha1:${digest} · ${summary}`;
+}
+
+const lastLineOf = (s: string): string | undefined =>
+  s
     .split('\n')
     .map((l) => l.replace(/\s+/g, ' ').trim())
     .filter(Boolean)
     .pop();
-  const summary = lastLine ? (lastLine.length > 160 ? lastLine.slice(0, 160) + '…' : lastLine) : '(no output)';
-  return `sha1:${digest} · ${summary}`;
-}
