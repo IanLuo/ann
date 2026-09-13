@@ -37,9 +37,11 @@ const CONTRACT = JSON.stringify({ intent: 'do the thing', acceptanceCriteria: ['
 
 class StubProvider {
   private server: Server;
+  /** The OS-assigned port, read back from the listener (never probed for). */
+  private boundPort = 0;
   private queue: string[] = [];
   readonly requests: string[] = [];
-  constructor(private readonly port: number) {
+  private constructor() {
     this.server = createServer((req, res) => {
       let body = '';
       req.on('data', (c: Buffer) => (body += c.toString('utf8')));
@@ -56,17 +58,16 @@ class StubProvider {
       });
     });
   }
+  /** Bind on port 0 and READ the OS-assigned port: a probe-then-bind pair races with the
+   *  other suites' servers (the workers run in parallel) and made this file flaky. */
   static async start(): Promise<StubProvider> {
-    const probe = createServer();
-    await new Promise<void>((r) => probe.listen(0, '127.0.0.1', () => r()));
-    const port = (probe.address() as { port: number }).port;
-    await new Promise<void>((r) => probe.close(() => r()));
-    const stub = new StubProvider(port);
-    await new Promise<void>((r) => stub.server.listen(port, '127.0.0.1', () => r()));
+    const stub = new StubProvider();
+    await new Promise<void>((r) => stub.server.listen(0, '127.0.0.1', () => r()));
+    stub.boundPort = (stub.server.address() as { port: number }).port;
     return stub;
   }
   get baseUrl(): string {
-    return `http://127.0.0.1:${this.port}/v1`;
+    return `http://127.0.0.1:${this.boundPort}/v1`;
   }
   script(...responses: string[]): void {
     this.queue.push(...responses);
