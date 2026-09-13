@@ -120,6 +120,12 @@ export const GOAL_SEED_GUARD =
 /** Excerpt bound for the read view (context-packet-spec §4 — never unbounded). */
 const READ_CHARS = 200_000;
 
+/** The v14 §2 contract FIELD SET — the closed set of node.json contract keys. Exported
+ *  because the spawn gate is not the only consumer that must agree with it: the semantic
+ *  driver validates a DRAFTED contract against the same set (leg 12/02), so a generated
+ *  draft is spawn-able by construction rather than refused by the human's `spawn!`. */
+export const CONTRACT_FIELDS = ['intent', 'acceptanceCriteria', 'targetAreas', 'requiredInputs', 'expectedOutputs', 'workType', 'flow', 'model', 'openQuestions'] as const;
+
 export interface SpawnedNode {
   id: string;
   kind: 'leg' | 'task';
@@ -390,9 +396,9 @@ export class Commands {
     const raw = (contract ?? {}) as Record<string, unknown>;
     const c = ((raw.contract ?? raw) ?? {}) as Record<string, unknown>;
     if (typeof c !== 'object' || c === null || Array.isArray(c)) return ['contract must be an object'];
-    const KNOWN = ['intent', 'acceptanceCriteria', 'targetAreas', 'requiredInputs', 'expectedOutputs', 'workType', 'flow', 'model', 'openQuestions'];
+    const KNOWN = CONTRACT_FIELDS;
     for (const k of Object.keys(c)) {
-      if (!KNOWN.includes(k)) problems.push(`unknown contract field '${k}' (v14 §2 fields: ${KNOWN.join(' · ')})`);
+      if (!(KNOWN as readonly string[]).includes(k)) problems.push(`unknown contract field '${k}' (v14 §2 fields: ${KNOWN.join(' · ')})`);
     }
     if (typeof c.intent !== 'string' || !c.intent.trim()) problems.push('intent is REQUIRED (a non-empty string)');
     const acs = c.acceptanceCriteria;
@@ -1392,12 +1398,15 @@ export class Commands {
   /** A gate's LAST decision — the same reading the frame's own gate state uses: the last
    *  submitted/confirmed/rejected event at that gate. `complete!` requires `confirmed`
    *  here, so a confirm gate re-submitted after an accept (an undecided submission) can
-   *  never be completed over. */
-  private confirmGateState(id: string): 'confirmed' | 'rejected' | 'submitted' | 'none' {
-    const decisions = this.store
-      .events(id)
-      .filter((e) => (e.type === 'submitted' || e.type === 'confirmed' || e.type === 'rejected') && e.gate === 'confirm');
+   *  never be completed over. The ONE gate-state read (leg 12/02 reuses it: an undecided
+   *  ENTRY gate is where the semantic driver's `run!` pre-flight lands). */
+  gateState(id: string, gate: string): 'confirmed' | 'rejected' | 'submitted' | 'none' {
+    const decisions = this.store.events(id).filter((e) => (e.type === 'submitted' || e.type === 'confirmed' || e.type === 'rejected') && e.gate === gate);
     return (decisions[decisions.length - 1]?.type as 'confirmed' | 'rejected' | 'submitted' | undefined) ?? 'none';
+  }
+
+  private confirmGateState(id: string): 'confirmed' | 'rejected' | 'submitted' | 'none' {
+    return this.gateState(id, 'confirm');
   }
 
   /** Rejections recorded at a gate — the bound's counter (and L2's rework signal). */

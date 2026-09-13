@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { createContext, resolveDispatch, jsonDoc, outcomeOf, type Outcome } from './handlers.js';
 import { APPROVE_BUSY, Approver, whatsNext, type ApproveProposal } from './approve.js';
+import { DRIVE_BUSY, driveJourney, type DriveOptions } from './drive.js';
 import { UI_HTML } from './ui.js';
 
 /**
@@ -17,12 +18,16 @@ import { UI_HTML } from './ui.js';
  * optional DRILL INDEX (`?n=`, the item/event number the CLI addresses) — the whole-journey gate queue (`gates` —
  * the L1 read the UI's WAITING ON YOU view needs, `Commands.pendingGates`), the gate
  * WRITE (`POST /api/gate` → the same L1 `gate!` composite: accept|reject + feedback),
- * the OPERATE LOOP's read + write (`GET /api/whatsnext` — the WHAT'S NEXT card's
- * operator view — and `POST /api/approve` → `runOperatorAction` in-process, leg 11),
- * and the single UI page at `/`. Nothing else is exposed — `run!`/`spawn!`/`submit!`/
- * `goal!`/`spec!`/`archive`/`advance!` are NOT routes: the approve is ONE named route
- * over the operator action (a specific gesture), never a general command runner, and
- * the refusal is a named error doc (`not-exposed`), never a silent pass-through.
+ * the OPERATE LOOP's read + writes (`GET /api/whatsnext` — the WHAT'S NEXT card's
+ * operator view — `POST /api/approve` → `runOperatorAction` in-process, leg 11 — and
+ * `POST /api/drive` → `runSemanticDriver` in-process, leg 12 task 02: the LLM loop whose
+ * proposals are validated against a CLOSED SET and executed through the SAME command
+ * layer), and the single UI page at `/`. Nothing else is exposed — `run!`/`spawn!`/
+ * `submit!`/`goal!`/`spec!`/`archive`/`advance!` are NOT routes: the approve is ONE named
+ * route over the operator action (a specific gesture) and the drive is ONE named route
+ * over the semantic driver (which composes `submit!`/`run!` itself, so no route becomes a
+ * command runner), and the refusal is a named error doc (`not-exposed`), never a silent
+ * pass-through.
  *
  * OUT OF SCOPE, NAMED: auth beyond local, multi-user, packaging/distribution. The
  * server binds 127.0.0.1 by default (the general config's `server.*` builtin — the
@@ -128,7 +133,7 @@ const notExposed = (name: string): Outcome => ({
   ok: false,
   error: {
     code: 'not-exposed',
-    message: `serve: '${name}' is not exposed — the minimal slice is journey · status · next · detail · confirm · results · packet · gates · whatsnext (GET) and the gate / approve writes (POST /api/gate, POST /api/approve). run!/spawn!/submit!/goal!/spec!/archive/advance! are deliberately absent (scope OUT).`,
+    message: `serve: '${name}' is not exposed — the minimal slice is journey · status · next · detail · confirm · results · packet · gates · whatsnext (GET) and the gate / approve / drive writes (POST /api/gate, POST /api/approve, POST /api/drive). run!/spawn!/submit!/goal!/spec!/archive/advance! are deliberately absent as ROUTES (scope OUT): the approve and the drive are named routes over the operator action and the semantic driver, which compose those commands themselves.`,
   },
 });
 
@@ -195,6 +200,35 @@ async function route(root: string, approver: Approver, req: IncomingMessage, res
     }
   }
 
+  // ── the DRIVE — the semantic driver's LLM loop (leg 12 task 02) ──
+  // `runSemanticDriver` in-process: the model proposes a call, CODE validates it against
+  // the closed set, and an accepted call executes through the SAME command layer. The
+  // provider (and its key) is resolved inside `driveJourney` and never reaches the body.
+  // The single-flight slot is SHARED with the approve — one operate-loop action at a time.
+  if (name === 'drive') {
+    if (req.method !== 'POST') return sendJson(res, 405, jsonDoc(usageError('POST /api/drive {provider?, model?, maxTurns?, resume?}')));
+    if (!approver.claim()) {
+      req.resume(); // nothing reads this body — drain it, then refuse
+      return sendJson(res, 409, jsonDoc({ ok: false, error: { code: 'drive-busy', message: DRIVE_BUSY } }));
+    }
+    try {
+      let opts: DriveOptions = {};
+      try {
+        const raw = await readBody(req);
+        const parsed = (raw ? JSON.parse(raw) : {}) as Record<string, unknown>;
+        const bad = driveOptionProblems(parsed);
+        if (bad) return sendJson(res, 400, jsonDoc(usageError(bad)));
+        opts = parsed as DriveOptions;
+      } catch {
+        return sendJson(res, 400, jsonDoc(usageError('POST /api/drive expects a JSON body: {provider?, model?, maxTurns?, resume?}')));
+      }
+      const out = await driveJourney(root, opts);
+      return sendJson(res, out.status, JSON.stringify(out.body, null, 2) + '\n');
+    } finally {
+      approver.release();
+    }
+  }
+
   // ── the gate WRITE — the same L1 composite the CLI's `gate!` calls ──
   if (name === 'gate') {
     if (req.method !== 'POST') return sendJson(res, 405, jsonDoc(usageError('POST /api/gate {id, gate, decision, feedback}')));
@@ -251,6 +285,29 @@ async function route(root: string, approver: Approver, req: IncomingMessage, res
   }
   const out = dispatch(root, argv);
   return sendJson(res, httpStatus(out), jsonDoc(out));
+}
+
+/** The drive body's shape, validated BEFORE the loop runs (an untrusted body never picks
+ *  a provider/model silently, and an unknown key is a usage refusal, never ignored).
+ *  Returns the problem, or undefined when the body is well-formed. */
+function driveOptionProblems(p: Record<string, unknown>): string | undefined {
+  const known = ['provider', 'model', 'maxTurns', 'resume'];
+  const unknown = Object.keys(p).filter((k) => !known.includes(k));
+  if (unknown.length) return `POST /api/drive: unknown option(s) ${unknown.join(', ')} — the body is {provider?, model?, maxTurns?, resume?}`;
+  for (const k of ['provider', 'model']) {
+    if (p[k] !== undefined && (typeof p[k] !== 'string' || !p[k])) return `POST /api/drive: '${k}' must be a non-empty string`;
+  }
+  if (p.maxTurns !== undefined && (typeof p.maxTurns !== 'number' || !Number.isInteger(p.maxTurns))) {
+    return "POST /api/drive: 'maxTurns' must be an integer (the loop refuses an out-of-range bound, never clamps it)";
+  }
+  if (p.resume !== undefined) {
+    const r = p.resume as Record<string, unknown> | null;
+    if (!r || typeof r !== 'object' || Array.isArray(r)) return "POST /api/drive: 'resume' must be the checkpoint object a previous run returned";
+    for (const k of ['at', 'action', 'detail']) {
+      if (typeof r[k] !== 'string' || !(r[k] as string)) return `POST /api/drive: 'resume.${k}' must be a non-empty string`;
+    }
+  }
+  return undefined;
 }
 
 function readBody(req: IncomingMessage): Promise<string> {
