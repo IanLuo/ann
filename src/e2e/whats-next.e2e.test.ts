@@ -104,18 +104,31 @@ function driveLoopJourney(root: string): void {
   commit(root, 'the loop fixture journey');
 }
 
-/** The DIRTY-STATE journey: one ACTIVE leg with one task whose grill gate was REJECTED (a
- *  DECIDED gate, so the integrity check is clean — and the frame's own gate is the one the
- *  daemon must not prompt for, care a), plus a committed doc the test dirties. */
+/** The OPEN journey (care a): one ACTIVE leg with one task whose grill gate has NOT been
+ *  submitted — the frame's own gate is the one the daemon must not prompt for, and NO
+ *  rejection stands anywhere, so the integrity re-check is clean. A rejection here would
+ *  be a DIFFERENT state since leg 12/08: a rework-owed task is a NAMED integrity finding
+ *  (GATE-REWORK — the mis-dispatch that drove 12/05 twice), pinned by its own test below.
+ *  Plus a committed doc the dirty-state test dirties. */
 function driveOpenJourney(root: string): void {
   cli(root, ['spawn!', LEG, CONTRACT('the alpha leg')]);
   cli(root, ['spawn!', FIRST, CONTRACT('do the thing')]);
-  cli(root, ['submit!', FIRST, 'grill']);
-  cli(root, ['gate!', FIRST, 'grill', 'reject', 'the contract is not right yet — rework it']);
   mkdirSync(join(root, 'docs'), { recursive: true });
   writeFileSync(join(root, 'docs', 'thing.md'), '# Thing\n\nthe committed bytes\n');
   cli(root, ['docs', '--write']);
   commit(root, 'the open fixture journey');
+}
+
+/** THE REWORK JOURNEY (leg 12/08, AC-3): the SAME shape 12/05 hit live — a task whose
+ *  ENTRY (grill) gate was REJECTED with feedback and never re-submitted. Before the
+ *  reconciliation rule this state reported `integrity: clean`, `queued` and
+ *  continue-leg; now it is a NAMED finding. */
+function driveReworkJourney(root: string): void {
+  cli(root, ['spawn!', LEG, CONTRACT('the alpha leg')]);
+  cli(root, ['spawn!', FIRST, CONTRACT('do the thing')]);
+  cli(root, ['submit!', FIRST, 'grill']);
+  cli(root, ['gate!', FIRST, 'grill', 'reject', 'the contract is not right yet — rework it']);
+  commit(root, 'the rework fixture journey');
 }
 
 /** A FIXTURE-ONLY journey (no CLI drive): the boundary SHAPES are pre-states, not states a
@@ -516,7 +529,7 @@ describe('e2e — the approve FAILS CLOSED: no submission (care a) and a dirty s
 
   it('a gate with NO submission refuses by NAME — the daemon never prompts (care a)', { timeout: 30_000 }, async () => {
     const v = await card(server);
-    expect(v.advance.action).toBe('continue-leg'); // the rejected-gate task IS the frontmost-ready
+    expect(v.advance.action).toBe('continue-leg'); // the un-submitted task IS the frontmost-ready
     expect((await integrity(server)).clean).toBe(true);
     expect(v.executable).toBe(true);
     const before = await logTypes(server, FIRST);
@@ -563,6 +576,60 @@ describe('e2e — the approve FAILS CLOSED: no submission (care a) and a dirty s
     const again = await post(server.url + '/api/approve', boundTo(clean));
     expect(again.status).toBe(409);
     expect((JSON.parse(again.body) as { error: { code: string } }).error.code).toBe('daemon-prompt'); // care a — never a prompt
+  });
+});
+
+/**
+ * THE MIS-DISPATCH CANNOT BE CALLED CLEAN (leg 12/08, AC-3). The state 12/05 hit live —
+ * an entry gate REJECTED with feedback, never re-submitted — used to answer
+ * `integrity: clean` with `executable: true` and a plain `continue-leg`, so the operator
+ * (and the driver) drove past the rejection and did the work twice. The
+ * reconciliation rule makes it a NAMED finding on the SAME read the card and the
+ * approve use: the steering surface can no longer call it clean, and the write refuses
+ * fail-closed with zero writes.
+ */
+describe('e2e — a REJECTED bound gate is a NAMED integrity finding (the rework, 12/08)', () => {
+  let root: string;
+  let server!: Server;
+
+  beforeAll(async () => {
+    root = newProject();
+    driveReworkJourney(root);
+    server = await serve(root);
+  }, 60_000);
+  afterAll(() => {
+    server?.kill();
+    if (root) rmSync(root, { recursive: true, force: true });
+  });
+
+  it('the lazy integrity snapshot NAMES the owed rework, and the approve refuses fail-closed', { timeout: 30_000 }, async () => {
+    // the status word still reads `queued` (the projection invents no state) — the REWORK
+    // is what the reconciliation reports, so a READER cannot mistake it for fresh work
+    expect(await taskStatus(server, FIRST)).toBe('queued');
+    const v = await card(server);
+    expect(v.executable).toBe(true); // the derivation side is unchanged — the WRITE is the guard
+
+    const dirty = await integrity(server);
+    expect(dirty.clean).toBe(false); // …and this is the finding that used to be invisible
+    expect(dirty.blockers.some((b) => b.includes('GATE-REWORK') && b.includes(FIRST) && b.includes('grill'))).toBe(true);
+
+    // the SAME refusal the card displays, carried through the write with ZERO writes
+    const before = await logTypes(server, FIRST);
+    const r = await post(server.url + '/api/approve', boundTo(v));
+    expect(r.status).toBe(409);
+    const doc = JSON.parse(r.body) as { error: { code: string }; blockers: string[] };
+    expect(doc.error.code).toBe('refused-integrity');
+    expect(doc.blockers.some((b) => b.includes('GATE-REWORK'))).toBe(true);
+    expect(await logTypes(server, FIRST)).toEqual(before);
+  });
+
+  it('the card names the rework on the node itself (the next line is DERIVED, not worded locally)', { timeout: 30_000 }, async () => {
+    const r = await get(server.url + `/api/confirm?id=${encodeURIComponent(FIRST)}`);
+    expect(r.status).toBe(200);
+    const d = JSON.parse(r.body) as { detail: { rework: boolean; next: { verdict: string; gate?: string }; gates: { grill: { state: string } } } };
+    expect(d.detail.gates.grill.state).toBe('rejected');
+    expect(d.detail.rework).toBe(true);
+    expect(d.detail.next).toEqual({ verdict: 'rework', gate: 'grill' });
   });
 });
 

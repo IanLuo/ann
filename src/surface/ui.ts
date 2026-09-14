@@ -366,28 +366,37 @@ export const UI_HTML = `<!doctype html>
     byId('card-events-h').hidden = !o.events;
     byId('card-gates').hidden = !o.gates;
   }
-  /** What the task is WAITING FOR — derived from its status + gate states, never assumed:
-   *  a queued task with nothing submitted is NOT decidable, and must not look it. */
+  /** What the task is WAITING FOR — WORDED here, DERIVED in the engine: detail.next is
+   *  the workflow projection's verdict (the /api/confirm payload), so the card cannot
+   *  disagree with check(), the queue, the driver or the CLI. The ONE thing this side
+   *  adds is the gate IN HAND (the page knows which gate the operator clicked): a
+   *  submitted gate in hand is decidable NOW. */
   function nextLine(detail, gate) {
-    var st = detail.status;
-    var grill = gateState(detail, 'grill').state;
-    var confirm = gateState(detail, 'confirm').state;
-    if (gate && gateState(detail, gate).state === 'submitted') {
-      return 'decide it now — accepting ' + gate + ' ' + (STEP[gate].role === 'entry' ? 'lets the work start' : 'lets it land');
+    var v = detail.next || {};
+    var verdict = v.verdict;
+    if (gate && gateState(detail, gate).state === 'submitted') verdict = 'decide-now';
+    switch (verdict) {
+      case 'decide-now':
+        return 'decide it now — accepting ' + gate + ' ' + (STEP[gate].role === 'entry' ? 'lets the work start' : 'lets it land');
+      case 'closed':
+        return 'closed';
+      case 'terminal':
+        return v.status || (detail.status || 'closed');
+      case 'conclusion-missing':
+        return 'the exit gate is accepted but the conclusion evidence is MISSING — record it, then close: complete! ' + detail.id;
+      case 'rework':
+        return 'REWORK OWED — the last decision at the ' + (v.gate || 'gate') + ' gate is a REJECTION; the task must be reworked and re-submitted there before it can run';
+      case 'waiting-on-decision':
+        return 'waiting on a decision — ' + (v.gate === 'confirm' ? 'confirm (exit)' : v.gate === 'grill' ? 'grill (entry)' : 'a gate') + ' is in WAITING ON YOU';
+      case 'waiting-on-runner':
+        return 'waiting on the runner — the confirm gate is decided and the evidence commit is not recorded yet';
+      case 'work-in-progress':
+        return 'work in progress';
+      case 'entry-accepted':
+        return 'the entry (grill) gate is accepted — the work has not started';
+      default:
+        return 'queued — the entry (grill) gate has not been submitted yet; nothing to decide here';
     }
-    if (st === 'done') return 'closed';
-    if (st === 'accepted') return 'the exit gate is accepted but the conclusion evidence is MISSING — record it, then close: complete! ' + detail.id;
-    if (st === 'blocked') {
-      var which = confirm === 'submitted' ? 'confirm (exit)' : grill === 'submitted' ? 'grill (entry)' : 'a decision';
-      return 'waiting on a decision — ' + which + ' is in WAITING ON YOU';
-    }
-    if (st === 'failed' || st === 'deferred' || st === 'cancelled' || st === 'superseded') return st;
-    if (st === 'active') return 'work in progress';
-    return grill === 'submitted'
-      ? 'submitted at the entry gate — waiting on a decision (in WAITING ON YOU)'
-      : grill === 'confirmed'
-        ? 'the entry (grill) gate is confirmed — the work has not started'
-        : 'queued — the entry (grill) gate has not been submitted yet; nothing to decide here';
   }
 
   /** THE NODE'S EVENT LIST — the SAME read the CLI prints with 'ann events <id>': every

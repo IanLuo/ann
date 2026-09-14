@@ -6,6 +6,7 @@ import { Store } from '../store/store.js';
 import { getVOCAB } from '../store/vocab.js';
 import { Commands } from '../commands/index.js';
 import { Frame } from '../flow/frame.js';
+import { workflowState } from '../store/workflow.js';
 import { Step, StepContext, StepOutput, Abilities, ResearchFinding, Intent, INTENT_KINDS } from '../flow/types.js';
 import { StepLookup, ChainEntry } from '../flow/chain.js';
 import { EvalFixture, FlowFixture, FlowStep, Kpi, EvalReport } from './types.js';
@@ -226,9 +227,11 @@ async function runFlowFixture(fixture: FlowFixture): Promise<{ firstPass: boolea
       .some((e) => e.type === 'evidence' && Array.isArray(e.commits) && (e.commits as unknown[]).length > 0);
     const verified = docVerified && evidenceCommitted;
     // Rework is a GATE event, not a verify problem: a grill rejection re-materializes the
-    // flow (frame.ts) and lands a `rejected` event on the node. Count it by the event tail
-    // — rejections never populate `problems`, so the old string check missed rework.
-    const noRework = r.verifyCycles === 0 && !commands.events(taskId).some((e) => e.type === 'rejected');
+    // flow (frame.ts) and lands a `rejected` event on the node. Count it off the ONE
+    // derivation (workflow.ts) — rejections never populate `problems`, so the old string
+    // check missed rework.
+    const gates = workflowState(commands.events(taskId)).gates;
+    const noRework = r.verifyCycles === 0 && gates.grill.rejected.length === 0 && gates.confirm.rejected.length === 0;
     const firstPass = r.stop === 'completed' && verified && noRework;
 
     return {

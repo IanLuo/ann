@@ -40,6 +40,8 @@ const detail: TaskDetail = {
   superseded: false,
   contract: { intent: 'the github binding', acceptanceCriteria: ['AC one'] },
   gates: { grill: { state: 'none' }, confirm: { state: 'none' } },
+  rework: false,
+  next: { verdict: 'queued' },
   artifacts: [],
   events: [],
   blockers: [],

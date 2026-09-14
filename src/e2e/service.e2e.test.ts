@@ -390,7 +390,7 @@ describe('e2e — the minimal service + UI (AC-1: the thin binding over the comm
     const journey = JSON.parse((await get(server.url + '/api/journey')).body) as { legs: Array<{ id: string; tasks: Array<{ id: string; status: string }> }> };
     expect(journey.legs.find((l) => l.id === LEG2)?.tasks.find((t) => t.id === T2)?.status).toBe('queued');
     const cardAfter = JSON.parse((await get(server.url + `/api/confirm?id=${T2}`)).body) as { detail: { gates: { grill: { state: string } } } };
-    expect(cardAfter.detail.gates.grill.state).toBe('confirmed');
+    expect(cardAfter.detail.gates.grill.state).toBe('accepted');
   });
 
   it('serve refuses --json (a daemon has no one-document answer)', () => {

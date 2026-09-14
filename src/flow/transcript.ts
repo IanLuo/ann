@@ -1,5 +1,6 @@
 import { Commands, CommandResult } from '../commands/index.js';
 import { JourneyEvent } from '../store/store.js';
+import { gateView } from '../store/workflow.js';
 import { Phase } from './chain.js';
 import { ResearchFinding } from './types.js';
 
@@ -81,10 +82,7 @@ export class Transcript {
   boundary(phase: Phase): number {
     const evs = this.events;
     const gate = boundGate(phase);
-    let latest = -1;
-    evs.forEach((e, i) => {
-      if (e.type === 'rejected' && e.gate === gate) latest = i;
-    });
+    let latest = gateView(evs, gate).lastRejection?.index ?? -1;
     if (countsVerifyCycles(phase)) {
       for (const { index, trace } of this.records()) {
         if (trace.kind === 'verify' && index > latest) latest = index;
@@ -95,17 +93,13 @@ export class Transcript {
 
   /** The number of verify cycles since the latest gate decision at `confirm`. */
   verifyCycles(): number {
-    const evs = this.events;
-    let anchor = -1;
-    evs.forEach((e, i) => {
-      if ((e.type === 'confirmed' || e.type === 'rejected') && e.gate === 'confirm') anchor = i;
-    });
+    const anchor = gateView(this.events, 'confirm').lastDecisionIndex;
     return this.records().filter((r) => r.trace.kind === 'verify' && r.index > anchor).length;
   }
 
   /** runId = 1 + rejections at the bound gate + verify cycles (execute/confirm only). */
   runId(phase: Phase): number {
-    const rejections = this.commands.rejections(this.taskId, boundGate(phase));
+    const rejections = gateView(this.events, boundGate(phase)).rejected.length;
     return 1 + rejections + (countsVerifyCycles(phase) ? this.verifyCycles() : 0);
   }
 

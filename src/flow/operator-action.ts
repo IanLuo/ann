@@ -3,6 +3,7 @@ import { AdvanceView, Commands, FrontmostReady, GoalView } from '../commands/ind
 import { docsIndexFresh } from '../store/docs.js';
 import { Frame, FrameDeps, FrameResult } from './frame.js';
 import { runValidators } from './validators/index.js';
+import { workflowState } from '../store/workflow.js';
 import { JourneyEvent } from '../store/store.js';
 
 /**
@@ -164,16 +165,10 @@ function advanceCard(s: DerivationSnapshot): string {
   return lines.join('\n');
 }
 
-/** An undecided submission at a task — the gate awaiting the human, if any. */
+/** The gate awaiting the human, if any — the ONE derivation's `waitingOn` (workflow.ts),
+ *  never a second scan of the tail. */
 function undecidedGateOf(events: JourneyEvent[]): 'grill' | 'confirm' | undefined {
-  for (let i = events.length - 1; i >= 0; i--) {
-    const e = events[i];
-    if (e.type !== 'submitted' || typeof e.gate !== 'string') continue;
-    if (!events.slice(i + 1).some((x) => (x.type === 'confirmed' || x.type === 'rejected') && x.gate === e.gate)) {
-      return e.gate === 'grill' ? 'grill' : 'confirm';
-    }
-  }
-  return undefined;
+  return workflowState(events).waitingOn;
 }
 
 /** Where the journey landed after a continue-leg run — derived from the frame stop and

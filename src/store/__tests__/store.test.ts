@@ -838,7 +838,7 @@ describe('Store — detail() (the full task/leg card)', () => {
     if (!d.contract) throw new Error('contract missing');
     expect(d.contract.intent).toBe('Build the thing');
     expect(d.contract.acceptanceCriteria).toEqual(['AC-A', 'AC-B']);
-    expect(d.gates.grill).toMatchObject({ state: 'confirmed' });
+    expect(d.gates.grill).toMatchObject({ state: 'accepted' });
     expect(d.gates.confirm.state).toBe('submitted'); // awaiting decision
     expect(d.artifacts).toEqual([
       expect.objectContaining({ name: 'thing-spec', sha: 'abc1234', role: 'historical', path: '.ann/journey/legs/06-engine-build/05-s2/artifacts/spec.md' }),

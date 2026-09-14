@@ -166,7 +166,7 @@ const nodeCardLines = (c: NodeCard): string[] => {
   }
   lines.push('---', 'GATES (derived)');
   const gateLine = (g: { state: string; at?: string }) =>
-    `GATE ${g.state === 'confirmed' ? '✓' : g.state === 'rejected' ? '✗' : g.state === 'submitted' ? '…' : '·'} ${g.state}${g.at ? ` (${g.at})` : ''}`;
+    `GATE ${g.state === 'accepted' ? '✓' : g.state === 'rejected' ? '✗' : g.state === 'submitted' ? '…' : '·'} ${g.state}${g.at ? ` (${g.at})` : ''}`;
   lines.push(`  ${gateLine(c.gates.grill)} — grilling (entry)`, `  ${gateLine(c.gates.confirm)} — confirm-result (exit)`);
   lines.push('---', 'ARTIFACTS');
   if (!c.artifacts.length) lines.push('  (none locked)');

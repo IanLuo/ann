@@ -4,6 +4,7 @@ import { join, relative } from 'node:path';
 import { Store, JourneyEvent, NodeDir, ResultItem, TaskDetail, CLOSED_TASK_STATUSES, type CheckView } from '../store/store.js';
 import { blobSha, stripMarkers } from '../store/sha.js';
 import { getVOCAB } from '../store/vocab.js';
+import { GATE_DECISION_EVENTS, READY_STATUSES, gateView, workflowState, type GateLifecycle } from '../store/workflow.js';
 import { ALLOWLIST, ALLOWLIST_NAMES, outputDetail, defaultCaptureEnv, type CaptureEnv } from './capture.js';
 import type { OpLog } from '../abilities/obs/log.js';
 
@@ -559,8 +560,8 @@ export class Commands {
       this.store.appendEvent(
         this.node(id),
         decision === 'accept'
-          ? { at: this.today, type: 'confirmed', gate, ...(feedback ? { feedback } : {}), note: `accepted (${this.who})` }
-          : { at: this.today, type: 'rejected', gate, feedback, note: `rejected (${this.who})` },
+          ? { at: this.today, type: GATE_DECISION_EVENTS.accept, gate, ...(feedback ? { feedback } : {}), note: `accepted (${this.who})` }
+          : { at: this.today, type: GATE_DECISION_EVENTS.reject, gate, feedback, note: `rejected (${this.who})` },
       );
       // The auto-close rides the SAME gesture — the event names itself, so the log never
       // reads like a separate `complete!`. Never on a re-accept of an already-closed task.
@@ -784,7 +785,7 @@ export class Commands {
       );
     }
     const gateState = this.confirmGateState(id);
-    if (gateState !== 'confirmed') {
+    if (gateState !== 'accepted') {
       return fail(
         'not-accepted',
         `${id}: the confirm-result gate is not accepted (last decision: ${gateState}) — complete! records a delivery the HUMAN accepted: submit! ${id} confirm, then gate! ${id} confirm accept`,
@@ -1187,33 +1188,42 @@ export class Commands {
     for (const id of this.store.ids()) {
       if (!id.includes('/')) continue;
       if (['cancelled', 'deferred'].includes(this.store.status(id))) continue;
-      for (const e of this.store.events(id)) {
-        if (e.type !== 'submitted' || typeof e.gate !== 'string') continue;
-        if (!this.undecidedSubmission(id, e.gate)) continue;
-        if (out.some((p) => p.task === id && p.gate === e.gate)) continue;
-        const c = this.conclusion(id);
-        out.push({
-          task: id,
-          gate: e.gate,
-          role: e.gate === 'grill' ? 'entry' : 'exit',
-          leg: id.split('/')[0],
-          intent: String(this.store.contractOf(id)?.intent ?? ''),
-          since: String(e.at ?? ''),
-          delivered: {
-            // the CURRENT conclusion's citation set — the bytes the close will judge (the
-            // log's older citations are superseded history, like an earlier claim)
-            commits: this.store.currentCitedCommits(id).length,
-            claims: c.claims.length,
-            unclaimed: c.unclaimed.length,
-            checks: c.checks.length,
-            // BOUND = what actually closes the task (leg 12/03; the fail side leg 12/02):
-            // a CAPTURED pass against a cited commit AND no CAPTURED failure on one — the
-            // SAME reading `complete!` and the auto-close make, so a gate card never
-            // promises a close the predicate would refuse.
-            bound: this.store.capturedPassBound(id) && this.store.capturedFailCited(id) === undefined ? 1 : 0,
-          },
-        });
-      }
+      out.push(...this.pendingGatesOf(id));
+    }
+    return out;
+  }
+
+  /** ONE task's undecided gates, read off the ONE derivation (workflow.ts) — the shared
+   *  half of the whole-journey queue above and the active-leg observer view in
+   *  lookBack(), so a gate queue can never be two readings of the same log. */
+  private pendingGatesOf(id: string): PendingGate[] {
+    const wf = workflowState(this.store.events(id));
+    const out: PendingGate[] = [];
+    for (const gate of ['grill', 'confirm'] as const) {
+      const view = wf.gates[gate];
+      if (!view.undecided) continue;
+      const c = this.conclusion(id);
+      out.push({
+        task: id,
+        gate,
+        role: gate === 'grill' ? 'entry' : 'exit',
+        leg: id.split('/')[0],
+        intent: String(this.store.contractOf(id)?.intent ?? ''),
+        since: String(view.undecidedAt ?? ''),
+        delivered: {
+          // the CURRENT conclusion's citation set — the bytes the close will judge (the
+          // log's older citations are superseded history, like an earlier claim)
+          commits: this.store.currentCitedCommits(id).length,
+          claims: c.claims.length,
+          unclaimed: c.unclaimed.length,
+          checks: c.checks.length,
+          // BOUND = what actually closes the task (leg 12/03; the fail side leg 12/02):
+          // a CAPTURED pass against a cited commit AND no CAPTURED failure on one — the
+          // SAME reading `complete!` and the auto-close make, so a gate card never
+          // promises a close the predicate would refuse.
+          bound: this.store.capturedPassBound(id) && this.store.capturedFailCited(id) === undefined ? 1 : 0,
+        },
+      });
     }
     return out;
   }
@@ -1365,7 +1375,7 @@ export class Commands {
   frontmostReady(): FrontmostReady | undefined {
     const legs = this.store.ids().filter((i) => !i.includes('/')).sort();
     for (const leg of legs) {
-      const ready = this.store.tasksOf(leg).filter((t) => ['queued', 'active'].includes(this.store.status(t)));
+      const ready = this.store.tasksOf(leg).filter((t) => READY_STATUSES.includes(this.store.status(t)));
       if (ready.length) return { leg, task: ready[0], status: this.store.status(ready[0]) };
     }
     return undefined;
@@ -1374,17 +1384,12 @@ export class Commands {
   /** Where we are + what's ahead — derived from the tail, never assumed. */
   lookBack(): LookBack {
     const activeLeg = this.activeLeg();
-    const ready = activeLeg ? this.store.tasksOf(activeLeg).filter((t) => ['queued', 'active'].includes(this.store.status(t))) : [];
+    const ready = activeLeg ? this.store.tasksOf(activeLeg).filter((t) => READY_STATUSES.includes(this.store.status(t))) : [];
     const alsoReady = (ready.length ? ready.slice(1) : []).map((t) => ({ leg: activeLeg!, task: t, status: this.store.status(t) }));
     const legGate = activeLeg ? this.store.legGateMet(activeLeg) : { met: true };
     const pendingGates: LookBack['pendingGates'] = [];
     for (const t of this.store.tasksOf(activeLeg ?? '')) {
-      const evs = this.store.events(t);
-      for (const e of evs) {
-        if (e.type !== 'submitted' || typeof e.gate !== 'string') continue;
-        if (!this.undecidedSubmission(t, e.gate)) continue;
-        if (!pendingGates.some((p) => p.task === t && p.gate === e.gate)) pendingGates.push({ task: t, gate: e.gate });
-      }
+      for (const p of this.pendingGatesOf(t)) pendingGates.push({ task: p.task, gate: p.gate });
     }
     return {
       ...(activeLeg ? { activeLeg, activeLegStatus: this.store.status(activeLeg) } : {}),
@@ -1404,7 +1409,7 @@ export class Commands {
     const working = legs.find((l) => this.store.tasksOf(l).length > 0 && this.store.status(l) !== 'done');
     if (working) {
       const tasks = this.store.tasksOf(working);
-      const ready = tasks.filter((t) => ['queued', 'active'].includes(this.store.status(t)));
+      const ready = tasks.filter((t) => READY_STATUSES.includes(this.store.status(t)));
       if (ready.length) return { leg: working, action: 'continue-leg', detail: `next task: ${ready[0]} (${this.store.status(ready[0])})` };
       const done = tasks.filter((t) => CLOSED_TASK_STATUSES.includes(this.store.status(t))).length;
       const blocked = tasks.filter((t) => this.store.status(t) === 'blocked').length;
@@ -1507,32 +1512,27 @@ export class Commands {
 
   /* ══ shared derivations ════════════════════════════════════════════════════ */
 
-  /** An `undecided` submission at this gate — the predicate BOTH gate writes share.
-   *  A submission is decided by a later `confirmed` OR `rejected` at the same gate. */
-  private undecidedSubmission(id: string, gate: string): boolean {
-    const evs = this.store.events(id);
-    return evs.some((e, i) => {
-      if (e.type !== 'submitted' || e.gate !== gate) return false;
-      return !evs.slice(i + 1).some((x) => (x.type === 'confirmed' || x.type === 'rejected') && x.gate === gate);
-    });
+  /** An `undecided` submission at this gate — the ONE derivation (workflow.ts): a
+   *  submission with no later decision at the same gate. The predicate BOTH gate writes
+   *  share (submit!'s re-submission refusal, gate!'s auto-submit). */
+  undecidedSubmission(id: string, gate: string): boolean {
+    return gateView(this.store.events(id), gate).undecided;
   }
 
-  /** A gate's LAST decision — the same reading the frame's own gate state uses: the last
-   *  submitted/confirmed/rejected event at that gate. `complete!` requires `confirmed`
-   *  here, so a confirm gate re-submitted after an accept (an undecided submission) can
-   *  never be completed over. The ONE gate-state read (leg 12/02 reuses it: an undecided
-   *  ENTRY gate is where the semantic driver's `run!` pre-flight lands). */
-  gateState(id: string, gate: string): 'confirmed' | 'rejected' | 'submitted' | 'none' {
-    const decisions = this.store.events(id).filter((e) => (e.type === 'submitted' || e.type === 'confirmed' || e.type === 'rejected') && e.gate === gate);
-    return (decisions[decisions.length - 1]?.type as 'confirmed' | 'rejected' | 'submitted' | undefined) ?? 'none';
+  /** A gate's LAST decision, in the lifecycle vocabulary (workflow.ts): `accepted` is
+   *  what the event `confirmed` records (the two vocabularies are reconciled through
+   *  GATE_DECISION_EVENTS). `complete!` requires `accepted` here, so a confirm gate
+   *  re-submitted after an accept (an undecided submission) can never be completed over. */
+  gateState(id: string, gate: string): GateLifecycle {
+    return gateView(this.store.events(id), gate).state;
   }
 
-  private confirmGateState(id: string): 'confirmed' | 'rejected' | 'submitted' | 'none' {
+  private confirmGateState(id: string): GateLifecycle {
     return this.gateState(id, 'confirm');
   }
 
   /** Rejections recorded at a gate — the bound's counter (and L2's rework signal). */
   rejections(id: string, gate: string): number {
-    return this.store.events(id).filter((e) => e.type === 'rejected' && e.gate === gate).length;
+    return gateView(this.store.events(id), gate).rejected.length;
   }
 }

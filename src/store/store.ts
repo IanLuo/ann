@@ -4,6 +4,7 @@ import { join, basename, resolve, sep } from 'node:path';
 import { getVOCAB } from './vocab.js';
 import { blobSha, stripMarkers } from './sha.js';
 import { loadDocsManifest, scanDocsDir, writeDocsManifest } from './docs.js';
+import { gateView, isGateEventType, workflowProblems, workflowState, type GateLifecycle, type GateView, type NextVerdict, type WorkflowState } from './workflow.js';
 import type { OpLog } from '../abilities/obs/log.js';
 
 /** The object types `git cat-file` reports for a reference that RESOLVES — the batch
@@ -174,9 +175,11 @@ export function resolveStoreLocation(raw: string): StoreLocation {
   throw new StoreLocationError(`ANN_STORE: bad target '${raw}' — ${STORE_LOCATION_HINT} (no legs/ journey store found)`);
 }
 
-/** Detail card types — `Store.detail()` derives; the CLI renders (ann detail <id>). */
+/** Detail card types — `Store.detail()` derives; the CLI renders (ann detail <id>).
+ *  A gate's state is the LIFECYCLE word (workflow.ts) — `accepted` is what the event
+ *  `confirmed` records, one word per state everywhere the card is read. */
 export interface DetailGate {
-  state: 'none' | 'submitted' | 'confirmed' | 'rejected';
+  state: GateLifecycle;
   at?: string;
 }
 
@@ -194,6 +197,10 @@ export interface TaskDetail {
   superseded: boolean;
   contract: Record<string, unknown> | undefined;
   gates: { grill: DetailGate; confirm: DetailGate };
+  /** REWORK OWED (derived — a rejected bound gate with no later submission at it). */
+  rework: boolean;
+  /** The card's next line, DERIVED (the verdict; the wording is the renderer's). */
+  next: NextVerdict;
   artifacts: ArtifactRef[];
   events: JourneyEvent[];
   blockers: string[];
@@ -509,79 +516,17 @@ export class Store {
     return this.legStatus(id);
   }
 
+  /** THE STATUS WORD — derived by the ONE workflow projection (workflow.ts), which also
+   *  owns the gate lifecycle every other gate reader consumes. This method is the
+   *  store's name for it; nothing here re-reads the event tail. */
   private taskStatus(id: string): string {
-    let status = 'queued';
-    const evs = this.events(id);
-    for (const e of evs) {
-      switch (e.type) {
-        case 'created':
-          status = 'queued';
-          break;
-        case 'activated':
-          status = 'active';
-          break;
-        case 'completed':
-          status = 'done';
-          break;
-        case 'failed':
-          status = 'failed';
-          break;
-        case 'superseded':
-          if (status !== 'done' && status !== 'failed') status = 'superseded';
-          break;
-        // leg 08 task 01 (the task-close vocabulary): the confirm-result gate was
-        // ACCEPTED but no `completed` follows — the deliverable is approved, the delivery
-        // is not recorded. Never `queued` (the created default would make it look
-        // re-runnable to next/advance!/run!) and never `done` (nothing was delivered).
-        // The GRILL gate's confirmation is NOT this state: a grilled-but-unstarted task
-        // is ordinary queued/active work.
-        case 'confirmed':
-          if (e.gate === 'confirm' && status !== 'done' && status !== 'failed') status = 'accepted';
-          break;
-        // leg 08 task 01 — the CANCELLED terminal: the task is no longer needed, an
-        // append-style bookkeeping record (NOT a gate decision — any initiator may
-        // record it, with a required reason). Like `superseded` it never un-closes
-        // delivered (done) or exhausted (failed) work; unlike it the blocked
-        // re-derivations below never override it — cancellation is the escape hatch for
-        // a task stuck at an undecided submission.
-        case 'cancelled':
-          if (status !== 'done' && status !== 'failed') status = 'cancelled';
-          break;
-        // leg 08 task 01's `cancelled` counterpart, wired as a real terminal: `deferred`
-        // is the task POSTPONED (not delivered, not abandoned) — an append-style
-        // bookkeeping record with a required reason, same escape-hatch semantics as
-        // `cancelled`. Terminal in BOTH directions: it never un-closes delivered (done) /
-        // exhausted (failed) / abandoned (cancelled) work, and the blocked re-derivations
-        // below never override it — so deferring a task stuck at an undecided submission
-        // STICKS and its leg can derive done.
-        case 'deferred':
-          if (status !== 'done' && status !== 'failed' && status !== 'cancelled') status = 'deferred';
-          break;
-        // v6 goal session: `goal-met` is deliberately NOT here — a goal verdict is
-        // STATUS-INERT (goal-session-design §2). Only the seed (created+completed)
-        // makes the goal leg done; the verdict never moves legStatus.
-      }
-    }
-    // v8 §3: a submitted without a confirmed/rejected at that gate = blocked
-    // (waiting on human) — a gate cannot be skipped silently. Never overrides done/failed
-    // — nor `cancelled` (leg 08 task 01) and `deferred`: a cancelled OR deferred task
-    // STAYS so, whatever undecided submission or undischarged `waiting` record it carries.
-    if (status !== 'done' && status !== 'failed' && status !== 'cancelled' && status !== 'deferred') {
-      const pendingGate = evs.some((e) => {
-        if (e.type !== 'submitted' || typeof e.gate !== 'string') return false;
-        return !evs.slice(evs.indexOf(e) + 1).some((x) => (x.type === 'confirmed' || x.type === 'rejected') && x.gate === e.gate);
-      });
-      if (pendingGate) status = 'blocked';
-      // v14 §3 (core-design §3 rule 8, resume tail-state 4): a `waiting` record with no
-      // SUBSEQUENT commit evidence = the empty-chain verify-wait — the runner has not
-      // committed yet. `waiting` maps to blocked; the commit evidence releases it.
-      // A stated code-literal change beside the eventTypes/statuses reconciliations.
-      const lastWaiting = evs.map((e) => e.type).lastIndexOf('waiting');
-      if (lastWaiting >= 0 && !evs.slice(lastWaiting + 1).some((e) => e.type === 'evidence' && Array.isArray(e.commits) && e.commits.length > 0)) {
-        status = 'blocked';
-      }
-    }
-    return status;
+    return this.workflow(id).status;
+  }
+
+  /** The ONE workflow projection for a node (workflow.ts) — the status word, the derived
+   *  rework flag, the gate views and the card's next verdict, computed in ONE pass. */
+  private workflow(id: string): WorkflowState {
+    return workflowState(this.events(id));
   }
 
   private legStatus(id: string): string {
@@ -890,16 +835,13 @@ export class Store {
   /* ---------------------------------------------------------------- */
 
   /** Full derived detail for one node — contract, gate states, artifacts (with
-   *  current/superseded roles), event tail, blockers, leg tasks. */
+   *  current/superseded roles), event tail, blockers, leg tasks. The gate states, the
+   *  rework flag, the next verdict and the blockers ALL come from the ONE workflow
+   *  projection (workflow.ts) — this card derives nothing about a gate itself. */
   detail(id: string): TaskDetail {
     const evs = this.events(id);
-    const gate = (name: string): DetailGate => {
-      const last = [...evs]
-        .reverse()
-        .find((e) => ['submitted', 'confirmed', 'rejected'].includes(e.type) && e.gate === name);
-      if (!last) return { state: 'none' };
-      return { state: last.type as DetailGate['state'], at: last.at };
-    };
+    const wf = workflowState(evs);
+    const gate = (g: GateView): DetailGate => ({ state: g.state, ...(g.at ? { at: g.at } : {}) });
     // unwrap the contract (defensive: legacy double-nested {contract:{contract:{…}}})
     const contract = this.contractOf(id);
     // artifacts — HISTORY ONLY (the record→disk files a retired flow left): docs are
@@ -915,18 +857,18 @@ export class Store {
       const path = this.artifactPath(a?.path ?? `journey/legs/${id}/artifacts/${filename}`);
       artifacts.push({ name: nm, path, sha: a?.lockSha ?? '', role: 'historical' });
     }
-    const blockers = evs
-      .filter(
-        (e) => e.type === 'submitted' && !evs.slice(evs.indexOf(e) + 1).some((x) => ['confirmed', 'rejected'].includes(x.type) && x.gate === e.gate),
-      )
-      .map((b) => `submitted (gate=${typeof b.gate === 'string' ? b.gate : '?'}) awaiting decision`);
+    const blockers = (['grill', 'confirm'] as const)
+      .filter((g) => wf.gates[g].undecided)
+      .map((g) => `submitted (gate=${g}) awaiting decision`);
     const detail: TaskDetail = {
       id,
       isLeg: !id.includes('/'),
       status: this.status(id),
       superseded: this.events(id).some((e) => e.type === 'superseded'),
       contract,
-      gates: { grill: gate('grill'), confirm: gate('confirm') },
+      gates: { grill: gate(wf.gates.grill), confirm: gate(wf.gates.confirm) },
+      rework: wf.rework,
+      next: wf.next,
       artifacts,
       events: evs,
       blockers,
@@ -1470,7 +1412,7 @@ export class Store {
       if (e.decision !== 'met') throw new Error("append rejected: goal-met.decision must be 'met'");
       if (e.feedback !== undefined && typeof e.feedback !== 'string') throw new Error('append rejected: goal-met.feedback must be a string');
     }
-    if (e.type === 'submitted' || e.type === 'confirmed' || e.type === 'rejected') {
+    if (isGateEventType(e.type)) {
       if (typeof e.gate !== 'string' || !getVOCAB().gates.includes(e.gate)) {
         throw new Error(`append rejected: ${e.type}.gate must be one of ${getVOCAB().gates.join('|')}`);
       }
@@ -1655,30 +1597,29 @@ export class Store {
     const problems: string[] = [];
     if (!id.includes('/')) return problems;
     const list = evs ?? this.events(id);
+    // the gate half comes from the ONE derivation (workflow.ts): `accepted` indices, the
+    // submissions, the last decision — never a private re-scan of the triple.
+    const grill = gateView(list, 'grill');
+    const confirm = gateView(list, 'confirm');
     let lastComplete = -1,
-      lastConfirm2 = -1,
-      firstWork = -1,
-      lastConfirm1 = -1;
+      firstWork = -1;
     list.forEach((e, i) => {
-      const gate = typeof e.gate === 'string' ? e.gate : '';
       if (e.type === 'completed') lastComplete = i;
-      if (e.type === 'artifact-locked' || e.type === 'completed') {
-        if (firstWork === -1) firstWork = i;
-      }
-      if (e.type === 'confirmed' && gate === 'confirm') lastConfirm2 = i;
-      if (e.type === 'confirmed' && gate === 'grill') lastConfirm1 = i;
+      if ((e.type === 'artifact-locked' || e.type === 'completed') && firstWork === -1) firstWork = i;
     });
-    if (lastComplete >= 0 && lastConfirm2 === -1) {
+    const lastAccept1 = grill.accepted.length ? grill.accepted[grill.accepted.length - 1] : -1;
+    if (lastComplete >= 0 && confirm.accepted.length === 0) {
       problems.push(`GATE-2 GAP: ${id} — completed but no confirmed(gate=confirm) recorded`);
     }
-    if (firstWork >= 0 && (lastConfirm1 === -1 || lastConfirm1 > firstWork)) {
+    if (firstWork >= 0 && (lastAccept1 === -1 || lastAccept1 > firstWork)) {
       problems.push(`GATE-1 GAP: ${id} — produced work (artifact-locked/completed) but no confirmed(gate=grill) before it`);
     }
     // flow-control v4 §3: gates are SEQUENTIAL — a confirm-gate with NO confirmed grill ever
     // = GATE① skipped. (Recording order may be retrospective — the write path enforces strict
     // order; the check only catches a truly missing grill.)
-    const confirmIdx = list.findIndex((e) => (e.type === 'submitted' || e.type === 'confirmed') && e.gate === 'confirm');
-    const grillIdx = list.findIndex((e) => e.type === 'confirmed' && e.gate === 'grill');
+    const opened = [confirm.submitted[0], confirm.accepted[0]].filter((i): i is number => i !== undefined);
+    const confirmIdx = opened.length ? Math.min(...opened) : -1;
+    const grillIdx = grill.accepted.length ? grill.accepted[0] : -1;
     if (confirmIdx >= 0 && grillIdx === -1) {
       problems.push(`GATE-SEQ GAP: ${id} — confirm gate recorded but no confirmed(gate=grill) ever (flow-control v4 §3)`);
     }
@@ -1700,6 +1641,11 @@ export class Store {
     for (const id of this.nodes.keys()) {
       if (this.grandfathered(id)) continue;
       for (const p of this.gateProblems(id)) problems.push(p);
+      // THE RECONCILIATION RULE (leg 12/08, AC-3): the status word must not contradict the
+      // derived gate lifecycle — a READY word beside an owed rework (the mis-dispatch),
+      // `accepted` without a confirm accept, `blocked` with nothing pending. Tasks only:
+      // a LEG's status is an aggregate of its children, not the tail projection.
+      if (id.includes('/')) for (const p of workflowProblems(id, workflowState(this.events(id)))) problems.push(p);
     }
     // F-AC16 closure invariants: completed-after-gate-revised requires transferred|deferred;
     // transferred targets must exist. Tasks only (leg roots carry no events by construction).

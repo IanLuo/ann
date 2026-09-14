@@ -14,9 +14,11 @@ const detail = (over: Partial<TaskDetail> = {}): TaskDetail => ({
     targetAreas: ['src/flow/'],
   },
   gates: {
-    grill: { state: 'confirmed', at: '2026-08-28' },
+    grill: { state: 'accepted', at: '2026-08-28' },
     confirm: { state: 'submitted', at: '2026-08-28' },
   },
+  rework: false,
+  next: { verdict: 'waiting-on-decision', gate: 'confirm' },
   artifacts: [{ name: 'runner-review', path: '.ann/journey/legs/06-engine-build/09/artifacts/runner-review.md', sha: 'abc1234', role: 'current' }],
   events: [],
   blockers: [],
@@ -48,7 +50,7 @@ describe('renderGateCard (F11 — step card)', () => {
     expect(text).toContain('intent: the runner reviewer');
     expect(text).toContain('AC-1: AC one');
     expect(text).toContain('AC-2: AC two');
-    expect(text).toContain('✓ grilling (entry) — confirmed (2026-08-28)');
+    expect(text).toContain('✓ grilling (entry) — accepted (2026-08-28)');
     expect(text).toContain('… confirm-result (exit) — submitted (2026-08-28)');
     expect(text).toContain('commit');
     expect(text).toContain('runner-review.md');

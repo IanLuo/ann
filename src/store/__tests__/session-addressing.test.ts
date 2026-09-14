@@ -281,7 +281,7 @@ describe('ANN_STORE — resolution rule + path remap under a journey root', () =
     // statuses / detail / results reads
     expect(c.statuses().map((r) => r.id).sort()).toEqual(['01-goal', '02-leg', '02-leg/01-produce', '02-leg/02-prose']);
     expect(c.status('02-leg/01-produce')).toBe('done');
-    expect(c.detail('02-leg/01-produce').gates.grill.state).toBe('confirmed');
+    expect(c.detail('02-leg/01-produce').gates.grill.state).toBe('accepted');
     rmSync(group, { recursive: true, force: true });
   });
 });

@@ -58,7 +58,7 @@ export function renderGateCard(data: GateCardData): string {
 
   out.push('  gates (derived):');
   const gateLine = (g: { state: string; at?: string }, label: string) =>
-    `    ${g.state === 'confirmed' ? '✓' : g.state === 'rejected' ? '✗' : g.state === 'submitted' ? '…' : '·'} ${label} — ${g.state}${g.at ? ` (${g.at})` : ''}`;
+    `    ${g.state === 'accepted' ? '✓' : g.state === 'rejected' ? '✗' : g.state === 'submitted' ? '…' : '·'} ${label} — ${g.state}${g.at ? ` (${g.at})` : ''}`;
   out.push(gateLine(d.gates.grill, 'grilling (entry)'));
   out.push(gateLine(d.gates.confirm, 'confirm-result (exit)'));
 

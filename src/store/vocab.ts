@@ -25,6 +25,11 @@ export interface Vocab {
   eventTypes: string[];
   statuses: string[];
   gates: string[];
+  /** THE DECISION MAPPING (v4, leg 12/08) — the human input `accept|reject` ↔ the event
+   *  types `confirmed|rejected`. The derivation reads the CODE literal
+   *  (`GATE_DECISION_EVENTS`, workflow.ts); this declaration is the registry half of the
+   *  reconciled pair (resource-registry §5), pinned by a table test. */
+  gateDecisions: Record<string, string>;
   artifactTypes: Record<string, ArtifactTypeEntry>;
 }
 

@@ -1,9 +1,9 @@
 {
   "registry": "vocab",
-  "version": 3,
+  "version": 4,
   "category": "schema",
   "kind": "registry",
-  "definition": "the schema vocabulary — the single source of truth for event types, statuses, gates, and artifact types (resource-registry spec: one registry per class, no layer duplicates). Machine-readable form of journey-format-spec v14 §3. Data-or-code is PER KEY (resource-registry v3 §5): artifactTypes is ADJUSTABLE DATA — each entry carries the docs/ category it places into and whether it takes a -v<N> filename (format v14 §14/§15); eventTypes, statuses and the gate SET/POSITIONS are PROTECTED — enforced as code literals and recorded as reconciliations. Consumers read; never hardcode.",
+  "definition": "the schema vocabulary — the single source of truth for event types, statuses, gates, and artifact types (resource-registry spec: one registry per class, no layer duplicates). Machine-readable form of journey-format-spec v14 §3, plus (v4, leg 12/08) the DECISION mapping gateDecisions: the human input accept|reject <-> the recorded events confirmed|rejected (a RECONCILED pair — the derivation reads the code literal GATE_DECISION_EVENTS; §5). Data-or-code is PER KEY (resource-registry v3 §5): artifactTypes is ADJUSTABLE DATA — each entry carries the docs/ category it places into and whether it takes a -v<N> filename (format v14 §14/§15); eventTypes, statuses and the gate SET/POSITIONS are PROTECTED — enforced as code literals and recorded as reconciliations. Consumers read; never hardcode.",
   "eventTypes": [
     "created",
     "activated",
@@ -38,6 +38,10 @@
     "grill",
     "confirm"
   ],
+  "gateDecisions": {
+    "accept": "confirmed",
+    "reject": "rejected"
+  },
   "artifactTypes": {
     "spec": { "category": "specs", "versioned": true },
     "system-design": { "category": "system-designs", "versioned": true },

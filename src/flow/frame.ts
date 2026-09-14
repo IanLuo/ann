@@ -12,6 +12,7 @@ import { CommitRecord, IntentTranslator } from './intents.js';
 import { Transcript } from './transcript.js';
 import { reviewRunner, RunnerReview } from './runner-review.js';
 import { Abilities, ReadView, Step, StepContext, StepOutput, StepVerdict } from './types.js';
+import { gateLifecycle, gateView, undischargedWait } from '../store/workflow.js';
 
 /**
  * L2 — THE FRAME (core-design §4). The RESUMABLE COORDINATOR.
@@ -89,8 +90,8 @@ export interface FrameDeps {
   log?: OpLog;
 }
 
-/** The last gate write at a gate — the tail state the resume rule reads. */
-type GateState = 'confirmed' | 'rejected' | 'submitted' | 'none';
+/* The frame keeps NO gate-state reader of its own (leg 12/08): the former private copy
+ * was DELETED — every resume read below is `gateLifecycle` (workflow.ts). */
 
 const today = (): string => new Date().toISOString().slice(0, 10);
 
@@ -291,14 +292,14 @@ export class Frame {
     this.enterPhase(result, `gate:${gate}`);
     let current = packet;
     for (;;) {
-      const state = this.gateState(taskId, gate);
+      const state = gateLifecycle(this.commands.events(taskId), gate);
       const source = chain.find((e) => phaseOf(e) === gate);
 
       // TAIL STATE 1 — skip the WRITE, not the STEP. The bound step still runs: its
       // transcript replays it, and its deferred intents must reach the same commit as
       // every other step's. Its verdict is NOT re-routed — the gate is already decided,
       // and a decided gate is a decided gate.
-      if (state === 'confirmed') {
+      if (state === 'accepted') {
         if (source && translator) {
           const outcome = await this.runStep(taskId, source, current, transcript, translator, this.latestRejection(taskId, gate));
           result.outcomes.push(outcome);
@@ -547,7 +548,7 @@ export class Frame {
   ): Promise<FrameResult> {
     const stop = await this.gate('confirm', taskId, chain, packet, transcript, result, translator);
     if (stop) return stop;
-    if (this.gateState(taskId, 'confirm') !== 'confirmed') {
+    if (gateLifecycle(this.commands.events(taskId), 'confirm') !== 'accepted') {
       // rejected → RE-EXECUTE from the feedback (LOCKED routing — never supersede)
       return { ...result, stop: 'blocked-at-gate', phase: 'gate:confirm', problems: [this.latestRejection(taskId, 'confirm') ?? 'rejected at confirm'] };
     }
@@ -592,18 +593,10 @@ export class Frame {
 
   /* ══ tail reads + the failure write ════════════════════════════════════════ */
 
-  private gateState(taskId: string, gate: string): GateState {
-    const evs = this.commands.events(taskId).filter((e) => ['submitted', 'confirmed', 'rejected'].includes(e.type) && e.gate === gate);
-    const last = evs[evs.length - 1];
-    return (last?.type as GateState) ?? 'none';
-  }
-
-  /** Tail state 4: a `waiting` record with NO subsequent commit evidence still stands. */
+  /** Tail state 4: a `waiting` record with NO subsequent commit evidence still stands
+   *  (the ONE reading, workflow.ts — the status projection reads the same function). */
   private pendingWait(taskId: string): boolean {
-    const evs = this.commands.events(taskId);
-    const last = evs.map((e) => e.type).lastIndexOf('waiting');
-    if (last < 0) return false;
-    return !evs.slice(last + 1).some((e) => e.type === 'evidence' && Array.isArray(e.commits) && (e.commits as unknown[]).length > 0);
+    return undischargedWait(this.commands.events(taskId));
   }
 
   private hasEvent(taskId: string, type: string): boolean {
@@ -611,9 +604,8 @@ export class Frame {
   }
 
   private latestRejection(taskId: string, gate: string): string | undefined {
-    const rejections = this.commands.events(taskId).filter((e) => e.type === 'rejected' && e.gate === gate);
-    const last = rejections[rejections.length - 1];
-    return last ? (last.feedback as string | undefined) ?? (last.note as string | undefined) : undefined;
+    const last = gateView(this.commands.events(taskId), gate).lastRejection;
+    return last ? last.feedback ?? last.note : undefined;
   }
 
   /** Commit evidence OBSERVED since activation — the two-phase outcome channel. */

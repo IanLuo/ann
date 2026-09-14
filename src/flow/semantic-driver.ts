@@ -680,7 +680,7 @@ async function execRun(deps: DriverDeps, channel: PresentOnlyInteract, taskId: s
   const wroteNow = (): string[] => commands.events(taskId).slice(before).map((e) => `${taskId}: ${e.type}${typeof e.gate === 'string' ? `@${e.gate}` : ''}`);
 
   const grill = commands.gateState(taskId, 'grill');
-  if (grill !== 'confirmed') {
+  if (grill !== 'accepted') {
     if (grill === 'submitted' || grill === 'rejected') {
       return {
         kind: 'landed',
@@ -735,7 +735,7 @@ async function execRun(deps: DriverDeps, channel: PresentOnlyInteract, taskId: s
       return {
         kind: 'landed',
         executed: { turn, call: 'run!', args, output: { gateRefused: e.question }, wrote: wroteNow() },
-        landing: { where: 'gate', task: taskId, gate: commands.gateState(taskId, 'grill') === 'confirmed' ? 'confirm' : 'grill' },
+        landing: { where: 'gate', task: taskId, gate: commands.gateState(taskId, 'grill') === 'accepted' ? 'confirm' : 'grill' },
         reason: `'run!' reached a live gate decision on ${taskId} — the driver refused to answer it ('${e.question}') and landed there`,
       };
     }
