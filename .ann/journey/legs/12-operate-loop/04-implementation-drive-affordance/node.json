@@ -1,0 +1,19 @@
+{
+  "id": "12-operate-loop/04-implementation-drive-affordance",
+  "contract": {
+    "intent": "THE DRIVE AFFORDANCE — put the SEMANTIC DRIVER on the page: the human triggers the next step from the web UI. `POST /api/drive` already exists (the driver's LLM loop, the shared single-flight slot with approve, {provider?, model?, maxTurns?, resume?}), but the page has no affordance for it — the design record's Q2, deferred as this sibling task. The WHAT'S NEXT card gains a DRIVE action: it triggers the loop, shows the honest live state, and renders the outcome — the calls the driver made (each validated against the closed set), the stop reason (a human gate · the authored-work boundary · the turn bound · fail-closed), and any DRAFTED contract (labelled GENERATED) presented for the human's approval.",
+    "acceptanceCriteria": [
+      "The UI gains a DRIVE affordance on the WHAT'S NEXT card (or its own card): it POSTs /api/drive and renders the outcome. It is NEVER a dead button — the honest states are surfaced: disabled/explained when the derivation is a boundary (advance-leg/closure-needed/none) or the tree is dirty (the named integrity blockers), drive-busy when the single-flight slot is held (shared with approve), and a named provider-unavailable stop",
+      "THE OUTCOME IS RENDERED: the driver's turn-by-turn calls (each with its validation verdict — accepted / refused-by-name), the route reason of the stop, and — when the driver drafted at the authored-work boundary — the DRAFTED contract clearly marked GENERATED (model · provider · turn · run), presented for the HUMAN's decision. The spawn! stays a human act: the page may offer the human their OWN spawn action (a human click, recorded as such) or point at the command — pick one and RECORD it; never a machine spawn",
+      "THE COST/CREDENTIAL REALITY IS SURFACED: a live drive makes REAL provider calls with the SERVER-SIDE key (the key never reaches the page or a response body) — the affordance says so before the human clicks; the checks stay honest (a provider failure = a named stop with ZERO writes, shown on the page)",
+      "Proven with a STUB provider (no live calls): an e2e over real HTTP covering the drive route + the page's drive flow, the drive-busy refusal, the boundary/blocker states, and the draft presentation; the UI keeps its minimal vanilla style (no new deps)",
+      "Full suite green (745 baseline + additions), npm run typecheck clean, ann check/verify clean on the live journey; committed with evidence"
+    ],
+    "workType": "implementation",
+    "targetAreas": [
+      "src/surface",
+      "src/e2e"
+    ]
+  },
+  "createdAt": "2026-09-14"
+}
