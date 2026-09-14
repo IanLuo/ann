@@ -30,6 +30,10 @@
  *   GET  /api/results?id=<node>&n=<n> → ONE result item, DRILLED: a commit's `git show`,
  *                                  the local file/dir at a ref's path, an evidence event,
  *                                  a link — the exit gate's review, item by item
+ *   GET  /api/events?id=<node>[&n=<n>] → the node's EVENT LIST in log order, numbered
+ *                                  exactly as `ann journey <id>` numbers it; with `n`, ONE
+ *                                  event DRILLED: the raw record + what it points at
+ *                                  (a commit · a ref · an artifact · the gate · a node)
  *   POST /api/gate               → the decision: {id, gate, decision, feedback} → the same
  *                                  L1 `gate!` write the CLI performs; the page then
  *                                  RE-READS the journey + queue, so a landed decision is
@@ -210,6 +214,8 @@ export const UI_HTML = `<!doctype html>
         <button class="reject" id="reject">Reject</button>
       </div>
     </div>
+    <h2 id="card-events-h">Events — the node’s log, in order</h2>
+    <ul class="events" id="card-events"></ul>
     <p class="message" id="card-message"></p>
   </section>
 </main>
@@ -344,9 +350,11 @@ export const UI_HTML = `<!doctype html>
     byId('card-checks').replaceChildren();
     byId('card-gates').replaceChildren();
     byId('card-results').replaceChildren();
+    byId('card-events').replaceChildren();
     byId('card-claims-h').hidden = !o.claims;
     byId('card-checks-h').hidden = !o.checks;
     byId('card-results-h').hidden = !o.results;
+    byId('card-events-h').hidden = !o.events;
     byId('card-gates').hidden = !o.gates;
   }
   /** What the task is WAITING FOR — derived from its status + gate states, never assumed:
@@ -373,10 +381,48 @@ export const UI_HTML = `<!doctype html>
         : 'queued — the entry (grill) gate has not been submitted yet; nothing to decide here';
   }
 
+  /** THE NODE'S EVENT LIST — the SAME read the CLI prints with 'ann events <id>': every
+   *  event in LOG ORDER, numbered exactly as 'journey <id>' numbers it (at · type · gate ·
+   *  note), each row a NEW-TAB drill into that event's raw record and what it points at.
+   *  One section, EVERY node view (a gate card, a drilled task, a leg). 'gate' carries the
+   *  exit gate's decision into each drill, exactly as the results list does. */
+  function loadEvents(id, gate) {
+    var list = byId('card-events');
+    list.replaceChildren();
+    return api('/api/events?id=' + encodeURIComponent(id)).then(function (r) {
+      if (r.status !== 200) { list.appendChild(el('li', 'events unavailable: ' + JSON.stringify(r.doc.error), 'muted')); return null; }
+      var evs = r.doc.events || [];
+      if (!evs.length) {
+        list.appendChild(
+          el(
+            'li',
+            r.doc.kind === 'LEG'
+              ? 'no events — a leg root carries none by design: its status is derived from its tasks, and the facts live on them'
+              : 'no events recorded',
+            'muted',
+          ),
+        );
+        return null;
+      }
+      evs.forEach(function (e) {
+        var li = el('li');
+        li.appendChild(
+          drillLink(
+            { kind: 'event', id: id, n: e.n, gate: gate || null },
+            'drill',
+            e.n + '. ' + e.at + '  ' + e.type + (e.gate ? ' (gate=' + e.gate + ')' : '') + (e.note ? ' — ' + e.note : '') + ' ›',
+          ),
+        );
+        list.appendChild(li);
+      });
+      return null;
+    });
+  }
+
   function openCard(id, gate) {
     selected = { id: id, gate: gate };
     message('');
-    sections({ claims: true, checks: true, gates: true, results: true }); // the gate card shows all four
+    sections({ claims: true, checks: true, gates: true, results: true, events: true }); // the gate card shows all five
     return api('/api/confirm?id=' + encodeURIComponent(id)).then(function (r) {
       if (r.status !== 200) { message('card unavailable: ' + JSON.stringify(r.doc.error), true); return; }
       var detail = r.doc.detail;
@@ -484,7 +530,7 @@ export const UI_HTML = `<!doctype html>
       });
       if (!items.length) results.appendChild(el('li', 'no results recorded', 'muted'));
       if (!decidable && !gate) message('no undecided gate on this node — nothing to decide here');
-      return null;
+      return loadEvents(id, keep ? keep.gate : null);
     });
   }
 
@@ -663,6 +709,7 @@ export const UI_HTML = `<!doctype html>
     if (q.drill === 'gates') return { kind: 'gates' };
     if (q.drill === 'gate' && q.id && q.gate) return { kind: 'gate', id: q.id, gate: q.gate };
     if (q.drill === 'result' && q.id && q.n) return { kind: 'result', id: q.id, n: q.n, gate: q.gate };
+    if (q.drill === 'event' && q.id && q.n) return { kind: 'event', id: q.id, n: q.n, gate: q.gate };
     if (q.drill === 'blocker' && q.blocker) return { kind: 'blocker', blocker: q.blocker };
     return null;
   }
@@ -691,6 +738,7 @@ export const UI_HTML = `<!doctype html>
     if (s.kind === 'gate') return openCard(s.id, s.gate).then(stamped);
     if (s.kind === 'blocker') return Promise.resolve(drillBlocker(s.blocker)).then(stamped);
     if (s.kind === 'result') return (s.gate ? drillResultFromGate(s.id, s.n, s.gate) : drillResult(s.id, s.n, null)).then(stamped);
+    if (s.kind === 'event') return (s.gate ? drillEventFromGate(s.id, s.n, s.gate) : drillEvent(s.id, s.n, null)).then(stamped);
     if (s.kind === 'gates') {
       return api('/api/whatsnext').then(function (r) {
         drillGates(r.status === 200 ? (r.doc.pendingGates || []) : []);
@@ -706,6 +754,50 @@ export const UI_HTML = `<!doctype html>
     return api('/api/confirm?id=' + encodeURIComponent(id)).then(function (r) {
       var state = r.status === 200 ? gateState(r.doc.detail, gate).state : 'none';
       return drillResult(id, n, state === 'submitted' ? { id: id, gate: gate } : null);
+    });
+  }
+  /** The SAME re-derivation for an event drilled from the exit gate: the event walk is part
+   *  of the review, so the decision stays in hand while the operator reads it — and a gate
+   *  decided since the link was made shows none. */
+  function drillEventFromGate(id, n, gate) {
+    return api('/api/confirm?id=' + encodeURIComponent(id)).then(function (r) {
+      var state = r.status === 200 ? gateState(r.doc.detail, gate).state : 'none';
+      return drillEvent(id, n, state === 'submitted' ? { id: id, gate: gate } : null);
+    });
+  }
+  /** ONE EVENT — the command layer's 'ann events <id> <n>' drill: the RAW record plus the
+   *  LINKS that command resolved for it (a commit · a ref · an artifact · the gate card ·
+   *  the node itself), each naming the follow-up. The record and the link list ARE the
+   *  command's value; this renders them and adds a drill where one applies. */
+  function drillEvent(id, n, keep) {
+    drillHead(
+      (keep ? STEP[keep.gate].badge + ' STEP · ' : '') + 'one event',
+      id + ' · event ' + n,
+      'one event of the node’s log, RAW, plus what it points at — the SAME drill the CLI addresses: ann events ' + id + ' ' + n + '. Nothing is decided here; a node it names drills into its own tab.',
+      keep,
+    );
+    sections({});
+    return api('/api/events?id=' + encodeURIComponent(id) + '&n=' + n).then(function (r) {
+      var node = drillFields();
+      if (r.status !== 200) { field(node, 'error', JSON.stringify(r.doc.error)); return null; }
+      var v = r.doc;
+      field(node, 'event', n + ' of ' + v.total + ' on ' + id + ' (' + v.kind + ')');
+      field(node, 'drill', 'ann events ' + id + ' ' + n);
+      node.appendChild(el('h3', 'the event (raw)'));
+      node.appendChild(el('pre', JSON.stringify(v.event, null, 2), 'drill-out'));
+      var links = v.links || [];
+      if (links.length) node.appendChild(el('h3', 'What it points at'));
+      links.forEach(function (l) {
+        var p = el('p', null, 'field');
+        p.appendChild(el('span', l.kind + ': ', 'k'));
+        p.appendChild(el('span', l.what + ' — ' + l.detail));
+        // a NODE link drills into that node's own walk; every other kind names the CLI
+        // command that shows more (a commit's git show, a ref's file, the gate card)
+        if (l.kind === 'node' && l.what) p.appendChild(drillLink({ kind: String(l.what).indexOf('/') > 0 ? 'task' : 'leg', id: l.what }, 'task', 'drill in ›'));
+        else p.appendChild(el('span', '  ' + l.command, 'ev'));
+        node.appendChild(p);
+      });
+      return null;
     });
   }
   /** Open the pane for a DRILLED item: the same pane the gate queue uses, headed by what is
@@ -848,7 +940,7 @@ export const UI_HTML = `<!doctype html>
   function drillLeg(leg, verdict) {
     drillHead('WHAT’S NEXT · the leg gate', leg,
       'the active leg this derivation reads. The leg gate is the PREDECESSOR gate: ' + (verdict && verdict.met ? 'MET — nothing holds this leg shut.' : 'UNMET — ' + ((verdict && verdict.blocker) || '(no blocker named)')) + ' The leg’s tasks and their derived statuses are below — drill into any one.');
-    sections({});
+    sections({ events: true });
     return api('/api/detail?id=' + encodeURIComponent(leg)).then(function (r) {
       if (r.status !== 200) { var n0 = drillFields(); field(n0, 'error', JSON.stringify(r.doc.error)); return null; }
       var d = r.doc;
@@ -862,7 +954,7 @@ export const UI_HTML = `<!doctype html>
       node.appendChild(el('h3', 'Tasks (' + tasks.length + ') — drill into any one'));
       tasks.forEach(function (t) { nodeDrillButton(node, t.id, t.id + ' · ' + t.status); });
       if (!tasks.length) node.appendChild(el('p', '(this leg holds no tasks — an EMPTY front leg is advance-leg: the next leg is AUTHORED work, never a machine spawn)', 'muted'));
-      return null;
+      return loadEvents(leg, null);
     });
   }
   /** The pending gates: the human's OTHER move — each opens the gate card (the decision

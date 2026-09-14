@@ -228,6 +228,31 @@ const gateCard = (over: Record<string, unknown> = {}) => ({
   results: [{ kind: 'commit', label: SHA, sha: SHA }],
 });
 
+/** The node's EVENT LIST + one event DRILLED — the service's `GET /api/events` (the read
+ *  leg 10/04 exposed, whose body is the CLI's `ann events <id> [n]` value). */
+const eventsRead = {
+  id: TASK,
+  kind: 'TASK',
+  events: [
+    { n: 1, at: '2026-09-12', type: 'created', note: 'spawned by bookkeeper (agent)' },
+    { n: 2, at: '2026-09-12', type: 'submitted', gate: 'grill', note: 'submitted for the grill gate (agent)' },
+    { n: 3, at: '2026-09-12', type: 'evidence', note: `captured 'npm test' → pass (exit 0) against ${SHA}` },
+  ],
+};
+/** A LEG root: no events of its own by design (v8 §3) — the pane must say so. */
+const legEventsRead = { id: LEG, kind: 'LEG', events: [] };
+const eventDrillRead = {
+  id: TASK,
+  kind: 'TASK',
+  n: 1,
+  total: 3,
+  event: { at: '2026-09-12', type: 'created', note: 'spawned by bookkeeper (agent)' },
+  links: [
+    { kind: 'node', what: TASK, detail: 'the whole node: contract · inputs · gates · the full event walk', command: `ann journey ${TASK}` },
+    { kind: 'commit', what: SHA, detail: 'resolves in git — the deliverable', command: `ann results ${TASK} 1` },
+  ],
+};
+
 const reads = (whatsnext: unknown): Record<string, unknown> => ({
   '/api/journey': journey,
   '/api/gates': [],
@@ -235,6 +260,9 @@ const reads = (whatsnext: unknown): Record<string, unknown> => ({
   [`/api/confirm?id=${TASK}`]: confirmRead(),
   [`/api/packet?id=${TASK}`]: packetRead,
   [`/api/detail?id=${LEG}`]: detailRead,
+  [`/api/events?id=${TASK}`]: eventsRead,
+  [`/api/events?id=${LEG}`]: legEventsRead,
+  [`/api/events?id=${TASK}&n=1`]: eventDrillRead,
   '/api/next': nextRead,
 });
 
@@ -537,5 +565,69 @@ describe('the served page — the DEFERRED work is visible (leg 12 task 01)', ()
     await flush();
     expect(page.get('deferred-head').hidden).toBe(true);
     expect(page.get('deferred').text()).toBe('');
+  });
+});
+
+describe('the served page — the node’s EVENT LIST is on the card (leg 10/04’s read, wired in)', () => {
+  it('lists the node’s events in LOG ORDER, each row a NEW-TAB drill into the raw record', async () => {
+    const gateReads: Record<string, unknown> = { ...reads(card()), [`/api/confirm?id=${TASK}`]: gateCard() };
+    const tab = boot(gateReads, '#drill=gate&id=' + encodeURIComponent(TASK) + '&gate=confirm');
+    await flush();
+    // the card reads the node's log — the SAME read the CLI prints with `ann events <id>`
+    expect(tab.fetched).toContain(`/api/events?id=${TASK}`);
+    expect(tab.get('card-events-h').hidden).toBe(false);
+    const links = tab.get('card-events').links();
+    expect(links.map((l) => l.textContent)).toEqual([
+      '1. 2026-09-12  created — spawned by bookkeeper (agent) ›',
+      '2. 2026-09-12  submitted (gate=grill) — submitted for the grill gate (agent) ›',
+      `3. 2026-09-12  evidence — captured 'npm test' → pass (exit 0) against ${SHA} ›`,
+    ]);
+    // numbered exactly as `journey <id>` numbers them, and each carries its event in the fragment
+    expect(links[0].href).toBe('#drill=event&id=' + encodeURIComponent(TASK) + '&gate=confirm&n=1');
+    expect(links[2].href).toBe('#drill=event&id=' + encodeURIComponent(TASK) + '&gate=confirm&n=3');
+    expect(links[0].target).toBe('_blank');
+    expect(links[0].rel).toBe('noopener');
+  });
+
+  it('the event tab shows the RAW record + what it points at, and keeps the exit gate’s decision', async () => {
+    const gateReads: Record<string, unknown> = { ...reads(card()), [`/api/confirm?id=${TASK}`]: gateCard() };
+    const gateTab = boot(gateReads, '#drill=gate&id=' + encodeURIComponent(TASK) + '&gate=confirm');
+    await flush();
+    const tab = await openTab(gateTab.get('card-events').links()[0], gateReads);
+    expect(tab.get('card-step-label').textContent).toContain('EXIT STEP'); // the review survives the drill
+    expect(tab.get('card-title').textContent).toBe(`${TASK} · event 1`);
+    expect(tab.fetched).toContain(`/api/events?id=${TASK}&n=1`);
+    expect(tab.get('card-decide').hidden).toBe(false); // a submitted gate stays decidable while read
+    const node = tab.get('card-node');
+    expect(node.textContent).toContain('1 of 3 on ' + TASK); // where this event sits in the walk
+    expect(node.textContent).toContain('ann events ' + TASK + ' 1'); // the CLI handle
+    expect(node.textContent).toContain('"type": "created"'); // the RAW record, not a paraphrase
+    // the links: a NODE drills into its own tab, every other kind names the follow-up command
+    expect(node.textContent).toContain('commit: ' + SHA + ' — resolves in git');
+    expect(node.textContent).toContain('ann results ' + TASK + ' 1');
+    const deeper = await openTab(node.link('drill in'), gateReads);
+    expect(deeper.get('card-title').textContent).toBe(TASK); // the node it names
+  });
+
+  it('a LEG root says why its own list is empty (its status is derived from its tasks)', async () => {
+    const page = boot(reads(card()));
+    await flush();
+    const tab = await openTab(page.get('wn-facts').link('leg gate'), reads(card()));
+    expect(tab.fetched).toContain(`/api/events?id=${LEG}`);
+    expect(tab.get('card-events-h').hidden).toBe(false);
+    expect(tab.get('card-events').textContent).toContain('no events — a leg root carries none by design');
+  });
+
+  it('a view with NO event list hides the section (never a stale row from the card before it)', async () => {
+    const gateReads: Record<string, unknown> = {
+      ...reads(card()),
+      [`/api/confirm?id=${TASK}`]: gateCard(),
+      [`/api/results?id=${TASK}&n=1`]: resultsRead,
+    };
+    const gateTab = boot(gateReads, '#drill=gate&id=' + encodeURIComponent(TASK) + '&gate=confirm');
+    await flush();
+    const tab = await openTab(gateTab.get('card-results').link('commit'), gateReads);
+    expect(tab.get('card-events-h').hidden).toBe(true);
+    expect(tab.get('card-events').textContent).toBe('');
   });
 });
