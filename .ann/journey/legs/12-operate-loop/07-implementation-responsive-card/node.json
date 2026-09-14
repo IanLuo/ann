@@ -1,0 +1,19 @@
+{
+  "id": "12-operate-loop/07-implementation-responsive-card",
+  "contract": {
+    "intent": "THE CARD MUST BE RESPONSIVE. Measured, not guessed: `GET /api/whatsnext` (the WHAT'S NEXT card) takes 3.3s on every page load while every other read is ~5ms — src/surface/approve.ts:163 `whatsNext()` calls `operatorIntegrityBlockers()` (the FULL fail-closed pre-check = commands.check() + runValidators + docsIndexFresh + verify + a git subprocess) synchronously on EVERY read. Measured on the live journey (39 nodes): check ≈3.5s of which the S4 validators ≈1.9s; verify and git status are fast. The page therefore blocks ~3.3s per load/refresh. THE FIX: the READ must not run the pre-check. The integrity gate BELONGS TO THE WRITE — the approve and drive routes already run the full check fail-closed (that is the guard, unchanged). The card returns the fast derivation; the integrity snapshot is either omitted (with an honest note that it is verified on approve) or fetched LAZILY by the UI on demand — pick one and record it.",
+    "acceptanceCriteria": [
+      "The whatsnext READ no longer runs the full integrity pre-check: measured before/after latency for GET /api/whatsnext on the live journey (before ≈3.3s) — the read returns in the same class as the other reads (tens of ms, not seconds)",
+      "THE GUARD IS NOT WEAKENED: the approve and drive writes still run the FULL fail-closed pre-check before executing (unchanged, proven by their existing tests); the card's display of integrity is truthful — either an honest 'verified when you approve' note, or a lazy fetch that shows the real result when it arrives (never a stale or blank claim)",
+      "The UI loads and stays responsive: the page renders without blocking on the integrity check; if the check is fetched lazily, the card shows a clear pending state and then the real result; the earlier invariants (never a dead button; the boundary/dirty states) still hold",
+      "NAME the engine-level cost honestly: why are check()/validate ~3.5s on 39 nodes? Identify the dominant cost (e.g. the validators re-deriving per node, the docs manifest re-read per node, a repeated disk walk). If a local, safe fix is obvious, take it and prove the improvement (a before/after measurement); if it needs a bigger change, RECORD it as an explicit follow-up slice — never silently ignored",
+      "Tests: the read's shape + latency class; the write's guard unchanged (the existing approve/drive tests still pass); the lazy path if chosen; full suite green (745+ baseline), npm run typecheck clean, ann check/verify clean; committed with evidence"
+    ],
+    "workType": "implementation",
+    "targetAreas": [
+      "src/surface",
+      "src/e2e"
+    ]
+  },
+  "createdAt": "2026-09-14"
+}
