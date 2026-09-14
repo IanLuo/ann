@@ -1,4 +1,5 @@
 import { AdvanceView, Commands, CONTRACT_FIELDS, DeferredTask, FrontmostReady, GoalView } from '../commands/index.js';
+import type { OpLog } from '../abilities/obs/log.js';
 import { loadDocsManifest } from '../store/docs.js';
 import { StepLookup, loadProjectFlow } from './chain.js';
 import { Frame } from './frame.js';
@@ -399,18 +400,35 @@ export interface DriverDeps {
   resume?: DriverCheckpoint;
   /** The run id (default: generated). */
   runId?: string;
+  /** The OPERATIONAL LOG (leg 12/05) — optional: when present, every TURN records its
+   *  proposal + the CODE verdict, and every stop records its route reason, all under the
+   *  driver's own runId (the frame's phases inside the run inherit it). */
+  log?: OpLog;
 }
 
 export async function runSemanticDriver(deps: DriverDeps): Promise<DriverResult> {
   const commands = deps.commands;
   const provider = deps.provider ?? 'default';
   const runId = deps.runId ?? `drive-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+  /** THE CORRELATION (AC-1): the driver's own run — every turn, every stop, and every
+   *  frame phase of a `run!` inside it shares this runId, so `ann log --run <runId>` is
+   *  the whole run: what ran, in what order, and why it stopped. */
+  const log = deps.log?.child({ runId });
   const channel = new PresentOnlyInteract();
   const executed: DriverExecuted[] = [];
   const writes: string[] = [];
   let turns = 0;
   const base = (stop: DriverStop, routeReason: string): DriverResult => {
     const now = derive(commands);
+    // THE STOP LINE — every stop carries its route reason (AC-1: never a silent end).
+    log?.line({
+      event: 'stop',
+      command: 'drive',
+      outcome: stop,
+      level: stop === 'provider-failure' || stop === 'call-refused' ? 'warn' : 'info',
+      inputs: { routeReason },
+      ...(stop === 'provider-failure' ? { error: { code: 'provider-failure', message: routeReason } } : {}),
+    });
     return {
       stop,
       routeReason,
@@ -460,13 +478,36 @@ export async function runSemanticDriver(deps: DriverDeps): Promise<DriverResult>
     // advance-leg (an empty front leg) · closure-needed — DRAFT for the human's approval
     const boundary = first.advance.action;
     turns = 1;
+    const draftStarted = Date.now();
     let raw: string;
     try {
       raw = await deps.llm.complete({ prompt: draftPrompt(deps.root, commands, observationOf(first, 0, []), boundary), system: DRIVER_SYSTEM, ...(deps.model ? { model: deps.model } : {}) });
     } catch (e) {
+      log?.line({
+        event: 'turn',
+        turn: turns,
+        command: 'draft',
+        outcome: 'provider-failure',
+        level: 'error',
+        durationMs: Date.now() - draftStarted,
+        inputs: { boundary },
+        error: { code: 'provider-failure', message: (e as Error).message },
+      });
       return { ...base('provider-failure', `provider failure on the boundary draft: ${(e as Error).message} — the run stopped with ZERO writes (no fabricated contract, no advance)`), ...(resumed ? { resumed } : {}) };
     }
     const drafted = buildDraft(raw, { root: deps.root, commands, leg: first.advance.leg, boundary, runId, provider, model: deps.model, turn: turns });
+    // THE BOUNDARY TURN — the draft attempt and its verdict (a draft that fails the
+    // contract check is never offered for approval: nothing is written).
+    log?.line({
+      event: 'turn',
+      turn: turns,
+      command: 'draft',
+      outcome: drafted.ok ? 'drafted' : 'draft-invalid',
+      level: drafted.ok ? 'info' : 'warn',
+      durationMs: Date.now() - draftStarted,
+      inputs: { boundary, ...(drafted.ok ? { draft: drafted.draft.id } : {}) },
+      ...(drafted.ok ? {} : { error: { code: 'draft-invalid', message: drafted.problems.join('; ') } }),
+    });
     if (!drafted.ok) {
       return { ...base('draft-invalid', `the boundary draft was REFUSED: ${drafted.problems.join('; ')} — nothing is offered for approval and nothing was written`), ...(resumed ? { resumed } : {}) };
     }
@@ -488,16 +529,37 @@ export async function runSemanticDriver(deps: DriverDeps): Promise<DriverResult>
     }
     turns++;
     const obs = observationOf(derive(commands), turns, executed);
+    const turnStarted = Date.now();
 
     let text: string;
     try {
       text = await deps.llm.complete({ prompt: loopPrompt(obs, maxTurns), system: DRIVER_SYSTEM, ...(deps.model ? { model: deps.model } : {}) });
     } catch (e) {
+      log?.line({
+        event: 'turn',
+        turn: turns,
+        outcome: 'provider-failure',
+        level: 'error',
+        durationMs: Date.now() - turnStarted,
+        error: { code: 'provider-failure', message: (e as Error).message },
+      });
       return { ...base('provider-failure', `provider failure: ${(e as Error).message} — the run stopped with ZERO writes (no fabricated call, no advance)`), ...(resumed ? { resumed } : {}) };
     }
 
     const valid = validateProposal(text, { commands, advance: obs.advance });
     if (!valid.ok) {
+      // THE CODE VERDICT — REFUSED, by name (unknown-call · forbidden-call · bad-args ·
+      // unparseable): recorded with the code and the reason, never clamped.
+      log?.line({
+        event: 'turn',
+        turn: turns,
+        outcome: `refused:${valid.refusal.code}`,
+        level: 'warn',
+        ...(valid.refusal.call ? { command: valid.refusal.call } : {}),
+        durationMs: Date.now() - turnStarted,
+        inputs: { proposal: unquote(text) },
+        error: { code: valid.refusal.code, message: valid.refusal.reason },
+      });
       return {
         ...base('refused-proposal', `REFUSED the proposal${valid.refusal.call ? ` '${valid.refusal.call}'` : ''} (${valid.refusal.code}): ${valid.refusal.reason}`),
         refusal: valid.refusal,
@@ -505,15 +567,35 @@ export async function runSemanticDriver(deps: DriverDeps): Promise<DriverResult>
       };
     }
     if (valid.proposal.kind === 'stop') {
+      log?.line({
+        event: 'turn',
+        turn: turns,
+        outcome: 'model-stop',
+        durationMs: Date.now() - turnStarted,
+        inputs: { reason: valid.proposal.reason },
+      });
       return { ...base('model-stop', `the model stopped the loop: ${valid.proposal.reason}`), ...(resumed ? { resumed } : {}) };
     }
 
     const call = valid.proposal;
     const outcome = call.call === 'run!'
-      ? await execRun(deps, channel, call.args.id ?? obs.frontmost?.task, turns)
+      ? await execRun(deps, channel, call.args.id ?? obs.frontmost?.task, turns, log)
       : execReadOrPresent(commands, deps.recordedBy, call, turns);
     executed.push(outcome.executed);
     writes.push(...outcome.executed.wrote);
+    // THE TURN LINE — the proposal, the CODE verdict (accepted → executed / refused by
+    // the command layer) and what it wrote, in one line.
+    log?.line({
+      event: 'turn',
+      turn: turns,
+      command: call.call,
+      ...(outcome.executed.args.id ? { taskId: outcome.executed.args.id } : {}),
+      outcome: outcome.kind === 'refused' ? 'call-refused' : outcome.kind === 'landed' ? 'landed' : 'executed',
+      level: outcome.kind === 'refused' ? 'warn' : 'info',
+      durationMs: Date.now() - turnStarted,
+      inputs: { args: call.args, reason: call.reason, output: outcome.executed.output },
+      ...(outcome.kind === 'refused' ? { error: { code: call.call, message: outcome.reason } } : {}),
+    });
     if (outcome.kind === 'refused') {
       return {
         ...base('call-refused', `the call '${call.call}' was refused by the command layer: ${outcome.reason}`),
@@ -583,7 +665,7 @@ function execReadOrPresent(commands: Commands, recordedBy: string, call: DriverP
  * yet) and lands there. A run that still reaches a live gate decision lands the same way:
  * the channel's refusal is caught, and the journey is left exactly as the frame wrote it.
  */
-async function execRun(deps: DriverDeps, channel: PresentOnlyInteract, taskId: string | undefined, turn: number): Promise<CallOutcome> {
+async function execRun(deps: DriverDeps, channel: PresentOnlyInteract, taskId: string | undefined, turn: number, log?: OpLog): Promise<CallOutcome> {
   const commands = deps.commands;
   if (!taskId) {
     return { kind: 'refused', executed: { turn, call: 'run!', args: {}, output: null, wrote: [] }, reason: 'no frontmost-ready task to run' };
@@ -617,7 +699,7 @@ async function execRun(deps: DriverDeps, channel: PresentOnlyInteract, taskId: s
   }
 
   try {
-    const frame = new Frame({ commands, root: deps.root, registry: deps.registry, abilities: { llm: deps.llm, interact: channel } });
+    const frame = new Frame({ commands, root: deps.root, registry: deps.registry, abilities: { llm: deps.llm, interact: channel }, ...(log ? { log: log.child({ taskId }) } : {}) });
     const r = await frame.run(taskId);
     const wrote = wroteNow();
     const executed: DriverExecuted = { turn, call: 'run!', args, output: { stop: r.stop, phase: r.phase, problems: r.problems, advance: r.advance }, wrote };

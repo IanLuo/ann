@@ -13,6 +13,7 @@ import {
 } from '../semantic-driver.js';
 import { StepLookup } from '../chain.js';
 import { LlmAbility } from '../types.js';
+import { OpLog, readOpLog } from '../../abilities/obs/log.js';
 
 /**
  * THE SEMANTIC DRIVER (flow/semantic-driver, leg 12 task 02) — the LLM loop whose
@@ -455,5 +456,69 @@ describe('AC-1 — resume by RE-DERIVATION (a stale checkpoint is recorded, neve
     // the model was given the CURRENT derivation — the stale plan is nowhere in the loop
     expect(prompts[0]).toContain(`"task": "${TASK}"`);
     expect(prompts[0]).not.toContain('01-leg/09-gone');
+  });
+});
+
+describe('the operational log (leg 12/05) — turns, verdicts and the stop reason', () => {
+  it('records every turn (the proposal + the CODE verdict) and the stop, all under the DRIVER runId', async () => {
+    readyTask();
+    const c = commands();
+    const { llm } = fakeLlm([call('detail', { id: TASK }), JSON.stringify({ stop: 'the human decides the gate', reason: 'a gate is a human call' })]);
+    const log = new OpLog(root, 'run-cmd', 'test', { secrets: [] });
+    const r = await drive(c, llm, { log });
+    expect(r.stop).toBe('model-stop');
+
+    const lines = readOpLog(root, { run: 'run-1', tail: 1000 }).lines;
+    const turns = lines.filter((l) => l.event === 'turn');
+    // one line per turn: the accepted+executed proposal, then the model's stop proposal
+    expect(turns.map((l) => [l.turn, l.command, l.outcome])).toEqual([
+      [1, 'detail', 'executed'],
+      [2, undefined, 'model-stop'],
+    ]);
+    // the turn line carries the proposal's inputs (nothing else), and the stop line the reason
+    expect(turns[0].inputs).toMatchObject({ args: { id: TASK } });
+    const stop = lines.find((l) => l.event === 'stop');
+    expect(stop?.outcome).toBe('model-stop');
+    expect(String((stop?.inputs as { routeReason?: string }).routeReason)).toContain('the human decides the gate');
+    // every line is correlated to the driver's own runId (the frame's phases inherit it)
+    for (const l of lines) expect(l.runId).toBe('run-1');
+  });
+
+  it('records the boundary DRAFT as a turn — what the model produced, ground on the epic, nothing written', async () => {
+    emptyFrontLeg();
+    const c = commands();
+    const before = logSnapshot(c);
+    const { llm } = fakeLlm([
+      JSON.stringify({
+        id: '02-leg/01-implementation-the-beta-slice',
+        workType: 'implementation',
+        intent: 'implement the beta slice',
+        acceptanceCriteria: ['the beta slice works'],
+        targetAreas: ['src'],
+        rationale: 'the epic asks for it',
+      }),
+    ]);
+    const log = new OpLog(root, 'run-cmd', 'test', { secrets: [] });
+    const r = await drive(c, llm, { log });
+    expect(r.stop).toBe('boundary-drafted');
+    const lines = readOpLog(root, { run: 'run-1' }).lines;
+    const turn = lines.find((l) => l.event === 'turn');
+    expect(turn).toMatchObject({ turn: 1, command: 'draft', outcome: 'drafted' });
+    expect((turn?.inputs as { draft?: string }).draft).toBe('02-leg/01-implementation-the-beta-slice');
+    expect(lines.find((l) => l.event === 'stop')?.outcome).toBe('boundary-drafted');
+    expect(logSnapshot(c)).toEqual(before); // the log records the draft; the JOURNEY is untouched
+  });
+
+  it('records a REFUSED proposal by name — the CODE verdict, with its code', async () => {
+    readyTask();
+    const c = commands();
+    const { llm } = fakeLlm([call('gate!', { id: TASK, gate: 'grill', decision: 'accept' })]);
+    const log = new OpLog(root, 'run-cmd', 'test', { secrets: [] });
+    const r = await drive(c, llm, { log });
+    expect(r.stop).toBe('refused-proposal');
+    const refuse = readOpLog(root, { run: 'run-1', level: 'warn' }).lines.find((l) => l.event === 'turn');
+    expect(refuse?.outcome).toBe('refused:forbidden-call');
+    expect(refuse?.command).toBe('gate!');
+    expect(refuse?.level).toBe('warn');
   });
 });

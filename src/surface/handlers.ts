@@ -12,7 +12,8 @@ import { execSync, execFileSync } from 'node:child_process';
 import { Store, resolveStoreLocation, storeJourneyDir } from '../store/store.js';
 import type { StoreLocation, JourneyEvent, ResultItem, TaskDetail } from '../store/store.js';
 import { scanDocsDir, loadDocsManifest, writeDocsManifest, docsIndexFresh, docSha } from '../store/docs.js';
-import { Commands, CommandResult, GOAL_SEED_GUARD } from '../commands/index.js';
+import { Commands, CommandResult, GOAL_SEED_GUARD, nodeIdOf } from '../commands/index.js';
+import { OpLog, newRunId, readOpLog, parseSince, DEFAULT_TAIL, type LogLevel } from '../abilities/obs/log.js';
 import { ALLOWLIST_NAMES } from '../commands/capture.js';
 import {
   loadProviderRegistry,
@@ -133,6 +134,9 @@ export interface CliContext {
   /** RECORDED_BY — provenance for the commands layer. */
   who: string;
   json: boolean;
+  /** THE OPERATIONAL LOG HANDLE (leg 12/05) — one runId per invocation; the command's
+   *  own line + every write + every frame phase of this invocation correlate here. */
+  log: OpLog;
   /** The LAZY store over the RESOLVED target (env or active) — first use constructs. */
   store: Store;
   /** The LAZY L1 commands over ctx.store + who. */
@@ -146,9 +150,12 @@ export interface CliContext {
 /** Build a ctx over a resolved root — shared by runMain and the parity-test harness.
  *  Does NOT chdir (runMain chdirs before creating the ctx). Lazy store/commands/target
  *  so config!/cred!/project! never touch the store (bad ANN_STORE → still available). */
-export function createContext(root: string, args: string[], opts: { json?: boolean } = {}): CliContext {
+export function createContext(root: string, args: string[], opts: { json?: boolean; runId?: string; log?: OpLog } = {}): CliContext {
   const who = process.env.RECORDED_BY || 'agent';
   const json = opts.json ?? false;
+  // THE CORRELATION ROOT: one runId per invocation (a caller may supply its own — the
+  // driver's run, a service boot) and one log handle; children narrow taskId/runId.
+  const log = opts.log ?? new OpLog(root, opts.runId ?? newRunId('cmd'), who);
   const envStore = (process.env.ANN_STORE ?? '').trim();
   let _target: { loc: StoreLocation; readOnly: boolean } | undefined;
   const target = (): { loc: StoreLocation; readOnly: boolean } => {
@@ -176,7 +183,7 @@ export function createContext(root: string, args: string[], opts: { json?: boole
   let _commands: Commands | undefined;
   const commands = new Proxy({} as Commands, {
     get(_t, prop) {
-      const c = (_commands ??= new Commands(store, who));
+      const c = (_commands ??= new Commands(store, who, undefined, log));
       const v = Reflect.get(c, prop as never);
       return typeof v === 'function' ? (v as () => unknown).bind(c) : v;
     },
@@ -186,6 +193,7 @@ export function createContext(root: string, args: string[], opts: { json?: boole
     args,
     who,
     json,
+    log,
     store,
     commands,
     target,
@@ -255,6 +263,7 @@ const COMMANDS: Array<{ name: string; args: string; desc: string }> = [
   { name: 'check', args: '', desc: 'integrity + gates + docs-manifest freshness + the journey state line · alias --check' },
   { name: 'verify', args: '', desc: 'the DRIFT read — reconciles the log\'s recorded claims vs filesystem/git reality (D1-D5 + store-external); exits 1 on any drift · alias --verify' },
   { name: 'ledger', args: '', desc: 'the write-rev ledger — rev + per-node last-write rev/at + hashes (the store-external integrity guard) · alias --ledger' },
+  { name: 'log', args: '[--task <id>] [--run <runId>] [--level <level>] [--since <iso|30m>] [--tail <n>]', desc: 'THE OPERATIONAL LOG READ (leg 12/05 — observability for debugging): the scratch JSONL action log (logs/operation.jsonl, GITIGNORED — never the record) as a derived tail — one line per engine action (command · write · frame phase · driver turn · stop) carrying a WALL-CLOCK ts (the journey events are date-only), the actor/provenance, the REDACTED inputs, the outcome, the duration and the CORRELATION ID (runId · taskId · turn); a whole run reconstructs from one --run. Filters: --task <id> · --run <runId> · --level info|warn|error (that level and above) · --since <iso|30m|2h|1d> · --tail <n> (default 50) · alias --log' },
   { name: 'specs', args: '', desc: 'the docs contract stack — the manifest → docs/<name>.md @ content-sha (upstream/referrers prose from the file head) · alias --specs' },
   { name: 'providers', args: '', desc: 'the adapter registry: providers, models, defaults (env-resolved, api key masked) · alias --providers' },
   { name: 'config', args: '', desc: 'the user config file (~/.ann/config.json; apiKey masked) · alias --config' },
@@ -817,6 +826,45 @@ export const HANDLERS: Record<string, Handler> = {
       })),
   }),
 
+  /* log — the OPERATIONAL LOG read (leg 12/05): the derived tail over the scratch JSONL
+   *  action log. A READ: it never writes, never touches the store, and never throws on a
+   *  torn line (the log module counts those). */
+  log: (ctx) => {
+    const take = (args: string[], flag: string) => takeFlag(args, flag);
+    const task = take(ctx.args.slice(1), '--task');
+    const run = take(task.rest, '--run');
+    const level = take(run.rest, '--level');
+    const since = take(level.rest, '--since');
+    const tail = take(since.rest, '--tail');
+    const USAGE =
+      'usage: ann log [--task <id>] [--run <runId>] [--level info|warn|error] [--since <iso|30m>] [--tail <n>]';
+    const stray = strayFlag(tail.rest);
+    if (stray) return usage(`${USAGE} — unknown flag ${stray}`);
+    if (level.value !== undefined && !['info', 'warn', 'error'].includes(level.value)) {
+      return usage(`${USAGE} — --level must be info|warn|error (got '${level.value}')`);
+    }
+    if (since.value !== undefined && parseSince(since.value) === undefined) {
+      return usage(`${USAGE} — --since must be an ISO instant or a window like 30m|2h|1d (got '${since.value}')`);
+    }
+    let n: number | undefined;
+    if (tail.value !== undefined) {
+      n = Number(tail.value);
+      if (!Number.isInteger(n) || n < 1) return usage(`${USAGE} — --tail must be a positive integer (got '${tail.value}')`);
+    } else {
+      n = DEFAULT_TAIL;
+    }
+    return {
+      ok: true,
+      value: readOpLog(ctx.root, {
+        ...(task.value ? { task: task.value } : {}),
+        ...(run.value ? { run: run.value } : {}),
+        ...(level.value ? { level: level.value as LogLevel } : {}),
+        ...(since.value ? { since: since.value } : {}),
+        tail: n,
+      }),
+    };
+  },
+
   /* next — the FOUR-STATE GOAL CONSULT computed once, carried in the value */
   next: (ctx) => {
     const lb = ctx.commands.lookBack();
@@ -889,7 +937,8 @@ export const HANDLERS: Record<string, Handler> = {
       commands: ctx.commands,
       root: ctx.root,
       registry: buildStepRegistry(),
-      abilities: buildAbilities(getAdapter(undefined, ctx.root)),
+      abilities: buildAbilities(getAdapter(undefined, ctx.root, ctx.log.runId)),
+      log: ctx.log,
     });
     const r = await frame.run(taskId);
     return { ok: true, value: r, ...(r.stop === 'completed' ? {} : { exitCode: 1 }) };
@@ -912,7 +961,8 @@ export const HANDLERS: Record<string, Handler> = {
       commands: ctx.commands,
       root: ctx.root,
       registry: buildStepRegistry(),
-      abilities: buildAbilities(getAdapter(undefined, ctx.root)),
+      abilities: buildAbilities(getAdapter(undefined, ctx.root, ctx.log.runId)),
+      log: ctx.log,
     });
     // the exit mirrors run!: only a COMPLETED continue-leg run exits 0; the refusals and
     // every stopped-short landing exit 1, declined/boundary (designed stops) exit 0.
@@ -960,7 +1010,7 @@ export const HANDLERS: Record<string, Handler> = {
     }
     let handle: Awaited<ReturnType<typeof startService>>;
     try {
-      handle = await startService({ root: ctx.root, host, port });
+      handle = await startService({ root: ctx.root, host, port, log: ctx.log.child({ actor: 'server' }) });
     } catch (e) {
       return boom('serve-bind', `serve could not bind ${host}:${port} — ${(e as Error).message}`);
     }
@@ -1185,7 +1235,7 @@ async function goalSeedInteractive(ctx: CliContext): Promise<Outcome> {
   const idea = ctx.args.slice(2).join(' ').trim();
   const gate = ctx.commands.goalSeedGate();
   if (!gate.allow) return boom('goal-seed-gate', `not-empty: ${gate.blocker ?? GOAL_SEED_GUARD}`);
-  const r = await runGoalSeed(ctx.commands, buildAbilities(getAdapter(undefined, ctx.root)), { idea });
+  const r = await runGoalSeed(ctx.commands, buildAbilities(getAdapter(undefined, ctx.root, ctx.log.runId)), { idea });
   if (!r.ok) {
     // emit() prints the error once (stderr in text, the error doc in JSON) — never twice
     return { ok: false, error: { code: r.error.code, message: r.error.blocker, text: `${r.error.code}: ${r.error.blocker}` }, exitCode: 1 };
@@ -1219,7 +1269,7 @@ async function specInteractive(ctx: CliContext): Promise<Outcome> {
   }
   const mode: 'produce' | 'amend' = amend ? 'amend' : 'produce';
   const name = positional[0] ?? DEFAULT_SPEC_NAME;
-  const r = await runSpecSession(docsSpecsTarget(ctx.root), buildAbilities(getAdapter(undefined, ctx.root)), { mode, name });
+  const r = await runSpecSession(docsSpecsTarget(ctx.root), buildAbilities(getAdapter(undefined, ctx.root, ctx.log.runId)), { mode, name });
   if (!r.ok) {
     // emit() prints the error once (stderr in text, the error doc in JSON) — never twice
     return { ok: false, error: { code: r.error.code, message: r.error.blocker, text: `${r.error.code}: ${r.error.blocker}` }, exitCode: 1 };
@@ -1240,6 +1290,7 @@ const ALIAS: Record<string, string> = {
   '--check': 'check',
   '--verify': 'verify',
   '--ledger': 'ledger',
+  '--log': 'log',
   '--specs': 'specs',
   '--providers': 'providers',
   '--config': 'config',
@@ -1273,6 +1324,7 @@ const isProjectRoot = (dir: string): boolean => existsSync(join(dir, '.ann')) ||
 /* ── runMain — flag strip → root resolve → ctx → dispatch → the ONE emit ────── */
 
 export async function runMain(rawArgv: string[] = process.argv.slice(2)): Promise<void> {
+  const startedAt = Date.now();
   const args = rawArgv.slice();
   // Global --project <path> / --json — extracted and STRIPPED (per-command parsing
   // never sees them); --project works before OR after the command.
@@ -1311,15 +1363,25 @@ export async function runMain(rawArgv: string[] = process.argv.slice(2)): Promis
   const ctx = createContext(root, args, { json });
   const canonical = command === undefined ? 'help' : ALIAS[command] ?? command;
   const env = ctx.renderEnv();
+  // THE COMMAND-LAYER CHOKEPOINT (AC-2): every invocation's outcome is recorded ONCE,
+  // at the single emission point, with the runId this invocation's writes/phases share.
+  const cmdlog = {
+    log: ctx.log,
+    command: command ?? 'help',
+    startedAt,
+    argv: args.slice(1),
+    ...(nodeIdOf(args[1]) ? { taskId: nodeIdOf(args[1]) } : {}),
+  };
+  const emitCmd = (o: Outcome, renderKey?: string): void => emit(o, json, env, renderKey, cmdlog);
 
   try {
     // bare ann / help / commands are doc forms (canonical 'help' set above for bare).
     if (canonical === 'help') {
-      emit(await HANDLERS.help(ctx), json, env, 'help');
+      emitCmd(await HANDLERS.help(ctx), 'help');
       return;
     }
     if (canonical === 'commands') {
-      emit(await HANDLERS.commands(ctx), json, env, 'commands');
+      emitCmd(await HANDLERS.commands(ctx), 'commands');
       return;
     }
     // a bare WRITE name refuses with a hint — the `!` is a guarantee, not advice.
@@ -1334,11 +1396,13 @@ export async function runMain(rawArgv: string[] = process.argv.slice(2)): Promis
     // an interactive terminal grilling session — JSON refuses up-front inside each.
     if (canonical === 'goal!' && (args[1] ?? '') === 'seed') {
       const out = await goalSeedInteractive(ctx);
+      logCommand(cmdlog, out, json);
       if (!out.ok) throw new CommandExit(out.error.code, out.error.message, { text: out.error.text, exitCode: out.exitCode });
       return;
     }
     if (canonical === 'spec!') {
       const out = await specInteractive(ctx);
+      logCommand(cmdlog, out, json);
       if (!out.ok) throw new CommandExit(out.error.code, out.error.message, { text: out.error.text, exitCode: out.exitCode });
       return;
     }
@@ -1347,12 +1411,12 @@ export async function runMain(rawArgv: string[] = process.argv.slice(2)): Promis
     // branch; `run!` renders under `run`). A missing handler falls to the bare-name read.
     const { handler, renderKey } = resolveDispatch(ctx, canonical);
     if (!handler) {
-      emit(bareNameHandler(ctx), json, env, 'bare');
+      emitCmd(bareNameHandler(ctx), 'bare');
       return;
     }
-    emit(await handler(ctx), json, env, renderKey);
+    emitCmd(await handler(ctx), renderKey);
   } catch (e) {
-    emit(outcomeOf(e), json);
+    emitCmd(outcomeOf(e));
   }
 }
 
@@ -1365,9 +1429,37 @@ export function jsonDoc(outcome: Outcome): string {
   return JSON.stringify(outcome.value, null, 2) + '\n';
 }
 
+/** The command-invocation line's context — the ONE emit that records it. */
+interface CommandLogCtx {
+  log: OpLog;
+  command: string;
+  startedAt: number;
+  argv: string[];
+  taskId?: string;
+}
+
+/** The ONE command line — the invocation's outcome, duration and REDACTED argv. Called at
+ *  the single emission point AND by the interactive carve-outs (which write their own
+ *  stdout), so every invocation is recorded exactly once. */
+function logCommand(cmd: CommandLogCtx, outcome: Outcome, json: boolean): void {
+  cmd.log.line({
+    event: 'command',
+    command: cmd.command,
+    ...(cmd.taskId ? { taskId: cmd.taskId } : {}),
+    inputs: { argv: cmd.argv, json },
+    outcome: outcome.ok ? (outcome.exitCode ? `exit-${outcome.exitCode}` : 'ok') : `refused:${outcome.error.code}`,
+    level: outcome.ok ? (outcome.exitCode ? 'warn' : 'info') : outcome.error.code === 'error' ? 'error' : 'warn',
+    durationMs: Date.now() - cmd.startedAt,
+    ...(outcome.ok ? {} : { error: { code: outcome.error.code, message: outcome.error.message } }),
+  });
+}
+
 /** The single emission point: an Outcome → stderr diagnostics (DIAG) → stdout
- *  (JSON doc, or the RENDER of the SAME value) → the exit code. */
-function emit(outcome: Outcome, json: boolean, env?: RenderEnv, renderKey?: string): void {
+ *  (JSON doc, or the RENDER of the SAME value) → the exit code. THE OPERATIONAL LOG's
+ *  command chokepoint when `cmd` is given: ONE line per invocation with its outcome
+ *  (ok / exit-N / refused:<code>), duration and REDACTED argv — fail-open, never fatal. */
+function emit(outcome: Outcome, json: boolean, env?: RenderEnv, renderKey?: string, cmd?: CommandLogCtx): void {
+  if (cmd) logCommand(cmd, outcome, json);
   if (!outcome.ok) {
     const text = outcome.error.text ?? outcome.error.message;
     if (json) process.stdout.write(jsonDoc(outcome));

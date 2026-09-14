@@ -1,6 +1,7 @@
 import { createContext } from './handlers.js';
 import { getAdapter } from '../abilities/llm/index.js';
 import { providerLlm } from '../abilities/index.js';
+import { newRunId, type OpLog } from '../abilities/obs/log.js';
 import { buildStepRegistry } from '../flow/steps/index.js';
 import { DriverCheckpoint, DriverResult, runSemanticDriver } from '../flow/semantic-driver.js';
 
@@ -33,6 +34,8 @@ export const DRIVE_BUSY =
   'a drive is already running — the daemon runs ONE operate-loop action at a time (this request was refused; nothing was queued or interleaved) — re-read the journey and try again';
 
 export interface DriveOptions {
+  /** The run id (the correlation id every log line of this run carries); default: minted. */
+  runId?: string;
   provider?: string;
   model?: string;
   maxTurns?: number;
@@ -46,8 +49,8 @@ export interface DriveOutcome {
 
 const refusal = (status: number, code: string, message: string): DriveOutcome => ({ status, body: { ok: false, error: { code, message } } });
 
-export async function driveJourney(root: string, opts: DriveOptions = {}): Promise<DriveOutcome> {
-  const ctx = createContext(root, ['drive'], { json: true });
+export async function driveJourney(root: string, opts: DriveOptions = {}, log?: OpLog): Promise<DriveOutcome> {
+  const ctx = createContext(root, ['drive'], { json: true, ...(log ? { log } : {}) });
 
   // A read-only target (ANN_STORE pointing at a non-active journey) does not get an LLM
   // loop aimed at it: refused up front, by name, before any provider call (the store's
@@ -64,9 +67,12 @@ export async function driveJourney(root: string, opts: DriveOptions = {}): Promi
   // The credential lives HERE (env / user config / the dev keychain) and goes no further
   // than the adapter. A provider that cannot be resolved is a named failure, never a
   // guessed one, and never a body that echoes a secret.
+  // THE DRIVER'S RUN ID (leg 12/05): minted HERE, so the op-log's model calls, the
+  // driver's turns and the frame's phases inside the run all carry ONE correlation id.
+  const runId = opts.runId ?? newRunId('drive');
   let llm;
   try {
-    llm = providerLlm(getAdapter(opts.provider, root), opts.model);
+    llm = providerLlm(getAdapter(opts.provider, root, runId), opts.model);
   } catch (e) {
     return refusal(503, 'provider-config', `drive refused: the provider could not be resolved — ${(e as Error).message}`);
   }
@@ -77,6 +83,8 @@ export async function driveJourney(root: string, opts: DriveOptions = {}): Promi
     registry: buildStepRegistry(),
     llm,
     recordedBy: ctx.who,
+    log: ctx.log,
+    runId,
     ...(opts.provider ? { provider: opts.provider } : {}),
     ...(opts.model ? { model: opts.model } : {}),
     ...(opts.maxTurns !== undefined ? { maxTurns: opts.maxTurns } : {}),

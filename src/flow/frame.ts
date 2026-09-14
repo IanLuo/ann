@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { recording } from '../abilities/recording.js';
+import type { OpLog } from '../abilities/obs/log.js';
 import { Commands, CommandError, LookBack } from '../commands/index.js';
 import { assemblePacket, ContextPacket } from './materialize.js';
 import { RuleFinding } from './validators/types.js';
@@ -32,6 +33,15 @@ import { Abilities, ReadView, Step, StepContext, StepOutput, StepVerdict } from 
  * FRAME-WRITE IDEMPOTENCE: `activated`/`completed`/`failed` already in the tail are not
  * re-written. The frame never writes directly — every write goes through L1.
  */
+
+/** The last phase's OUTCOME, derived from the frame's own stop — the closing half of the
+ *  phase spine (the log line carries it with the phase's duration). */
+function stopOutcome(stop: FrameStop): string {
+  if (stop === 'completed') return 'completed';
+  if (stop === 'failed') return 'failed';
+  if (stop === 'escalated') return 'escalated';
+  return 'blocked';
+}
 
 export type FrameStop =
   | 'not-ready'
@@ -73,6 +83,9 @@ export interface FrameDeps {
   root: string;
   registry: StepLookup;
   abilities: Abilities;
+  /** The OPERATIONAL LOG (leg 12/05) — optional: when present, every phase opens and
+   *  closes a line correlated by taskId, so a run's shape is visible with its timing. */
+  log?: OpLog;
 }
 
 /** The last gate write at a gate — the tail state the resume rule reads. */
@@ -85,17 +98,22 @@ export class Frame {
   private readonly root: string;
   private readonly registry: StepLookup;
   private readonly abilities: Abilities;
+  private readonly log?: OpLog;
   /** The GATE steps' outcomes (grill), keyed by step id. A `when` on an execute-phase
    *  entry may reference the step that DECIDED the grill gate (it precedes execute in
    *  execution order) — the depth-route conditional (`envision when idea-validate is
    *  ambiguous`) is that case. Reseeded every run(); the last (accepting) run wins. */
   private gateResults = new Map<string, StepOutput>();
+  /** The operational log for THIS run (task-correlated) + the open phase. */
+  private runLog?: OpLog;
+  private openPhase?: { name: string; at: number };
 
   constructor(deps: FrameDeps) {
     this.commands = deps.commands;
     this.root = deps.root;
     this.registry = deps.registry;
     this.abilities = deps.abilities;
+    this.log = deps.log;
   }
 
   /** The read view (§5) — an L1 derived read INJECTED into steps, not an L3 servant. */
@@ -106,18 +124,50 @@ export class Frame {
   async run(taskId: string): Promise<FrameResult> {
     this.gateResults = new Map();
     const base: FrameResult = { taskId, stop: 'not-ready', phase: 'materialize', problems: [], chain: [], outcomes: [], verifyCycles: 0 };
+    // THE PHASE SPINE (AC-2): materialize opens here; every transition closes the open
+    // phase (with its outcome + durationMs) and opens the next. The wrapper below closes
+    // the LAST phase with the frame's own stop, so each phase has an entry and an exit.
+    this.runLog = this.log?.child({ taskId });
+    this.enterPhase(base, 'materialize');
+    try {
+      const r = await this.runInner(taskId, base);
+      this.closePhase(stopOutcome(r.stop));
+      return r;
+    } catch (e) {
+      this.closePhase('failed');
+      throw e;
+    }
+  }
+
+  /** One phase transition: EXIT the open phase (`prev`), ENTER `name` — logged in pairs. */
+  private enterPhase(result: FrameResult, name: string, prev = 'ok'): FrameResult {
+    this.closePhase(prev);
+    result.phase = name;
+    this.openPhase = { name, at: Date.now() };
+    this.runLog?.line({ event: 'phase', phase: name, outcome: 'enter' });
+    return result;
+  }
+
+  private closePhase(outcome: string): void {
+    const open = this.openPhase;
+    if (!open) return;
+    this.openPhase = undefined;
+    this.runLog?.line({ event: 'phase', phase: open.name, outcome, durationMs: Date.now() - open.at });
+  }
+
+  private async runInner(taskId: string, base: FrameResult): Promise<FrameResult> {
 
     /* ── config + chain (data; a problem fails closed, never proceeds) ───────── */
     const { config, problems: configProblems } = resolveConfig(this.root);
-    if (configProblems.length) return { ...base, phase: 'config', problems: configProblems };
+    if (configProblems.length) return this.enterPhase({ ...base, problems: configProblems }, 'config', 'failed');
 
     let flow;
     try {
       flow = resolveChain(this.commands.store, taskId, this.root);
     } catch (e) {
-      return { ...base, phase: 'config', problems: [(e as Error).message] };
+      return this.enterPhase({ ...base, problems: [(e as Error).message] }, 'config', 'failed');
     }
-    if (flow.problem) return { ...base, phase: 'config', problems: [flow.problem], chain: flow.chain };
+    if (flow.problem) return this.enterPhase({ ...base, problems: [flow.problem], chain: flow.chain }, 'config', 'failed');
 
     /* ── materialize (the packet; the resolution ladder's `block` rung) ──────── */
     const packet = assemblePacket(this.commands.store, taskId);
@@ -125,7 +175,11 @@ export class Frame {
 
     const chainProblems = validateChain(this.registry, flow.chain, packet, config);
     if (chainProblems.length) {
-      return { ...base, phase: 'validate-chain', problems: chainProblems.map((p) => `${p.at}: ${p.problem}`), chain: flow.chain };
+      return this.enterPhase(
+        { ...base, problems: chainProblems.map((p) => `${p.at}: ${p.problem}`), chain: flow.chain },
+        'validate-chain',
+        'failed',
+      );
     }
 
     const result: FrameResult = { ...base, chain: flow.chain };
@@ -142,9 +196,8 @@ export class Frame {
     if (grill) return grill;
 
     /* ── validate + activate (the frame's own write, idempotent on replay) ──── */
-    result.phase = 'activate';
-    if (!this.hasEvent(taskId, 'activated')) {
-      const a = this.commands.append(taskId, { at: today(), type: 'activated', note: 'activated by the frame' } as unknown as JourneyEvent);
+    this.enterPhase(result, 'activate');
+    if (!this.hasEvent(taskId, 'activated')) {      const a = this.commands.append(taskId, { at: today(), type: 'activated', note: 'activated by the frame' } as unknown as JourneyEvent);
       if (!a.ok) return this.stopFailed(taskId, result, a.error);
     }
 
@@ -155,12 +208,12 @@ export class Frame {
       let verifyFindings: string[] = [];
 
       for (let cycle = 0; cycle < cycles; cycle++) {
-        result.phase = 'execute';
+        this.enterPhase(result, 'execute', verifyFindings.length ? 'failed' : 'ok');
         result.outcomes = [];
         const executed = await this.execute(taskId, flow.chain, packet, transcript, translator, result, feedback);
         if (executed) return executed;
 
-        result.phase = 'verify';
+        this.enterPhase(result, 'verify');
         verifyFindings = this.verify(taskId, flow.chain, translator, result);
         if (!verifyFindings.length) {
           const confirmed = await this.confirmAndCommit(taskId, flow.chain, packet, transcript, translator, result);
@@ -170,7 +223,6 @@ export class Frame {
         // EMPTY CHAIN (flow 2): a verify failure is "the runner has not committed yet"
         // — a WAIT condition, not a defect. verifyFailCycles is context-INERT here.
         if (!flow.chain.length) {
-          result.phase = 'verify';
           result.problems = verifyFindings;
           // tail state 4, written once: an undischarged `waiting` is already the block
           if (!this.pendingWait(taskId)) {
@@ -214,7 +266,7 @@ export class Frame {
     result: FrameResult,
     translator?: IntentTranslator,
   ): Promise<FrameResult | undefined> {
-    result.phase = `gate:${gate}`;
+    this.enterPhase(result, `gate:${gate}`);
     let current = packet;
     for (;;) {
       const state = this.gateState(taskId, gate);
@@ -484,7 +536,7 @@ export class Frame {
       // concluding is the OPERATOR's move: `git commit` the docs/ change + record
       // `evidence.commits[]`. Until then — `waiting` (tail state 4, written once); the
       // release is the evidence, and a re-run then concludes. Docs are git content.
-      result.phase = 'verify';
+      this.enterPhase(result, 'verify');
       if (!this.pendingWait(taskId)) {
         const w = this.commands.append(
           taskId,
@@ -500,7 +552,7 @@ export class Frame {
     }
 
     /* ── commit — the deferred intents RECORD here (spawns); every task concludes ── */
-    result.phase = 'commit';
+    this.enterPhase(result, 'commit');
     const recorded = translator.commit();
     if (!recorded.ok) return this.stopFailed(taskId, result, recorded.error);
     result.committed = recorded.value;
@@ -511,7 +563,7 @@ export class Frame {
     }
 
     /* ── look-back + advance (derived reads — never assumed) ─────────────────── */
-    result.phase = 'advance';
+    this.enterPhase(result, 'advance');
     const next = this.commands.advance();
     return { ...result, stop: 'completed', lookBack: this.commands.lookBack(), advance: `${next.action}: ${next.detail}` };
   }

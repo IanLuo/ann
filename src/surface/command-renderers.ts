@@ -210,6 +210,30 @@ export interface CommandRow {
   desc: string;
   json: boolean;
 }
+
+/** The `ann log` READ's value — the operational-log page (abilities/obs/log.ts). */
+export interface LogValue {
+  file: string;
+  total: number;
+  filtered: number;
+  shown: number;
+  skipped: number;
+  filters: Record<string, unknown>;
+  lines: Array<{
+    ts: string;
+    level: 'info' | 'warn' | 'error';
+    event: string;
+    actor: string;
+    runId: string;
+    taskId?: string;
+    turn?: number;
+    command?: string;
+    phase?: string;
+    outcome: string;
+    durationMs?: number;
+    error?: { code: string; message: string };
+  }>;
+}
 export interface UsageDoc {
   doc: string;
   naming: string;
@@ -676,6 +700,30 @@ export const RENDERS: Record<string, Renderer> = {
 
   read: (value) => `${(value as { content: string }).content}\n`,
 
+  /* log — the OPERATIONAL LOG tail (leg 12/05): one line per action, the correlation id
+   *  first so a run reads as a run. Filtered/tail metadata goes to stderr (DIAG). */
+  log: (value) => {
+    const v = value as LogValue;
+    if (!v.lines.length) return block([`no operational-log lines match (${v.file})`]);
+    const lines = v.lines.map((l) => {
+      const bits = [
+        l.ts,
+        l.level.toUpperCase().padEnd(5),
+        (l.event ?? '?').padEnd(7),
+        (l.command ?? l.phase ?? '').padEnd(22),
+        l.outcome.padEnd(18),
+        l.runId,
+        l.taskId ? `task=${l.taskId}` : '',
+        l.turn !== undefined ? `turn=${l.turn}` : '',
+        l.durationMs !== undefined ? `${l.durationMs}ms` : '',
+        l.phase && l.command ? `phase=${l.phase}` : '',
+        l.error ? `error=${l.error.code}: ${l.error.message}` : '',
+      ].filter(Boolean);
+      return bits.join(' ');
+    });
+    return block(lines);
+  },
+
   /* the writes — value = the serialized CommandResult ({ok:true,value}) */
   'spawn!': (value) => {
     const v = (value as { ok: true; value: { id: string; kind: string } }).value;
@@ -757,6 +805,14 @@ export function renderPacketById(value: unknown, env: RenderEnv): string {
 /* ── DIAG — the stderr a command's SUCCESS used to print (bytes preserved) ──── */
 
 export const DIAG: Record<string, DiagFn> = {
+  log: (value, env) => {
+    const v = value as LogValue;
+    const active = Object.entries(v.filters ?? {}).filter(([, f]) => f !== undefined && f !== '');
+    return [
+      `  ${v.file}`,
+      `  ${v.shown} of ${v.filtered} matching line(s) (${v.total} read${v.skipped ? `, ${v.skipped} unparseable` : ''})${active.length ? ` — filters: ${active.map(([k, f]) => `${k}=${String(f)}`).join(' ')}` : ''}`,
+    ];
+  },
   check: (value) => {
     const v = value as { problems: string[]; notes: Array<{ sev: string; msg: string }> };
     const lines = [...v.problems];

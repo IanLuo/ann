@@ -5,6 +5,7 @@ import { Store, JourneyEvent, NodeDir, ResultItem, TaskDetail, CLOSED_TASK_STATU
 import { blobSha, stripMarkers } from '../store/sha.js';
 import { getVOCAB } from '../store/vocab.js';
 import { ALLOWLIST, ALLOWLIST_NAMES, outputDetail, defaultCaptureEnv, type CaptureEnv } from './capture.js';
+import type { OpLog } from '../abilities/obs/log.js';
 
 /** A producer artifact's LOGICAL NAME from its file — the stem (last extension
  *  stripped): the thin model names an artifact by the file that carries it
@@ -287,6 +288,11 @@ export interface GoalView {
   legs: Array<{ id: string; status: string }>;
 }
 
+/** The node-id shape (NN-kebab segments) — used to put a `taskId` on an operational-log
+ *  line ONLY when the argument IS a node id (a positional like `goal! met` is not one). */
+export const nodeIdOf = (v: unknown): string | undefined =>
+  typeof v === 'string' && /^[0-9]{2}-[a-z0-9-]+(\/[0-9]{2}-[a-z0-9-]+)*$/.test(v) ? v : undefined;
+
 export class Commands {
   constructor(
     readonly store: Store,
@@ -296,7 +302,48 @@ export class Commands {
      *  It is the ONLY thing the capture mechanism injects: the allowlist, the guards,
      *  the sha and the write all stay the engine's. */
     private readonly captureEnv: CaptureEnv = defaultCaptureEnv,
+    /** The operational log (leg 12/05) — optional: absent means no operational logging
+     *  (unit tests that do not care), present means every write below is recorded. */
+    private readonly log?: OpLog,
   ) {}
+
+  /**
+   * THE OPERATIONAL LOG'S COMMAND-LAYER CHOKEPOINT (leg 12/05, AC-2): ONE wrapper around
+   * every mutator — the verb, the REDACTED args, the outcome (ok, or the refusal's CODE)
+   * and the duration, so a refused write is as visible as a successful one and no write
+   * site sprinkles logging. Fail-open by construction: the logger never throws
+   * (abilities/obs/log.ts), and a THROWING mutator is logged and re-thrown unchanged.
+   */
+  private loggedWrite<T>(name: string, args: unknown[], fn: () => CommandResult<T>): CommandResult<T> {
+    const started = Date.now();
+    let r: CommandResult<T>;
+    try {
+      r = fn();
+    } catch (e) {
+      this.log?.line({
+        event: 'write',
+        command: `${name}!`,
+        level: 'error',
+        ...(nodeIdOf(args[0]) ? { taskId: nodeIdOf(args[0]) } : {}),
+        outcome: 'threw',
+        durationMs: Date.now() - started,
+        inputs: { args },
+        error: { code: 'throw', message: (e as Error).message },
+      });
+      throw e;
+    }
+    this.log?.line({
+      event: 'write',
+      command: `${name}!`,
+      level: r.ok ? 'info' : 'warn',
+      ...(nodeIdOf(args[0]) ? { taskId: nodeIdOf(args[0]) } : {}),
+      outcome: r.ok ? 'ok' : `refused:${r.error.code}`,
+      durationMs: Date.now() - started,
+      inputs: { args },
+      ...(r.ok ? {} : { error: { code: r.error.code, message: r.error.blocker } }),
+    });
+    return r;
+  }
 
   private get today(): string {
     return new Date().toISOString().slice(0, 10);
@@ -329,6 +376,10 @@ export class Commands {
    * `node.json` + `artifacts/`).
    */
   spawn(id: string, contract: unknown): CommandResult<SpawnedNode> {
+    return this.loggedWrite('spawn', [id, contract], () => this.spawnImpl(id, contract));
+  }
+
+  private spawnImpl(id: string, contract: unknown): CommandResult<SpawnedNode> {
     // v6 — NO POST-MET SPAWNS (goal-session-design §4): once the goal is sealed with a
     // met verdict, the session is terminal until it archives (a stale verdict is never
     // silently carried forward by more work).
@@ -429,6 +480,10 @@ export class Commands {
    * the bytes a human confirmed are the bytes that land.
    */
   submit(id: string, gate: string, opts: { note?: string; confirmedSha?: string } = {}): CommandResult<{ gate: string; confirmedSha?: string }> {
+    return this.loggedWrite('submit', [id, gate, opts], () => this.submitImpl(id, gate, opts));
+  }
+
+  private submitImpl(id: string, gate: string, opts: { note?: string; confirmedSha?: string }): CommandResult<{ gate: string; confirmedSha?: string }> {
     if (!getVOCAB().gates.includes(gate)) return fail('unknown-gate', `gate must be one of ${getVOCAB().gates.join('|')}`);
     if (!id.includes('/')) return fail('leg-gate-write', 'leg roots carry no gates — gates live on tasks (flow-control v6 §3)');
     if (!this.store.ids().includes(id)) return fail('no-node', `no node ${id}`);
@@ -468,6 +523,10 @@ export class Commands {
    * the gesture still owed. Grill accepts and rejects never complete.
    */
   gate(id: string, gate: string, decision: string, feedback = ''): CommandResult<GateOutcome> {
+    return this.loggedWrite('gate', [id, gate, decision, feedback], () => this.gateImpl(id, gate, decision, feedback));
+  }
+
+  private gateImpl(id: string, gate: string, decision: string, feedback: string): CommandResult<GateOutcome> {
     if (!getVOCAB().gates.includes(gate)) return fail('unknown-gate', `gate must be one of ${getVOCAB().gates.join('|')}`);
     if (decision !== 'accept' && decision !== 'reject') return fail('bad-decision', "decision must be 'accept' or 'reject'");
     if (!this.store.ids().includes(id)) return fail('no-node', `no node ${id}`);
@@ -538,6 +597,14 @@ export class Commands {
     commits: Array<{ sha: string; note?: string }>,
     opts: { refs?: string[]; note?: string; claims?: unknown[]; checks?: unknown[] } = {},
   ): CommandResult<{ commits: number; refs: number; claims: number; checks: number }> {
+    return this.loggedWrite('evidence', [id, commits, opts], () => this.evidenceImpl(id, commits, opts));
+  }
+
+  private evidenceImpl(
+    id: string,
+    commits: Array<{ sha: string; note?: string }>,
+    opts: { refs?: string[]; note?: string; claims?: unknown[]; checks?: unknown[] },
+  ): CommandResult<{ commits: number; refs: number; claims: number; checks: number }> {
     if (!id.includes('/')) return fail('leg-gate-write', 'leg roots carry no conclusion — evidence belongs to tasks');
     if (!this.store.ids().includes(id)) return fail('no-node', `no node ${id}`);
     if (!Array.isArray(commits) || !commits.length) {
@@ -592,6 +659,10 @@ export class Commands {
    * refuses a `captured` check by name, so this fact can be produced here or not at all.
    */
   capture(id: string, name: string, opts: { note?: string } = {}): CommandResult<CapturedCheck> {
+    return this.loggedWrite('capture', [id, name, opts], () => this.captureImpl(id, name, opts));
+  }
+
+  private captureImpl(id: string, name: string, opts: { note?: string }): CommandResult<CapturedCheck> {
     if (!id.includes('/')) return fail('leg-gate-write', 'leg roots carry no verification — a captured check belongs to a task');
     if (!this.store.ids().includes(id)) return fail('no-node', `no node ${id}`);
     const command = String(name ?? '').trim();
@@ -694,6 +765,10 @@ export class Commands {
    * `accepted` status (leg 08 task 01) names the missing evidence, never a missing rule.
    */
   complete(id: string, opts: { note?: string } = {}): CommandResult<{ at: string }> {
+    return this.loggedWrite('complete', [id, opts], () => this.completeImpl(id, opts));
+  }
+
+  private completeImpl(id: string, opts: { note?: string }): CommandResult<{ at: string }> {
     if (!id.includes('/')) return fail('leg-gate-write', 'leg roots carry no lifecycle — gates and completion live on tasks (flow-control v6 §3)');
     if (!this.store.ids().includes(id)) return fail('no-node', `no node ${id}`);
     if (this.store.events(id).some((e) => e.type === 'completed')) {
@@ -759,6 +834,10 @@ export class Commands {
    * hole in every one of them.
    */
   append(id: string, event: JourneyEvent): CommandResult {
+    return this.loggedWrite('append', [id, event], () => this.appendImpl(id, event));
+  }
+
+  private appendImpl(id: string, event: JourneyEvent): CommandResult {
     const retired = RETIRED_KINDS[event?.type];
     if (retired) {
       return fail('retired-kind', `'${event.type}' ${retired}`);
@@ -792,6 +871,10 @@ export class Commands {
    * disk are untouched (AC1).
    */
   lock(id: string, artifactFile: string, opts: { type?: string; note?: string } = {}): CommandResult<LockedArtifact> {
+    return this.loggedWrite('lock', [id, artifactFile, opts], () => this.lockImpl(id, artifactFile, opts));
+  }
+
+  private lockImpl(id: string, artifactFile: string, opts: { type?: string; note?: string }): CommandResult<LockedArtifact> {
     if (!this.store.ids().includes(id)) return fail('no-node', `no node ${id}`);
     const node = this.store.resolveNode(id);
     const full = this.nodeArtifactFile(node, artifactFile);
@@ -933,6 +1016,10 @@ export class Commands {
    *  submission anywhere (a done task can still hide one) · structural exhaustion
    *  reached. Appends `goal-met` to the goal root (status-inert). */
   goalVerdict(decision: 'met', feedback = ''): CommandResult<{ verdict: 'met'; at: string }> {
+    return this.loggedWrite('goal! met', [feedback], () => this.goalVerdictImpl(decision, feedback));
+  }
+
+  private goalVerdictImpl(decision: 'met', feedback: string): CommandResult<{ verdict: 'met'; at: string }> {
     if (decision !== 'met') return fail('bad-verdict', "goal! verdict must be 'met'");
     const goalId = this.store.goalLegId();
     if (!goalId) return fail('no-goal', 'no goal leg — seed a goal before recording a verdict');
@@ -970,6 +1057,10 @@ export class Commands {
    *  scratch). Content-level check/verify problems (this repo's known 15/4 baseline)
    *  are NOT re-litigated here — they travel into the archive with the session. */
   goalArchive(override = false): CommandResult<{ at: string; dest: string; slug: string }> {
+    return this.loggedWrite('goal! archive', [], () => this.goalArchiveImpl(override));
+  }
+
+  private goalArchiveImpl(override: boolean): CommandResult<{ at: string; dest: string; slug: string }> {
     const goalId = this.store.goalLegId();
     const emptyJourney = this.store.ids().length === 0;
     const met = !!goalId && this.store.events(goalId).some((e) => e.type === 'goal-met');
@@ -1010,6 +1101,14 @@ export class Commands {
    *  this composite.
    */
   goalSeed(doc: string): CommandResult<{
+    id: string;
+    contract: { intent: string; acceptanceCriteria: string[] };
+    doc: { name: string; path: string; sha: string };
+  }> {
+    return this.loggedWrite('goal! seed', [doc], () => this.goalSeedImpl(doc));
+  }
+
+  private goalSeedImpl(doc: string): CommandResult<{
     id: string;
     contract: { intent: string; acceptanceCriteria: string[] };
     doc: { name: string; path: string; sha: string };

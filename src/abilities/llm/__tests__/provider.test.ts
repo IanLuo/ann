@@ -48,6 +48,17 @@ afterEach(() => {
 
 const oplog = () => readFileSync(join(root, 'logs', 'provider.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
 
+describe('the op-log carries the run correlation id (leg 12/05)', () => {
+  it('records the runId the caller supplied, and omits it when there is no run', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ choices: [{ message: { content: 'ok' } }] }));
+    await new OpenAICompatibleAdapter(entry(), defaults, root, 'drive-run-1').complete('hello');
+    await new OpenAICompatibleAdapter(entry(), defaults, root).complete('hello');
+    const [withRun, withoutRun] = oplog();
+    expect(withRun).toMatchObject({ runId: 'drive-run-1', provider: 'test', ok: true });
+    expect(withoutRun.runId).toBeUndefined();
+  });
+});
+
 describe('OpenAICompatibleAdapter — frozen contract (design §3)', () => {
   it('returns {ok:true, text, usage} on a well-formed completion', async () => {
     fetchMock.mockResolvedValue(

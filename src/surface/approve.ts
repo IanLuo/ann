@@ -6,6 +6,7 @@ import { getAdapter } from '../abilities/llm/index.js';
 import { buildStepRegistry } from '../flow/steps/index.js';
 import { operatorIntegrityBlockers, runOperatorAction, OperatorActionResult } from '../flow/operator-action.js';
 import { InteractAbility, ResearchFinding } from '../flow/types.js';
+import type { OpLog } from '../abilities/obs/log.js';
 
 /**
  * L3 · THE OPERATE LOOP'S WRITE — the WHAT'S NEXT card's APPROVE.
@@ -159,8 +160,8 @@ function frontmostChainSteps(ctx: CliContext, root: string, frontmost: Frontmost
   return flow.problem ? 0 : flow.chain.length;
 }
 
-export function whatsNext(root: string): WhatsNextView {
-  const ctx = createContext(root, [], { json: true });
+export function whatsNext(root: string, log?: OpLog): WhatsNextView {
+  const ctx = createContext(root, [], { json: true, ...(log ? { log } : {}) });
   const advance = ctx.commands.advance();
   const lb = ctx.commands.lookBack();
   const blockers = operatorIntegrityBlockers(ctx.commands, root);
@@ -209,10 +210,12 @@ export class Approver {
 
   /** The approve: the operator action, in-process, with the CLI's own deps + the daemon
    *  channel. Every refusal the action produces is carried through by name. */
-  async approve(proposal?: ApproveProposal): Promise<ApproveOutcome> {
+  async approve(proposal?: ApproveProposal, log?: OpLog): Promise<ApproveOutcome> {
     // The SAME ctx the CLI builds (`advance!`), so the action reads what the CLI reads;
-    // the read-only chokepoint is the CLI's own (ANN_STORE on a non-active journey).
-    const ctx = createContext(this.root, ['advance!'], { json: true });
+    // the read-only chokepoint is the CLI's own (ANN_STORE on a non-active journey). The
+    // request's operational-log handle rides in (leg 12/05), so the frame's phases and
+    // the approve's writes correlate with the request's own line.
+    const ctx = createContext(this.root, ['advance!'], { json: true, ...(log ? { log } : {}) });
     try {
       readOnlyRefuse(ctx, 'advance!');
     } catch (e) {
@@ -226,7 +229,8 @@ export class Approver {
         commands: ctx.commands,
         root: this.root,
         registry: buildStepRegistry(),
-        abilities: buildAbilities(getAdapter(undefined, this.root), { interact: channel }),
+        abilities: buildAbilities(getAdapter(undefined, this.root, ctx.log.runId), { interact: channel }),
+        log: ctx.log,
       });
     } catch (e) {
       // The daemon channel's two named refusals — the action stopped fail-closed and

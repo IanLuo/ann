@@ -7,6 +7,7 @@ import { Commands } from '../../commands/index.js';
 import { Frame, FrameResult } from '../frame.js';
 import { ChainEntry, StepLookup } from '../chain.js';
 import { Abilities, Intent, ResearchFinding, Step, StepContext, StepOutput } from '../types.js';
+import { OpLog, logPath, readOpLog } from '../../abilities/obs/log.js';
 
 /**
  * THE FRAME (core-design §4) — the RESUMABLE COORDINATOR. These tests pin the four
@@ -456,5 +457,46 @@ describe('the read view + prior are the two input channels (§5)', () => {
     const r2 = await conclude(c, [mkStep('envision'), spec]);
     expect(r2.stop).toBe('completed');
     expect(seen).toBe('envision artifact');
+  });
+});
+
+describe('the operational log (leg 12/05) — the phase spine', () => {
+  it('opens and closes every phase it enters, with a duration, under one correlation id', async () => {
+    const c = setup();
+    chainFile([]); // the empty-chain flow: materialize → grill → activate → execute → verify (wait)
+    const log = new OpLog(root, 'run-phases', 'test', { secrets: [] });
+    const f = new Frame({ commands: c, root, registry: registryOf([]), abilities: abilities(new ScriptedInteract(['accept'])), log });
+    const r = await f.run(TASK);
+    expect(r.stop).toBe('blocked-waiting');
+
+    const phases = readOpLog(root, { run: 'run-phases', tail: 1000 }).lines.filter((l) => l.event === 'phase');
+    // entry then exit per phase, in the order the frame entered them; the LAST phase
+    // closes with the frame's own stop (a wait, not an 'ok').
+    expect(phases.map((l) => `${l.phase}:${l.outcome}`)).toEqual([
+      'materialize:enter',
+      'materialize:ok',
+      'gate:grill:enter',
+      'gate:grill:ok',
+      'activate:enter',
+      'activate:ok',
+      'execute:enter',
+      'execute:ok',
+      'verify:enter',
+      'verify:blocked',
+    ]);
+    // every line is correlated to the TASK and timed (an exit carries durationMs ≥ 0)
+    for (const l of phases) {
+      expect(l.taskId).toBe(TASK);
+      expect(l.runId).toBe('run-phases');
+      if (l.outcome === 'enter') expect(l.durationMs).toBeUndefined();
+      else expect(l.durationMs).toBeGreaterThanOrEqual(0);
+    }
+  });
+
+  it('a frame with NO log writes nothing (the log is optional — never a hard dependency)', async () => {
+    const c = setup();
+    chainFile([]);
+    await run(c, [], new ScriptedInteract(['accept']));
+    expect(existsSync(logPath(root))).toBe(false);
   });
 });

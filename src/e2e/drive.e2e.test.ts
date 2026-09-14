@@ -252,6 +252,12 @@ describe('POST /api/drive — the semantic driver over the service (leg 12 task 
     // the key reached the ADAPTER (server-side) and was never logged: the op log is the
     // run's own metrics (Q1) and carries no credential
     expect(existsSync(join(root, 'logs', 'provider.jsonl'))).toBe(true);
-    expect(readFileSync(join(root, 'logs', 'provider.jsonl'), 'utf8')).not.toContain(SECRET);
+    const opLog = readFileSync(join(root, 'logs', 'provider.jsonl'), 'utf8');
+    expect(opLog).not.toContain(SECRET);
+    // …and every model call carries the DRIVER RUN's correlation id (leg 12/05), so the
+    // provider view joins the operational view: one `--run` spans turns, phases and calls
+    const opLines = opLog.trim().split('\n').map((l) => JSON.parse(l) as { runId?: string });
+    expect(opLines.length).toBeGreaterThan(0);
+    expect(opLines.every((l) => /^drive-/.test(String(l.runId)))).toBe(true);
   });
 });

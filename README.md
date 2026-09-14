@@ -58,6 +58,7 @@ session (unchanged); a bad/absent target fails closed at startup (named error, e
 | `check` | `` | integrity + gates + docs-manifest freshness + the journey state line · alias --check | `yes` |
 | `verify` | `` | the DRIFT read — reconciles the log's recorded claims vs filesystem/git reality (D1-D5 + store-external); exits 1 on any drift · alias --verify | `yes` |
 | `ledger` | `` | the write-rev ledger — rev + per-node last-write rev/at + hashes (the store-external integrity guard) · alias --ledger | `yes` |
+| `log` | `[--task <id>] [--run <runId>] [--level <level>] [--since <iso|30m>] [--tail <n>]` | THE OPERATIONAL LOG READ (leg 12/05 — observability for debugging): the scratch JSONL action log (logs/operation.jsonl, GITIGNORED — never the record) as a derived tail — one line per engine action (command · write · frame phase · driver turn · stop) carrying a WALL-CLOCK ts (the journey events are date-only), the actor/provenance, the REDACTED inputs, the outcome, the duration and the CORRELATION ID (runId · taskId · turn); a whole run reconstructs from one --run. Filters: --task <id> · --run <runId> · --level info|warn|error (that level and above) · --since <iso|30m|2h|1d> · --tail <n> (default 50) · alias --log | `yes` |
 | `specs` | `` | the docs contract stack — the manifest → docs/<name>.md @ content-sha (upstream/referrers prose from the file head) · alias --specs | `yes` |
 | `providers` | `` | the adapter registry: providers, models, defaults (env-resolved, api key masked) · alias --providers | `yes` |
 | `config` | `` | the user config file (~/.ann/config.json; apiKey masked) · alias --config | `yes` |
@@ -157,6 +158,14 @@ will execute) · `chain` (the flow config as data) · `steps` (the step registry
    CAPTURED pass bound to a cited commit — a reported-only conclusion is refused by name)
    records the explicit `completed` — `done` follows only from that event.
 
+**Debug — what ann actually DID.** `log [--task <id>] [--run <runId>] [--level w] [--since 30m] [--tail <n>]`
+tails the OPERATIONAL log (below): one line per engine action with a wall-clock
+timestamp, the actor, the redacted inputs, the outcome and the duration — correlated by
+`runId` · `taskId` · `turn`, so one run rebuilds in order (what ran, why, how it ended).
+Three views of the trace, no duplication: the events (the record) · the op-log
+`logs/provider.jsonl` (the model calls) · this operational log (commands · writes ·
+phases · turns · stops).
+
 **Automate.** `run! <id>` drives a task through the frame (materialize → grill →
 activate → execute → verify → confirm → commit) and stops at the first block
 (fail-closed when no provider is configured). It is resumable, but re-enters the frame
@@ -172,6 +181,36 @@ past one. advance-leg / closure-needed / none are NOT machine-executable: the
 boundary/closure/goal-consult card is presented and it stops (the authored-work
 boundary, flow-control-spec v7 §5 — never a machine spawn, never a machine gate
 answer).
+
+### The operational log — observability for debugging
+
+A self-driving loop is undebuggable without a detailed log of what ann is doing, why, and
+how it ended (design record: `.agents/plan/self-driving-design.md`). The engine writes one
+JSONL line per ACTION to **`<project>/logs/operation.jsonl`** — the SAME gitignored scratch
+home as the provider op-log, never the record (the journey events stay the record) — and
+`ann log` is the derived read over it (plus `GET /api/log` for the page).
+
+```
+{ts, level, event, actor, runId, taskId?, turn?, command?, phase?, inputs?, outcome, durationMs?, error?}
+```
+
+* **ts** — a WALL-CLOCK ISO instant (the journey's `at` is DATE-only: time lives here).
+* **event** — `command` (one per CLI/HTTP invocation) · `write` (one per mutator, a
+  REFUSAL included) · `phase` (the frame: materialize · gate:grill · activate · execute ·
+  verify · gate:confirm · commit · advance — enter + exit with the duration) · `turn` (the
+  driver's proposal + the CODE verdict — accepted / refused-by-name) · `stop` (the route
+  reason it ended on).
+* **correlation** — `runId` (a command invocation · a driver run · an HTTP request · a
+  service boot) · `taskId` · `turn`: `ann log --run <runId>` reconstructs a whole run in
+  order. The op-log lines carry the SAME `runId`, so the two files join: one `--run` spans
+  the model calls, the driver's turns, the frame's phases and the writes.
+* **inputs** — REDACTED (NFR-SEC-1): a value under a secret-looking key is dropped, a
+  value matching a known secret (env-derived) is dropped, and a prompt/completion is
+  stored as `{chars, sha}` — never verbatim.
+* **invariants** — logging NEVER throws into the flow (a write failure warns and the
+  engine proceeds); the file is BOUNDED (rotates to `.1` at 4 MiB — 2×cap on disk, max);
+  the scratch home ignores ITSELF (`logs/.gitignore`), so no `git add -A` can sweep it
+  into the record.
 
 ## Architecture (current code)
 
@@ -251,6 +290,7 @@ single writer + derived views).
 | **Goal-session lifecycle (v6/v17)** — `goal` view · `goal! seed` grill → `docs/goal.md` · `goal! met` verdict · `goal! archive` reset | ✅ built | `src/flow/goal-grill.ts` · `goal-seed.ts` + `src/commands/` (seedGoal · verdict · archiveJourney) |
 | **SPECS grill area (leg 05)** — `spec!` produce/amend: grill the seeded goal into ONE amendable spec doc `docs/<name>.md`, PRODUCE lands a new name · `--amend` rewrites an in-force doc in place | ✅ built | `src/flow/spec-grill.ts` · `spec-doc.ts` |
 | **Operator action (leg 07)** — `advance!`: F5 approve→execute (functional-spec v2 F5 · flow-control v7 §2/§5) — integrity re-checked fail-closed, advance re-derived, continue-leg runs the frame, boundary stops presented | ✅ built | `src/flow/operator-action.ts` |
+| **Operational log (leg 12/05)** — the third view of the trace: JSONL action log (`logs/operation.jsonl`, scratch) + the `ann log` read + `GET /api/log`; correlated by runId · taskId · turn | ✅ built | `src/abilities/obs/log.ts` |
 | **Skills/tools/MCP (step model)** | ❌ decided, build deferred | — |
 
 The layer fold is complete — the legacy tier paths are gone, and current code

@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { createContext, resolveDispatch, jsonDoc, outcomeOf, type Outcome } from './handlers.js';
 import { APPROVE_BUSY, Approver, whatsNext, type ApproveProposal } from './approve.js';
 import { DRIVE_BUSY, driveJourney, type DriveOptions } from './drive.js';
+import { OpLog, newRunId } from '../abilities/obs/log.js';
 import { UI_HTML } from './ui.js';
 
 /**
@@ -42,7 +43,7 @@ import { UI_HTML } from './ui.js';
 
 /** The canonical reads this slice exposes — the CLI's own command names, dispatched
  *  through the CLI's own handlers (an id-less read is a named usage refusal). */
-const READ_ROUTES = new Set(['journey', 'status', 'next', 'detail', 'confirm', 'results', 'packet', 'events']);
+const READ_ROUTES = new Set(['journey', 'status', 'next', 'detail', 'confirm', 'results', 'packet', 'events', 'log']);
 /** The reads addressed by a node id (`?id=<node>`). */
 const ID_READS = new Set(['detail', 'confirm', 'packet']);
 
@@ -57,6 +58,10 @@ export interface ServiceOptions {
    *  (flags > env > general config > builtin); the service holds no default. */
   host: string;
   port: number;
+  /** The OPERATIONAL LOG handle (leg 12/05) — the service's own correlation root; every
+   *  request records one line under it and the handlers share it (the SAME runId the
+   *  `ann serve` invocation logged). Absent means no operational logging. */
+  log?: OpLog;
 }
 
 export interface ServiceHandle {
@@ -74,14 +79,33 @@ export async function startService(opts: ServiceOptions): Promise<ServiceHandle>
   const host = opts.host;
   const port = opts.port;
   const root = opts.root;
+  // THE SERVICE'S CORRELATION ROOT (AC-4): the page's reads/writes and the operator
+  // actions are recorded under one runId (the `ann serve` invocation's), all in the
+  // SAME scratch log the CLI writes — `ann log --run <that runId>` is the daemon's day.
+  const log = opts.log ?? new OpLog(root, newRunId('serve'), 'server');
   // THE SINGLE-FLIGHT (care b): ONE approve at a time, per service instance. The slot is
   // claimed SYNCHRONOUSLY in the route, before the request's first await (the body read).
   const approver = new Approver(root);
   const server = createServer((req, res) => {
-    route(root, approver, req, res).catch((e: unknown) => {
-      // Fail-closed: an unexpected throw is a named error doc, never a stack trace.
-      sendJson(res, 500, jsonDoc({ ok: false, error: { code: 'service', message: (e as Error).message } }));
-    });
+    const started = Date.now();
+    // ONE runId PER REQUEST: the request's line and everything it causes (the gate write,
+    // the approve's frame phases, the driver's turns) correlate to each other.
+    const reqLog = log.child({ runId: newRunId('http') });
+    route(root, approver, reqLog, req, res)
+      .catch((e: unknown) => {
+        // Fail-closed: an unexpected throw is a named error doc, never a stack trace.
+        sendJson(res, 500, jsonDoc({ ok: false, error: { code: 'service', message: (e as Error).message } }));
+      })
+      // ONE line per request — the route, the status and the duration. Never throws.
+      .finally(() =>
+        reqLog.line({
+          event: 'command',
+          command: `${req.method ?? 'GET'} ${req.url ?? '/'}`,
+          outcome: `http-${res.statusCode}`,
+          level: res.statusCode >= 400 ? 'warn' : 'info',
+          durationMs: Date.now() - started,
+        }),
+      );
   });
   await new Promise<void>((resolve, reject) => {
     const onError = (e: Error): void => reject(e);
@@ -105,9 +129,9 @@ export async function startService(opts: ServiceOptions): Promise<ServiceHandle>
 /** Dispatch ONE canonical command through the CLI's own path and normalize a thrown
  *  failure exactly as `runMain` does. The whitelist is the SCOPE BOUNDARY: everything
  *  outside the slice is refused by NAME, before any store access. */
-function dispatch(root: string, argv: string[]): Outcome {
+function dispatch(root: string, argv: string[], log?: OpLog): Outcome {
   const canonical = argv[0];
-  const ctx = createContext(root, argv, { json: true });
+  const ctx = createContext(root, argv, { json: true, ...(log ? { log } : {}) });
   if (canonical === 'gates') {
     // The ONE route that is a direct L1 read rather than a CLI command: the
     // whole-journey gate queue (Commands.pendingGates) — derived on demand, no caching.
@@ -133,7 +157,7 @@ const notExposed = (name: string): Outcome => ({
   ok: false,
   error: {
     code: 'not-exposed',
-    message: `serve: '${name}' is not exposed — the minimal slice is journey · status · next · detail · confirm · results · packet · gates · whatsnext (GET) and the gate / approve / drive writes (POST /api/gate, POST /api/approve, POST /api/drive). run!/spawn!/submit!/goal!/spec!/archive/advance! are deliberately absent as ROUTES (scope OUT): the approve and the drive are named routes over the operator action and the semantic driver, which compose those commands themselves.`,
+    message: `serve: '${name}' is not exposed — the minimal slice is journey · status · next · detail · confirm · results · packet · events · log · gates · whatsnext (GET) and the gate / approve / drive writes (POST /api/gate, POST /api/approve, POST /api/drive). run!/spawn!/submit!/goal!/spec!/archive/advance! are deliberately absent as ROUTES (scope OUT): the approve and the drive are named routes over the operator action and the semantic driver, which compose those commands themselves.`,
   },
 });
 
@@ -148,7 +172,7 @@ function httpStatus(o: Outcome): number {
   return 500;
 }
 
-async function route(root: string, approver: Approver, req: IncomingMessage, res: ServerResponse): Promise<void> {
+async function route(root: string, approver: Approver, log: OpLog, req: IncomingMessage, res: ServerResponse): Promise<void> {
   // The base is a PLACEHOLDER: the request path is host-agnostic (nothing here reads the
   // Host header or the peer address — remote-capable in shape).
   const url = new URL(req.url ?? '/', 'http://service.invalid');
@@ -193,7 +217,7 @@ async function route(root: string, approver: Approver, req: IncomingMessage, res
       } catch {
         return sendJson(res, 400, jsonDoc(usageError('POST /api/approve expects a JSON body: {proposal?: {action, detail}}')));
       }
-      const out = await approver.approve(proposal);
+      const out = await approver.approve(proposal, log);
       return sendJson(res, out.status, JSON.stringify(out.body, null, 2) + '\n');
     } finally {
       approver.release();
@@ -222,7 +246,7 @@ async function route(root: string, approver: Approver, req: IncomingMessage, res
       } catch {
         return sendJson(res, 400, jsonDoc(usageError('POST /api/drive expects a JSON body: {provider?, model?, maxTurns?, resume?}')));
       }
-      const out = await driveJourney(root, opts);
+      const out = await driveJourney(root, opts, log);
       return sendJson(res, out.status, JSON.stringify(out.body, null, 2) + '\n');
     } finally {
       approver.release();
@@ -243,7 +267,7 @@ async function route(root: string, approver: Approver, req: IncomingMessage, res
     }
     const feedback = typeof payload.feedback === 'string' ? payload.feedback : '';
     const argv = ['gate!', payload.id, payload.gate, payload.decision, ...(feedback ? [feedback] : [])];
-    const out = dispatch(root, argv);
+    const out = dispatch(root, argv, log);
     return sendJson(res, httpStatus(out), jsonDoc(out));
   }
 
@@ -251,12 +275,25 @@ async function route(root: string, approver: Approver, req: IncomingMessage, res
   if (req.method !== 'GET') return sendJson(res, 405, jsonDoc(usageError(`GET /api/${name}`)));
   if (name !== 'gates' && name !== 'whatsnext' && !READ_ROUTES.has(name)) return sendJson(res, 404, jsonDoc(notExposed(name)));
 
+  // THE OPERATIONAL LOG'S READ (leg 12/05, AC-4) — the SAME `ann log` handler the CLI
+  // dispatches, over the SAME scratch file (never a second reader): `?task=&run=&level=
+  // &since=&tail=` are passed through as the command's own flags.
+  if (name === 'log') {
+    const argv = ['log'];
+    for (const q of ['task', 'run', 'level', 'since', 'tail'] as const) {
+      const v = url.searchParams.get(q);
+      if (v !== null && v !== '') argv.push(`--${q}`, v);
+    }
+    const out = dispatch(root, argv, log);
+    return sendJson(res, httpStatus(out), jsonDoc(out));
+  }
+
   // THE WHAT'S NEXT CARD's read (leg 11) — the operator view: the derived advance +
   // frontmost-ready + leg gate + pending gates, AND the integrity blockers the approve
   // re-checks fail-closed. Derived on demand, like the gate queue; never cached.
   if (name === 'whatsnext') {
     try {
-      return sendJson(res, 200, JSON.stringify(whatsNext(root), null, 2) + '\n');
+      return sendJson(res, 200, JSON.stringify(whatsNext(root, log), null, 2) + '\n');
     } catch (e) {
       const o = outcomeOf(e);
       return sendJson(res, httpStatus(o), jsonDoc(o));
@@ -283,7 +320,7 @@ async function route(root: string, approver: Approver, req: IncomingMessage, res
   } else {
     argv = [name]; // journey · next (no-arg reads; an id would make `journey` a node walk)
   }
-  const out = dispatch(root, argv);
+  const out = dispatch(root, argv, log);
   return sendJson(res, httpStatus(out), jsonDoc(out));
 }
 
