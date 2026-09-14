@@ -1,0 +1,33 @@
+{
+  "id": "12-operate-loop/08-implementation-one-gate-derivation",
+  "contract": {
+    "intent": "THE GATE LIFECYCLE, DERIVED ONCE — the smell behind the `queued`-for-a-REJECTED-gate hole. ONE question ('what is the state of this task's gates?') is re-answered INDEPENDENTLY off the raw event tail in ~11 places: Store.taskStatus · Store.gateProblems · Store.detail's gates · Commands.gateState · Commands.undecidedSubmission · Commands.pendingGates · lookBack's pendingGates · Commands.rejections · Frame.gateState (a PRIVATE DUPLICATE of the Commands one) · Frame.pendingWait · Transcript.boundary/verifyCycles · operator-action's undecidedGateOf (in advance!'s own file, used only to label the landing) · the UI's nextLine branch table. And the STATUS WORD (taskStatus) is a projection grown case-by-case (accepted · blocked · deferred · cancelled) that was never RECONCILED with the GATE STATE: a rejection at the entry gate derives `queued`, the ready set {queued, active} matches, frontmostReady offers it, advance() proposes continue-leg, and advance!'s sanity check reports 'integrity: clean' — its two inputs read no gate at all (operatorIntegrityBlockers = check + validator errors + verify + docs freshness + uncommitted changes; snapshotOf = advance + frontmostReady). Measured consequence: a worker was dispatched against a REJECTED contract and did the work (12/05, twice), and with gates pending advance() degenerates to 'closure-needed' (close the leg) while rework is owed. The DATA layer is already strict and centralized (one writer · closed type set · per-type field whitelist · gate in {grill, confirm} · GATE-SEQ · decisions composite-owned) — the DERIVATION layer is not. Deliverable: ONE gate-lifecycle derivation + ONE workflow-state projection every reader consumes, and a RECONCILIATION rule so a contradiction FAILS check() — then a missed branch is a check failure, never a silent mis-dispatch.",
+    "acceptanceCriteria": [
+      "AC-1 — ONE derivation exists: a single exported function over the event tail (`gateLifecycle(events, gate)` -> none|submitted|accepted|rejected) plus ONE workflow-state projection (the status word, `rework` included), and it is the ONLY place the submitted|confirmed|rejected TRIPLE is interpreted. Unit-tested across the whole lifecycle: created-only · first submission · accept · reject · RE-submission after a reject (clears the rework) · accept after rework · a decision at the OTHER gate not affecting this one · a double decision at one gate · a legacy/inert record in the tail.",
+      "AC-2 — EVERY existing reader consumes it, and the duplicates are gone: Store.taskStatus · Store.gateProblems/check · Store.detail().gates · Commands.gateState · Commands.undecidedSubmission · Commands.pendingGates · lookBack's pendingGates · Commands.rejections · Frame.gateState (the private duplicate DELETED, not left beside it) · Frame.pendingWait · Transcript.boundary/verifyCycles · operator-action's landing label · the payload the UI renders (the queue's next-line VERDICT becomes a derived field; the wording stays in the renderer). No reader re-scans the triple, and a test asserts every reader AGREES on a fixture set covering all four states — a disagreement is a FAILURE, not a nuance.",
+      "AC-3 — THE RECONCILIATION RULE (scripted, never convention): check() fails when the status word CONTRADICTS the derived gate lifecycle — (a) queued/active with a last-decision REJECTION at a bound gate (the mis-dispatch: rework owed), (b) `accepted` without a confirm accept, (c) `blocked` with neither an undecided submission nor an undischarged `waiting`. Because advance!'s integrity re-check and the whatsnext card read check(), the steering surface can no longer call a contradiction clean — proven by a fixture that today reports 'integrity: clean' and must now produce a NAMED finding.",
+      "AC-4 — The projection invents no state: `rework` is DERIVED (a rejected bound gate with no later submission at that gate; a re-submission clears it) — no new event type, no new stored state, no new write path; the reject bound (3/gate), the rework rung and the F-AC16 closure semantics are unchanged; the CONTRAST case is pinned (a freshly-ACCEPTED entry gate still derives ready — the healthy path — and done/blocked/accepted/deferred/cancelled are unchanged).",
+      "AC-5 — The two decision vocabularies are REGISTERED as a reconciliation: the human input `accept|reject` <-> the events `confirmed|rejected` mapping is recorded in the schema registry and the reconciliation register (docs/resource-registry 5), pinned by a table test (per gate event type: allowed fields · the closed gate set · the total mapping) so no third form can appear silently.",
+      "AC-6 — No regression, committed with evidence: leg status · the leg gate · goal exhaustion · the closed set · the existing suite unchanged; full `npm test` green, `npm run typecheck` clean, `ann check` + `ann verify` clean on the live journey."
+    ],
+    "targetAreas": [
+      "src/store",
+      "src/commands",
+      "src/flow",
+      "src/surface",
+      "src/e2e"
+    ],
+    "requiredInputs": [],
+    "expectedOutputs": [],
+    "workType": "implementation"
+  },
+  "openQuestions": [
+    {
+      "id": "Q1",
+      "question": "12/06 (rework-visible) lands the CONSEQUENCE (the rework word + next/look-back naming it + the driver's rules + the UI) while this task supplies the ONE derivation that word must be projected from — which order, and should 12/06's AC-1 fold in here (dropping it there) so the word is never implemented twice?",
+      "blocking": false,
+      "defaultIfUnanswered": "land 12/06 first as the visible consequence (a small local patch), then this task consolidates it into the single derivation and adds the reconciler; if 12/06 is still entry-pending when this task is picked up, fold its AC-1 here and amend it there"
+    }
+  ],
+  "createdAt": "2026-09-14"
+}
