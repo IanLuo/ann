@@ -30,9 +30,41 @@ A self-driving loop is undebuggable without a *detailed* log of what ann is doin
 ## The slices (in landing order — the log first, so the rest is debuggable)
 
 1. **THE OBSERVABILITY LOG** — the detailed operational log + its read (this is what makes the autonomous slices debuggable). *(spawned as `12-operate-loop/05-implementation-observability-log`)*
-2. **THE RUNNER** — the capability environment (skills · tools · mcp), tool-calling in the provider adapter, the execute step. Hard guard: the capability pool is NOT a general shell (allowlists · sandboxing — the `12/03` lesson).
+2. **THE RUNNER** — the WORKER PROTOCOL + the pluggable worker registry (below), `pi` as the **first** worker kind, the execute step. Hard guard: a worker kind is NOT a general shell (allowlists · sandboxing · the container form — the `12/03` lesson).
 3. **THE COMMIT MIRROR** — one act, one commit, a rule + a check + an owner.
 4. **THE SUPERVISOR** — drive → gate → wait → resume; the driver dispatches the runner.
+
+## The WORKER PROTOCOL — pluggable workers (pi is one kind, never the only one)
+
+**The principle.** Ann's comparative advantage is **context micro-management + process control**; a coding harness's is **doing the work**. So the runner must be an interchangeable **worker**: a protocol (what a worker is) + a registry of **kinds** (how each is launched), selected per task — *not* a hardcoded `pi`.
+
+**The protocol (L2 declares it; L3 modules implement it — like the `llm`/`interact`/`shell`/`tool` abilities):**
+
+```
+IN     the task contract (ACs) · the MATERIALIZED CONTEXT PACKET (Ann's scoping — exactly this job's context)
+       · the workdir · the allowed capabilities (skills · tools · mcp — a CLOSED pool) · the sandbox policy
+       · the evidence contract (what must come back: the committed work + the captured checks)
+OUT    the work itself (committed) · the CAPTURED evidence (the checks run + their results + the sha they ran against)
+       · a machine-readable stop reason
+RULES  never decides a gate · never writes the journey except through the sanctioned evidence path
+       · bounded (turns/time) · fail-closed (a failure = a named stop, zero fabricated evidence)
+```
+
+**The registry (one registry per class — the repo's existing pattern; DATA, not code):** a `worker` registry beside the provider registry (`rules/adapter/`), each kind naming its launch spec + capabilities + defaults:
+
+| Kind (examples) | Launch | Notes |
+|---|---|---|
+| `pi-cli` | `pi -p` (headless: process prompt and exit) with `--mode json\|rpc`, `--system-prompt`, `--session`/`--no-session` | MIT-licensed; the SDK form (`createAgentSession`/`ModelRuntime`/`SessionManager`) is the in-process alternative |
+| `pi-container` | the same, in the documented container form (`docs/containerization.md`) | the safest default for an unattended loop |
+| `herdr:<kind>` | herdr's agent kinds (claude · codex · gemini · opencode · …) | the visible-pane form — a human can watch |
+| `human` | no launch — the work is done by a person; the evidence arrives as commits | the honest fallback |
+| `script` / `tool` | a deterministic command (no model) | for work that should never touch an LLM |
+
+**SELECTION — per type of work.** The task's `workType` (and/or `contract.flow`/`contract.model`, the existing per-task overrides) selects the worker kind, so the same journey can route a `spec` task to one kind and an `implementation` task to another. The mapping is configuration (like the flow chains), with the driver free to choose within the allowed kinds — never outside them.
+
+**THE DRIVER'S EXTENSION POINT.** The driver's dispatch step resolves a worker kind through the registry and invokes the module; the driver NEVER hardcodes a worker (adding a kind = data + a module — no core change). This is the extension seam: **the journey decides WHAT and WHY; Ann's context packet supplies WHAT THE JOB NEEDS; the worker kind supplies the HOW.**
+
+**Correlation for debugging:** the worker's own session (pi's `--session`, or the pane) is linked to Ann's **operational log** by the correlation id (the `12/05` work) — so a run in the log points at the worker transcript that produced it, and vice versa.
 
 ## Risks (named, not hidden)
 
