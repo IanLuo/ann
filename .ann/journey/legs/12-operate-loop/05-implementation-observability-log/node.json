@@ -1,0 +1,21 @@
+{
+  "id": "12-operate-loop/05-implementation-observability-log",
+  "contract": {
+    "intent": "THE DETAILED OPERATIONAL LOG — observability for debugging. A self-driving loop is undebuggable without a detailed, structured log of what ann is doing, why, and how it ended. Add a JSONL OPERATIONAL log: one line per engine action with a WALL-CLOCK timestamp (the journey events are DATE-only), the actor/provenance, the phase/command, the inputs (redacted), the outcome, the duration, any error, and a CORRELATION ID (run · task · turn) so a whole run can be reconstructed. It complements — never duplicates — the existing op-log (model calls) and the trace/transcript (the step-level transcript in the event log): this is the third view (commands · phases · decisions · stops, with time). Design record: .agents/plan/self-driving-design.md.",
+    "acceptanceCriteria": [
+      "A STRUCTURED OPERATIONAL LOG exists (JSONL, one line per action): timestamp (wall-clock) · actor/provenance · phase/command · inputs (redacted) · outcome · duration · error? · a correlation id (run · task · turn). A whole run must be reconstructable from it (what ran, in what order, why it stopped)",
+      "INTEGRATION POINTS are covered: every CLI/command invocation + its outcome; the driver's turns (the proposal, the CODE validation verdict — accepted / refused-by-name, the stop/route reason); the frame's phases (materialize · gate · activate · execute · verify · confirm · commit); the gate writes; the provider calls' outcomes. Wire it at the SAME chokepoints the engine already centralizes (do not sprinkle ad-hoc logging)",
+      "INVARIANTS: logging NEVER throws into the flow (fail-open — a log failure warns and the engine proceeds; observability must never break the engine); REDACTION per NFR-SEC-1 (no api key, no headers, no secrets; prompts NOT verbatim — chars/hash, as the op-log already does); BOUNDED (rotation/size caps, never unbounded growth); the log is SCRATCH, never the record — the journey events stay the record and the log is gitignored (like logs/)",
+      "A DEBUG READ exists: an `ann log`-style read (tail/filter by task · run · level · time) — and the same over the service for the page — so debugging needs no raw-file spelunking; the read is a derived view over the log file",
+      "Tests: the log line's shape; the redaction (a planted secret never appears); no-throw (a log write failure does not break the command); the rotation/bound; the correlation id reconstructing a run; the read's filters. Full suite green (745 baseline + additions), npm run typecheck clean, ann check/verify clean; committed with evidence"
+    ],
+    "workType": "implementation",
+    "targetAreas": [
+      "src/flow",
+      "src/surface",
+      "src/commands",
+      "src/e2e"
+    ]
+  },
+  "createdAt": "2026-09-14"
+}
