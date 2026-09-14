@@ -1,3 +1,4 @@
 {"at":"2026-09-14","type":"created","note":"spawned by bookkeeper (agent)"}
 {"at":"2026-09-14","type":"submitted","gate":"grill","note":"submitted for the grill gate (agent)"}
 {"at":"2026-09-14","type":"extended","note":"MEASURED EVIDENCE (the diagnosis): GET /api/whatsnext = 3.32s / 3.31s / 3.30s over three runs (consistent, not a hiccup); every other read 5ms-7ms; ann check 3.54s (of which ann validate 1.87s); version 2 - the page blocks on every load. Code point: src/surface/approve.ts:163 whatsNext() - operatorIntegrityBlockers() on EVERY read."}
+{"at":"2026-09-14","type":"confirmed","gate":"grill","note":"accepted (ianluo)"}
