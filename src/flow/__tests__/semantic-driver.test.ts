@@ -13,7 +13,7 @@ import {
 } from '../semantic-driver.js';
 import { StepLookup } from '../chain.js';
 import { LlmAbility } from '../types.js';
-import { OpLog, readOpLog } from '../../abilities/obs/log.js';
+import { newTrace, readOpLog } from '../../abilities/obs/log.js';
 
 /**
  * THE SEMANTIC DRIVER (flow/semantic-driver, leg 12 task 02) — the LLM loop whose
@@ -464,11 +464,11 @@ describe('the operational log (leg 12/05) — turns, verdicts and the stop reaso
     readyTask();
     const c = commands();
     const { llm } = fakeLlm([call('detail', { id: TASK }), JSON.stringify({ stop: 'the human decides the gate', reason: 'a gate is a human call' })]);
-    const log = new OpLog(root, 'run-cmd', 'test', { secrets: [] });
+    const log = newTrace(root, { actor: 'test', layer: 'L3', component: 'surface/cli' }, { secrets: [] });
     const r = await drive(c, llm, { log });
     expect(r.stop).toBe('model-stop');
 
-    const lines = readOpLog(root, { run: 'run-1', tail: 1000 }).lines;
+    const lines = readOpLog(root, { trace: log.traceId, tail: 1000 }).lines;
     const turns = lines.filter((l) => l.event === 'turn');
     // one line per turn: the accepted+executed proposal, then the model's stop proposal
     expect(turns.map((l) => [l.turn, l.command, l.outcome])).toEqual([
@@ -480,8 +480,10 @@ describe('the operational log (leg 12/05) — turns, verdicts and the stop reaso
     const stop = lines.find((l) => l.event === 'stop');
     expect(stop?.outcome).toBe('model-stop');
     expect(String((stop?.inputs as { routeReason?: string }).routeReason)).toContain('the human decides the gate');
-    // every line is correlated to the driver's own runId (the frame's phases inherit it)
-    for (const l of lines) expect(l.runId).toBe('run-1');
+    // ONE CHAIN: the turns read at L2 · flow/semantic-driver, under the caller's trace
+    for (const l of lines.slice(0, 2)) expect(l.runId).toBe('run-1');
+    expect(turns.every((l) => l.layer === 'L2' && l.component === 'flow/semantic-driver#turn')).toBe(true);
+    expect(new Set(lines.map((l) => l.traceId))).toEqual(new Set([log.traceId]));
   });
 
   it('records the boundary DRAFT as a turn — what the model produced, ground on the epic, nothing written', async () => {
@@ -498,10 +500,10 @@ describe('the operational log (leg 12/05) — turns, verdicts and the stop reaso
         rationale: 'the epic asks for it',
       }),
     ]);
-    const log = new OpLog(root, 'run-cmd', 'test', { secrets: [] });
+    const log = newTrace(root, { actor: 'test', layer: 'L3', component: 'surface/cli' }, { secrets: [] });
     const r = await drive(c, llm, { log });
     expect(r.stop).toBe('boundary-drafted');
-    const lines = readOpLog(root, { run: 'run-1' }).lines;
+    const lines = readOpLog(root, { trace: log.traceId }).lines;
     const turn = lines.find((l) => l.event === 'turn');
     expect(turn).toMatchObject({ turn: 1, command: 'draft', outcome: 'drafted' });
     expect((turn?.inputs as { draft?: string }).draft).toBe('02-leg/01-implementation-the-beta-slice');
@@ -513,10 +515,10 @@ describe('the operational log (leg 12/05) — turns, verdicts and the stop reaso
     readyTask();
     const c = commands();
     const { llm } = fakeLlm([call('gate!', { id: TASK, gate: 'grill', decision: 'accept' })]);
-    const log = new OpLog(root, 'run-cmd', 'test', { secrets: [] });
+    const log = newTrace(root, { actor: 'test', layer: 'L3', component: 'surface/cli' }, { secrets: [] });
     const r = await drive(c, llm, { log });
     expect(r.stop).toBe('refused-proposal');
-    const refuse = readOpLog(root, { run: 'run-1', level: 'warn' }).lines.find((l) => l.event === 'turn');
+    const refuse = readOpLog(root, { trace: log.traceId, level: 'warn' }).lines.find((l) => l.event === 'turn');
     expect(refuse?.outcome).toBe('refused:forbidden-call');
     expect(refuse?.command).toBe('gate!');
     expect(refuse?.level).toBe('warn');

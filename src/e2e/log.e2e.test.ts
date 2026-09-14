@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, mkdirSync, cpSync, readFileSync, rmSync, symli
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync, execFileSync } from 'node:child_process';
-import { OpLog, logPath, readOpLog } from '../abilities/obs/log.js';
+import { logPath, newTrace, readOpLog } from '../abilities/obs/log.js';
 import { startService } from '../surface/service.js';
 
 /**
@@ -111,17 +111,36 @@ describe('a REAL command leaves a real line — and the run reconstructs from it
     expect(statusLine?.inputs).toEqual({ argv: [], json: false });
     expect(String(statusLine?.ts)).toMatch(/^\d{4}-\d{2}-\d{2}T/);
 
-    // ONE run = the write's line, then the command's, all under one runId
-    const runId = lines.find((l) => l.command === 'append!')?.runId;
-    expect(typeof runId).toBe('string');
-    const run = lines.filter((l) => l.runId === runId);
-    expect(run.map((l) => [l.event, l.command, l.outcome])).toEqual([
-      ['write', 'append!', 'ok'],
-      ['command', 'append!', 'ok'],
+    // ONE TRACE = the whole chain, ACROSS THE LAYERS: the store (L0) committed it, the
+    // command layer (L1) reported the write, the surface (L3) ran the invocation. In the
+    // FILE they appear in the order they were WRITTEN (the invocation's line closes last).
+    const traceId = String(lines.find((l) => l.command === 'append!')?.traceId);
+    expect(traceId).toMatch(/^trace-/);
+    const chain = lines.filter((l) => l.traceId === traceId);
+    expect(chain.map((l) => [l.seq, l.layer, l.component, l.event, l.command, l.outcome])).toEqual([
+      [2, 'L0', 'store', 'write', 'store.appendEvent', 'written'],
+      [3, 'L1', 'commands', 'write', 'append!', 'ok'],
+      [1, 'L3', 'surface/cli', 'command', 'append!', 'ok'],
     ]);
+    // …and the READ reorders it into the chain's own timeline: the entry (seq 1, reserved
+    // when the invocation opened) first, then what it caused — the L0 store, the L1 write.
+    const timeline = JSON.parse(cli(root, ['log', '--json', '--trace', traceId, '--tail', '100']).stdout) as {
+      lines: Array<{ seq: number; layer: string; component: string; command?: string; event: string; outcome: string }>;
+      traces: number;
+    };
+    expect(timeline.traces).toBe(1);
+    expect(timeline.lines.map((l) => [l.seq, l.layer, l.command])).toEqual([
+      [1, 'L3', 'append!'],
+      [2, 'L0', 'store.appendEvent'],
+      [3, 'L1', 'append!'],
+    ]);
+    // the tree links: the invocation is the root span (s1); both layers hang under it
+    expect([chain[0].spanId, chain[1].spanId, chain[2].spanId]).toEqual(['s3', 's2', 's1']);
+    expect([chain[0].parentSpanId, chain[1].parentSpanId, chain[2].parentSpanId]).toEqual(['s1', 's1', undefined]);
     // the write line addresses the node it wrote, and carries its redacted args
-    expect(run[0].taskId).toBe(TASK);
-    expect(JSON.stringify(run[0].inputs)).toContain('waiting for the runner');
+    expect(chain[1].taskId).toBe(TASK);
+    expect(JSON.stringify(chain[1].inputs)).toContain('waiting for the runner');
+    expect(chain[0].taskId).toBe(TASK); // the store line too — the same location
     // file order IS the order things happened (the log is append-only, ts non-decreasing)
     const ts = lines.map((l) => Date.parse(String(l.ts)));
     expect([...ts].sort((a, b) => a - b)).toEqual(ts);
@@ -205,8 +224,18 @@ describe('the debug read — `ann log`, no raw-file spelunking', () => {
     const runId = String(lines[0].runId);
 
     const page = JSON.parse(cli(root, ['log', '--json', '--tail', '100']).stdout) as { total: number; shown: number; lines: Array<Record<string, unknown>> };
-    expect(page.total).toBe(5); // 3 invocations + the write + the refused write
-    expect(page.lines.map((l) => l.event)).toEqual(['command', 'write', 'command', 'write', 'command']);
+    // 3 invocations + the write's 2 layers (L1 + the L0 store line) + the refused write's 2
+    expect(page.total).toBe(6);
+    // the file's own order == the traces' order: within one invocation the store (L0)
+    // commits first, the command layer (L1) reports the write, the surface (L3) closes
+    expect(page.lines.map((l) => [l.event, l.layer])).toEqual([
+      ['command', 'L3'],
+      ['write', 'L0'],
+      ['write', 'L1'],
+      ['command', 'L3'],
+      ['write', 'L1'],
+      ['command', 'L3'],
+    ]);
 
     const oneRun = JSON.parse(cli(root, ['log', '--json', '--run', runId]).stdout) as { shown: number; lines: Array<Record<string, unknown>> };
     expect(oneRun.shown).toBe(1);
@@ -215,6 +244,7 @@ describe('the debug read — `ann log`, no raw-file spelunking', () => {
     // --task matches the WRITES that address the node AND the invocations that name it
     const byTask = JSON.parse(cli(root, ['log', '--json', '--task', TASK]).stdout) as { lines: Array<Record<string, unknown>> };
     expect(byTask.lines.map((l) => [l.event, l.command])).toEqual([
+      ['write', 'store.appendEvent'],
       ['write', 'append!'],
       ['command', 'append!'],
       ['write', 'append!'],
@@ -261,7 +291,7 @@ describe('the service route — GET /api/log, the same file, one reader', () => 
   it('serves the operational log over HTTP with the CLI’s own handler', async () => {
     cli(root, ['status']);
     const runId = String(linesOf(root)[0].runId);
-    const svc = await startService({ root, host: '127.0.0.1', port: 0, log: new OpLog(root, 'run-serve-test', 'server', { secrets: [] }) });
+    const svc = await startService({ root, host: '127.0.0.1', port: 0, log: newTrace(root, { actor: 'server', layer: 'L3', component: 'surface/service' }, { secrets: [] }) });
     try {
       const res = await fetch(`${svc.url}/api/log?run=${runId}&tail=5`);
       expect(res.status).toBe(200);
@@ -271,7 +301,8 @@ describe('the service route — GET /api/log, the same file, one reader', () => 
       // the request itself is recorded — server actor, its OWN http runId, status + duration
       const served = readOpLog(root, {}).lines.find((l) => String(l.command).startsWith('GET /api/log'));
       expect(served).toMatchObject({ actor: 'server', outcome: 'http-200' });
-      expect(String(served?.runId)).toMatch(/^http-/);
+      expect(String(served?.runId)).toMatch(/^http-/); // a request is its OWN chain AND run
+      expect(String(served?.traceId)).toMatch(/^http-/);
       expect(typeof served?.durationMs).toBe('number');
       // and a bad filter is the CLI's own usage error, over HTTP 400
       expect((await fetch(`${svc.url}/api/log?since=yesterday`)).status).toBe(400);

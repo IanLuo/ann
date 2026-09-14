@@ -83,8 +83,9 @@ export interface FrameDeps {
   root: string;
   registry: StepLookup;
   abilities: Abilities;
-  /** The OPERATIONAL LOG (leg 12/05) — optional: when present, every phase opens and
-   *  closes a line correlated by taskId, so a run's shape is visible with its timing. */
+  /** The OPERATIONAL LOG (leg 12/05 + its rework) — optional: when present, the frame runs
+   *  in its own span (`L2` · `flow/frame`), each phase in a child span, so a run's shape,
+   *  its layer and its place in the trace are all visible with their timing. */
   log?: OpLog;
 }
 
@@ -104,8 +105,9 @@ export class Frame {
    *  execution order) — the depth-route conditional (`envision when idea-validate is
    *  ambiguous`) is that case. Reseeded every run(); the last (accepting) run wins. */
   private gateResults = new Map<string, StepOutput>();
-  /** The operational log for THIS run (task-correlated) + the open phase. */
+  /** The operational log for THIS run (task-correlated) + the open phase's span. */
   private runLog?: OpLog;
+  private phaseLog?: OpLog;
   private openPhase?: { name: string; at: number };
 
   constructor(deps: FrameDeps) {
@@ -124,27 +126,45 @@ export class Frame {
   async run(taskId: string): Promise<FrameResult> {
     this.gateResults = new Map();
     const base: FrameResult = { taskId, stop: 'not-ready', phase: 'materialize', problems: [], chain: [], outcomes: [], verifyCycles: 0 };
-    // THE PHASE SPINE (AC-2): materialize opens here; every transition closes the open
-    // phase (with its outcome + durationMs) and opens the next. The wrapper below closes
-    // the LAST phase with the frame's own stop, so each phase has an entry and an exit.
-    this.runLog = this.log?.child({ taskId });
+    const startedAt = Date.now();
+    // THE PHASE SPINE (AC-2): the FRAME opens its own span (`L2` · `flow/frame`) inside
+    // whatever trace called it, every transition closes the open phase (with its outcome +
+    // durationMs) and opens the next IN ITS OWN SPAN, and the run's OWN span is closed by a
+    // stop line carrying the frame's stop — so each phase has an entry and an exit, the
+    // run reads as a tree under the command that started it, and every span id in the file
+    // belongs to a line.
+    // the run's own span RESERVES its place: its single line is the frame STOP (written at
+    // the end), and the chain must still read command → frame → phases → writes
+    this.runLog = this.log?.span({ layer: 'L2', component: 'flow/frame', taskId, reserve: true });
     this.enterPhase(base, 'materialize');
     try {
       const r = await this.runInner(taskId, base);
       this.closePhase(stopOutcome(r.stop));
+      this.runLog?.line({
+        event: 'stop',
+        command: 'frame',
+        phase: r.phase,
+        outcome: r.stop,
+        level: r.stop === 'failed' || r.stop === 'escalated' ? 'warn' : 'info',
+        durationMs: Date.now() - startedAt,
+        ...(r.problems.length ? { inputs: { problems: r.problems } } : {}),
+      });
       return r;
     } catch (e) {
       this.closePhase('failed');
+      this.runLog?.line({ event: 'stop', command: 'frame', outcome: 'threw', level: 'error', durationMs: Date.now() - startedAt, error: { code: 'throw', message: (e as Error).message } });
       throw e;
     }
   }
 
-  /** One phase transition: EXIT the open phase (`prev`), ENTER `name` — logged in pairs. */
+  /** One phase transition: EXIT the open phase (`prev`), ENTER `name` — logged in pairs,
+   *  each phase its own span (a child of the frame run's). */
   private enterPhase(result: FrameResult, name: string, prev = 'ok'): FrameResult {
     this.closePhase(prev);
     result.phase = name;
     this.openPhase = { name, at: Date.now() };
-    this.runLog?.line({ event: 'phase', phase: name, outcome: 'enter' });
+    this.phaseLog = this.runLog?.span({ component: `flow/frame#${name}` });
+    this.phaseLog?.line({ event: 'phase', phase: name, outcome: 'enter' });
     return result;
   }
 
@@ -152,7 +172,9 @@ export class Frame {
     const open = this.openPhase;
     if (!open) return;
     this.openPhase = undefined;
-    this.runLog?.line({ event: 'phase', phase: open.name, outcome, durationMs: Date.now() - open.at });
+    const log = this.phaseLog;
+    this.phaseLog = undefined;
+    log?.line({ event: 'phase', phase: open.name, outcome, durationMs: Date.now() - open.at });
   }
 
   private async runInner(taskId: string, base: FrameResult): Promise<FrameResult> {

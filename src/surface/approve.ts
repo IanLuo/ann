@@ -229,7 +229,7 @@ export class Approver {
         commands: ctx.commands,
         root: this.root,
         registry: buildStepRegistry(),
-        abilities: buildAbilities(getAdapter(undefined, this.root, ctx.log.runId), { interact: channel }),
+        abilities: buildAbilities(getAdapter(undefined, this.root, { runId: ctx.log.runId, traceId: ctx.log.traceId }), { interact: channel }),
         log: ctx.log,
       });
     } catch (e) {

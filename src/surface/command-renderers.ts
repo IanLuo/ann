@@ -218,9 +218,16 @@ export interface LogValue {
   filtered: number;
   shown: number;
   skipped: number;
+  traces?: number;
   filters: Record<string, unknown>;
   lines: Array<{
     ts: string;
+    seq: number;
+    traceId: string;
+    spanId?: string;
+    parentSpanId?: string;
+    layer: 'L0' | 'L1' | 'L2' | 'L3';
+    component?: string;
     level: 'info' | 'warn' | 'error';
     event: string;
     actor: string;
@@ -700,19 +707,23 @@ export const RENDERS: Record<string, Renderer> = {
 
   read: (value) => `${(value as { content: string }).content}\n`,
 
-  /* log — the OPERATIONAL LOG tail (leg 12/05): one line per action, the correlation id
-   *  first so a run reads as a run. Filtered/tail metadata goes to stderr (DIAG). */
+  /* log — the OPERATIONAL LOG view (leg 12/05 + its rework): one line per action,
+   *  CHAIN · LAYER · ORDER first so a trace reads as a timeline, then what happened.
+   *  Filtered/tail metadata goes to stderr (DIAG). */
   log: (value) => {
     const v = value as LogValue;
     if (!v.lines.length) return block([`no operational-log lines match (${v.file})`]);
     const lines = v.lines.map((l) => {
       const bits = [
+        String(l.seq ?? '').padStart(4),
         l.ts,
-        l.level.toUpperCase().padEnd(5),
+        l.layer.padEnd(2),
+        (l.component ?? '').padEnd(24),
         (l.event ?? '?').padEnd(7),
-        (l.command ?? l.phase ?? '').padEnd(22),
+        (l.command ?? l.phase ?? '').padEnd(24),
         l.outcome.padEnd(18),
-        l.runId,
+        l.traceId,
+        l.spanId !== undefined ? `span=${l.spanId}${l.parentSpanId ? `<-${l.parentSpanId}` : ''}` : '',
         l.taskId ? `task=${l.taskId}` : '',
         l.turn !== undefined ? `turn=${l.turn}` : '',
         l.durationMs !== undefined ? `${l.durationMs}ms` : '',
@@ -810,7 +821,7 @@ export const DIAG: Record<string, DiagFn> = {
     const active = Object.entries(v.filters ?? {}).filter(([, f]) => f !== undefined && f !== '');
     return [
       `  ${v.file}`,
-      `  ${v.shown} of ${v.filtered} matching line(s) (${v.total} read${v.skipped ? `, ${v.skipped} unparseable` : ''})${active.length ? ` — filters: ${active.map(([k, f]) => `${k}=${String(f)}`).join(' ')}` : ''}`,
+      `  ${v.shown} of ${v.filtered} matching line(s) (${v.total} read, ${v.traces ?? 0} trace(s)${v.skipped ? `, ${v.skipped} unparseable` : ''})${active.length ? ` — filters: ${active.map(([k, f]) => `${k}=${String(f)}`).join(' ')}` : ''}`,
     ];
   },
   check: (value) => {

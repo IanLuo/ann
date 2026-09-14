@@ -13,7 +13,7 @@ import { Store, resolveStoreLocation, storeJourneyDir } from '../store/store.js'
 import type { StoreLocation, JourneyEvent, ResultItem, TaskDetail } from '../store/store.js';
 import { scanDocsDir, loadDocsManifest, writeDocsManifest, docsIndexFresh, docSha } from '../store/docs.js';
 import { Commands, CommandResult, GOAL_SEED_GUARD, nodeIdOf } from '../commands/index.js';
-import { OpLog, newRunId, readOpLog, parseSince, DEFAULT_TAIL, type LogLevel } from '../abilities/obs/log.js';
+import { OpLog, newTrace, newRunId, readOpLog, parseSince, DEFAULT_TAIL, isLayerId, type LogLevel, type LayerId } from '../abilities/obs/log.js';
 import { ALLOWLIST_NAMES } from '../commands/capture.js';
 import {
   loadProviderRegistry,
@@ -153,9 +153,11 @@ export interface CliContext {
 export function createContext(root: string, args: string[], opts: { json?: boolean; runId?: string; log?: OpLog } = {}): CliContext {
   const who = process.env.RECORDED_BY || 'agent';
   const json = opts.json ?? false;
-  // THE CORRELATION ROOT: one runId per invocation (a caller may supply its own — the
-  // driver's run, a service boot) and one log handle; children narrow taskId/runId.
-  const log = opts.log ?? new OpLog(root, opts.runId ?? newRunId('cmd'), who);
+  // THE TRACE ROOT (THE REWORK): one invocation = ONE causal chain. A caller may supply
+  // the handle it already owns (the service's request trace, the driver's run); otherwise
+  // the invocation opens a fresh trace, and everything below — the frame, the driver, the
+  // commands, the store — inherits its `traceId` through `span()` by construction.
+  const log = opts.log ?? newTrace(root, { actor: who, layer: 'L3', component: 'surface/cli', ...(opts.runId ? { runId: opts.runId } : {}) });
   const envStore = (process.env.ANN_STORE ?? '').trim();
   let _target: { loc: StoreLocation; readOnly: boolean } | undefined;
   const target = (): { loc: StoreLocation; readOnly: boolean } => {
@@ -175,7 +177,9 @@ export function createContext(root: string, args: string[], opts: { json?: boole
   let _store: Store | undefined;
   const store = new Proxy({} as Store, {
     get(_t, prop) {
-      const s = (_store ??= new Store(target().loc, { readOnly: target().readOnly }));
+      // THE L0 SPAN: the store's own handle — one span for the store, whose lines say
+      // `layer: 'L0'`, `component: 'store'` (WHERE in the stack the bytes were written).
+      const s = (_store ??= new Store(target().loc, { readOnly: target().readOnly, log: log.span({ layer: 'L0', component: 'store' }) }));
       const v = Reflect.get(s, prop as never);
       return typeof v === 'function' ? (v as () => unknown).bind(s) : v;
     },
@@ -183,7 +187,9 @@ export function createContext(root: string, args: string[], opts: { json?: boole
   let _commands: Commands | undefined;
   const commands = new Proxy({} as Commands, {
     get(_t, prop) {
-      const c = (_commands ??= new Commands(store, who, undefined, log));
+      // THE L1 SPAN: one handle for the command layer — its write lines say
+      // `layer: 'L1'`, `component: 'commands'`.
+      const c = (_commands ??= new Commands(store, who, undefined, log.span({ layer: 'L1', component: 'commands' })));
       const v = Reflect.get(c, prop as never);
       return typeof v === 'function' ? (v as () => unknown).bind(c) : v;
     },
@@ -263,7 +269,7 @@ const COMMANDS: Array<{ name: string; args: string; desc: string }> = [
   { name: 'check', args: '', desc: 'integrity + gates + docs-manifest freshness + the journey state line · alias --check' },
   { name: 'verify', args: '', desc: 'the DRIFT read — reconciles the log\'s recorded claims vs filesystem/git reality (D1-D5 + store-external); exits 1 on any drift · alias --verify' },
   { name: 'ledger', args: '', desc: 'the write-rev ledger — rev + per-node last-write rev/at + hashes (the store-external integrity guard) · alias --ledger' },
-  { name: 'log', args: '[--task <id>] [--run <runId>] [--level <level>] [--since <iso|30m>] [--tail <n>]', desc: 'THE OPERATIONAL LOG READ (leg 12/05 — observability for debugging): the scratch JSONL action log (logs/operation.jsonl, GITIGNORED — never the record) as a derived tail — one line per engine action (command · write · frame phase · driver turn · stop) carrying a WALL-CLOCK ts (the journey events are date-only), the actor/provenance, the REDACTED inputs, the outcome, the duration and the CORRELATION ID (runId · taskId · turn); a whole run reconstructs from one --run. Filters: --task <id> · --run <runId> · --level info|warn|error (that level and above) · --since <iso|30m|2h|1d> · --tail <n> (default 50) · alias --log' },
+  { name: 'log', args: '[--trace <traceId>] [--layer L0..L3] [--task <id>] [--run <runId>] [--level <level>] [--since <iso|30m>] [--tail <n>]', desc: 'THE OPERATIONAL LOG READ (leg 12/05 + its rework — observability for debugging): the scratch JSONL action log (logs/operation.jsonl, GITIGNORED — never the record) as a derived view. EVERY LINE CARRIES ITS CHAIN, ITS LAYER AND ITS PLACE: traceId (ONE causal chain — a command · a request · a drive, inherited by every nested span) · spanId/parentSpanId (the nesting: a command opens a frame, a frame opens phases) · layer (L0 store · L1 commands · L2 flow · L3 surface/abilities) + component (the module that produced it) · seq (the order WITHIN the trace — clock-independent) · ts (wall-clock) · actor · runId · taskId/turn · the REDACTED inputs · the outcome · the duration · the error. WITH --trace the chain reads as ONE TIMELINE, ordered by seq (what ran, where in the stack, in what order). Filters: --trace <id> · --layer L0|L1|L2|L3 · --task <id> · --run <runId> · --level info|warn|error (that level and above) · --since <iso|30m|2h|1d> · --tail <n> (default 50) · alias --log' },
   { name: 'specs', args: '', desc: 'the docs contract stack — the manifest → docs/<name>.md @ content-sha (upstream/referrers prose from the file head) · alias --specs' },
   { name: 'providers', args: '', desc: 'the adapter registry: providers, models, defaults (env-resolved, api key masked) · alias --providers' },
   { name: 'config', args: '', desc: 'the user config file (~/.ann/config.json; apiKey masked) · alias --config' },
@@ -826,22 +832,29 @@ export const HANDLERS: Record<string, Handler> = {
       })),
   }),
 
-  /* log — the OPERATIONAL LOG read (leg 12/05): the derived tail over the scratch JSONL
-   *  action log. A READ: it never writes, never touches the store, and never throws on a
-   *  torn line (the log module counts those). */
+  /* log — the OPERATIONAL LOG read (leg 12/05 + its rework): the derived view over the
+   *  scratch JSONL action log. A READ: it never writes, never touches the store, and never
+   *  throws on a torn line (the log module counts those). The two DIMENSIONS the grill
+   *  rejection named select the CHAIN and the LAYER; `--trace` reads that chain as ONE
+   *  timeline (ordered by seq, never by clock). */
   log: (ctx) => {
     const take = (args: string[], flag: string) => takeFlag(args, flag);
-    const task = take(ctx.args.slice(1), '--task');
+    const trace = take(ctx.args.slice(1), '--trace');
+    const layer = take(trace.rest, '--layer');
+    const task = take(layer.rest, '--task');
     const run = take(task.rest, '--run');
     const level = take(run.rest, '--level');
     const since = take(level.rest, '--since');
     const tail = take(since.rest, '--tail');
     const USAGE =
-      'usage: ann log [--task <id>] [--run <runId>] [--level info|warn|error] [--since <iso|30m>] [--tail <n>]';
+      'usage: ann log [--trace <traceId>] [--layer L0|L1|L2|L3] [--task <id>] [--run <runId>] [--level info|warn|error] [--since <iso|30m>] [--tail <n>]';
     const stray = strayFlag(tail.rest);
     if (stray) return usage(`${USAGE} — unknown flag ${stray}`);
     if (level.value !== undefined && !['info', 'warn', 'error'].includes(level.value)) {
       return usage(`${USAGE} — --level must be info|warn|error (got '${level.value}')`);
+    }
+    if (layer.value !== undefined && !isLayerId(layer.value)) {
+      return usage(`${USAGE} — --layer must be L0|L1|L2|L3 (got '${layer.value}')`);
     }
     if (since.value !== undefined && parseSince(since.value) === undefined) {
       return usage(`${USAGE} — --since must be an ISO instant or a window like 30m|2h|1d (got '${since.value}')`);
@@ -856,6 +869,8 @@ export const HANDLERS: Record<string, Handler> = {
     return {
       ok: true,
       value: readOpLog(ctx.root, {
+        ...(trace.value ? { trace: trace.value } : {}),
+        ...(layer.value ? { layer: layer.value as LayerId } : {}),
         ...(task.value ? { task: task.value } : {}),
         ...(run.value ? { run: run.value } : {}),
         ...(level.value ? { level: level.value as LogLevel } : {}),
@@ -937,7 +952,7 @@ export const HANDLERS: Record<string, Handler> = {
       commands: ctx.commands,
       root: ctx.root,
       registry: buildStepRegistry(),
-      abilities: buildAbilities(getAdapter(undefined, ctx.root, ctx.log.runId)),
+      abilities: buildAbilities(getAdapter(undefined, ctx.root, { runId: ctx.log.runId, traceId: ctx.log.traceId })),
       log: ctx.log,
     });
     const r = await frame.run(taskId);
@@ -961,7 +976,7 @@ export const HANDLERS: Record<string, Handler> = {
       commands: ctx.commands,
       root: ctx.root,
       registry: buildStepRegistry(),
-      abilities: buildAbilities(getAdapter(undefined, ctx.root, ctx.log.runId)),
+      abilities: buildAbilities(getAdapter(undefined, ctx.root, { runId: ctx.log.runId, traceId: ctx.log.traceId })),
       log: ctx.log,
     });
     // the exit mirrors run!: only a COMPLETED continue-leg run exits 0; the refusals and
@@ -1010,7 +1025,7 @@ export const HANDLERS: Record<string, Handler> = {
     }
     let handle: Awaited<ReturnType<typeof startService>>;
     try {
-      handle = await startService({ root: ctx.root, host, port, log: ctx.log.child({ actor: 'server' }) });
+      handle = await startService({ root: ctx.root, host, port, log: ctx.log.span({ actor: 'server', layer: 'L3', component: 'surface/service' }) });
     } catch (e) {
       return boom('serve-bind', `serve could not bind ${host}:${port} — ${(e as Error).message}`);
     }
@@ -1235,7 +1250,7 @@ async function goalSeedInteractive(ctx: CliContext): Promise<Outcome> {
   const idea = ctx.args.slice(2).join(' ').trim();
   const gate = ctx.commands.goalSeedGate();
   if (!gate.allow) return boom('goal-seed-gate', `not-empty: ${gate.blocker ?? GOAL_SEED_GUARD}`);
-  const r = await runGoalSeed(ctx.commands, buildAbilities(getAdapter(undefined, ctx.root, ctx.log.runId)), { idea });
+  const r = await runGoalSeed(ctx.commands, buildAbilities(getAdapter(undefined, ctx.root, { runId: ctx.log.runId, traceId: ctx.log.traceId })), { idea });
   if (!r.ok) {
     // emit() prints the error once (stderr in text, the error doc in JSON) — never twice
     return { ok: false, error: { code: r.error.code, message: r.error.blocker, text: `${r.error.code}: ${r.error.blocker}` }, exitCode: 1 };
@@ -1269,7 +1284,7 @@ async function specInteractive(ctx: CliContext): Promise<Outcome> {
   }
   const mode: 'produce' | 'amend' = amend ? 'amend' : 'produce';
   const name = positional[0] ?? DEFAULT_SPEC_NAME;
-  const r = await runSpecSession(docsSpecsTarget(ctx.root), buildAbilities(getAdapter(undefined, ctx.root, ctx.log.runId)), { mode, name });
+  const r = await runSpecSession(docsSpecsTarget(ctx.root), buildAbilities(getAdapter(undefined, ctx.root, { runId: ctx.log.runId, traceId: ctx.log.traceId })), { mode, name });
   if (!r.ok) {
     // emit() prints the error once (stderr in text, the error doc in JSON) — never twice
     return { ok: false, error: { code: r.error.code, message: r.error.blocker, text: `${r.error.code}: ${r.error.blocker}` }, exitCode: 1 };

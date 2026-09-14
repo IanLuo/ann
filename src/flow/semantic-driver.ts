@@ -400,9 +400,10 @@ export interface DriverDeps {
   resume?: DriverCheckpoint;
   /** The run id (default: generated). */
   runId?: string;
-  /** The OPERATIONAL LOG (leg 12/05) — optional: when present, every TURN records its
-   *  proposal + the CODE verdict, and every stop records its route reason, all under the
-   *  driver's own runId (the frame's phases inside the run inherit it). */
+  /** The OPERATIONAL LOG (leg 12/05 + its rework) — optional: when present, the driver runs
+   *  in its own span INSIDE the caller's trace (`L2` · `flow/semantic-driver`, `runId` = the
+   *  drive run), every TURN in a child span, so the chain `request → drive → turn → frame →
+   *  provider` reads as one timeline with its layers. */
   log?: OpLog;
 }
 
@@ -410,10 +411,10 @@ export async function runSemanticDriver(deps: DriverDeps): Promise<DriverResult>
   const commands = deps.commands;
   const provider = deps.provider ?? 'default';
   const runId = deps.runId ?? `drive-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
-  /** THE CORRELATION (AC-1): the driver's own run — every turn, every stop, and every
-   *  frame phase of a `run!` inside it shares this runId, so `ann log --run <runId>` is
-   *  the whole run: what ran, in what order, and why it stopped. */
-  const log = deps.log?.child({ runId });
+  /** THE SPAN (leg 12/05 rework): the driver works INSIDE the trace that started it (the
+   *  CLI invocation, the HTTP request) — same traceId, its own span, `runId` = the drive
+   *  run. So `ann log --trace <id>` holds the request AND the drive it caused, in order. */
+  const log = deps.log?.span({ layer: 'L2', component: 'flow/semantic-driver', runId, reserve: true });
   const channel = new PresentOnlyInteract();
   const executed: DriverExecuted[] = [];
   const writes: string[] = [];
@@ -498,7 +499,8 @@ export async function runSemanticDriver(deps: DriverDeps): Promise<DriverResult>
     const drafted = buildDraft(raw, { root: deps.root, commands, leg: first.advance.leg, boundary, runId, provider, model: deps.model, turn: turns });
     // THE BOUNDARY TURN — the draft attempt and its verdict (a draft that fails the
     // contract check is never offered for approval: nothing is written).
-    log?.line({
+    const draftLog = log?.span({ component: 'flow/semantic-driver#draft', reserve: true });
+    draftLog?.line({
       event: 'turn',
       turn: turns,
       command: 'draft',
@@ -530,12 +532,15 @@ export async function runSemanticDriver(deps: DriverDeps): Promise<DriverResult>
     turns++;
     const obs = observationOf(derive(commands), turns, executed);
     const turnStarted = Date.now();
+    // THE TURN'S OWN SPAN: a turn that runs the frame opens it inside THIS span, so the
+    // phases hang off the turn that asked for them.
+    const turnLog = log?.span({ component: 'flow/semantic-driver#turn', reserve: true });
 
     let text: string;
     try {
       text = await deps.llm.complete({ prompt: loopPrompt(obs, maxTurns), system: DRIVER_SYSTEM, ...(deps.model ? { model: deps.model } : {}) });
     } catch (e) {
-      log?.line({
+      turnLog?.line({
         event: 'turn',
         turn: turns,
         outcome: 'provider-failure',
@@ -550,7 +555,7 @@ export async function runSemanticDriver(deps: DriverDeps): Promise<DriverResult>
     if (!valid.ok) {
       // THE CODE VERDICT — REFUSED, by name (unknown-call · forbidden-call · bad-args ·
       // unparseable): recorded with the code and the reason, never clamped.
-      log?.line({
+      turnLog?.line({
         event: 'turn',
         turn: turns,
         outcome: `refused:${valid.refusal.code}`,
@@ -567,7 +572,7 @@ export async function runSemanticDriver(deps: DriverDeps): Promise<DriverResult>
       };
     }
     if (valid.proposal.kind === 'stop') {
-      log?.line({
+      turnLog?.line({
         event: 'turn',
         turn: turns,
         outcome: 'model-stop',
@@ -579,13 +584,13 @@ export async function runSemanticDriver(deps: DriverDeps): Promise<DriverResult>
 
     const call = valid.proposal;
     const outcome = call.call === 'run!'
-      ? await execRun(deps, channel, call.args.id ?? obs.frontmost?.task, turns, log)
+      ? await execRun(deps, channel, call.args.id ?? obs.frontmost?.task, turns, turnLog)
       : execReadOrPresent(commands, deps.recordedBy, call, turns);
     executed.push(outcome.executed);
     writes.push(...outcome.executed.wrote);
     // THE TURN LINE — the proposal, the CODE verdict (accepted → executed / refused by
     // the command layer) and what it wrote, in one line.
-    log?.line({
+    turnLog?.line({
       event: 'turn',
       turn: turns,
       command: call.call,
@@ -665,7 +670,7 @@ function execReadOrPresent(commands: Commands, recordedBy: string, call: DriverP
  * yet) and lands there. A run that still reaches a live gate decision lands the same way:
  * the channel's refusal is caught, and the journey is left exactly as the frame wrote it.
  */
-async function execRun(deps: DriverDeps, channel: PresentOnlyInteract, taskId: string | undefined, turn: number, log?: OpLog): Promise<CallOutcome> {
+async function execRun(deps: DriverDeps, channel: PresentOnlyInteract, taskId: string | undefined, turn: number, turnLog?: OpLog): Promise<CallOutcome> {
   const commands = deps.commands;
   if (!taskId) {
     return { kind: 'refused', executed: { turn, call: 'run!', args: {}, output: null, wrote: [] }, reason: 'no frontmost-ready task to run' };
@@ -699,7 +704,9 @@ async function execRun(deps: DriverDeps, channel: PresentOnlyInteract, taskId: s
   }
 
   try {
-    const frame = new Frame({ commands, root: deps.root, registry: deps.registry, abilities: { llm: deps.llm, interact: channel }, ...(log ? { log: log.child({ taskId }) } : {}) });
+    // the frame opens its OWN span inside the turn that asked for the run (no intermediate
+    // handle: every span that appears as a parent has a line of its own)
+    const frame = new Frame({ commands, root: deps.root, registry: deps.registry, abilities: { llm: deps.llm, interact: channel }, ...(turnLog ? { log: turnLog } : {}) });
     const r = await frame.run(taskId);
     const wrote = wroteNow();
     const executed: DriverExecuted = { turn, call: 'run!', args, output: { stop: r.stop, phase: r.phase, problems: r.problems, advance: r.advance }, wrote };

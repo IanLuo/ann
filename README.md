@@ -58,7 +58,7 @@ session (unchanged); a bad/absent target fails closed at startup (named error, e
 | `check` | `` | integrity + gates + docs-manifest freshness + the journey state line · alias --check | `yes` |
 | `verify` | `` | the DRIFT read — reconciles the log's recorded claims vs filesystem/git reality (D1-D5 + store-external); exits 1 on any drift · alias --verify | `yes` |
 | `ledger` | `` | the write-rev ledger — rev + per-node last-write rev/at + hashes (the store-external integrity guard) · alias --ledger | `yes` |
-| `log` | `[--task <id>] [--run <runId>] [--level <level>] [--since <iso|30m>] [--tail <n>]` | THE OPERATIONAL LOG READ (leg 12/05 — observability for debugging): the scratch JSONL action log (logs/operation.jsonl, GITIGNORED — never the record) as a derived tail — one line per engine action (command · write · frame phase · driver turn · stop) carrying a WALL-CLOCK ts (the journey events are date-only), the actor/provenance, the REDACTED inputs, the outcome, the duration and the CORRELATION ID (runId · taskId · turn); a whole run reconstructs from one --run. Filters: --task <id> · --run <runId> · --level info|warn|error (that level and above) · --since <iso|30m|2h|1d> · --tail <n> (default 50) · alias --log | `yes` |
+| `log` | `[--trace <traceId>] [--layer L0..L3] [--task <id>] [--run <runId>] [--level <level>] [--since <iso|30m>] [--tail <n>]` | THE OPERATIONAL LOG READ (leg 12/05 + its rework — observability for debugging): the scratch JSONL action log (logs/operation.jsonl, GITIGNORED — never the record) as a derived view. EVERY LINE CARRIES ITS CHAIN, ITS LAYER AND ITS PLACE: traceId (ONE causal chain — a command · a request · a drive, inherited by every nested span) · spanId/parentSpanId (the nesting: a command opens a frame, a frame opens phases) · layer (L0 store · L1 commands · L2 flow · L3 surface/abilities) + component (the module that produced it) · seq (the order WITHIN the trace — clock-independent) · ts (wall-clock) · actor · runId · taskId/turn · the REDACTED inputs · the outcome · the duration · the error. WITH --trace the chain reads as ONE TIMELINE, ordered by seq (what ran, where in the stack, in what order). Filters: --trace <id> · --layer L0|L1|L2|L3 · --task <id> · --run <runId> · --level info|warn|error (that level and above) · --since <iso|30m|2h|1d> · --tail <n> (default 50) · alias --log | `yes` |
 | `specs` | `` | the docs contract stack — the manifest → docs/<name>.md @ content-sha (upstream/referrers prose from the file head) · alias --specs | `yes` |
 | `providers` | `` | the adapter registry: providers, models, defaults (env-resolved, api key masked) · alias --providers | `yes` |
 | `config` | `` | the user config file (~/.ann/config.json; apiKey masked) · alias --config | `yes` |
@@ -185,32 +185,49 @@ answer).
 ### The operational log — observability for debugging
 
 A self-driving loop is undebuggable without a detailed log of what ann is doing, why, and
-how it ended (design record: `.agents/plan/self-driving-design.md`). The engine writes one
+how it ended (design record: `.agents/plan/self-driving-design.md`; dimensions added by the
+12/05 grill rework: *"tracing id and layer id … timeline, location"*). The engine writes one
 JSONL line per ACTION to **`<project>/logs/operation.jsonl`** — the SAME gitignored scratch
 home as the provider op-log, never the record (the journey events stay the record) — and
 `ann log` is the derived read over it (plus `GET /api/log` for the page).
 
 ```
-{ts, level, event, actor, runId, taskId?, turn?, command?, phase?, inputs?, outcome, durationMs?, error?}
+{ts, seq, traceId, spanId, parentSpanId?, layer, component, event, level, actor,
+ runId, taskId?, turn?, command?, phase?, inputs?, outcome, durationMs?, error?}
 ```
 
-* **ts** — a WALL-CLOCK ISO instant (the journey's `at` is DATE-only: time lives here).
-* **event** — `command` (one per CLI/HTTP invocation) · `write` (one per mutator, a
-  REFUSAL included) · `phase` (the frame: materialize · gate:grill · activate · execute ·
-  verify · gate:confirm · commit · advance — enter + exit with the duration) · `turn` (the
-  driver's proposal + the CODE verdict — accepted / refused-by-name) · `stop` (the route
-  reason it ended on).
-* **correlation** — `runId` (a command invocation · a driver run · an HTTP request · a
-  service boot) · `taskId` · `turn`: `ann log --run <runId>` reconstructs a whole run in
-  order. The op-log lines carry the SAME `runId`, so the two files join: one `--run` spans
-  the model calls, the driver's turns, the frame's phases and the writes.
-* **inputs** — REDACTED (NFR-SEC-1): a value under a secret-looking key is dropped, a
-  value matching a known secret (env-derived) is dropped, and a prompt/completion is
-  stored as `{chars, sha}` — never verbatim.
-* **invariants** — logging NEVER throws into the flow (a write failure warns and the
-  engine proceeds); the file is BOUNDED (rotates to `.1` at 4 MiB — 2×cap on disk, max);
-  the scratch home ignores ITSELF (`logs/.gitignore`), so no `git add -A` can sweep it
-  into the record.
+**Of ANY line you can say: which chain, which layer, and where in the timeline it sits.**
+
+* **which CHAIN** — `traceId` is ONE causal chain (a CLI invocation · an HTTP request · a
+  drive · a service boot); every NESTED span inherits it, so `ann log --trace <id>` is the
+  whole chain. `spanId` / `parentSpanId` nest it: a request opens a drive, the drive a turn,
+  the turn the frame, the frame its phases — a tree, with every parent span id also a line
+  (no dangling links). `runId` stays the RUN/ATTEMPT inside the chain (a `drive-…` run
+  differs from the `http-…` chain that caused it).
+* **which LAYER** — `layer` (`L0` store · `L1` commands · `L2` flow · `L3` surface/abilities)
+  and `component` (the module: `store` · `commands` · `flow/frame` · `flow/semantic-driver` ·
+  `surface/cli` · `surface/service`) say WHERE in the stack the line happened.
+* **where in TIME** — `seq` is the action's PLACE in the chain (1-based, clock-independent):
+  a container (the entry · a drive run · a turn · a frame run) reserves its place when it
+  opens and carries it on the line it writes when it ends, so the chain reads cause → effect
+  — `ann log --trace <id>` is a timeline, not an unwind. `ts` stays the wall-clock instant.
+* **which LOCATION in the journey** — `taskId` · `phase` · `turn`.
+* **event** — `command` (one per CLI/HTTP invocation) · `write` (one per mutator AND one per
+  store commit — L1 and L0 respectively; a REFUSAL included) · `phase` (the frame:
+  materialize · gate:grill · activate · execute · verify · gate:confirm · commit · advance —
+  enter + exit with the duration) · `turn` (the driver's proposal + the CODE verdict —
+  accepted / refused-by-name) · `stop` (the route reason a frame or a drive ended on).
+* **inputs** — REDACTED (NFR-SEC-1): a value under a secret-looking key is dropped, a value
+  matching a known secret (env-derived) is dropped, and a prompt/completion is stored as
+  `{chars, sha}` — never verbatim.
+* **invariants** — logging NEVER throws into the flow (a write failure warns and the engine
+  proceeds); the file is BOUNDED (rotates to `.1` at 4 MiB — 2×cap on disk, max); the
+  scratch home ignores ITSELF (`logs/.gitignore`), so no `git add -A` can sweep it into the
+  record.
+* **the read** — `ann log [--trace <id>] [--layer L0|L1|L2|L3] [--task <id>] [--run <runId>]
+  [--level info|warn|error] [--since <iso|30m>] [--tail <n>]` (the same over the service:
+  `GET /api/log?trace=&layer=&task=&run=&level=&since=&tail=`). The provider op-log carries
+  the SAME `traceId`, so the model calls are the leaf of the same timeline.
 
 ## Architecture (current code)
 

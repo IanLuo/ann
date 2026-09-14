@@ -4,6 +4,7 @@ import { join, basename, resolve, sep } from 'node:path';
 import { getVOCAB } from './vocab.js';
 import { blobSha, stripMarkers } from './sha.js';
 import { loadDocsManifest, scanDocsDir, writeDocsManifest } from './docs.js';
+import type { OpLog } from '../abilities/obs/log.js';
 
 export interface JourneyEvent {
   at: string;
@@ -339,6 +340,11 @@ export class Store {
   private ledger?: Ledger;              // the write-rev ledger (absent = no baseline yet)
   private ledgerCorrupt = false;        // ledger file exists but is unparseable → fail-closed
   private unparseableNodes = new Set<string>(); // events.jsonl that failed load-parsing
+  /** THE L0 LOG HANDLE (leg 12/05 rework) — the store's OWN span (`layer: 'L0'`,
+   *  `component: 'store'`), optional: it records each committed write with the write-rev
+   *  the ledger advanced to, so a reader can see the BOTTOM of the stack, not only the
+   *  command that asked for the write. Never consulted for state; fail-open. */
+  private readonly log?: OpLog;
 
   /** Construct over a session target. `location` is a raw path (normalized by
    *  resolveStoreLocation — the ANN_STORE surface) or an already-resolved StoreLocation.
@@ -346,10 +352,11 @@ export class Store {
    *  read-write, unchanged behavior. `readOnly` marks a NON-ACTIVE target so its write
    *  methods refuse (layer b). A location with no legs/ throws the NAMED StoreLocationError
    *  — a bad/absent store fails closed, never a silent empty tree. */
-  constructor(location: string | StoreLocation, opts: { readOnly?: boolean } = {}) {
+  constructor(location: string | StoreLocation, opts: { readOnly?: boolean; log?: OpLog } = {}) {
     const loc: StoreLocation = typeof location === 'string' ? resolveStoreLocation(location) : location;
     this.kind = loc.kind;
     this.readOnly = opts.readOnly ?? false;
+    this.log = opts.log;
     this.root = loc.root;
     this.journeyDir = storeJourneyDir(loc);
     this.legs = join(this.journeyDir, 'legs'); // v12 layout: all ann files under the journey dir
@@ -1251,6 +1258,21 @@ export class Store {
     appendFileSync(join(node.dir, 'events.jsonl'), JSON.stringify(event) + '\n');
     entry.events = prospective;
     this.recordWrite(node.id);
+    // THE L0 LINE — the store's reach of the stack: what landed, and the rev the write-rev
+    // ledger advanced to. The L1 line (commands) says what was ASKED; this says what the
+    // single writer DID.
+    this.log?.line({
+      event: 'write',
+      command: 'store.appendEvent',
+      taskId: node.id,
+      inputs: {
+        node: node.id,
+        type: event.type,
+        ...(typeof event.gate === 'string' ? { gate: event.gate } : {}),
+        rev: this.ledger?.rev,
+      },
+      outcome: 'written',
+    });
   }
 
   /* ══ THE STORE WRITE-REV LEDGER (.ann/journey/.ledger.json) — the store-external
@@ -1533,6 +1555,8 @@ export class Store {
     }
     // record the exact bytes ann wrote — the ledger never re-reads node.json on spawn
     this.recordWrite(id, nodeJson);
+    // THE L0 LINE for a node creation (node.json + the `created` event, one act)
+    this.log?.line({ event: 'write', command: 'store.spawn', taskId: id, inputs: { node: id, bytes: nodeJson.length }, outcome: 'written' });
   }
 
   /** GATE-1/GATE-2 (F-AC15): tasks only — leg roots carry no events (v8).

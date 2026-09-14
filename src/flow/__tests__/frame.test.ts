@@ -7,7 +7,7 @@ import { Commands } from '../../commands/index.js';
 import { Frame, FrameResult } from '../frame.js';
 import { ChainEntry, StepLookup } from '../chain.js';
 import { Abilities, Intent, ResearchFinding, Step, StepContext, StepOutput } from '../types.js';
-import { OpLog, logPath, readOpLog } from '../../abilities/obs/log.js';
+import { logPath, newTrace, readOpLog } from '../../abilities/obs/log.js';
 
 /**
  * THE FRAME (core-design §4) — the RESUMABLE COORDINATOR. These tests pin the four
@@ -464,12 +464,12 @@ describe('the operational log (leg 12/05) — the phase spine', () => {
   it('opens and closes every phase it enters, with a duration, under one correlation id', async () => {
     const c = setup();
     chainFile([]); // the empty-chain flow: materialize → grill → activate → execute → verify (wait)
-    const log = new OpLog(root, 'run-phases', 'test', { secrets: [] });
+    const log = newTrace(root, { actor: 'test', layer: 'L3', component: 'surface/cli' }, { secrets: [] });
     const f = new Frame({ commands: c, root, registry: registryOf([]), abilities: abilities(new ScriptedInteract(['accept'])), log });
     const r = await f.run(TASK);
     expect(r.stop).toBe('blocked-waiting');
 
-    const phases = readOpLog(root, { run: 'run-phases', tail: 1000 }).lines.filter((l) => l.event === 'phase');
+    const phases = readOpLog(root, { trace: log.traceId, tail: 1000 }).lines.filter((l) => l.event === 'phase');
     // entry then exit per phase, in the order the frame entered them; the LAST phase
     // closes with the frame's own stop (a wait, not an 'ok').
     expect(phases.map((l) => `${l.phase}:${l.outcome}`)).toEqual([
@@ -484,13 +484,22 @@ describe('the operational log (leg 12/05) — the phase spine', () => {
       'verify:enter',
       'verify:blocked',
     ]);
-    // every line is correlated to the TASK and timed (an exit carries durationMs ≥ 0)
+    // every line is correlated to the TASK, LAYERED (L2 · flow/frame), ORDERED and timed
     for (const l of phases) {
       expect(l.taskId).toBe(TASK);
-      expect(l.runId).toBe('run-phases');
+      expect(l.layer).toBe('L2');
+      expect(String(l.component)).toMatch(/^flow\/frame/);
       if (l.outcome === 'enter') expect(l.durationMs).toBeUndefined();
       else expect(l.durationMs).toBeGreaterThanOrEqual(0);
     }
+    // the ORDER is the chain's own (seq 1..N, monotonic) — independent of the clock
+    const seqs = readOpLog(root, { trace: log.traceId, tail: 1000 }).lines.map((l) => l.seq);
+    expect(seqs).toEqual([...seqs].sort((a, b) => a - b));
+    expect(new Set(seqs).size).toBe(seqs.length);
+    // …and the phases NEST under the frame's own span (a tree, not a flat list)
+    const frameSpan = readOpLog(root, { trace: log.traceId, tail: 1000 }).lines.find((l) => l.component === 'flow/frame');
+    expect(frameSpan?.spanId).toBe('s2');
+    expect(phases[0].parentSpanId).toBe(frameSpan?.spanId);
   });
 
   it('a frame with NO log writes nothing (the log is optional — never a hard dependency)', async () => {

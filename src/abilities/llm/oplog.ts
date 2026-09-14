@@ -9,9 +9,11 @@ import { join } from 'node:path';
 
 export interface OpLogEntry {
   at: string;
-  /** THE CORRELATION ID (leg 12/05): the run that made the call — the SAME `runId` the
-   *  operational log (abilities/obs/log.ts) records, so `ann log --run <runId>` and this
-   *  file can be joined into ONE run. Absent when the caller had no run (a library use). */
+  /** THE CORRELATION (leg 12/05 + its rework): the SAME `traceId` (the causal chain) and
+   *  `runId` (the run within it) the operational log (abilities/obs/log.ts) records, so
+   *  `ann log --trace <id>` and this file join into ONE timeline — the provider calls are
+   *  the model-call leaf of the chain. Absent when the caller had no run (a library use). */
+  traceId?: string;
   runId?: string;
   provider: string;
   model: string;

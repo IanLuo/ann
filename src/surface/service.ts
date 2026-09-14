@@ -2,7 +2,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { createContext, resolveDispatch, jsonDoc, outcomeOf, type Outcome } from './handlers.js';
 import { APPROVE_BUSY, Approver, whatsNext, type ApproveProposal } from './approve.js';
 import { DRIVE_BUSY, driveJourney, type DriveOptions } from './drive.js';
-import { OpLog, newRunId } from '../abilities/obs/log.js';
+import { newRunId, newTrace, type OpLog } from '../abilities/obs/log.js';
 import { UI_HTML } from './ui.js';
 
 /**
@@ -58,9 +58,10 @@ export interface ServiceOptions {
    *  (flags > env > general config > builtin); the service holds no default. */
   host: string;
   port: number;
-  /** The OPERATIONAL LOG handle (leg 12/05) — the service's own correlation root; every
-   *  request records one line under it and the handlers share it (the SAME runId the
-   *  `ann serve` invocation logged). Absent means no operational logging. */
+  /** The OPERATIONAL LOG handle (leg 12/05) — the SERVE BOOT's own trace (the caller
+   *  passes the `ann serve` invocation's handle); every HTTP REQUEST then opens its OWN
+   *  trace under it (`http-…`), so one request and everything it causes is one chain.
+   *  Absent means no operational logging. */
   log?: OpLog;
 }
 
@@ -79,18 +80,19 @@ export async function startService(opts: ServiceOptions): Promise<ServiceHandle>
   const host = opts.host;
   const port = opts.port;
   const root = opts.root;
-  // THE SERVICE'S CORRELATION ROOT (AC-4): the page's reads/writes and the operator
-  // actions are recorded under one runId (the `ann serve` invocation's), all in the
-  // SAME scratch log the CLI writes — `ann log --run <that runId>` is the daemon's day.
-  const log = opts.log ?? new OpLog(root, newRunId('serve'), 'server');
+  // THE SERVICE'S TRACE ROOT (AC-4 + its rework): the daemon boot opens a trace; each
+  // REQUEST opens its own (`http-…`) so `ann log --trace <id>` is ONE request and all it
+  // caused — the page's read, the gate write, the approve's frame phases, the drive's
+  // turns, the provider calls (joined by traceId in logs/provider.jsonl).
+  const log = opts.log ?? newTrace(root, { actor: 'server', layer: 'L3', component: 'surface/service' });
   // THE SINGLE-FLIGHT (care b): ONE approve at a time, per service instance. The slot is
   // claimed SYNCHRONOUSLY in the route, before the request's first await (the body read).
   const approver = new Approver(root);
   const server = createServer((req, res) => {
     const started = Date.now();
-    // ONE runId PER REQUEST: the request's line and everything it causes (the gate write,
-    // the approve's frame phases, the driver's turns) correlate to each other.
-    const reqLog = log.child({ runId: newRunId('http') });
+    // ONE TRACE PER REQUEST: the request's line and everything it causes (the gate write,
+    // the approve's frame phases, the driver's turns, the provider calls) is ONE chain.
+    const reqLog = log.span({ traceId: newRunId('http'), layer: 'L3', component: 'surface/service' });
     route(root, approver, reqLog, req, res)
       .catch((e: unknown) => {
         // Fail-closed: an unexpected throw is a named error doc, never a stack trace.
@@ -276,11 +278,12 @@ async function route(root: string, approver: Approver, log: OpLog, req: Incoming
   if (name !== 'gates' && name !== 'whatsnext' && !READ_ROUTES.has(name)) return sendJson(res, 404, jsonDoc(notExposed(name)));
 
   // THE OPERATIONAL LOG'S READ (leg 12/05, AC-4) — the SAME `ann log` handler the CLI
-  // dispatches, over the SAME scratch file (never a second reader): `?task=&run=&level=
-  // &since=&tail=` are passed through as the command's own flags.
+  // dispatches, over the SAME scratch file (never a second reader): the filters
+  // (`?trace=&layer=&task=&run=&level=&since=&tail=`) pass through as the command's own
+  // flags, so the page can pull ONE CHAIN (`trace`) or ONE LAYER (`layer`).
   if (name === 'log') {
     const argv = ['log'];
-    for (const q of ['task', 'run', 'level', 'since', 'tail'] as const) {
+    for (const q of ['trace', 'layer', 'task', 'run', 'level', 'since', 'tail'] as const) {
       const v = url.searchParams.get(q);
       if (v !== null && v !== '') argv.push(`--${q}`, v);
     }

@@ -302,8 +302,9 @@ export class Commands {
      *  It is the ONLY thing the capture mechanism injects: the allowlist, the guards,
      *  the sha and the write all stay the engine's. */
     private readonly captureEnv: CaptureEnv = defaultCaptureEnv,
-    /** The operational log (leg 12/05) — optional: absent means no operational logging
-     *  (unit tests that do not care), present means every write below is recorded. */
+    /** The operational log (leg 12/05 + its rework) — optional: absent means no operational
+     *  logging (unit tests that do not care); present means every write below is recorded at
+     *  `layer: 'L1'` (the caller supplies that span — see createContext). */
     private readonly log?: OpLog,
   ) {}
 
@@ -316,11 +317,16 @@ export class Commands {
    */
   private loggedWrite<T>(name: string, args: unknown[], fn: () => CommandResult<T>): CommandResult<T> {
     const started = Date.now();
+    // The line is emitted ON THE COMMAND LAYER'S SPAN (`L1` · `commands`, supplied by
+    // createContext), so the write's `spanId` is a node that EXISTS in the log and its
+    // `parentSpanId` is the caller's span (the CLI entry, the frame's own span) — the
+    // trace reads as a tree with no dangling parents.
+    const log = this.log;
     let r: CommandResult<T>;
     try {
       r = fn();
     } catch (e) {
-      this.log?.line({
+      log?.line({
         event: 'write',
         command: `${name}!`,
         level: 'error',
@@ -332,7 +338,7 @@ export class Commands {
       });
       throw e;
     }
-    this.log?.line({
+    log?.line({
       event: 'write',
       command: `${name}!`,
       level: r.ok ? 'info' : 'warn',

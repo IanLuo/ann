@@ -48,14 +48,15 @@ afterEach(() => {
 
 const oplog = () => readFileSync(join(root, 'logs', 'provider.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
 
-describe('the op-log carries the run correlation id (leg 12/05)', () => {
-  it('records the runId the caller supplied, and omits it when there is no run', async () => {
+describe('the op-log carries the trace/run correlation (leg 12/05 + its rework)', () => {
+  it('records the CHAIN and the run the caller supplied, and omits them when there is none', async () => {
     fetchMock.mockResolvedValue(jsonResponse({ choices: [{ message: { content: 'ok' } }] }));
-    await new OpenAICompatibleAdapter(entry(), defaults, root, 'drive-run-1').complete('hello');
+    await new OpenAICompatibleAdapter(entry(), defaults, root, { traceId: 'trace-1', runId: 'drive-run-1' }).complete('hello');
     await new OpenAICompatibleAdapter(entry(), defaults, root).complete('hello');
     const [withRun, withoutRun] = oplog();
-    expect(withRun).toMatchObject({ runId: 'drive-run-1', provider: 'test', ok: true });
+    expect(withRun).toMatchObject({ traceId: 'trace-1', runId: 'drive-run-1', provider: 'test', ok: true });
     expect(withoutRun.runId).toBeUndefined();
+    expect(withoutRun.traceId).toBeUndefined();
   });
 });
 

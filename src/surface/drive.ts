@@ -72,7 +72,7 @@ export async function driveJourney(root: string, opts: DriveOptions = {}, log?: 
   const runId = opts.runId ?? newRunId('drive');
   let llm;
   try {
-    llm = providerLlm(getAdapter(opts.provider, root, runId), opts.model);
+    llm = providerLlm(getAdapter(opts.provider, root, { runId, traceId: ctx.log.traceId }), opts.model);
   } catch (e) {
     return refusal(503, 'provider-config', `drive refused: the provider could not be resolved — ${(e as Error).message}`);
   }

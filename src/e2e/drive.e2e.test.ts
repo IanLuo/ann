@@ -31,6 +31,9 @@ const SECRET = 'sk-e2e-driver-secret-value';
 const OLD = '2026-08-20';
 const LEG = '01-alpha';
 const TASK = `${LEG}/01-first`;
+/** A SECOND ready task — never activated by the other tests, so the frame RUNS and WRITES
+ *  (activate + the verify wait) when the multi-layer test drives it. */
+const TASK2 = `${LEG}/02-second`;
 const CONTRACT = JSON.stringify({ intent: 'do the thing', acceptanceCriteria: ['the thing is done'], workType: 'implementation' });
 
 /* ── the stub provider (no live call, no external network) ────────────────── */
@@ -102,6 +105,7 @@ function loopJourney(root: string): void {
   for (const [id, contract, events] of [
     [LEG, JSON.stringify({ intent: 'the alpha leg (the epic)', acceptanceCriteria: ['the leg delivers'], workType: 'implementation' }), []],
     [TASK, CONTRACT, [{ at: '2026-08-27', type: 'created' }, { at: '2026-08-27', type: 'submitted', gate: 'grill' }, { at: '2026-08-27', type: 'confirmed', gate: 'grill' }]],
+    [TASK2, CONTRACT, [{ at: '2026-08-27', type: 'created' }, { at: '2026-08-27', type: 'submitted', gate: 'grill' }, { at: '2026-08-27', type: 'confirmed', gate: 'grill' }]],
   ] as const) {
     mkdirSync(dir(id), { recursive: true });
     writeFileSync(join(dir(id), 'node.json'), JSON.stringify({ id, contract: JSON.parse(contract), createdAt: '2026-08-27' }));
@@ -261,3 +265,113 @@ describe('POST /api/drive — the semantic driver over the service (leg 12 task 
     expect(opLines.every((l) => /^drive-/.test(String(l.runId)))).toBe(true);
   });
 });
+
+describe('THE MULTI-LAYER TRACE (leg 12/05 rework) — one chain, every layer, in order', () => {
+  /** The CLI's own `ann log` read — the timeline a reader sees, not a test-side assembly. */
+  const readTrace = (traceId: string, extra: string[] = []): { lines: LogLine[]; traces: number; filtered: number } =>
+    JSON.parse(
+      spawnSync(process.execPath, [CLI, 'log', '--json', '--trace', traceId, ...extra, '--tail', '1000'], {
+        cwd: root,
+        encoding: 'utf8',
+        env: { ...process.env, ANN_PROJECT: root, ANN_CONFIG: join(root, '.e2e-config.json') },
+      }).stdout,
+    ) as { lines: LogLine[]; traces: number; filtered: number };
+
+  it('reconstructs request → drive turn → frame phases → writes → the provider call, by traceId + layer + seq', async () => {
+    // ONE drive whose `run!` executes the frame on a task NEVER activated before, so the
+    // frame really writes — the chain is real, not assembled by hand
+    stub.script(JSON.stringify({ call: 'run!', args: { id: TASK2 }, reason: 'the frontmost-ready is ready' }));
+    const r = await post(`${srv.url}/api/drive`, {});
+    expect(r.status).toBe(200);
+
+    const raw = readFileSync(join(root, 'logs', 'operation.jsonl'), 'utf8')
+      .split('\n')
+      .filter(Boolean)
+      .map((l) => JSON.parse(l) as LogLine);
+    const req = raw.filter((l) => l.command === 'POST /api/drive').pop()!;
+    const traceId = String(req.traceId);
+    const page = readTrace(traceId);
+    const chain = page.lines;
+
+    // ONE CHAIN: everything the request caused is inside it, and the read agrees
+    expect(page.traces).toBe(1);
+    expect(chain.length).toBeGreaterThan(10); // request + turn + phases + writes + store
+    expect(chain.length).toBeLessThan(raw.length); // …and it is not the whole file
+
+    // WHICH LAYER · WHICH COMPONENT: the surface took the request, flow drove and ran the
+    // frame, the command layer wrote, the store committed — all four layers, ONE chain
+    expect(new Set(chain.map((l) => l.layer))).toEqual(new Set(['L3', 'L2', 'L1', 'L0']));
+    const components = new Set(chain.map((l) => String(l.component)));
+    expect(components).toContain('surface/service');
+    expect(components).toContain('flow/semantic-driver#turn');
+    expect([...components].some((c) => c.startsWith('flow/frame'))).toBe(true);
+    expect(components).toContain('commands');
+    expect(components).toContain('store');
+
+    // WHERE IN TIME: the read is the chain's own order — 1..N, no gap, no repeat — and it
+    // is a CAUSE→EFFECT order: the entry (its place reserved when the request opened, its
+    // line written when it closed) first, then the turn, the phases, the writes, the store
+    expect(chain.map((l) => Number(l.seq))).toEqual(Array.from({ length: chain.length }, (_, i) => i + 1));
+    const story = chain.map((l) => `${l.layer}:${String(l.component)}${l.phase ? `#${String(l.phase)}` : ''}`);
+    expect(story[0]).toBe('L3:surface/service');
+    const turnAt = story.findIndex((o) => o.startsWith('L2:flow/semantic-driver#turn'));
+    const firstPhase = story.findIndex((o) => o.startsWith('L2:flow/frame'));
+    const firstWrite = story.findIndex((o) => o === 'L1:commands');
+    const firstStore = story.findIndex((o) => o === 'L0:store');
+    expect(turnAt).toBeGreaterThan(0);
+    expect(turnAt).toBeLessThan(firstPhase); // the turn asked for the call…
+    expect(firstPhase).toBeLessThan(firstWrite); // …the frame ran its phases…
+    expect(firstPhase).toBeLessThan(firstStore); // …and only then did bytes land
+    expect(firstWrite).toBeGreaterThan(-1);
+    expect(story).toContain('L2:flow/frame#verify'); // the phases are named, not just counted
+    expect(chain.some((l) => l.event === 'stop' && String(l.component) === 'flow/frame')).toBe(true);
+
+    // THE NESTING: spanId/parentSpanId link the chain as a tree — the request is the root,
+    // the drive span its child, every span id in the trace belongs to a line in the trace
+    const bySpan = new Map(chain.map((l) => [String(l.spanId), l]));
+    expect(req.parentSpanId).toBeUndefined(); // the request is the chain's root span
+    const driveSpan = chain.find((l) => l.event === 'stop' && l.component === 'flow/semantic-driver')!;
+    const turnSpan = chain.find((l) => l.event === 'turn')!;
+    const frameSpan = chain.find((l) => l.event === 'stop' && l.component === 'flow/frame')!;
+    const phaseSpan = chain.find((l) => String(l.component).startsWith('flow/frame#'))!;
+    // request → the drive → the turn → the frame → its phases: each nested in its cause
+    expect(driveSpan.parentSpanId).toBe(String(req.spanId));
+    expect(turnSpan.parentSpanId).toBe(String(driveSpan.spanId));
+    expect(frameSpan.parentSpanId).toBe(String(turnSpan.spanId));
+    expect(phaseSpan.parentSpanId).toBe(String(frameSpan.spanId));
+    // every parent span id belongs to a line in the chain — no dangling links
+    for (const l of chain) if (l.parentSpanId !== undefined) expect(bySpan.has(String(l.parentSpanId))).toBe(true);
+
+    // THE PROVIDER CALL joins the SAME chain: the op-log line carries this traceId, so the
+    // model call is the leaf of this timeline (the abilities layer's own record)
+    const opLines = readFileSync(join(root, 'logs', 'provider.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l) as { traceId?: string; at: string });
+    expect(opLines[opLines.length - 1].traceId).toBe(traceId);
+
+    // THE LAYER FILTER narrows the same chain: L2 only, still in order
+    const flowOnly = readTrace(traceId, ['--layer', 'L2']);
+    expect(flowOnly.lines.length).toBeGreaterThan(0);
+    expect(flowOnly.lines.length).toBeLessThan(chain.length);
+    expect(flowOnly.lines.every((l) => l.layer === 'L2')).toBe(true);
+  });
+});
+
+/** The operational-log line, as the READ returns it (the fields this suite asserts on). */
+interface LogLine {
+  seq: number;
+  ts: string;
+  traceId: string;
+  spanId: string;
+  parentSpanId?: string;
+  layer: string;
+  component: string;
+  event: string;
+  level: string;
+  actor: string;
+  runId: string;
+  taskId?: string;
+  turn?: number;
+  command?: string;
+  phase?: string;
+  outcome: string;
+  durationMs?: number;
+}

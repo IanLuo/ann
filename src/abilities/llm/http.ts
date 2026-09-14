@@ -28,9 +28,10 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
     private readonly entry: ProviderEntry,
     private readonly defaults: ProviderDefaults,
     private readonly logRoot: string = process.cwd(),
-    /** The correlation id of the run making the calls (leg 12/05) — recorded on every
-     *  op-log line so the model calls join the operational log's run. */
-    private readonly runId?: string,
+    /** The correlation of the run making the calls (leg 12/05 + its rework) — the causal
+     *  CHAIN (`traceId`) and the run within it, recorded on every op-log line so the model
+     *  calls join the operational log's timeline. */
+    private readonly corr: { traceId?: string; runId?: string } = {},
   ) {
     const base = resolveSetting(entry.baseUrl, 'baseUrl');
     if (!base) {
@@ -165,7 +166,8 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
   private log(started: number, retries: number, model: string, maxTokens: number, prompt: string, completion: Completion): void {
     writeOpLog(this.logRoot, {
       at: new Date().toISOString(),
-      ...(this.runId ? { runId: this.runId } : {}),
+      ...(this.corr.traceId ? { traceId: this.corr.traceId } : {}),
+      ...(this.corr.runId ? { runId: this.corr.runId } : {}),
       provider: this.entry.id,
       model,
       promptChars: prompt.length,
