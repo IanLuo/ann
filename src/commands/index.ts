@@ -634,14 +634,21 @@ export class Commands {
   }
 
   /**
-   * THE TIGHTENED F-AC18 CLOSE PREDICATE (leg 12/03), in ONE place: `complete!` and the
-   * confirm-accept AUTO-CLOSE both call it, so "the accept closed it" and "complete!
-   * would close it" can never disagree. Two steps, both about ACTS:
-   *   1. the conclusion cites commit evidence (F-AC18, unchanged), and
+   * THE TIGHTENED F-AC18 CLOSE PREDICATE (leg 12/03; the FAIL side added by the leg 12/02
+   * rework), in ONE place: `complete!` and the confirm-accept AUTO-CLOSE both call it, so
+   * "the accept closed it" and "complete! would close it" can never disagree. Three
+   * steps, all about ACTS:
+   *   1. the conclusion cites commit evidence (F-AC18, unchanged),
    *   2. at least one CAPTURED pass is bound to a cited commit (the tightening): a
-   *      reported check is a claim, and a conclusion may no longer rest on one.
+   *      reported check is a claim, and a conclusion may no longer rest on one, and
+   *   3. NO CAPTURED FAILURE is recorded against a cited commit (the rework's addition):
+   *      asking only for a pass let a conclusion cite a commit holding a FAILED run and a
+   *      passed one and close on the pass — certifying bytes the record itself says failed.
    * Undefined = the evidence closes. The refusal is BY NAME — there is no reason-string
-   * escape hatch (a conclusion that rests on typed checks stays open).
+   * escape hatch (a conclusion that rests on typed checks stays open). The fail side is
+   * checked INSIDE this one predicate, so on every close path it speaks first: a failure
+   * on the bytes under review is the more fundamental problem than which AC named the act
+   * (the claim-level `claim-failed` still names a failure recorded against UNCITED bytes).
    */
   private closeEvidenceBlocker(id: string): { code: string; blocker: string } | undefined {
     if (!this.store.parentConcluded(id)) {
@@ -663,6 +670,13 @@ export class Commands {
       return {
         code: 'no-captured-pass',
         blocker: `${id}: the conclusion holds ${held} — a close needs a FACT, not a claim: a REPORTED check (--checks) is what the runner says, a CAPTURED one is what the engine ran. Run the verification: ann capture! ${id} '${ALLOWLIST_NAMES[0]}' (the closed allowlist: ${ALLOWLIST_NAMES.join(' · ')}), then cite the sha it ran against: ann evidence! ${id} <sha> --claims '[{"ac":"AC-1","check":"${ALLOWLIST_NAMES[0]}"}]'`,
+      };
+    }
+    const failedCited = this.store.capturedFailCited(id);
+    if (failedCited) {
+      return {
+        code: 'cited-check-failed',
+        blocker: `${id}: the conclusion CITES ${failedCited.sha} — the bytes under review — and the log holds a CAPTURED FAILURE on them: ${failedCited.command} → fail (exit ${failedCited.exitCode}) — ${failedCited.detail ?? 'no detail'}. A record may not certify bytes it recorded as failing, so the close refuses: fix the work, commit, and capture at the NEW sha (ann capture! ${id} '${failedCited.command}'), then re-record the conclusion citing that sha (ann evidence! ${id} <new-sha>). A failure bound to a commit the conclusion does NOT cite blocks nothing — say what it was in the note.`,
       };
     }
     return undefined;
@@ -1085,10 +1099,11 @@ export class Commands {
             claims: c.claims.length,
             unclaimed: c.unclaimed.length,
             checks: c.checks.length,
-            // BOUND = what actually closes the task (leg 12/03): a CAPTURED pass against
-            // a cited commit — the SAME reading `complete!` and the auto-close make, so a
-            // gate card never promises a close the predicate would refuse.
-            bound: this.store.capturedPassBound(id) ? 1 : 0,
+            // BOUND = what actually closes the task (leg 12/03; the fail side leg 12/02):
+            // a CAPTURED pass against a cited commit AND no CAPTURED failure on one — the
+            // SAME reading `complete!` and the auto-close make, so a gate card never
+            // promises a close the predicate would refuse.
+            bound: this.store.capturedPassBound(id) && this.store.capturedFailCited(id) === undefined ? 1 : 0,
           },
         });
       }

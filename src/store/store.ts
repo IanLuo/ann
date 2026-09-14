@@ -791,15 +791,18 @@ export class Store {
   }
 
   /**
-   * THE TIGHTENED F-AC18 PREDICATE (leg 12/03) — the record is a consequence, not a
-   * claim: `complete!` and the confirm-accept auto-close (both in Commands, one
-   * predicate) require a CAPTURED PASS bound to a cited commit.
+   * THE TIGHTENED F-AC18 PREDICATE (leg 12/03; the FAIL side added by the leg 12/02
+   * rework) — the record is a consequence, not a claim: `complete!` and the
+   * confirm-accept auto-close (both in Commands, one predicate) require a CAPTURED PASS
+   * bound to a cited commit AND no CAPTURED FAILURE on one (`capturedFailCited`).
    *
-   * The LATEST check per command governs (the rework reading): a failing re-run closes
-   * nothing even if an earlier run passed, and a passing re-run clears it. A reported
-   * check never satisfies this — a typed `pass` is a claim, and a claim is exactly what
-   * the close stopped accepting. `sha` must be one of the commits the conclusion cites:
-   * the bytes verified are the bytes under review.
+   * The LATEST check per command governs WHICH RUN is the one that passed (the rework
+   * reading): a failing re-run closes nothing even if an earlier run passed. The fail side
+   * reads the whole history on purpose — a pass at the SAME commit as a recorded failure
+   * is nondeterminism, not verification (see `capturedFailCited`). A reported check never
+   * satisfies this — a typed `pass` is a claim, and a claim is exactly what the close
+   * stopped accepting. `sha` must be one of the commits the conclusion cites: the bytes
+   * verified are the bytes under review.
    */
   capturedPassBound(id: string): boolean {
     const cited = new Set(this.citedCommits(id));
@@ -809,6 +812,27 @@ export class Store {
       if (c.source === 'captured' && c.result === 'pass' && c.sha && cited.has(c.sha)) return true;
     }
     return false;
+  }
+
+  /**
+   * A CAPTURED FAILURE recorded against bytes the conclusion CITES (leg 12/02 rework) —
+   * the other half of the close predicate, and the one the first form missed. Asking only
+   * for A captured pass let a conclusion cite a commit holding a FAILED `npm test` and a
+   * passed `npm run typecheck` and close on the second: the record certified bytes it had
+   * itself recorded as failing. `capturedPassBound` asks whether SOME act passed on the
+   * cited bytes; this asks whether ANY act failed on them, and the close requires both
+   * answers to be the ones a verified conclusion gives.
+   *
+   * The WHOLE history is read, not the latest run per command (which is what the pass side
+   * reads): `sha` names exact bytes, so a failure followed by a pass AT THE SAME COMMIT is
+   * nondeterminism, never verification — the one thing a close may not certify. A failure
+   * bound to a commit the conclusion does NOT cite is history: it blocks nothing, and the
+   * honest conclusion says so in its note. The remedy is always available and is the same
+   * act a rework already performs: fix the work, commit, capture at the NEW sha, cite that.
+   */
+  capturedFailCited(id: string): CheckView | undefined {
+    const cited = new Set(this.citedCommits(id));
+    return this.checksOf(id).find((c) => c.source === 'captured' && c.result === 'fail' && c.sha !== undefined && cited.has(c.sha));
   }
 
   /* ---------------------------------------------------------------- */

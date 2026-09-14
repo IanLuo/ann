@@ -168,46 +168,85 @@ const post = async (url: string, payload: unknown): Promise<Res> => {
   return { status: r.status, body: await r.text() };
 };
 
+/** A socket with its bytes ACCUMULATED — one reader per socket, so the 100-continue
+ *  barrier and the final response are read from the same stream, in order. */
+interface SocketReader {
+  until(test: (data: string) => boolean): Promise<string>;
+  ended(): Promise<string>;
+}
+function reader(socket: net.Socket): SocketReader {
+  let data = '';
+  const waiters: Array<{ test: (d: string) => boolean; resolve: (d: string) => void }> = [];
+  const done: Array<(d: string) => void> = [];
+  socket.setEncoding('utf8');
+  socket.on('data', (c: string) => {
+    data += c;
+    for (let i = waiters.length - 1; i >= 0; i--) if (waiters[i].test(data)) waiters.splice(i, 1)[0].resolve(data);
+  });
+  socket.on('end', () => { for (const r of done.splice(0)) r(data); });
+  return {
+    until: (test) => new Promise((resolve) => (test(data) ? resolve(data) : waiters.push({ test, resolve }))),
+    ended: () => new Promise((resolve) => done.push(resolve)),
+  };
+}
+
+/** The status + body of ONE HTTP response. */
+function parseResponse(raw: string): Res {
+  const status = Number(raw.split('\r\n')[0].split(' ')[1]);
+  const bodyStart = raw.indexOf('\r\n\r\n') + 4;
+  const rest = raw.slice(bodyStart);
+  // the response may be chunk-framed — take the first chunk's payload
+  const chunked = /^[0-9a-f]+\r\n/.exec(rest);
+  return { status, body: chunked ? rest.slice(chunked[0].length, rest.lastIndexOf('\r\n0\r\n')) : rest };
+}
+
 /**
- * TWO REQUESTS, BOTH IN FLIGHT — written on two ALREADY-CONNECTED sockets in the same tick,
- * so both bodies are buffered at the server before either is handled. That makes the
- * single-flight (care b) a property of the fixture, not of client-side scheduling luck: a
- * `fetch` pair races (the second request may only be written after the first response).
+ * TWO APPROVES THAT ARE PROVABLY IN FLIGHT AT THE SAME TIME — the single-flight probe
+ * (care b), with the OVERLAP GUARANTEED BY THE HTTP CONTRACT rather than by scheduling.
+ *
+ * The earlier form wrote both requests in one tick on two pre-connected sockets and trusted
+ * that both would be handled together. They need not be: the first can run to COMPLETION
+ * (its body already buffered; every store read and the frame's git work are synchronous)
+ * before the second is even dispatched — so the latecomer claimed a FREE slot and was
+ * refused on INTEGRITY (the frame's own uncommitted writes) instead of `approve-busy`.
+ * That is the flake: one full-suite run in ten, and twice in a tight loop of this file
+ * under CPU load, always `expected 'refused-integrity' to be 'approve-busy'`.
+ *
+ * So the overlap is proven instead of hoped for. The HOLDER's request goes out as HEADERS
+ * ONLY (`Expect: 100-continue`, body withheld). Node answers `100 Continue` BEFORE it emits
+ * 'request', and the approve route CLAIMS the slot synchronously, before its first await
+ * (the body read) — so the 100 on the wire proves the slot is held AND that the holder
+ * cannot proceed until we hand it its body. The LATE request is then sent in full and must
+ * be refused by name. Only after that is the holder's body released and its frame allowed
+ * to run: the refusal provably PRECEDES the run it refuses.
  */
-async function postTwice(url: string, payload: unknown): Promise<Res[]> {
+async function approveOverlap(url: string, payload: unknown): Promise<{ holder: Res; late: Res }> {
   const target = new URL(url + '/api/approve');
   const body = JSON.stringify(payload);
-  const request =
+  const head = (expect: boolean): string =>
     'POST /api/approve HTTP/1.1\r\n' +
     `host: ${target.host}\r\n` +
     'content-type: application/json\r\n' +
     `content-length: ${Buffer.byteLength(body)}\r\n` +
-    'connection: close\r\n\r\n' +
-    body;
+    'connection: close\r\n' +
+    (expect ? 'expect: 100-continue\r\n' : '') +
+    '\r\n';
   const connect = (): Promise<net.Socket> =>
     new Promise((resolve, reject) => {
       const socket = net.connect(Number(target.port), target.hostname, () => resolve(socket));
       socket.on('error', reject);
     });
-  const read = (socket: net.Socket): Promise<string> =>
-    new Promise((resolve) => {
-      let data = '';
-      socket.setEncoding('utf8');
-      socket.on('data', (c: string) => { data += c; });
-      socket.on('end', () => resolve(data));
-    });
-  const [a, b] = await Promise.all([connect(), connect()]);
-  const reads = Promise.all([read(a), read(b)]);
-  a.write(request);
-  b.write(request);
-  return (await reads).map((raw) => {
-    const status = Number(raw.split('\r\n')[0].split(' ')[1]);
-    const bodyStart = raw.indexOf('\r\n\r\n') + 4;
-    const rest = raw.slice(bodyStart);
-    // the response may be chunk-framed — take the first chunk's payload
-    const chunked = /^[0-9a-f]+\r\n/.exec(rest);
-    return { status, body: chunked ? rest.slice(chunked[0].length, rest.lastIndexOf('\r\n0\r\n')) : rest };
-  });
+  const [holding, arriving] = await Promise.all([connect(), connect()]);
+  const holder = reader(holding);
+  const late = reader(arriving);
+  holding.write(head(true)); // headers only — the withheld body is the brake
+  await holder.until((d) => d.includes('\r\n\r\n')); // the 100: the slot is CLAIMED and held
+  arriving.write(head(false) + body); // the latecomer arrives while the frame cannot run yet
+  const lateRes = parseResponse(await late.ended());
+  holding.write(body); // release the holder — now, and only now, its frame runs
+  // the holder's buffer holds the 100 block first, then its real response
+  const holderRes = parseResponse(await holder.ended().then((d) => d.slice(d.indexOf('\r\n\r\n') + 4)));
+  return { holder: holderRes, late: lateRes };
 }
 
 /** The WHAT'S NEXT card's read, parsed. */
@@ -331,16 +370,18 @@ describe('e2e — the operate loop: the WHAT\'S NEXT card + the approve (leg 11)
     expect(v.frontmost?.task).toBe(SECOND);
     const before = await logTypes(server, SECOND);
     const body = boundTo(v);
-    const [a, b] = await postTwice(server.url, body);
-    const results = [a, b].sort((x, y) => x.status - y.status); // [200, 409]
+    // the HOLDER is provably in flight (its body withheld, its slot claimed) before the
+    // latecomer arrives — see `approveOverlap`
+    const { holder, late } = await approveOverlap(server.url, body);
     // ONE approve ran; the other was refused BY NAME before it touched the store
-    expect(results.map((r) => r.status)).toEqual([200, 409]);
-    const ran = JSON.parse(results[0].body) as { value: ApproveResult };
-    const refused = JSON.parse(results[1].body) as { error: { code: string; message: string } };
-    expect(ran.value.stop).toBe('advanced');
-    expect(ran.value.landing?.task).toBe(SECOND);
+    expect(late.status).toBe(409);
+    const refused = JSON.parse(late.body) as { error: { code: string; message: string } };
     expect(refused.error.code).toBe('approve-busy');
     expect(refused.error.message).toContain('ONE at a time');
+    expect(holder.status).toBe(200);
+    const ran = JSON.parse(holder.body) as { value: ApproveResult };
+    expect(ran.value.stop).toBe('advanced');
+    expect(ran.value.landing?.task).toBe(SECOND);
     // ONE frame ran over the journey — the second never wrote anything
     expect(await logTypes(server, SECOND)).toEqual([...before, 'activated', 'waiting']);
     expect(await taskStatus(server, SECOND)).toBe('blocked');

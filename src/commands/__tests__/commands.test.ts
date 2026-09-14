@@ -430,8 +430,12 @@ describe('evidence! + complete! — the close gesture commands (leg 08 task 02)'
 
   it('a claim mapped to a FAILING check refuses by name even when another command has a captured pass', () => {
     accepted();
-    const c = cmds(stubCapture({ exits: { 'ann check': 1 } }));
+    // the AC's own act FAILED — on bytes the conclusion does NOT cite (the cited-commit
+    // case is refused earlier and by its own name: `cited-check-failed`)
+    let head = realSha();
+    const c = cmds({ head: () => head, dirty: () => [], run: (n) => ({ exitCode: n === 'ann check' ? 1 : 0, stdout: 'Tests  1 passed (1)\n', stderr: '' }) });
     valueOf(c.capture(ID, 'npm test')); // a captured PASS (the global predicate is satisfied)
+    head = 'feedface';
     valueOf(c.capture(ID, 'ann check')); // …and a FAILED run for the AC's own act
     valueOf(c.evidence(ID, [{ sha: realSha() }], { claims: [{ ac: 'AC-1', check: 'ann check' }] }));
     const e = errorOf(c.complete(ID));
@@ -439,6 +443,47 @@ describe('evidence! + complete! — the close gesture commands (leg 08 task 02)'
     expect(e.blocker).toContain("'AC-1'");
     expect(e.blocker).toContain('LATEST run FAILED');
     expect(c.status(ID)).toBe('accepted');
+  });
+
+  it('a CAPTURED FAILURE on a CITED commit refuses the close — a pass elsewhere on the same bytes cannot certify them (leg 12/02 rework)', () => {
+    accepted();
+    const c = cmds(stubCapture({ exits: { 'ann check': 1 } }));
+    valueOf(c.capture(ID, 'npm test')); // a captured PASS at the cited sha …
+    valueOf(c.capture(ID, 'ann check')); // … and a FAILED run at the SAME, cited sha
+    valueOf(c.evidence(ID, [{ sha: realSha() }], { claims: [{ ac: 'AC-1', check: 'npm test' }] })); // the claim maps the PASSING act
+    // the pass-side predicate ALONE would have closed this — the hole the fail side shuts
+    expect(c.store.capturedPassBound(ID)).toBe(true);
+    expect(c.store.capturedFailCited(ID)?.command).toBe('ann check');
+    const e = errorOf(c.complete(ID));
+    expect(e.code).toBe('cited-check-failed');
+    expect(e.blocker).toContain('ann check');
+    expect(e.blocker).toContain(realSha());
+    expect(e.blocker).toContain('NEW sha');
+    expect(c.status(ID)).toBe('accepted'); // nothing written
+  });
+
+  it('a captured failure on a commit the conclusion does NOT cite blocks nothing — it is history, said in the note', () => {
+    accepted();
+    let head = 'deadbeef';
+    const c = cmds({ head: () => head, dirty: () => [], run: (n) => ({ exitCode: n === 'ann check' ? 1 : 0, stdout: 'Tests  1 passed (1)\n', stderr: '' }) });
+    valueOf(c.capture(ID, 'ann check')); // FAILED, against the PRE-fix bytes
+    head = realSha();
+    valueOf(c.capture(ID, 'npm test')); // PASS, against the commit the conclusion cites
+    valueOf(c.evidence(ID, [{ sha: realSha() }], { claims: [{ ac: 'AC-1', check: 'npm test' }] }));
+    expect(valueOf(c.complete(ID)).at).toMatch(/^\d{4}-\d{2}-\d{2}$/); // closes
+    expect(c.status(ID)).toBe('done');
+  });
+
+  it('the gate card reads the WHOLE predicate: bound is 0 when the cited bytes carry a captured failure', () => {
+    // an UNDECIDED confirm submission — the card's own row for a task still awaiting a decision
+    writeNode('01-leg/01-a', CONTRACT, [ev('created'), ev('submitted', { gate: 'grill' }), ev('confirmed', { gate: 'grill' }), ev('submitted', { gate: 'confirm' })]);
+    const c = cmds(stubCapture({ exits: { 'ann check': 1 } }));
+    valueOf(c.capture('01-leg/01-a', 'npm test'));
+    valueOf(c.capture('01-leg/01-a', 'ann check'));
+    valueOf(c.evidence('01-leg/01-a', [{ sha: realSha() }], { claims: [{ ac: 'AC-1', check: 'npm test' }] }));
+    const row = c.pendingGates().find((p) => p.task === '01-leg/01-a')!;
+    expect(row.delivered.bound).toBe(0); // the card must not promise a close the predicate refuses
+    expect(c.store.capturedPassBound('01-leg/01-a')).toBe(true); // …the pass side alone would have
   });
 
   it('a claim mapping an act the log does NOT hold refuses by name (a mapping is not prose)', () => {
