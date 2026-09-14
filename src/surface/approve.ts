@@ -41,8 +41,18 @@ import type { OpLog } from '../abilities/obs/log.js';
  *      the real async abilities (a provider call in a shaping chain), and the channel's
  *      single yield keeps it LIVE rather than theoretical (the e2e proves the refusal).
  *   3. THE CARD'S READ (care c, `whatsNext`): the operator view — the derivation `ann
- *      next` prints, plus the integrity blockers `advance!` would refuse on. The card
- *      never claims the journey can advance when the action would refuse it.
+ *      next` prints, plus the derivation's own executability, and an honest
+ *      `integrity: unchecked` (the verdict is the lazy snapshot's, below). The card never
+ *      claims the journey can advance — and never claims a verdict it has not received.
+ *
+ *      THE INTEGRITY PRE-CHECK IS NOT RUN HERE (leg 12/07, MEASURED: it cost ~3.3s of
+ *      every page load — 187 per-sha `git cat-file` spawns inside `Store.check()`, which
+ *      the pre-check ran twice). The pre-check is the WRITE's guard: the approve below and
+ *      the drive run it fail-closed BEFORE anything executes, and nothing here weakens
+ *      that. The display gets the same answer on demand and on its own clock —
+ *      `integritySnapshot()`, the read behind `GET /api/integrity`, which the page fetches
+ *      lazily: a page load is never blocked on the check, and the card never claims a
+ *      verdict it does not have.
  */
 
 /* ── care a · the daemon's human channel ──────────────────────────────────── */
@@ -125,8 +135,30 @@ export class DaemonInteract implements InteractAbility {
 
 /* ── the card's read (care c) ─────────────────────────────────────────────── */
 
+/** The card's integrity line as the READ reports it — NO verdict. The full pre-check is
+ *  the write's guard (and the lazy snapshot's job, below); running it on the page's read
+ *  path is what made every load take ~3.3s (leg 12/07, measured). */
+export interface IntegrityUnchecked {
+  state: 'unchecked';
+  /** What is NOT being claimed, and when the real answer arrives. */
+  note: string;
+}
+
+/** The lazy integrity snapshot (`GET /api/integrity`) — the verdict the card displays once
+ *  it has been asked for: the SAME fail-closed pre-check the approve runs. */
+export interface IntegritySnapshot {
+  clean: boolean;
+  blockers: string[];
+}
+
+/** Why the card's read carries no verdict — the SAME words the card shows (one source for
+ *  the read and the page, so they cannot drift). */
+export const INTEGRITY_UNCHECKED =
+  'not read by the page load — the full check (ann check · the S4 validators · ann verify · the docs manifest · uncommitted tracked journey/docs) is the APPROVE\u2019s own guard, re-run fail-closed before anything executes; the page asks for this snapshot on its own (GET /api/integrity) so a load is never blocked on it';
+
 /** The operator view — what the WHAT'S NEXT card renders: the derived next action and
- *  its derivation facts, and the integrity blockers the approve would refuse on. */
+ *  its derivation facts. The integrity verdict is NOT part of this read (see above) — the
+ *  card's `integrity` field says so, and `integritySnapshot()` answers it on demand. */
 export interface WhatsNextView {
   /** The derived advance (`ann --json next`'s advance object). */
   advance: AdvanceView;
@@ -136,9 +168,9 @@ export interface WhatsNextView {
   legGate: { met: boolean; blocker?: string };
   /** Every undecided submission on the active leg (the human's other move). */
   pendingGates: Array<{ task: string; gate: string }>;
-  /** The `ann check` + `ann verify` + manifest + git-status blockers the action
-   *  re-checks fail-closed BEFORE anything executes. */
-  integrity: { clean: boolean; blockers: string[] };
+  /** The READ's honest half of the integrity display: unchecked, and why. The verdict
+   *  arrived with everything else before leg 12/07 — at 3.3s per page load. */
+  integrity: IntegrityUnchecked;
   /** The frontmost-ready task's RESOLVED chain — how many CONTENT steps the frame would
    *  run (`ann flow <id>`: contract.flow → workType chain → project default). 0 = there is
    *  NOTHING to execute: an `implementation` task's chain is deliberately empty, so the run
@@ -146,9 +178,12 @@ export interface WhatsNextView {
    *  execution only where there is something to execute (a chain that resolves WITH a
    *  problem counts 0 — the frame fails closed at config, so nothing executes either). */
   chainSteps: number;
-  /** TRUE iff the approve will execute: a clean state, the machine-executable
-   *  derivation, and a ready task. FALSE = present the card and stop (the UI offers no
-   *  approve) — never a button that cannot work. */
+  /** TRUE iff the DERIVATION side allows the approve: the machine-executable derivation
+   *  and a ready task. This is HALF the old answer — the integrity half is the write's own
+   *  re-check (and the lazy snapshot), so a true here is "the approve may be offered", never
+   *  "the journey can advance"; a dirty state still refuses the write with its named
+   *  blockers, which the card displays. FALSE = present the card and stop (no approve
+   *  button) — never a button that cannot work. */
   executable: boolean;
 }
 
@@ -164,16 +199,29 @@ export function whatsNext(root: string, log?: OpLog): WhatsNextView {
   const ctx = createContext(root, [], { json: true, ...(log ? { log } : {}) });
   const advance = ctx.commands.advance();
   const lb = ctx.commands.lookBack();
-  const blockers = operatorIntegrityBlockers(ctx.commands, root);
   return {
     advance,
     ...(lb.frontmostReady ? { frontmost: lb.frontmostReady } : {}),
     legGate: lb.legGate,
     pendingGates: lb.pendingGates,
-    integrity: { clean: blockers.length === 0, blockers },
+    // NO pre-check here (leg 12/07): the same call at this spot cost ~3.3s per page load.
+    // The approve and the drive run it fail-closed themselves; the card fetches the
+    // verdict lazily through `integritySnapshot`. The read says exactly that, and no more.
+    integrity: { state: 'unchecked', note: INTEGRITY_UNCHECKED },
     chainSteps: frontmostChainSteps(ctx, root, lb.frontmostReady),
-    executable: blockers.length === 0 && advance.action === 'continue-leg' && !!lb.frontmostReady,
+    executable: advance.action === 'continue-leg' && !!lb.frontmostReady,
   };
+}
+
+/** THE LAZY INTEGRITY SNAPSHOT (`GET /api/integrity`) — the full fail-closed pre-check the
+ *  approve runs, asked for on demand instead of on every page load. NOTHING is re-implemented
+ *  here and no guard moves: `operatorIntegrityBlockers` is the action's own function, so the
+ *  card's verdict and the write's refusal are the SAME answer. The page shows a pending state
+ *  until this lands, then the real result — never a stale or blank claim (AC-2/AC-3). */
+export function integritySnapshot(root: string, log?: OpLog): IntegritySnapshot {
+  const ctx = createContext(root, [], { json: true, ...(log ? { log } : {}) });
+  const blockers = operatorIntegrityBlockers(ctx.commands, root);
+  return { clean: blockers.length === 0, blockers };
 }
 
 /* ── the approve ──────────────────────────────────────────────────────────── */

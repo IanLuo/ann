@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { createContext, resolveDispatch, jsonDoc, outcomeOf, type Outcome } from './handlers.js';
-import { APPROVE_BUSY, Approver, whatsNext, type ApproveProposal } from './approve.js';
+import { APPROVE_BUSY, Approver, integritySnapshot, whatsNext, type ApproveProposal } from './approve.js';
 import { DRIVE_BUSY, driveJourney, type DriveOptions } from './drive.js';
 import { newRunId, newTrace, type OpLog } from '../abilities/obs/log.js';
 import { UI_HTML } from './ui.js';
@@ -29,6 +29,12 @@ import { UI_HTML } from './ui.js';
  * over the semantic driver (which composes `submit!`/`run!` itself, so no route becomes a
  * command runner), and the refusal is a named error doc (`not-exposed`), never a silent
  * pass-through.
+ *
+ * `GET /api/integrity` is the ONE LAZY READ (leg 12/07): the card's full fail-closed
+ * integrity pre-check, on demand. It is deliberately NOT part of `GET /api/whatsnext` —
+ * the pre-check cost ~3.3s (187 per-sha `git cat-file` spawns) and ran on EVERY page load.
+ * The check itself is unchanged and still guards the writes (the approve/drive run it
+ * fail-closed first); this route only lets the page display its verdict without blocking.
  *
  * OUT OF SCOPE, NAMED: auth beyond local, multi-user, packaging/distribution. The
  * server binds 127.0.0.1 by default (the general config's `server.*` builtin — the
@@ -159,7 +165,7 @@ const notExposed = (name: string): Outcome => ({
   ok: false,
   error: {
     code: 'not-exposed',
-    message: `serve: '${name}' is not exposed — the minimal slice is journey · status · next · detail · confirm · results · packet · events · log · gates · whatsnext (GET) and the gate / approve / drive writes (POST /api/gate, POST /api/approve, POST /api/drive). run!/spawn!/submit!/goal!/spec!/archive/advance! are deliberately absent as ROUTES (scope OUT): the approve and the drive are named routes over the operator action and the semantic driver, which compose those commands themselves.`,
+    message: `serve: '${name}' is not exposed — the minimal slice is journey · status · next · detail · confirm · results · packet · events · log · gates · whatsnext · integrity (GET) and the gate / approve / drive writes (POST /api/gate, POST /api/approve, POST /api/drive). run!/spawn!/submit!/goal!/spec!/archive/advance! are deliberately absent as ROUTES (scope OUT): the approve and the drive are named routes over the operator action and the semantic driver, which compose those commands themselves.`,
   },
 });
 
@@ -275,7 +281,7 @@ async function route(root: string, approver: Approver, log: OpLog, req: Incoming
 
   // ── the READS ──
   if (req.method !== 'GET') return sendJson(res, 405, jsonDoc(usageError(`GET /api/${name}`)));
-  if (name !== 'gates' && name !== 'whatsnext' && !READ_ROUTES.has(name)) return sendJson(res, 404, jsonDoc(notExposed(name)));
+  if (name !== 'gates' && name !== 'whatsnext' && name !== 'integrity' && !READ_ROUTES.has(name)) return sendJson(res, 404, jsonDoc(notExposed(name)));
 
   // THE OPERATIONAL LOG'S READ (leg 12/05, AC-4) — the SAME `ann log` handler the CLI
   // dispatches, over the SAME scratch file (never a second reader): the filters
@@ -292,11 +298,25 @@ async function route(root: string, approver: Approver, log: OpLog, req: Incoming
   }
 
   // THE WHAT'S NEXT CARD's read (leg 11) — the operator view: the derived advance +
-  // frontmost-ready + leg gate + pending gates, AND the integrity blockers the approve
-  // re-checks fail-closed. Derived on demand, like the gate queue; never cached.
+  // frontmost-ready + leg gate + pending gates. Derived on demand; never cached. It
+  // carries NO integrity verdict (leg 12/07): that pre-check cost ~3.3s per page load and
+  // belongs to the WRITE (below) plus the lazy route under it — the read says so.
   if (name === 'whatsnext') {
     try {
       return sendJson(res, 200, JSON.stringify(whatsNext(root, log), null, 2) + '\n');
+    } catch (e) {
+      const o = outcomeOf(e);
+      return sendJson(res, httpStatus(o), jsonDoc(o));
+    }
+  }
+
+  // THE INTEGRITY SNAPSHOT (leg 12/07) — the card's full fail-closed pre-check, asked for
+  // LAZILY by the page (`GET /api/integrity`): the same `operatorIntegrityBlockers` the
+  // approve refuses on, so what the card shows and what the write enforces cannot drift.
+  // Never cached: it is a snapshot of the tree NOW, and the page refreshes it per render.
+  if (name === 'integrity') {
+    try {
+      return sendJson(res, 200, JSON.stringify(integritySnapshot(root, log), null, 2) + '\n');
     } catch (e) {
       const o = outcomeOf(e);
       return sendJson(res, httpStatus(o), jsonDoc(o));

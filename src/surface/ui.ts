@@ -21,9 +21,18 @@
  *                                  task's own intent, what is DELIVERED there already)
  *   GET  /api/whatsnext          → the WHAT'S NEXT card: the derived advance (action +
  *                                  detail) · the frontmost-ready task · the leg gate · the
- *                                  pending gates · the integrity blockers · the
- *                                  frontmost-ready task's resolved chain LENGTH (0 content
- *                                  steps = the machine can only ACTIVATE it, and so it says)
+ *                                  pending gates · the frontmost-ready task's resolved chain
+ *                                  LENGTH (0 content steps = the machine can only ACTIVATE
+ *                                  it, and so it says). It carries NO integrity verdict: the
+ *                                  full pre-check cost ~3.3s and ran on every load (leg
+ *                                  12/07), so the card says it is unchecked and asks for the
+ *                                  snapshot below.
+ *   GET  /api/integrity          → THE LAZY INTEGRITY SNAPSHOT (leg 12/07): the SAME
+ *                                  fail-closed pre-check the approve refuses on, asked for
+ *                                  on the page's own clock. The card shows a pending state
+ *                                  until it lands, then the real verdict — never a stale or
+ *                                  blank claim. The check itself is unchanged and still
+ *                                  guards the writes.
  *   GET  /api/confirm?id=<node>  → the gate card: the complete node (contract · inputs ·
  *                                  open questions) · CLAIMS (with resolved pointers) ·
  *                                  CHECKS · gate states · results
@@ -568,6 +577,12 @@ export const UI_HTML = `<!doctype html>
 
   // ── the WHAT'S NEXT card: the derived proposal + the honest blocker surface (leg 11) ──
   var whatsNext = null; // the derivation the approve is bound to (the card the human saw)
+  // THE LAZY INTEGRITY SNAPSHOT (leg 12/07). The card's READ no longer runs the full
+  // fail-closed pre-check (measured: ~3.3s of EVERY page load); the page asks for it here,
+  // on its own clock, and says exactly what it does not yet know. States: checking · clean ·
+  // dirty · unavailable — never a verdict the page did not receive.
+  var wnIntegrity = { state: 'checking' };
+  var integritySeq = 0; // the in-flight snapshot's generation (a newer render wins)
   /** The operator action's four derivations, in the card's own words: continue-leg is the
    *  ONE the machine can run — and only when the frontmost-ready task's RESOLVED chain has
    *  CONTENT steps (an implementation task's chain is empty — nothing to execute, the
@@ -600,17 +615,23 @@ export const UI_HTML = `<!doctype html>
     whatsNext = v;
     var d = v.advance || { action: 'none', detail: '' };
     var step = DERIVATION[d.action] || { run: false, what: '' };
-    var clean = v.integrity && v.integrity.clean;
+    var checking = wnIntegrity.state === 'checking';
+    var dirty = wnIntegrity.state === 'dirty';
+    var clean = wnIntegrity.state === 'clean';
     var steps = v.chainSteps || 0; // the frontmost-ready task's RESOLVED chain: 0 = NOTHING to execute
     byId('wn-action').textContent = d.action;
     byId('wn-detail').textContent = d.detail;
     var badge = byId('wn-badge');
     // THE HEADLINE IS WHAT THE HUMAN CAN DO, in this order: a boundary derivation is the
     // point of the card (the move is the human's — a dirty tree does not change that), then
-    // a clean MACHINE-EXECUTABLE advance, then an EMPTY CHAIN — the machine can only
-    // activate it (the runner does the work), never execute anything — then a blocked one.
+    // the integrity verdict the lazy snapshot gave (a dirty tree CANNOT advance — said as
+    // soon as it is known, never assumed), then a pending/unknown verdict (the read does not
+    // guess), then a clean MACHINE-EXECUTABLE advance, then an EMPTY CHAIN — the machine can
+    // only activate it (the runner does the work), never execute anything.
     if (!step.run) { badge.textContent = 'PRESENTED AND STOPPED'; badge.className = 'badge stop'; }
-    else if (!clean) { badge.textContent = 'BLOCKED — CANNOT ADVANCE'; badge.className = 'badge stop'; }
+    else if (dirty) { badge.textContent = 'BLOCKED — CANNOT ADVANCE'; badge.className = 'badge stop'; }
+    else if (checking) { badge.textContent = 'CHECKING INTEGRITY'; badge.className = 'badge stop'; }
+    else if (!clean) { badge.textContent = 'INTEGRITY UNKNOWN'; badge.className = 'badge stop'; }
     else if (steps) { badge.textContent = 'MACHINE-EXECUTABLE'; badge.className = 'badge run'; }
     else { badge.textContent = 'ACTIVATE & WAIT'; badge.className = 'badge stop'; }
 
@@ -631,6 +652,10 @@ export const UI_HTML = `<!doctype html>
       ? (v.pendingGates || []).map(function (p) { return p.task + '@' + p.gate; }).join(' · ')
       : 'none',
       { kind: 'gates' });
+    // THE INTEGRITY VERDICT — the LAZY snapshot's, never the page load's (leg 12/07): the
+    // read does not run the pre-check (that is what made a load take ~3.3s), so the card
+    // says what it knows and no more. 'checking…' is a real state, not a blank claim.
+    fact('integrity', integrityWords(), null);
     // the derivation's own words — for a continue-leg with an EMPTY chain the honest
     // sentence is what the frame really does (activate + wait), never 'the machine can run
     // this step' (the badge above says the same, and this is why)
@@ -640,7 +665,7 @@ export const UI_HTML = `<!doctype html>
     // derives it, and the operator's step (the card CANNOT claim the journey can advance)
     var list = byId('wn-blockers');
     list.replaceChildren();
-    var blockers = (v.integrity && v.integrity.blockers) || [];
+    var blockers = wnIntegrity.blockers || [];
     blockers.forEach(function (b) {
       var li = el('li');
       var a = drillLink({ kind: 'blocker', blocker: b }, 'wn-blocker');
@@ -658,14 +683,52 @@ export const UI_HTML = `<!doctype html>
         : 'these would block an APPROVE — and none is offered here: the move above is the human step (the daemon never commits, closes, or spawns).', 'muted'));
     }
 
-    // the approve affordance exists ONLY where it can work: clean state · continue-leg ·
-    // a ready task. Otherwise the card PRESENTS the state and stops (never a dead button).
-    var executable = !!(v.executable && step.run && clean);
+    // the approve affordance exists ONLY where it can work: a KNOWN-clean state · continue-leg
+    // · a ready task. While the snapshot is in flight — or unreadable — the verdict is not
+    // known, so the card says WHICH (never a dead button, never a guessed verdict); an
+    // 'unavailable' snapshot still offers the approve, because the WRITE re-checks fail-closed
+    // and refuses with its named blockers if it must (the button always has a defined effect).
+    var executable = !!(v.executable && step.run && !checking && !dirty);
     byId('wn-actions').hidden = !executable;
     if (executable) wnMessage('');
     else if (!step.run) wnMessage('nothing to approve — ' + step.what + '.'); // the human move is above
-    else if (clean) wnMessage('nothing to approve — no frontmost-ready task.');
+    else if (checking || dirty) { /* the badge, the integrity fact and the blocker list say why */ }
+    else if (v.executable) wnMessage('nothing to approve — the integrity snapshot could not be read; the approve would re-check it fail-closed, so read it again with Refresh.');
+    else wnMessage('nothing to approve — no frontmost-ready task.');
     // blocked-and-continuable: keep whatever the last action said — the blocker list is the message
+  }
+
+  /** The integrity fact's words — the state the page actually knows, never more. */
+  function integrityWords() {
+    if (wnIntegrity.state === 'checking') return 'checking… — the page does NOT run the full pre-check on load (that cost ~3.3s); the verdict arrives on its own';
+    if (wnIntegrity.state === 'clean') return 'clean — re-checked fail-closed (ann check · the S4 validators · ann verify · the docs manifest · uncommitted tracked journey/docs)';
+    if (wnIntegrity.state === 'dirty') return 'dirty — ' + (wnIntegrity.blockers || []).length + ' named blocker(s) below: the approve would refuse fail-closed';
+    return 'unknown — ' + (wnIntegrity.note || 'the snapshot could not be read') + ' (the approve re-checks fail-closed anyway)';
+  }
+
+  /** THE LAZY INTEGRITY SNAPSHOT (leg 12/07) — GET /api/integrity, the SAME
+   *  operatorIntegrityBlockers the approve refuses on. Fetched AFTER the page has rendered
+   *  (so a load is never blocked on it), with a pending state shown while it is in flight and
+   *  the real result when it lands. A render that supersedes an in-flight read wins: the
+   *  stale reply is dropped, never displayed. */
+  function loadIntegrity() {
+    var seq = ++integritySeq;
+    wnIntegrity = { state: 'checking' };
+    if (whatsNext) renderWhatsNext(whatsNext);
+    return api('/api/integrity')
+      .then(function (r) {
+        if (seq !== integritySeq) return null; // a newer card render owns the display now
+        wnIntegrity = r.status === 200
+          ? { state: r.doc.clean ? 'clean' : 'dirty', blockers: r.doc.blockers || [] }
+          : { state: 'unavailable', note: 'the integrity read refused: ' + JSON.stringify(r.doc.error) };
+        if (whatsNext) renderWhatsNext(whatsNext);
+        return null;
+      })
+      .catch(function (e) {
+        if (seq !== integritySeq) return;
+        wnIntegrity = { state: 'unavailable', note: 'the integrity read failed: ' + e.message };
+        if (whatsNext) renderWhatsNext(whatsNext);
+      });
   }
 
   /* ── THE DRILL — the fragment IS the drill: every affordance is a LINK that opens the
@@ -1054,7 +1117,7 @@ export const UI_HTML = `<!doctype html>
       renderDeferred((r[0].doc.ahead || {}).deferred);
       renderQueue(r[1].status === 200 ? r[1].doc : []);
       if (r[2].status !== 200) wnMessage("what's-next unavailable: " + JSON.stringify(r[2].doc.error), true);
-      else renderWhatsNext(r[2].doc);
+      else { renderWhatsNext(r[2].doc); loadIntegrity(); } // the verdict is fetched LAZILY, after the render
       byId('updated').textContent = 'as of ' + new Date().toLocaleTimeString();
     });
   }

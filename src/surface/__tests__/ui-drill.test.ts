@@ -80,8 +80,10 @@ interface Stub {
   title: string;
 }
 
-/** Boot the served page — optionally AT a drill URL (that is what a new tab does). */
-function boot(reads: Record<string, unknown>, hash = ''): Stub {
+/** Boot the served page — optionally AT a drill URL (that is what a new tab does), and
+ *  optionally with a path whose reply NEVER arrives (the lazy integrity snapshot in flight —
+ *  the pending state cannot be observed any other way). */
+function boot(reads: Record<string, unknown>, hash = '', pending: string[] = []): Stub {
   const ids = [...SCRIPT.matchAll(/byId\('([^']+)'\)/g)].map((m) => m[1]);
   const nodes = new Map<string, FakeEl>();
   for (const id of ids) nodes.set(id, new FakeEl('div'));
@@ -99,6 +101,7 @@ function boot(reads: Record<string, unknown>, hash = ''): Stub {
     // decoded path, so the assertions read like the routes do
     const decoded = path.replace(/id=([^&]*)/, (_, v: string) => `id=${decodeURIComponent(v)}`);
     fetched.push(decoded);
+    if (pending.includes(decoded)) return new Promise<never>(() => {}); // in flight, forever
     const body = reads[decoded];
     return Promise.resolve({
       status: body === undefined ? 404 : 200,
@@ -156,11 +159,15 @@ const card = (over: Record<string, unknown> = {}) => ({
   frontmost: { leg: LEG, task: TASK, status: 'queued' },
   legGate: { met: true },
   pendingGates: [{ task: TASK, gate: 'grill' }],
-  integrity: { clean: true, blockers: [] },
+  // the READ's own half (leg 12/07): NO verdict — the pre-check is the write's guard, and
+  // the page fetches it lazily from /api/integrity (see `reads`)
+  integrity: { state: 'unchecked', note: 'not read by the page load — GET /api/integrity answers it' },
   chainSteps: 3, // the frontmost-ready task's RESOLVED chain has content steps (the machine executes it)
   executable: true,
   ...over,
 });
+/** The LAZY integrity snapshot — the SAME pre-check the approve refuses on. */
+const integrity = (over: Record<string, unknown> = {}) => ({ clean: true, blockers: [], ...over });
 const confirmRead = (over: Record<string, unknown> = {}) => ({
   detail: {
     id: TASK,
@@ -253,10 +260,11 @@ const eventDrillRead = {
   ],
 };
 
-const reads = (whatsnext: unknown): Record<string, unknown> => ({
+const reads = (whatsnext: unknown, integ: unknown = integrity()): Record<string, unknown> => ({
   '/api/journey': journey,
   '/api/gates': [],
   '/api/whatsnext': whatsnext,
+  '/api/integrity': integ,
   [`/api/confirm?id=${TASK}`]: confirmRead(),
   [`/api/packet?id=${TASK}`]: packetRead,
   [`/api/detail?id=${LEG}`]: detailRead,
@@ -270,8 +278,9 @@ describe('the served page — a drill opens its own tab, and the URL is the dril
   it('the card renders, and every fact is a NEW-TAB link carrying its item', async () => {
     const page = boot(reads(card()));
     await flush();
-    // the FULL page still reads and renders the journey views
-    expect(page.fetched).toEqual(['/api/journey', '/api/gates', '/api/whatsnext']);
+    // the FULL page still reads and renders the journey views — plus the LAZY integrity
+    // snapshot, fetched AFTER the render so a load never blocks on the ~3.3s pre-check
+    expect(page.fetched).toEqual(['/api/journey', '/api/gates', '/api/whatsnext', '/api/integrity']);
     expect(page.get('wn').hidden).toBe(false);
     expect(page.get('queue-view').hidden).toBe(false);
     expect(page.get('journey-view').hidden).toBe(false);
@@ -281,6 +290,8 @@ describe('the served page — a drill opens its own tab, and the URL is the dril
     expect(page.get('wn-actions').hidden).toBe(false); // the approve is offered: clean + executable
     // …and the derivation's own words still promise the run: the chain HAS content steps
     expect(page.get('wn-facts').text()).toContain('the machine can run this step through the frame');
+    // the integrity fact is the LAZY snapshot's verdict — never the read's (it has none)
+    expect(page.get('wn-facts').text()).toContain('integrity: clean — re-checked fail-closed');
     // the derivation head is a link to its own drill
     expect(page.get('wn-action').href).toBe('#drill=advance');
     expect(page.get('wn-action').target).toBe('_blank');
@@ -349,21 +360,35 @@ describe('the served page — a drill opens its own tab, and the URL is the dril
     expect(gateTab.get('card-gates').textContent).toContain('grill');
   });
 
+  it('THE PAGE RENDERS BEFORE THE INTEGRITY VERDICT — a pending state, never a blank claim', async () => {
+    // The pre-check is fetched lazily (leg 12/07): while it is in flight the card is fully
+    // rendered, says it does not know yet, and offers no approve — never a verdict it never got.
+    const page = boot(reads(card()), '', ['/api/integrity']);
+    await flush();
+    expect(page.get('wn-action').textContent).toBe('continue-leg'); // the derivation IS rendered
+    expect(page.get('wn-detail').textContent).toContain('next task'); // …and the card is complete
+    expect(page.get('wn-badge').textContent).toBe('CHECKING INTEGRITY');
+    expect(page.get('wn-actions').hidden).toBe(true); // no approve on an unknown verdict
+    expect(page.get('wn-facts').text()).toContain('the page does NOT run the full pre-check on load');
+    expect(page.get('wn-blockers').textContent).not.toContain('blocker:'); // and no invented blocker
+  });
+
   it('a blocker tab names its class, the read that derives it, and the node it names', async () => {
-    const dirty = card({ integrity: { clean: false, blockers: [DIRTY] }, executable: false });
-    const page = boot(reads(dirty));
+    const dirtyCard = card();
+    const dirtyInteg = integrity({ clean: false, blockers: [DIRTY] });
+    const page = boot(reads(dirtyCard, dirtyInteg));
     await flush();
     expect(page.get('wn-badge').textContent).toBe('BLOCKED — CANNOT ADVANCE');
     expect(page.get('wn-actions').hidden).toBe(true); // no approve where it cannot work
     const row = page.get('wn-blockers').link('blocker:');
     expect(row.textContent).toContain('uncommitted tracked journey changes — commit them'); // the operator's step
     expect(row.href).toContain('drill=blocker');
-    const tab = await openTab(row, reads(dirty));
+    const tab = await openTab(row, reads(dirtyCard, dirtyInteg));
     expect(tab.get('card-step-label').textContent).toContain('integrity blocker');
     expect(tab.get('card-node').textContent).toContain('a dirty tree: uncommitted tracked work');
     expect(tab.get('card-node').textContent).toContain('git status --porcelain -- .ann/journey docs');
     expect(tab.get('card-node').textContent).toContain('your step');
-    const named = await openTab(tab.get('card-node').link(TASK), reads(dirty)); // the node the blocker names
+    const named = await openTab(tab.get('card-node').link(TASK), reads(dirtyCard, dirtyInteg)); // the node the blocker names
     expect(named.fetched).toContain(`/api/packet?id=${TASK}`);
   });
 
@@ -397,7 +422,7 @@ describe('the served page — a drill opens its own tab, and the URL is the dril
     await flush();
     const after = tab.fetched.slice(before);
     expect(after).toContain(`/api/packet?id=${TASK}`); // the item's own read, again
-    expect(after.filter((f) => f === '/api/journey' || f === '/api/gates' || f === '/api/whatsnext')).toEqual([]);
+    expect(after.filter((f) => f === '/api/journey' || f === '/api/gates' || f === '/api/whatsnext' || f === '/api/integrity')).toEqual([]);
     expect(tab.get('updated').textContent).toContain('as of ');
   });
 
@@ -426,10 +451,10 @@ describe('the served page — a drill opens its own tab, and the URL is the dril
     expect(style).toContain('.gates { display: flex;');
     expect(UI_HTML).toContain('class="actions" id="wn-actions" hidden'); // absent until the approve can work
     // the behaviour the guard makes true (the blocks the page hides):
-    const blocked = boot(reads(card({ integrity: { clean: false, blockers: [DIRTY] }, executable: false })));
+    const blocked = boot(reads(card(), integrity({ clean: false, blockers: [DIRTY] })));
     await flush();
     expect(blocked.get('wn-actions').hidden).toBe(true);
-    const tab = await openTab(blocked.get('wn-blockers').link('blocker:'), reads(card({ integrity: { clean: false, blockers: [DIRTY] }, executable: false })));
+    const tab = await openTab(blocked.get('wn-blockers').link('blocker:'), reads(card(), integrity({ clean: false, blockers: [DIRTY] })));
     expect(tab.get('card-gates').hidden, 'a view with no gate chips hides the .gates row').toBe(true);
   });
 
@@ -440,10 +465,10 @@ describe('the served page — a drill opens its own tab, and the URL is the dril
     const exhausted = card({
       advance: { leg: '', action: 'none', detail: 'journey exhausted — verdict UNCONFIRMED: the human chooses — (1) goal! met (criteria met) · (2) a subtle task · (3) goal! archive & start a new goal' },
       frontmost: undefined,
-      integrity: { clean: false, blockers: [DIRTY] },
       executable: false,
     });
-    const page = boot(reads(exhausted));
+    const dirtyInteg = integrity({ clean: false, blockers: [DIRTY] });
+    const page = boot(reads(exhausted, dirtyInteg));
     await flush();
     expect(page.get('wn-badge').textContent).toBe('PRESENTED AND STOPPED'); // NOT 'BLOCKED'
     expect(page.get('wn-detail').textContent).toContain('goal! met'); // the move, on the card
@@ -452,7 +477,7 @@ describe('the served page — a drill opens its own tab, and the URL is the dril
     expect(page.get('wn-message').textContent).toContain('nothing to approve');
     expect(page.get('wn-actions').hidden).toBe(true);
     // …and the blocker still drills (what it is, the read that derives it, its node)
-    const tab = await openTab(page.get('wn-blockers').link('blocker:'), reads(exhausted));
+    const tab = await openTab(page.get('wn-blockers').link('blocker:'), reads(exhausted, dirtyInteg));
     expect(tab.get('card-node').textContent).toContain('git status --porcelain -- .ann/journey docs');
   });
 
@@ -469,7 +494,7 @@ describe('the served page — a drill opens its own tab, and the URL is the dril
     expect(page.get('wn-facts').text()).not.toContain('the machine can run this step through the frame');
     expect(page.get('wn-actions').hidden).toBe(false); // the move IS available: it activates the task
     // …and a DIRTY tree still wins the headline (the approve is withheld, not merely un-runnable)
-    const dirty = boot(reads(card({ chainSteps: 0, integrity: { clean: false, blockers: [DIRTY] }, executable: false })));
+    const dirty = boot(reads(card({ chainSteps: 0 }), integrity({ clean: false, blockers: [DIRTY] })));
     await flush();
     expect(dirty.get('wn-badge').textContent).toBe('BLOCKED — CANNOT ADVANCE');
     expect(dirty.get('wn-actions').hidden).toBe(true);

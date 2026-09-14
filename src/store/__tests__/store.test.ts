@@ -773,6 +773,28 @@ describe('Store — commit traceability (format v10 §9)', () => {
     expect(problems.some((p) => p.includes('does not resolve') || p.includes('does not exist'))).toBe(false);
   });
 
+  // LEG 12/07 — the traceability read resolves EVERY sha in ONE `git cat-file --batch-check`
+  // (the per-sha spawn was ~2.2s of `ann check` on the 39-node journey: 187 spawns). The
+  // batch answers by POSITION, so this pins the mapping back to the input names: a mix of
+  // live and dead references, and each problem must name its own.
+  it('resolves MANY shas in one batched call — each problem names its OWN reference', () => {
+    const live = realSha();
+    writeNode('06-engine-build/15-code', {}, [
+      ev('evidence', { commits: [{ sha: live }, { sha: 'dead000000000000000000000000000000000001' }] }),
+      ev('evidence', {
+        commits: [{ sha: 'dead000000000000000000000000000000000002' }],
+        checks: [{ command: 'npm test', result: 'pass', sha: live }, { command: 'ann check', result: 'pass', sha: 'dead000000000000000000000000000000000003' }],
+      }),
+    ]);
+    const problems = new Store(root).check();
+    // the LIVE reference is resolved (never reported); each DEAD one is reported, by name
+    expect(problems.some((p) => p.includes(live))).toBe(false);
+    for (const dead of ['000000000000000000000000000000000001', '000000000000000000000000000000000002', '000000000000000000000000000000000003']) {
+      expect(problems.some((p) => p.includes(dead) && p.includes('does not resolve')), `no problem names ${dead}`).toBe(true);
+    }
+    expect(problems.filter((p) => p.includes('does not resolve')).length).toBe(3); // exactly the dead ones
+  });
+
   // v18 §3 — a CHECK's sha binds the verification to the bytes it ran against: a
   // verification about a commit that does not exist is named, not silently kept.
   it('flags a checks[].sha that does not resolve in git (verification binds to bytes)', () => {

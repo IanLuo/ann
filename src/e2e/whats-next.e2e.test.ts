@@ -11,7 +11,11 @@ import net from 'node:net';
  *
  * PROVEN HERE (AC-1..AC-4):
  *   · the card's read (`GET /api/whatsnext`): the derived advance + frontmost-ready + leg
- *     gate + pending gates + the integrity blockers, and whether the approve can execute;
+ *     gate + pending gates, and whether the DERIVATION allows the approve — with NO integrity
+ *     verdict, and in the fast class (leg 12/07: the full pre-check cost ~3.3s of every load);
+ *   · the LAZY integrity snapshot (`GET /api/integrity`): the SAME fail-closed pre-check the
+ *     approve refuses on, on its own request, so the card can show a real verdict without
+ *     blocking the page;
  *   · the approve (`POST /api/approve`): the frontmost-ready runs THROUGH THE FRAME (the
  *     operator action's continue-leg path — no second write path) and lands at its next
  *     human decision; the card then reflects the new derived state (a re-read, never an
@@ -249,23 +253,35 @@ async function approveOverlap(url: string, payload: unknown): Promise<{ holder: 
   return { holder: holderRes, late: lateRes };
 }
 
-/** The WHAT'S NEXT card's read, parsed. */
+/** The WHAT'S NEXT card's read, parsed (leg 12/07: the read carries NO integrity verdict —
+ *  that pre-check cost ~3.3s of every page load and now arrives over its own lazy route). */
 interface WhatsNext {
   advance: { leg: string; action: string; detail: string };
   frontmost?: { leg: string; task: string; status: string };
   legGate: { met: boolean; blocker?: string };
   pendingGates: Array<{ task: string; gate: string }>;
-  integrity: { clean: boolean; blockers: string[] };
+  integrity: { state: string; note: string };
   /** The frontmost-ready task's RESOLVED chain length — 0 for these fixtures: an
    *  `implementation` task's chain is EMPTY (the runner does the work), so the page says
    *  ACTIVATE & WAIT, never MACHINE-EXECUTABLE. */
   chainSteps: number;
   executable: boolean;
 }
+/** The LAZY integrity snapshot (`GET /api/integrity`) — the SAME fail-closed pre-check the
+ *  approve runs, asked for on the page's own clock. */
+interface IntegritySnapshot {
+  clean: boolean;
+  blockers: string[];
+}
 const card = async (s: Server): Promise<WhatsNext> => {
   const r = await get(s.url + '/api/whatsnext');
   expect(r.status, `GET /api/whatsnext → ${r.status}: ${r.body.slice(0, 200)}`).toBe(200);
   return JSON.parse(r.body) as WhatsNext;
+};
+const integrity = async (s: Server): Promise<IntegritySnapshot> => {
+  const r = await get(s.url + '/api/integrity');
+  expect(r.status, `GET /api/integrity → ${r.status}: ${r.body.slice(0, 200)}`).toBe(200);
+  return JSON.parse(r.body) as IntegritySnapshot;
 };
 /** The propose the approve is bound to — exactly what the page sends. */
 const boundTo = (v: WhatsNext) => ({ proposal: { action: v.advance.action, detail: v.advance.detail } });
@@ -304,15 +320,30 @@ describe('e2e — the operate loop: the WHAT\'S NEXT card + the approve (leg 11)
     if (root) rmSync(root, { recursive: true, force: true });
   });
 
-  it('the card reads the derived proposal + the integrity state it can act on', { timeout: 30_000 }, async () => {
+  it('the card reads the derived proposal — fast, and without the integrity pre-check', { timeout: 30_000 }, async () => {
     const v = await card(server);
     expect(v.advance).toEqual({ leg: LEG, action: 'continue-leg', detail: `next task: ${FIRST} (queued)` });
     expect(v.frontmost).toEqual({ leg: LEG, task: FIRST, status: 'queued' });
     expect(v.legGate.met).toBe(true); // leg 01 has no predecessor
     expect(v.pendingGates).toEqual([]);
-    expect(v.integrity).toEqual({ clean: true, blockers: [] });
+    // THE READ CARRIES NO VERDICT (leg 12/07): the full pre-check was 3.3s of EVERY load on a
+    // 39-node journey. The card says what it knows — nothing — and names the lazy read.
+    expect(v.integrity.state).toBe('unchecked');
+    expect(v.integrity.note).toContain('GET /api/integrity');
     expect(v.chainSteps).toBe(0); // the resolved chain really is EMPTY (rules/flow/default.json)
     expect(v.executable).toBe(true);
+    // THE LAZY SNAPSHOT answers it — the same pre-check, on its own request
+    expect(await integrity(server)).toEqual({ clean: true, blockers: [] });
+  });
+
+  it('the read is in the FAST class — a page load is never blocked on the pre-check', { timeout: 30_000 }, async () => {
+    // the MEASURED live bug was 3.32/3.31/3.30s PER READ (three runs, 39 nodes) while every
+    // other read was 5–7ms. The bound is deliberately loose — a machine's speed is not the
+    // assertion; a read that runs the pre-check again cannot come in under it.
+    const t0 = Date.now();
+    await card(server);
+    const elapsed = Date.now() - t0;
+    expect(elapsed, `GET /api/whatsnext took ${elapsed}ms — the pre-check is back on the read path`).toBeLessThan(1000);
   });
 
   it('a STALE proposal refuses — nothing executed', { timeout: 30_000 }, async () => {
@@ -349,19 +380,20 @@ describe('e2e — the operate loop: the WHAT\'S NEXT card + the approve (leg 11)
     expect(await logTypes(server, FIRST)).toEqual([...before, 'activated', 'waiting']);
     // …and the derived state moved: the task waits on the runner, not on the machine
     expect(await taskStatus(server, FIRST)).toBe('blocked');
-    // the frame's writes are UNCOMMITTED work — the card must say so instead of claiming
-    // the journey can advance: the operator's step is the commit (care c, on the loop)
+    // the frame's writes are UNCOMMITTED work — the LAZY snapshot must say so, so the card
+    // can say BLOCKED instead of claiming the journey can advance (care c, on the loop)
     const dirty = await card(server);
     expect(dirty.advance.action).toBe('continue-leg');
-    expect(dirty.integrity.clean).toBe(false);
-    expect(dirty.integrity.blockers.some((b) => b.includes('uncommitted tracked change'))).toBe(true);
-    expect(dirty.executable).toBe(false);
+    expect(dirty.integrity.state).toBe('unchecked'); // the read has no verdict, ever
+    const dirtySnap = await integrity(server);
+    expect(dirtySnap.clean).toBe(false);
+    expect(dirtySnap.blockers.some((b) => b.includes('uncommitted tracked change'))).toBe(true);
     commit(root, 'the runner owes the evidence');
     // the CARD reflects the new derivation (a re-read, never an optimistic local edit)
     const after = await card(server);
     expect(after.advance.detail).toBe(`next task: ${SECOND} (queued)`);
     expect(after.frontmost?.task).toBe(SECOND);
-    expect(after.integrity).toEqual({ clean: true, blockers: [] });
+    expect(await integrity(server)).toEqual({ clean: true, blockers: [] }); // clean again — committed
     expect(after.executable).toBe(true);
   });
 
@@ -412,10 +444,10 @@ describe('e2e — the operate loop: the WHAT\'S NEXT card + the approve (leg 11)
     expect(page.status).toBe(200);
     expect(page.body).toContain("What's next"); // the card
     const script = page.body.match(/<script>([\s\S]*?)<\/script>/)?.[1] ?? '';
-    for (const route of ['/api/whatsnext', '/api/approve', '/api/journey', '/api/gates', '/api/confirm?id=', '/api/gate', '/api/packet?id=', '/api/detail?id=', '/api/next', '/api/results?id=']) expect(script).toContain(route);
+    for (const route of ['/api/whatsnext', '/api/integrity', '/api/approve', '/api/journey', '/api/gates', '/api/confirm?id=', '/api/gate', '/api/packet?id=', '/api/detail?id=', '/api/next', '/api/results?id=']) expect(script).toContain(route);
     // the card's own words: the machine-executable derivation, the presented-and-stopped
     // boundary, how to clear a blocker, the approve affordance, and the DRILL-INS
-    for (const word of ['MACHINE-EXECUTABLE', 'ACTIVATE & WAIT', 'PRESENTED AND STOPPED', 'NOT machine-executable', 'the authored-work boundary', 'uncommitted tracked journey changes — commit them', 'frontmost-ready', 'leg gate', 'UNMET — ', 'pending gates', 'drillTask', 'drillLeg', 'drillBlocker', 'drillAdvance', 'drillResult', 'drillHref', 'parseDrill', 'renderFocus', 'enterFocus', 'git show', 'DRILLS IN', 'wn-fact', 'drill in', '_blank', 'noopener', "kind: 'result'"])
+    for (const word of ['MACHINE-EXECUTABLE', 'ACTIVATE & WAIT', 'PRESENTED AND STOPPED', 'CHECKING INTEGRITY', 'INTEGRITY UNKNOWN', 'the page does NOT run the full pre-check on load', 'loadIntegrity', 'NOT machine-executable', 'the authored-work boundary', 'uncommitted tracked journey changes — commit them', 'frontmost-ready', 'leg gate', 'UNMET — ', 'pending gates', 'drillTask', 'drillLeg', 'drillBlocker', 'drillAdvance', 'drillResult', 'drillHref', 'parseDrill', 'renderFocus', 'enterFocus', 'git show', 'DRILLS IN', 'wn-fact', 'drill in', '_blank', 'noopener', "kind: 'result'"])
       expect(script, `the served page lost '${word}'`).toContain(word);
     expect(page.body).toContain('Approve'); // the approve affordance itself
     // every drill is a NEW-TAB link carrying its item in the fragment (`#drill=<kind>&id=…`)
@@ -485,7 +517,7 @@ describe('e2e — the approve FAILS CLOSED: no submission (care a) and a dirty s
   it('a gate with NO submission refuses by NAME — the daemon never prompts (care a)', { timeout: 30_000 }, async () => {
     const v = await card(server);
     expect(v.advance.action).toBe('continue-leg'); // the rejected-gate task IS the frontmost-ready
-    expect(v.integrity.clean).toBe(true);
+    expect((await integrity(server)).clean).toBe(true);
     expect(v.executable).toBe(true);
     const before = await logTypes(server, FIRST);
     const r = await post(server.url + '/api/approve', boundTo(v));
@@ -504,9 +536,10 @@ describe('e2e — the approve FAILS CLOSED: no submission (care a) and a dirty s
     // recorded reality it does not own (the operator commits)
     appendFileSync(join(root, 'docs', 'thing.md'), '\nhand edit\n');
     const v = await card(server);
-    expect(v.integrity.clean).toBe(false);
-    expect(v.executable).toBe(false);
-    expect(v.integrity.blockers.some((b) => b.includes('uncommitted tracked change') && b.includes('docs/thing.md'))).toBe(true);
+    expect(v.executable).toBe(true); // the derivation side is unaffected — the WRITE is the guard
+    const dirty = await integrity(server); // …and the card's lazy verdict says it cannot advance
+    expect(dirty.clean).toBe(false);
+    expect(dirty.blockers.some((b) => b.includes('uncommitted tracked change') && b.includes('docs/thing.md'))).toBe(true);
 
     const before = await logTypes(server, FIRST);
     const r = await post(server.url + '/api/approve', boundTo(v));
@@ -525,7 +558,7 @@ describe('e2e — the approve FAILS CLOSED: no submission (care a) and a dirty s
     // only reason it refused): the card reflects that, and the approve reaches the gate
     git(root, ['checkout', '--', 'docs/thing.md']);
     const clean = await card(server);
-    expect(clean.integrity).toEqual({ clean: true, blockers: [] });
+    expect(await integrity(server)).toEqual({ clean: true, blockers: [] });
     expect(clean.executable).toBe(true);
     const again = await post(server.url + '/api/approve', boundTo(clean));
     expect(again.status).toBe(409);

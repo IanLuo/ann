@@ -6,6 +6,12 @@ import { blobSha, stripMarkers } from './sha.js';
 import { loadDocsManifest, scanDocsDir, writeDocsManifest } from './docs.js';
 import type { OpLog } from '../abilities/obs/log.js';
 
+/** The object types `git cat-file` reports for a reference that RESOLVES — the batch
+ *  traceability read's own vocabulary (`missing` / `ambiguous` are not in it). */
+const GIT_OBJECT_TYPES = new Set(['commit', 'tree', 'blob', 'tag']);
+/** A plain hex object name — the only shape git's `--batch-check` protocol maps 1:1. */
+const HEX_SHA = /^[0-9a-fA-F]{4,40}$/;
+
 export interface JourneyEvent {
   at: string;
   type: string;
@@ -929,12 +935,93 @@ export class Store {
     return detail;
   }
 
+  /** THE SHA REFERENCES the traceability read resolves — every evidence.commits[].sha and
+   *  every evidence.checks[].sha in the log, deduplicated (the names, never the problems:
+   *  the problem ORDER stays the log's own). */
+  private shaRefs(): string[] {
+    const shas = new Set<string>();
+    for (const [, node] of this.nodes) {
+      for (const e of node.events) {
+        if (e.type !== 'evidence') continue;
+        for (const c of Array.isArray(e.commits) ? e.commits : []) {
+          const sha = (c as { sha?: unknown })?.sha;
+          if (typeof sha === 'string' && sha.trim()) shas.add(sha.trim());
+        }
+        for (const ck of Array.isArray(e.checks) ? e.checks : []) {
+          const sha = (ck as { sha?: unknown })?.sha;
+          if (typeof sha === 'string' && sha.trim()) shas.add(sha.trim());
+        }
+      }
+    }
+    return [...shas];
+  }
+
+  /** The shas of `shaRefs()` that do NOT resolve in git — in ONE subprocess
+   *  (`git cat-file --batch-check`), not one `git cat-file -t` spawn per sha.
+   *
+   *  MEASURED (leg 12/07 `07-implementation-responsive-card`): the per-sha spawn was the
+   *  dominant cost of `ann check` — 187 spawns ≈ 2.2s on the 39-node journey, and ~2.2s of
+   *  EVERY `GET /api/whatsnext` read (check() ran twice there: once from the command, once
+   *  from the closure-integrity rule). The batch asks the SAME question once.
+   *
+   *  Semantics are the per-sha probe's, exactly: a name resolves iff git reports a real
+   *  object type for it; `missing` / `ambiguous` both count as unresolved. Only a plain hex
+   *  object name rides the batch (git's batch protocol is one output line per input line);
+   *  every other name — rev syntax, whitespace — is probed alone with `-t`, so batching can
+   *  never resolve a name differently. */
+  private unresolvedShas(): Set<string> {
+    const refs = this.shaRefs();
+    const batched = new Set(refs.filter((s) => HEX_SHA.test(s)));
+    const resolved = this.batchedResolved([...batched]);
+    const unresolved = new Set<string>();
+    for (const s of refs) {
+      if (resolved.has(s)) continue;
+      if (batched.has(s)) {
+        unresolved.add(s); // batched, and git said it does not resolve
+        continue;
+      }
+      try {
+        execFileSync('git', ['cat-file', '-t', s], { stdio: 'pipe' });
+      } catch {
+        unresolved.add(s); // the per-name probe (rev syntax, whitespace, or no git at all)
+      }
+    }
+    return unresolved;
+  }
+
+  /** The batch half — ONE `git cat-file --batch-check` for every plain hex name, returning
+   *  the names that RESOLVE (git reported a real object type). A git that cannot run, or a
+   *  reply whose shape we do not understand, resolves NOTHING and leaves the caller to probe
+   *  per name — the answer is then slow, never quietly wrong. */
+  private batchedResolved(batchable: string[]): Set<string> {
+    const resolved = new Set<string>();
+    if (!batchable.length) return resolved;
+    try {
+      const out = execFileSync('git', ['cat-file', '--batch-check'], {
+        input: batchable.join('\n') + '\n',
+        encoding: 'utf8',
+        stdio: ['pipe', 'pipe', 'ignore'],
+      });
+      const lines = out.split('\n').filter((l) => l.trim());
+      // ONE output line per input line, in order (git's documented batch protocol).
+      if (lines.length !== batchable.length) return resolved;
+      lines.forEach((line, i) => {
+        const [name, type] = line.trim().split(/\s+/);
+        if (name && GIT_OBJECT_TYPES.has(type)) resolved.add(batchable[i]);
+      });
+    } catch {
+      /* git unavailable / not a repo — nothing resolved; the caller probes per name */
+    }
+    return resolved;
+  }
+
   /** Commit traceability (format v10 §9/§14): every structured evidence.commits[].sha
-   *  must resolve in git (`git cat-file -t`), every refs[] path must exist (repo-relative).
+   *  must resolve in git, every refs[] path must exist (repo-relative).
    *  git = the archive (format: git is the archive and source of truth). Never silent. */
   private commitTraceabilityProblems(): string[] {
     const problems: string[] = [];
     const repoRoot = process.cwd();
+    const unresolved = this.unresolvedShas();
     for (const [id, node] of this.nodes) {
       for (const e of node.events) {
         if (e.type !== 'evidence') continue;
@@ -944,9 +1031,7 @@ export class Store {
             problems.push(`F-AC18: ${id} — evidence.commits[] entry without a sha (format v10 §9)`);
             continue;
           }
-          try {
-            execFileSync('git', ['cat-file', '-t', sha.trim()], { stdio: 'pipe' });
-          } catch {
+          if (unresolved.has(sha.trim())) {
             problems.push(`F-AC18: ${id} — commit ${sha.trim()} does not resolve in git (traceability, format v10 §9)`);
           }
         }
@@ -960,9 +1045,7 @@ export class Store {
         for (const ck of Array.isArray(e.checks) ? e.checks : []) {
           const sha = (ck as { sha?: unknown })?.sha;
           if (typeof sha !== 'string' || !sha.trim()) continue;
-          try {
-            execFileSync('git', ['cat-file', '-t', sha.trim()], { stdio: 'pipe' });
-          } catch {
+          if (unresolved.has(sha.trim())) {
             problems.push(`F-AC18: ${id} — check '${String((ck as { command?: unknown })?.command ?? '')}' ran against ${sha.trim()}, which does not resolve in git (format v18 §3 — verification binds to bytes)`);
           }
         }

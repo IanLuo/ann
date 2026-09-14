@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { Store } from '../../store/store.js';
-import { Approver, DaemonInteract, DaemonPromptRefused, StaleProposalRefused, whatsNext } from '../approve.js';
+import { Approver, DaemonInteract, DaemonPromptRefused, StaleProposalRefused, integritySnapshot, whatsNext } from '../approve.js';
 import { OperatorActionResult } from '../../flow/operator-action.js';
 
 /**
@@ -14,6 +14,11 @@ import { OperatorActionResult } from '../../flow/operator-action.js';
  * (`src/e2e/whats-next.e2e.test.ts`); this file pins the pieces the e2e cannot reach —
  * the `ask` / second-`decide` / malformed-branch refusals and the claim/release rule — and
  * runs the approve in-process over a fixture journey.
+ *
+ * LEG 12/07 amended care c: the card's READ no longer runs the integrity pre-check (measured:
+ * ~3.3s of every page load); the verdict moved to the LAZY `integritySnapshot`
+ * (`GET /api/integrity`) while the pre-check itself still guards the WRITE, unchanged — the
+ * approve tests below are the same tests they were before this task.
  */
 
 const REPO = process.cwd();
@@ -114,24 +119,43 @@ describe('care b — the single-flight: ONE approve at a time', () => {
   });
 });
 
-describe("care c — the card's read names the integrity blockers (and stops offering the approve)", () => {
-  it('a clean journey is executable; a dirty one is not — the blocker is NAMED', () => {
+describe("care c — the card's read: the derivation, and NO pre-check on the read path (leg 12/07)", () => {
+  it('a clean journey reads executable — and the integrity verdict as UNCHECKED, in the card\'s own words', () => {
     readyTask();
     docs();
     const clean = whatsNext(root);
     expect(clean.advance).toEqual({ leg: '01-leg', action: 'continue-leg', detail: NEXT });
     expect(clean.frontmost).toEqual({ leg: '01-leg', task: TASK, status: 'queued' });
     expect(clean.legGate).toEqual({ met: true });
-    expect(clean.integrity).toEqual({ clean: true, blockers: [] });
+    // THE READ CARRIES NO VERDICT (leg 12/07): the full pre-check cost ~3.3s of every page
+    // load. The card says what it knows — nothing yet — and where the real answer comes from.
+    expect(clean.integrity.state).toBe('unchecked');
+    expect(clean.integrity.note).toContain('APPROVE'); // the write's own guard, named
+    expect(clean.integrity.note).toContain('GET /api/integrity'); // and the lazy read that answers it
     expect(clean.executable).toBe(true);
+  });
 
-    // an uncommitted TRACKED docs change: the op the operator owes is named by the blocker
+  it('a DIRTY tree does not slow or change the read — the verdict comes from the LAZY snapshot', () => {
+    readyTask();
+    docs();
+    // an uncommitted TRACKED docs change: a blocker the pre-check WOULD find — if the read
+    // ran it, the shape below would have to carry it. It does not (that is the proof).
     appendFileSync(join(root, 'docs', 'thing.md'), '\nhand edit\n');
     const dirty = whatsNext(root);
     expect(dirty.advance.action).toBe('continue-leg'); // the derivation is unchanged…
-    expect(dirty.integrity.clean).toBe(false); // …but the card CANNOT claim it can advance
-    expect(dirty.integrity.blockers.some((b) => b.includes('uncommitted tracked change:') && b.includes('docs/thing.md'))).toBe(true);
-    expect(dirty.executable).toBe(false);
+    expect(dirty.integrity.state).toBe('unchecked'); // …and the read ran NO pre-check
+    expect(dirty.executable).toBe(true); // the derivation half allows the approve; the WRITE is the guard
+    // THE LAZY SNAPSHOT — the SAME `operatorIntegrityBlockers` the approve refuses on, so
+    // what the card displays and what the write enforces cannot drift.
+    const snap = integritySnapshot(root);
+    expect(snap.clean).toBe(false);
+    expect(snap.blockers.some((b) => b.includes('uncommitted tracked change:') && b.includes('docs/thing.md'))).toBe(true);
+  });
+
+  it('the snapshot is clean on a clean tree (the card then says clean, not unchecked)', () => {
+    readyTask();
+    docs();
+    expect(integritySnapshot(root)).toEqual({ clean: true, blockers: [] });
   });
 
   it('the read says whether the frontmost-ready chain has CONTENT STEPS — an empty chain has nothing to execute', () => {
