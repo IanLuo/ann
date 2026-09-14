@@ -1,2 +1,3 @@
 {"at":"2026-09-14","type":"created","note":"spawned by bookkeeper (agent)"}
 {"at":"2026-09-14","type":"submitted","gate":"grill","note":"submitted for the grill gate (agent)"}
+{"at":"2026-09-14","type":"rejected","gate":"grill","feedback":"the log should have tracing id and layer id, belong to to indicate their timeline, location or maybe other dimensions","note":"rejected (ianluo)"}
