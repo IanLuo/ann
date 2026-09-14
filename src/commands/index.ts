@@ -1095,7 +1095,9 @@ export class Commands {
           intent: String(this.store.contractOf(id)?.intent ?? ''),
           since: String(e.at ?? ''),
           delivered: {
-            commits: c.cited.length,
+            // the CURRENT conclusion's citation set — the bytes the close will judge (the
+            // log's older citations are superseded history, like an earlier claim)
+            commits: this.store.currentCitedCommits(id).length,
             claims: c.claims.length,
             unclaimed: c.unclaimed.length,
             checks: c.checks.length,

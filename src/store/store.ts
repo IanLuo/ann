@@ -311,6 +311,17 @@ export interface CheckView {
 export const logicalNameFromFile = (f: string): string => f.replace(/\.md$/, '').replace(/-v\d+$/, '');
 
 /**
+ * DO TWO COMMIT NAMES NAME THE SAME COMMIT? A sha IS a commit's name at some length: the
+ * engine reads the FULL sha from git (`capture!`), while a conclusion may cite git's own
+ * abbreviation (7, as every doc example does). Comparing the raw strings made a short
+ * citation MISS its own captured run — a false `no-captured-pass` on a verified task —
+ * and, worse, let a FAILED run on cited bytes slip past `capturedFailCited`. One rule:
+ * equal, or one abbreviates the other (git's abbreviation floor is 7).
+ */
+const sameCommit = (a: string, b: string): boolean =>
+  a === b || (a.length >= 7 && b.length >= 7 && (a.startsWith(b) || b.startsWith(a)));
+
+/**
  * The tree store (S1) — reads/writes legs, nodes, events, artifacts per
  * journey-format-spec v8. Builds the in-memory tree; owns the single
  * appendEvent() write function (architecture LB-3); exposes derived views
@@ -751,17 +762,40 @@ export class Store {
   }
 
   /** The commits a task's conclusion cites (evidence.commits[].sha, deduped, in log
-   *  order) — the set a captured check's `sha` must belong to (F-AC18, tightened). */
+   *  order) — every citation the log holds, for the card's provenance count. */
   citedCommits(id: string): string[] {
     const out: string[] = [];
     for (const e of this.events(id)) {
       if (e.type !== 'evidence') continue;
-      for (const c of Array.isArray(e.commits) ? e.commits : []) {
-        const sha = (c as { sha?: unknown })?.sha;
-        if (typeof sha === 'string' && sha.trim() && !out.includes(sha.trim())) out.push(sha.trim());
-      }
+      for (const s of this.citedIn(e)) if (!out.includes(s)) out.push(s);
     }
     return out;
+  }
+
+  /** The commit shas ONE evidence event cites, deduped, in order. */
+  private citedIn(e: JourneyEvent): string[] {
+    const out: string[] = [];
+    for (const c of Array.isArray(e.commits) ? e.commits : []) {
+      const sha = (c as { sha?: unknown })?.sha;
+      if (typeof sha === 'string' && sha.trim() && !out.includes(sha.trim())) out.push(sha.trim());
+    }
+    return out;
+  }
+
+  /**
+   * THE CITATION SET THE CLOSE READS (leg 12/02 rework): the commits the CURRENT
+   * conclusion cites — the LATEST evidence event that carries `commits[]`. A re-recorded
+   * conclusion SUPERSEDES the earlier citation set, exactly as a later claim supersedes an
+   * earlier one for the same AC (the rework reading, format v18 §3).
+   *
+   * The close must read THIS rather than `citedCommits` (the union): the predicate is about
+   * the bytes UNDER REVIEW, and the union would let a SUPERSEDED citation of long-lost
+   * bytes block a task for ever — the exact opposite of the remedy a rework performs (fix,
+   * commit, capture at the new sha, re-record citing it).
+   */
+  currentCitedCommits(id: string): string[] {
+    const withCommits = this.events(id).filter((e) => e.type === 'evidence' && Array.isArray(e.commits) && e.commits.length > 0);
+    return withCommits.length ? this.citedIn(withCommits[withCommits.length - 1]) : [];
   }
 
   /** EVERY check the log holds for a node, in order — the verification history, each
@@ -794,22 +828,23 @@ export class Store {
    * THE TIGHTENED F-AC18 PREDICATE (leg 12/03; the FAIL side added by the leg 12/02
    * rework) — the record is a consequence, not a claim: `complete!` and the
    * confirm-accept auto-close (both in Commands, one predicate) require a CAPTURED PASS
-   * bound to a cited commit AND no CAPTURED FAILURE on one (`capturedFailCited`).
+   * bound to a commit the CURRENT conclusion cites (`currentCitedCommits`) AND no CAPTURED
+   * FAILURE on one (`capturedFailCited`).
    *
    * The LATEST check per command governs WHICH RUN is the one that passed (the rework
    * reading): a failing re-run closes nothing even if an earlier run passed. The fail side
-   * reads the whole history on purpose — a pass at the SAME commit as a recorded failure
-   * is nondeterminism, not verification (see `capturedFailCited`). A reported check never
-   * satisfies this — a typed `pass` is a claim, and a claim is exactly what the close
-   * stopped accepting. `sha` must be one of the commits the conclusion cites: the bytes
-   * verified are the bytes under review.
+   * reads the whole check history on purpose — a pass at the SAME commit as a recorded
+   * failure is nondeterminism, not verification (see `capturedFailCited`). A reported check
+   * never satisfies this — a typed `pass` is a claim, and a claim is exactly what the close
+   * stopped accepting. Commits are compared as NAMES (`sameCommit`): a citation may be
+   * git's abbreviation while the captured run carries the full sha.
    */
   capturedPassBound(id: string): boolean {
-    const cited = new Set(this.citedCommits(id));
+    const cited = this.currentCitedCommits(id);
     const latest = new Map<string, ReturnType<Store['checksOf']>[number]>();
     for (const c of this.checksOf(id)) latest.set(c.command, c);
     for (const c of latest.values()) {
-      if (c.source === 'captured' && c.result === 'pass' && c.sha && cited.has(c.sha)) return true;
+      if (c.source === 'captured' && c.result === 'pass' && c.sha && cited.some((x) => sameCommit(x, c.sha!))) return true;
     }
     return false;
   }
@@ -825,14 +860,15 @@ export class Store {
    *
    * The WHOLE history is read, not the latest run per command (which is what the pass side
    * reads): `sha` names exact bytes, so a failure followed by a pass AT THE SAME COMMIT is
-   * nondeterminism, never verification — the one thing a close may not certify. A failure
-   * bound to a commit the conclusion does NOT cite is history: it blocks nothing, and the
-   * honest conclusion says so in its note. The remedy is always available and is the same
-   * act a rework already performs: fix the work, commit, capture at the NEW sha, cite that.
+   * nondeterminism, never verification — the one thing a close may not certify. The
+   * citation set is the CURRENT conclusion's (`currentCitedCommits`), so a failure on bytes
+   * a SUPERSEDED conclusion cited is history — it blocks nothing, and the honest conclusion
+   * says so in its note. The remedy is always available and is the same act a rework
+   * already performs: fix the work, commit, capture at the NEW sha, cite that.
    */
   capturedFailCited(id: string): CheckView | undefined {
-    const cited = new Set(this.citedCommits(id));
-    return this.checksOf(id).find((c) => c.source === 'captured' && c.result === 'fail' && c.sha !== undefined && cited.has(c.sha));
+    const cited = this.currentCitedCommits(id);
+    return this.checksOf(id).find((c) => c.source === 'captured' && c.result === 'fail' && c.sha !== undefined && cited.some((x) => sameCommit(x, c.sha!)));
   }
 
   /* ---------------------------------------------------------------- */

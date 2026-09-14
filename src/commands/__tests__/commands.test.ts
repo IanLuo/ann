@@ -474,6 +474,37 @@ describe('evidence! + complete! — the close gesture commands (leg 08 task 02)'
     expect(c.status(ID)).toBe('done');
   });
 
+  it('a commit is matched by NAME: git\'s abbreviation in the citation still finds the captured run (and its failure)', () => {
+    accepted();
+    // the real shape: `capture!` records the FULL sha, the conclusion cites git's 7 — the
+    // raw-string comparison missed its own run (false `no-captured-pass`) and let a FAILED
+    // run on cited bytes slip through
+    const full = '0123456789abcdef0123456789abcdef01234567';
+    const c = cmds({ head: () => full, dirty: () => [], run: (n) => ({ exitCode: n === 'ann check' ? 1 : 0, stdout: 'Tests  1 passed (1)\n', stderr: '' }) });
+    valueOf(c.capture(ID, 'npm test'));
+    valueOf(c.capture(ID, 'ann check'));
+    valueOf(c.evidence(ID, [{ sha: full.slice(0, 7) }], { claims: [{ ac: 'AC-1', check: 'npm test' }] }));
+    expect(c.store.capturedPassBound(ID)).toBe(true); // the shorthand finds the pass
+    expect(c.store.capturedFailCited(ID)?.command).toBe('ann check'); // …and the failure
+    expect(errorOf(c.complete(ID)).code).toBe('cited-check-failed');
+  });
+
+  it('a RE-RECORDED conclusion supersedes the citation set: the new bytes close it, the old failure stays history', () => {
+    accepted();
+    let head = 'feedface';
+    const c = cmds({ head: () => head, dirty: () => [], run: (n) => ({ exitCode: n === 'ann check' ? 1 : 0, stdout: 'Tests  1 passed (1)\n', stderr: '' }) });
+    valueOf(c.capture(ID, 'npm test')); // a pass at the OLD bytes …
+    valueOf(c.capture(ID, 'ann check')); // … and a failure at the SAME old bytes
+    valueOf(c.evidence(ID, [{ sha: 'feedface' }], { claims: [{ ac: 'AC-1', check: 'npm test' }] }));
+    expect(errorOf(c.complete(ID)).code).toBe('cited-check-failed'); // the old conclusion could not close
+    // the rework: fix, commit, capture at the NEW sha, re-record citing it
+    head = 'cafebabe';
+    valueOf(c.capture(ID, 'npm test'));
+    valueOf(c.evidence(ID, [{ sha: 'cafebabe' }], { claims: [{ ac: 'AC-1', check: 'npm test' }] }));
+    expect(c.store.capturedFailCited(ID)).toBeUndefined(); // the old citation set is superseded
+    expect(valueOf(c.complete(ID)).at).toMatch(/^\d{4}-\d{2}-\d{2}$/); // …and the new bytes close it
+  });
+
   it('the gate card reads the WHOLE predicate: bound is 0 when the cited bytes carry a captured failure', () => {
     // an UNDECIDED confirm submission — the card's own row for a task still awaiting a decision
     writeNode('01-leg/01-a', CONTRACT, [ev('created'), ev('submitted', { gate: 'grill' }), ev('confirmed', { gate: 'grill' }), ev('submitted', { gate: 'confirm' })]);
