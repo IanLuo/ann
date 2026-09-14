@@ -66,6 +66,20 @@ RULES  never decides a gate · never writes the journey except through the sanct
 
 **Correlation for debugging:** the worker's own session (pi's `--session`, or the pane) is linked to Ann's **operational log** by the correlation id (the `12/05` work) — so a run in the log points at the worker transcript that produced it, and vice versa.
 
+## NOW — the minimal scope (one JOB type, one KIND)
+
+The protocol above is deliberately **job-type agnostic** (designing · coding · writing · drawing · …). The FIRST slice implements exactly ONE of them, minimally — the registry shape carries the rest as future kinds:
+
+- **THE JOB TYPE: `coding`** (only). No designing/writing/drawing kinds land yet; they are registry entries later, with no core change.
+- **THE KIND: `pi-min` — MINIMUM pi.** pi's own tagline is *"AI coding assistant with read, bash, edit, write tools"* — the minimum that does coding well is almost the harness as-is. The launch is headless (`pi -p`), in the task's workdir, with:
+  - a **minimal system prompt** (`--system-prompt`) plus the task's contract + the evidence contract appended (`--append-system-prompt`) — the packet is the scoping;
+  - **no extra skills/extensions** beyond what the job needs (the minimum, not the full kit);
+  - `--mode json` so the outcome is machine-readable for the evidence; a session (`--session`) or `--no-session` is the trace decision;
+  - the task's model override (`contract.model`, the existing per-task grain) mapped to `--provider/--model`.
+- **SCOPE OUT (recorded, not silently dropped):** other job types · other agent kinds (`herdr:<kind>`, claude/codex/gemini/…) · the SDK (in-process) form · the container form (recommended as the unattended default LATER — until then the worker runs in the task's workdir under the operator's account) · worker-side gate decisions (never, by protocol).
+
+This keeps the first runner slice small enough to land and prove end-to-end, while the protocol + registry make every future worker type an *addition*, not a rewrite.
+
 ## Risks (named, not hidden)
 
 - **Cost**: an always-on loop makes real provider calls per step — the turn bound and the gate stops are the brakes.
