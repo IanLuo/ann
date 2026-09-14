@@ -1,0 +1,21 @@
+{
+  "id": "12-operate-loop/06-implementation-rework-visible",
+  "contract": {
+    "intent": "THE REWORK MUST BE VISIBLE — a rejected gate is currently INVISIBLE in the derived surface, and that is a live safety hole, not a cosmetic one. Found in production operation: `12-operate-loop/05-implementation-observability-log` had its ENTRY (grill) gate REJECTED by the human with feedback, but the task's derived status read `queued` — IDENTICAL to the status of a freshly-ACCEPTED entry gate — and `next` proposed it as `frontmost-ready … (queued) · advance: continue-leg`. The operator dispatched a worker against the original contract and drove straight past the rejection; the DRIVER would have done the same. The rejection lived only in the events/gate card. Make the rework state machine-visible, so no actor (human, operator, or driver) can treat rework-needed work as fresh work.",
+    "acceptanceCriteria": [
+      "A REJECTED gate is visible in the DERIVED surface: the task's status (or an equivalent always-visible marker) distinguishes 'rework owed' from 'queued/ready' — e.g. a `rework` status word derived when the LAST decision at a gate is a rejection (with the reject bound and the rework rung semantics unchanged). The word must be honest: not done, not blocked, not accepted — and it must not break the existing derivations (leg status, the leg gate, the goal exhaustion, the closed set)",
+      "`next` (and the look-back) surface it: the frontmost-ready proposal must NOT present a rework-needed task as a plain continue-leg; it must say REWORK and point at the gate + the rejection feedback (the same way the DEFERRED section points at the reason), so a reader sees the owed rework at the steering surface",
+      "THE DRIVER'S RULES reflect it: the closed set / the driver's preconditions must refuse to auto-drive a task whose last gate decision is a rejection as if it were fresh work — the rework is explicit (record how: a named refusal, or the rework is simply not in the driver's allowed proposals)",
+      "The UI shows it: the gate queue / card / journey view expose the rejection + its feedback (the human's own words) rather than a bare status",
+      "Derived only — no new event type, no new state, no new write path; the reject bound (3/gate) and the F-AC16/closure semantics untouched; tests prove: the derivation word, the next/look-back line, the driver refusal, and the no-regression cases (accepted → queued-ready is UNCHANGED, blocked unchanged); full suite green; ann check/verify clean; committed with evidence"
+    ],
+    "workType": "implementation",
+    "targetAreas": [
+      "src/commands",
+      "src/store",
+      "src/surface",
+      "src/flow"
+    ]
+  },
+  "createdAt": "2026-09-14"
+}

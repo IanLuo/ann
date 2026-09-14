@@ -1,0 +1,3 @@
+{"at":"2026-09-14","type":"created","note":"spawned by bookkeeper (agent)"}
+{"at":"2026-09-14","type":"submitted","gate":"grill","note":"submitted for the grill gate (agent)"}
+{"at":"2026-09-14","type":"extended","note":"THE HOLE THIS CLOSES (observed live): 12/05s grill gate was REJECTED, yet status read queued (identical to an accepted entry gate) and next proposed continue-leg; the operator dispatched a worker against the original contract and drove past the rejection. The rejection existed only in the events/card. This task makes rework machine-visible at every steering surface, and requires the driver to refuse to treat rework-needed work as fresh."}
