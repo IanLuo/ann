@@ -276,10 +276,34 @@ describe('AC-2 — it NEVER answers a gate and never self-closes', () => {
     expect(c.status(TASK)).not.toBe('done');
   });
 
-  it('a rejected entry gate is the human\'s: run! lands with ZERO writes', async () => {
+  it('a rework-owed task is NOT proposed: its leg derives the authored-work boundary (never continue-leg), and the loop writes ZERO', async () => {
     writeNode('01-leg', []);
     writeNode(TASK, [ev('created'), ev('submitted', { gate: 'grill' }), ev('rejected', { gate: 'grill' })]);
     const c = commands();
+    // the WORD (12/08 rework): the rejected task is outside the ready set, so the leg has
+    // no machine-runnable work — the derivation is the authored-work boundary, never the
+    // mis-dispatch the flattened `queued` word used to produce
+    expect(c.status(TASK)).toBe('rework');
+    expect(c.gateState(TASK, 'grill')).toBe('rejected');
+    expect(c.advance().action).toBe('closure-needed');
+    const before = logSnapshot(c);
+    const { llm } = fakeLlm([call('run!', { id: TASK })]);
+    const r = await drive(c, llm);
+    // the loop takes the boundary arm (the draft it offers is the human's to approve) —
+    // it never runs the rework-owed task, never answers its gate, never self-closes
+    expect(['draft-invalid', 'boundary-drafted']).toContain(r.stop);
+    expect(logSnapshot(c)).toEqual(before); // ZERO writes
+    expect(c.status(TASK)).toBe('rework'); // the gate is still the human's
+  });
+
+  it('an EXPLICIT run! on a rework-owed task is refused at the pre-flight: lands at the gate with ZERO writes', async () => {
+    writeNode('01-leg', []);
+    writeNode(TASK, [ev('created'), ev('submitted', { gate: 'grill' }), ev('rejected', { gate: 'grill' })]);
+    // a READY sibling keeps the derivation at continue-leg, so the loop actually reaches
+    // the model's explicit call (the pre-flight is still the guard for an explicit id)
+    writeNode('01-leg/02-b', [ev('created'), ev('submitted', { gate: 'grill' }), ev('confirmed', { gate: 'grill' })]);
+    const c = commands();
+    expect(c.advance().action).toBe('continue-leg');
     const before = logSnapshot(c);
     const { llm } = fakeLlm([call('run!', { id: TASK })]);
     const r = await drive(c, llm);

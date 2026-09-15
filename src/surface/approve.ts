@@ -28,9 +28,11 @@ import type { OpLog } from '../abilities/obs/log.js';
  *      card the human saw) and REFUSES EVERY OTHER PROMPT BY NAME. A gate the frame
  *      wants to decide live (state 'none' / rejected) therefore stops the approve
  *      fail-closed with a named refusal and zero writes — it never blocks, never
- *      fabricates an answer, and never guesses. With our discipline a gate is always
- *      SUBMITTED first (the frame blocks-and-waits on it), so the normal continue-leg
- *      never reaches a prompt.
+ *      fabricates an answer, and never guesses. A frontmost-ready task whose gate is
+ *      still `none` (or `rejected`) DOES reach that prompt on an ordinary continue-leg:
+ *      the daemon refuses it BY NAME and the operator submits the gate first (the UI's
+ *      own write). A gate that is already SUBMITTED is decidable through the UI, so a
+ *      continue-leg over submitted gates never prompts.
  *   2. THE SINGLE-FLIGHT (care b). The store append is synchronous, but the Frame
  *      awaits: two overlapping approves could interleave two frames over one journey.
  *      `claim()` is SYNCHRONOUS and is taken BEFORE the first await of a request, so a
@@ -47,12 +49,14 @@ import type { OpLog } from '../abilities/obs/log.js';
  *
  *      THE INTEGRITY PRE-CHECK IS NOT RUN HERE (leg 12/07, MEASURED: it cost ~3.3s of
  *      every page load — 187 per-sha `git cat-file` spawns inside `Store.check()`, which
- *      the pre-check ran twice). The pre-check is the WRITE's guard: the approve below and
- *      the drive run it fail-closed BEFORE anything executes, and nothing here weakens
- *      that. The display gets the same answer on demand and on its own clock —
- *      `integritySnapshot()`, the read behind `GET /api/integrity`, which the page fetches
- *      lazily: a page load is never blocked on the check, and the card never claims a
- *      verdict it does not have.
+ *      the pre-check ran twice). The pre-check is the APPROVE's own guard: the approve
+ *      below runs it fail-closed BEFORE anything executes (rule 1 of the operator action),
+ *      and nothing here weakens that. `POST /api/drive` runs NO such pre-check — its
+ *      backstop is the store's own write guard, and this card's verdict speaks for the
+ *      approve, never for the drive. The display gets the same answer on demand and on its
+ *      own clock — `integritySnapshot()`, the read behind `GET /api/integrity`, which the
+ *      page fetches lazily: a page load is never blocked on the check, and the card never
+ *      claims a verdict it does not have.
  */
 
 /* ── care a · the daemon's human channel ──────────────────────────────────── */

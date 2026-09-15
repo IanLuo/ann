@@ -2,11 +2,13 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
-import { Store, JourneyEvent, TaskDetail } from '../store.js';
+import { Store, JourneyEvent, TaskDetail, CLOSED_TASK_STATUSES } from '../store.js';
 import { getVOCAB } from '../vocab.js';
 import {
   GATE_DECISION_EVENTS,
   GATE_EVENT_TYPES,
+  READY_STATUSES,
+  REWORK_EXEMPT,
   gateLifecycle,
   gateView,
   undischargedWait,
@@ -16,6 +18,7 @@ import {
   type WorkflowState,
 } from '../workflow.js';
 import { Commands } from '../../commands/index.js';
+import { runValidators } from '../../flow/validators/index.js';
 
 /**
  * THE GATE LIFECYCLE, DERIVED ONCE (leg 12 task 08).
@@ -23,9 +26,9 @@ import { Commands } from '../../commands/index.js';
  * Two halves, pinned together:
  *
  *   · the DERIVATION (workflow.ts) — one lifecycle over the triple, one status-word
- *     projection, one rework flag, one reconciliation rule; exercised across the WHOLE
- *     lifecycle (created-only · submit · accept · reject · re-submit · accept-after-
- *     rework · the other gate · a double decision · a legacy/inert record);
+ *     projection (`rework` included), one rework flag, one reconciliation rule; exercised
+ *     across the WHOLE lifecycle (created-only · submit · accept · reject · re-submit ·
+ *     accept-after-rework · the other gate · a double decision · a legacy/inert record);
  *   · the READERS — every surface that used to answer "what is the state of this task's
  *     gates?" off the raw tail (the store's status/detail/check, the command layer's
  *     gateState/undecidedSubmission/pendingGates/rejections/lookBack, the card payload)
@@ -86,10 +89,10 @@ const LIFECYCLE: Array<{
     verdict: 'entry-accepted',
   },
   {
-    what: 'reject — the rework is owed, and the status word stays READY (the reconciliation catches it)',
+    what: 'reject — the rework is owed and the WORD says so (`rework`: outside the ready set, so nothing proposes it)',
     tail: [ev('created'), ev('submitted', { gate: 'grill' }), ev('rejected', { gate: 'grill', feedback: 'rework it' })],
     state: 'rejected',
-    status: 'queued',
+    status: 'rework',
     rework: true,
     verdict: 'rework',
   },
@@ -121,7 +124,7 @@ const LIFECYCLE: Array<{
     what: 'a double decision at one gate — the LAST one is the state (accept then reject)',
     tail: [ev('created'), ev('submitted', { gate: 'grill' }), ev('confirmed', { gate: 'grill' }), ev('rejected', { gate: 'grill' })],
     state: 'rejected',
-    status: 'queued',
+    status: 'rework',
     rework: true,
     verdict: 'rework',
   },
@@ -208,18 +211,41 @@ describe('the ONE workflow projection (AC-1/AC-4) — the status word, rework in
     });
   }
 
-  it('THE CONTRAST: a freshly ACCEPTED entry gate derives READY (the healthy path, unchanged)', () => {
+  it('THE CONTRAST (the review\'s call): a freshly ACCEPTED entry gate derives the READY word, a REJECTED one derives `rework` — the WORD now keeps the rejected task out of the ready set', () => {
     const accepted = workflowState(asEvents([ev('created'), ev('submitted', { gate: 'grill' }), ev('confirmed', { gate: 'grill' })]));
-    const rejected = workflowState(asEvents([ev('created'), ev('submitted', { gate: 'grill' }), ev('rejected', { gate: 'grill' })]));
-    // the same status WORD — which is exactly why the derived `rework` flag and the
-    // reconciliation rule exist: the WORD alone cannot tell them apart
+    const rejected = workflowState(asEvents([ev('created'), ev('submitted', { gate: 'grill' }), ev('rejected', { gate: 'grill', feedback: 'rework it' })]));
+    // the words DIFFER — PREVENTION: a rejected task cannot be proposed as fresh work
     expect(accepted.status).toBe('queued');
-    expect(rejected.status).toBe('queued');
-    // …and the derivation distinguishes them
+    expect(rejected.status).toBe('rework');
+    expect(READY_STATUSES).toContain(accepted.status);
+    expect(READY_STATUSES).not.toContain(rejected.status);
+    // the flag and the verdict stay, because they carry what a bare word cannot: WHICH
+    // gate, and the human's own feedback (through the view)
     expect(accepted.rework).toBe(false);
     expect(rejected.rework).toBe(true);
     expect(accepted.next).toEqual({ verdict: 'entry-accepted' });
     expect(rejected.next).toEqual({ verdict: 'rework', gate: 'grill' });
+    expect(rejected.gates.grill.lastRejection?.feedback).toBe('rework it');
+  });
+
+  it('the `rework` word is DERIVED and bounded: not a CLOSED word, not a READY word, and it never overrides a closed one', () => {
+    expect(REWORK_EXEMPT).toEqual([...CLOSED_TASK_STATUSES, 'failed']); // the knowing duplicate, pinned
+    expect(CLOSED_TASK_STATUSES).not.toContain('rework'); // the leg aggregate / distance reads still count it
+    expect(READY_STATUSES).not.toContain('rework'); // no reader proposes it
+    // closed or exhausted work keeps its word even with a rejection in the tail — the
+    // rework FACT stays derived (the flag), but it cannot re-open closed work
+    const closed: Array<[string, string, Record<string, unknown>]> = [
+      ['completed', 'done', {}],
+      ['superseded', 'superseded', { successor: { name: 'x', path: 'docs/x.md' } }],
+      ['cancelled', 'cancelled', { reason: 'no longer needed' }],
+      ['deferred', 'deferred', { reason: 'later' }],
+      ['failed', 'failed', {}],
+    ];
+    for (const [type, word, extra] of closed) {
+      const wf = workflowState(asEvents([ev('created'), ev('submitted', { gate: 'grill' }), ev('rejected', { gate: 'grill' }), ev(type, extra)]));
+      expect(wf.status, `${type} → ${word}`).toBe(word);
+      expect(wf.rework, `${type} keeps the derived fact`).toBe(true);
+    }
   });
 
   it('the reject bound and the rework are consequences of the SAME counter — 3 rejections, still one open rework', () => {
@@ -230,7 +256,7 @@ describe('the ONE workflow projection (AC-1/AC-4) — the status word, rework in
     const wf = workflowState(tail);
     expect(wf.gates.grill.rejected).toHaveLength(3);
     expect(wf.rework).toBe(true);
-    expect(wf.status).toBe('queued');
+    expect(wf.status).toBe('rework'); // the bound's counter and the word read the SAME state
   });
 
   it('the two-phase wait is unchanged: a confirm accept with an undischarged `waiting` is blocked, not accepted', () => {
@@ -275,45 +301,53 @@ describe('the reconciliation rule (AC-3) — the status word vs the derived life
   afterEach(() => { rmSync(root, { recursive: true, force: true }); });
 
   /** THE MIS-DISPATCH FIXTURE — the exact state 12/05 hit live: the entry gate REJECTED
-   *  with feedback and never re-submitted. TODAY (before this task) it reported
-   *  `integrity: clean`, `queued`, continue-leg, and the operator drove past the
-   *  rejection; the pre-existing rules see NOTHING wrong with it. */
-  it('(a) a REJECTED bound gate with a READY status word is a NAMED finding — and every pre-existing rule was silent', () => {
+   *  with feedback and never re-submitted. Before this task it reported `integrity: clean`,
+   *  `queued`, continue-leg, and the operator drove past the rejection. The FIX is
+   *  PREVENTION (the review's call): the task derives the `rework` WORD, which is outside
+   *  the ready set, so no reader proposes it — and check() stays CLEAN, so one human
+   *  rejection can no longer wedge every read in the journey. */
+  it('the rework WORD prevents the mis-dispatch: the rejected task is out of the ready set and check() is CLEAN (no journey-wide wedge)', () => {
     writeNode(TASK, [ev('created'), ev('submitted', { gate: 'grill' }), ev('rejected', { gate: 'grill', feedback: 'the contract is not right yet — rework it' })]);
     const s = new Store(root);
+    const cmds = commands();
 
-    // the state as it stood: READY, no gate gap, no other rule's business
-    expect(s.status(TASK)).toBe('queued');
-    expect(s.gateProblems(TASK)).toEqual([]);
-    const problems = s.check();
-    expect(problems.filter((p) => !p.startsWith('GATE-REWORK'))).toEqual([]); // nothing else objected
-    expect(problems).toHaveLength(1);
-    expect(problems[0]).toContain('GATE-REWORK');
-    expect(problems[0]).toContain(TASK);
-    expect(problems[0]).toContain("gate 'grill'");
-    expect(problems[0]).toContain("'queued'");
-    // the derivation agrees with the finding, so a reader can act on it
+    // the word is the honest one, and it is NOT ready
+    expect(s.status(TASK)).toBe('rework');
+    expect(READY_STATUSES).not.toContain(s.status(TASK));
+    // …so nothing proposes it: not the frontmost-ready derivation, not advance()
+    expect(cmds.frontmostReady()).toBeUndefined();
+    expect(cmds.advance().action).not.toBe('continue-leg');
+    expect(cmds.lookBack().frontmostReady).toBeUndefined();
+    // the flag and the verdict still carry the gate + the feedback
     const wf = workflowState(asEvents(s.events(TASK)));
     expect(wf.rework).toBe(true);
     expect(wf.next).toEqual({ verdict: 'rework', gate: 'grill' });
-    // the same fixture with the SAME status word but an ACCEPTED gate is clean (the
-    // contrast): the finding is about the rejection, never about the word alone
+    expect(wf.gates.grill.lastRejection?.feedback).toContain('rework it');
+
+    // PREVENTION BEATS DETECTION: the old READY-word finding (GATE-REWORK) is RETIRED with
+    // the rule (a), so this state is NOT a journey-wide integrity failure any more — the
+    // pre-existing rules and the reconciliation both stay silent
+    expect(s.gateProblems(TASK)).toEqual([]);
+    expect(s.check()).toEqual([]);
+    expect(workflowProblems(TASK, wf)).toEqual([]);
+    // the contrast at the same word-level: an ACCEPTED entry gate is READY and clean too
     writeNode('01-leg/02-b', [ev('created'), ev('submitted', { gate: 'grill' }), ev('confirmed', { gate: 'grill' })]);
-    expect(new Store(root).check().filter((p) => p.includes('02-b'))).toEqual([]);
+    expect(new Store(root).status('01-leg/02-b')).toBe('queued');
+    expect(new Store(root).check()).toEqual([]);
   });
 
-  it('(a) holds at the CONFIRM gate too, and is cleared by a re-submission', () => {
+  it('the rework WORD holds at the CONFIRM gate too, and a re-submission clears it (back to the wait)', () => {
     writeNode(TASK, [ev('created'), ev('activated'), ev('submitted', { gate: 'grill' }), ev('confirmed', { gate: 'grill' }), ev('submitted', { gate: 'confirm' }), ev('rejected', { gate: 'confirm' })]);
     const s = new Store(root);
-    expect(s.status(TASK)).toBe('active');
-    expect(s.check()).toEqual([expect.stringContaining('GATE-REWORK')]);
-    // the rework gesture: re-submit at the rejected gate — the finding clears
+    expect(s.status(TASK)).toBe('rework');
+    expect(s.check()).toEqual([]);
+    // the rework gesture: re-submit at the rejected gate — the word yields to the wait
     s.appendEvent(s.resolveNode(TASK), ev('submitted', { gate: 'confirm' }) as unknown as JourneyEvent);
     expect(s.status(TASK)).toBe('blocked');
     expect(s.check()).toEqual([]);
   });
 
-  it('(a) never fires for a terminal word — a cancelled/deferred task owes no dispatch', () => {
+  it('a terminal word is never overridden by the rework — a cancelled task owes no dispatch', () => {
     writeNode(TASK, [ev('created'), ev('submitted', { gate: 'grill' }), ev('rejected', { gate: 'grill' }), ev('cancelled', { reason: 'no longer needed' })]);
     const s = new Store(root);
     expect(s.status(TASK)).toBe('cancelled');
@@ -321,16 +355,39 @@ describe('the reconciliation rule (AC-3) — the status word vs the derived life
     expect(workflowState(asEvents(s.events(TASK))).rework).toBe(true); // derived, but not a dispatch risk
   });
 
-  it('(b) `accepted` without a confirm accept is a NAMED finding', () => {
+  it('(b) `accepted` with the exit gate not LAST-accepted is a NAMED finding — and its message names no false cause', () => {
     const wf = workflowState(asEvents([ev('created'), ev('submitted', { gate: 'confirm' }), ev('confirmed', { gate: 'confirm' })]));
     expect(workflowProblems(TASK, wf)).toEqual([]); // the honest accepted
-    // the contradiction: the status word says accepted, the lifecycle does not. The
-    // projection above cannot produce this (that is the point) — the rule's other two
-    // directions are pinned against the crafted word, so a future branch that drifts
-    // FAILS here instead of shipping.
+    // the crafted contradiction: the word says accepted, the exit gate's LAST decision does
+    // not. The word derivation covers the shapes that used to reach this (below), so this
+    // is the GUARD direction — pinned against the crafted word so a future branch that
+    // drifts FAILS here instead of shipping.
     const lying: WorkflowState = { ...wf, status: 'accepted', gates: { ...wf.gates, confirm: gateView(asEvents([ev('submitted', { gate: 'confirm' })]), 'confirm') } };
     expect(workflowProblems(TASK, lying)).toEqual([expect.stringContaining('GATE-STATUS')]);
     expect(workflowProblems(TASK, lying)[0]).toContain("last decision is 'submitted'");
+    // F1: the message must NOT assert a cause that can be false. The old wording said "no
+    // confirm accept" — false for the reachable accept → re-submit → reject shape.
+    expect(workflowProblems(TASK, lying)[0]).not.toContain('no confirm accept');
+  });
+
+  it('F1 — the reachable accept → re-submit → reject shape at confirm derives `rework` (the old rule (b) message lied about it)', () => {
+    writeNode(TASK, [
+      ev('created'),
+      ev('submitted', { gate: 'grill' }), ev('confirmed', { gate: 'grill' }),
+      ev('submitted', { gate: 'confirm' }), ev('confirmed', { gate: 'confirm' }), // the exit gate ACCEPTED
+      ev('submitted', { gate: 'confirm' }), // …then RE-SUBMITTED
+      ev('rejected', { gate: 'confirm', feedback: 'the evidence does not hold up' }), // …then REJECTED
+    ]);
+    const s = new Store(root);
+    const wf = workflowState(asEvents(s.events(TASK)));
+    // there IS a confirm accept in the tail — that is the point: the word is `rework`, never
+    // a bare `accepted` beside a rejected gate, and no false-cause message can be reached
+    expect(wf.gates.confirm.accepted).toHaveLength(1);
+    expect(wf.status).toBe('rework');
+    expect(wf.rework).toBe(true);
+    expect(wf.next).toEqual({ verdict: 'rework', gate: 'confirm' });
+    expect(workflowProblems(TASK, wf)).toEqual([]);
+    expect(s.check()).toEqual([]);
   });
 
   it('(c) `blocked` with nothing pending is a NAMED finding', () => {
@@ -342,12 +399,14 @@ describe('the reconciliation rule (AC-3) — the status word vs the derived life
     expect(workflowProblems(TASK, lying)[0]).toContain('nothing is pending');
   });
 
-  it('check() reports the finding through the SAME read advance! and the card use (check is the steering surface\'s guard)', () => {
+  it('the retired (a): check() no longer has a GATE-REWORK direction — and rule (b)/(c) still fire through the SAME read advance! and the card use', () => {
     writeNode(TASK, [ev('created'), ev('submitted', { gate: 'grill' }), ev('rejected', { gate: 'grill' })]);
-    // `operatorIntegrityBlockers` is `check()` + validators + verify + docs + uncommitted;
-    // the finding rides check(), so both the approve's re-check and the lazy integrity
-    // route refuse on it (proven over HTTP in whats-next.e2e.test.ts)
-    expect(new Store(root).check()).toEqual([expect.stringContaining('GATE-REWORK')]);
+    const s = new Store(root);
+    // the rework state is NOT a finding any more (prevention replaced detection)
+    expect(s.check().filter((p) => p.includes('GATE-REWORK'))).toEqual([]);
+    // while the two guard directions ARE scripted and reported by check() when they appear
+    const lyingAccepted: WorkflowState = { ...workflowState(asEvents([ev('created'), ev('submitted', { gate: 'confirm' }), ev('confirmed', { gate: 'confirm' })])), status: 'accepted', gates: { grill: gateView([], 'grill'), confirm: gateView([], 'confirm') } };
+    expect(workflowProblems(TASK, lyingAccepted)).toEqual([expect.stringContaining('GATE-STATUS')]);
   });
 });
 
@@ -396,12 +455,53 @@ describe('the readers AGREE (AC-2) — one fixture set, all four gate states', (
       expect(cmds.pendingGates().some((p) => p.task === TASK && p.gate === 'grill')).toBe(c.state === 'submitted');
       // 10. the active-leg observer view
       expect(cmds.lookBack().pendingGates.some((p) => p.task === TASK && p.gate === 'grill')).toBe(c.state === 'submitted');
-      // 11. the reconciliation: the honest fixtures never contradict themselves — except
-      // the one state that IS the contradiction (`rework owed` beside a READY word), which
-      // must be reported by NAME (that is AC-3(a), and it must stay observable)
-      expect(workflowProblems(TASK, wf)).toEqual(c.state === 'rejected' ? [expect.stringContaining('GATE-REWORK')] : []);
+      // 11. the reconciliation: EVERY honest fixture is silent — the rejected case included,
+      // because the projection now derives the `rework` WORD for it (the retired (a) made
+      // this state a finding; the word makes it impossible instead)
+      expect(workflowProblems(TASK, wf)).toEqual([]);
     });
   }
+
+  it('the rework state AGREES across the readers too (the fifth status word, all readers)', () => {
+    writeNode(TASK, [ev('created'), ev('submitted', { gate: 'grill' }), ev('rejected', { gate: 'grill' })]);
+    const store = new Store(root);
+    const cmds = commands();
+    const d = store.detail(TASK);
+    const wf = workflowState(asEvents(store.events(TASK)));
+    expect(store.status(TASK)).toBe('rework');
+    expect(d.status).toBe('rework');
+    expect(d.gates.grill.state).toBe('rejected');
+    expect(d.rework).toBe(true);
+    expect(d.next).toEqual({ verdict: 'rework', gate: 'grill' });
+    expect(cmds.gateState(TASK, 'grill')).toBe('rejected');
+    expect(cmds.rejections(TASK, 'grill')).toBe(1);
+    expect(cmds.undecidedSubmission(TASK, 'grill')).toBe(false);
+    expect(d.blockers).toEqual([]);
+    expect(cmds.pendingGates()).toEqual([]);
+    expect(cmds.lookBack().pendingGates).toEqual([]);
+    expect(workflowProblems(TASK, wf)).toEqual([]);
+  });
+
+  it('a rework-owed task is NOT proposed, while the LEG aggregate, the leg gate and the distance-to-goal read still count it as OPEN work', () => {
+    writeLeg('02-next');
+    writeNode(TASK, [ev('created'), ev('submitted', { gate: 'grill' }), ev('rejected', { gate: 'grill' })]);
+    const store = new Store(root);
+    const cmds = commands();
+    // NOT proposed: the ready set excludes it, so the frontmost-ready/advance/look-back reads skip it
+    expect(cmds.frontmostReady()).toBeUndefined();
+    expect(cmds.lookBack().frontmostReady).toBeUndefined();
+    expect(cmds.advance().action).not.toBe('continue-leg');
+    expect(cmds.advance().detail).not.toContain('next task:');
+    // …but the WORK is still open: the leg derives the child's word (never `done`), so the
+    // leg gate stays shut and the distance-to-goal set still lists the leg AND the task
+    expect(store.status('01-leg')).toBe('rework');
+    expect(CLOSED_TASK_STATUSES).not.toContain('rework');
+    const findings = runValidators(store).filter((f) => f.code === 'distance-to-goal');
+    expect(findings).toHaveLength(1);
+    expect(findings[0].detail).toContain('01-leg');
+    expect(findings[0].detail).toContain(TASK);
+    expect(store.legGateMet('02-next')).toMatchObject({ met: false });
+  });
 
   it('the readers agree on a task whose CONFIRM gate is the one in flight', () => {
     writeNode(TASK, [ev('created'), ev('submitted', { gate: 'grill' }), ev('confirmed', { gate: 'grill' }), ev('submitted', { gate: 'confirm' })]);
@@ -489,6 +589,7 @@ describe('the gate-decision vocabularies, REGISTERED (AC-5)', () => {
 
   it('the derivation derives the registry\'s own range (a status word outside vocab.statuses cannot be produced)', () => {
     const words = new Set(getVOCAB().statuses);
+    expect(words).toContain('rework'); // the word this change registered (vocab v5)
     for (const c of LIFECYCLE) expect(words).toContain(workflowState(asEvents(c.tail)).status);
   });
 });

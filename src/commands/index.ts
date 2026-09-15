@@ -784,11 +784,11 @@ export class Commands {
         `${id} is already completed — the done terminal is recorded once (rework is a superseding sibling task, never a second completed on this one)`,
       );
     }
-    const gateState = this.confirmGateState(id);
-    if (gateState !== 'accepted') {
+    const state = this.gateState(id, 'confirm');
+    if (state !== 'accepted') {
       return fail(
         'not-accepted',
-        `${id}: the confirm-result gate is not accepted (last decision: ${gateState}) — complete! records a delivery the HUMAN accepted: submit! ${id} confirm, then gate! ${id} confirm accept`,
+        `${id}: the confirm-result gate is not accepted (last decision: ${state}) — complete! records a delivery the HUMAN accepted: submit! ${id} confirm, then gate! ${id} confirm accept`,
       );
     }
     const evidenceBlocker = this.closeEvidenceBlocker(id);
@@ -1525,10 +1525,6 @@ export class Commands {
    *  re-submitted after an accept (an undecided submission) can never be completed over. */
   gateState(id: string, gate: string): GateLifecycle {
     return gateView(this.store.events(id), gate).state;
-  }
-
-  private confirmGateState(id: string): GateLifecycle {
-    return this.gateState(id, 'confirm');
   }
 
   /** Rejections recorded at a gate — the bound's counter (and L2's rework signal). */

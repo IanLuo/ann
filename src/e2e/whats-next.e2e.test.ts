@@ -106,9 +106,9 @@ function driveLoopJourney(root: string): void {
 
 /** The OPEN journey (care a): one ACTIVE leg with one task whose grill gate has NOT been
  *  submitted — the frame's own gate is the one the daemon must not prompt for, and NO
- *  rejection stands anywhere, so the integrity re-check is clean. A rejection here would
- *  be a DIFFERENT state since leg 12/08: a rework-owed task is a NAMED integrity finding
- *  (GATE-REWORK — the mis-dispatch that drove 12/05 twice), pinned by its own test below.
+ *  rejection stands anywhere, so the integrity pre-check is clean. A rejection here would
+ *  be a DIFFERENT state since leg 12/08: a rework-owed task derives the `rework` WORD and
+ *  is NOT proposed (pin: the rework suite below).
  *  Plus a committed doc the dirty-state test dirties. */
 function driveOpenJourney(root: string): void {
   cli(root, ['spawn!', LEG, CONTRACT('the alpha leg')]);
@@ -119,10 +119,10 @@ function driveOpenJourney(root: string): void {
   commit(root, 'the open fixture journey');
 }
 
-/** THE REWORK JOURNEY (leg 12/08, AC-3): the SAME shape 12/05 hit live — a task whose
- *  ENTRY (grill) gate was REJECTED with feedback and never re-submitted. Before the
- *  reconciliation rule this state reported `integrity: clean`, `queued` and
- *  continue-leg; now it is a NAMED finding. */
+/** THE REWORK JOURNEY (leg 12/08): the SAME shape 12/05 hit live — a task whose ENTRY
+ *  (grill) gate was REJECTED with feedback and never re-submitted. It used to report
+ *  `integrity: clean`, `queued` and continue-leg (the mis-dispatch); the fix is the
+ *  DERIVED `rework` word, which keeps the task out of the ready set. */
 function driveReworkJourney(root: string): void {
   cli(root, ['spawn!', LEG, CONTRACT('the alpha leg')]);
   cli(root, ['spawn!', FIRST, CONTRACT('do the thing')]);
@@ -580,15 +580,17 @@ describe('e2e — the approve FAILS CLOSED: no submission (care a) and a dirty s
 });
 
 /**
- * THE MIS-DISPATCH CANNOT BE CALLED CLEAN (leg 12/08, AC-3). The state 12/05 hit live —
- * an entry gate REJECTED with feedback, never re-submitted — used to answer
- * `integrity: clean` with `executable: true` and a plain `continue-leg`, so the operator
- * (and the driver) drove past the rejection and did the work twice. The
- * reconciliation rule makes it a NAMED finding on the SAME read the card and the
- * approve use: the steering surface can no longer call it clean, and the write refuses
- * fail-closed with zero writes.
+ * PREVENTION REPLACED DETECTION (leg 12/08 rework — the rejected confirm gate's review).
+ * The state 12/05 hit live — an entry gate REJECTED with feedback, never re-submitted —
+ * used to answer `integrity: clean` with `executable: true` and a plain `continue-leg`, so
+ * the operator (and the driver) drove past the rejection and did the work twice. The first
+ * fix made it a NAMED integrity finding (GATE-REWORK); the review's call replaced that with
+ * the DERIVED `rework` WORD, because the finding turned ONE human rejection into a
+ * journey-wide `check()` failure on every read. This suite pins the prevention over HTTP:
+ * the word, the CLEAN integrity read, the derivation (the authored-work boundary, never
+ * continue-leg) and the derived verdict carrying the gate + the human's feedback.
  */
-describe('e2e — a REJECTED bound gate is a NAMED integrity finding (the rework, 12/08)', () => {
+describe('e2e — a REJECTED bound gate derives the `rework` WORD: not proposed, journey CLEAN (12/08)', () => {
   let root: string;
   let server!: Server;
 
@@ -602,34 +604,42 @@ describe('e2e — a REJECTED bound gate is a NAMED integrity finding (the rework
     if (root) rmSync(root, { recursive: true, force: true });
   });
 
-  it('the lazy integrity snapshot NAMES the owed rework, and the approve refuses fail-closed', { timeout: 30_000 }, async () => {
-    // the status word still reads `queued` (the projection invents no state) — the REWORK
-    // is what the reconciliation reports, so a READER cannot mistake it for fresh work
-    expect(await taskStatus(server, FIRST)).toBe('queued');
+  it('the steering surface: the word is `rework`, the rework-owed task is NOT proposed, and integrity is CLEAN', { timeout: 30_000 }, async () => {
+    // the WORD is the honest one — and it is exactly what keeps the task out of the ready set
+    expect(await taskStatus(server, FIRST)).toBe('rework');
     const v = await card(server);
-    expect(v.executable).toBe(true); // the derivation side is unchanged — the WRITE is the guard
+    // no ready work in the leg → the derivation is the authored-work boundary, never the
+    // continue-leg invitation that drove 12/05 twice
+    expect(v.advance.action).toBe('closure-needed');
+    expect(v.frontmost).toBeUndefined();
+    expect(v.executable).toBe(false); // the approve is not even offered
+    // …and the journey is CLEAN: one human rejection no longer fails every read (the wedge
+    // the retired GATE-REWORK finding caused)
+    expect(await integrity(server)).toEqual({ clean: true, blockers: [] });
 
-    const dirty = await integrity(server);
-    expect(dirty.clean).toBe(false); // …and this is the finding that used to be invisible
-    expect(dirty.blockers.some((b) => b.includes('GATE-REWORK') && b.includes(FIRST) && b.includes('grill'))).toBe(true);
-
-    // the SAME refusal the card displays, carried through the write with ZERO writes
+    // the boundary present-and-stop, with ZERO writes: the human's move is the rework
+    // re-submission at the rejected gate, never a machine run
     const before = await logTypes(server, FIRST);
     const r = await post(server.url + '/api/approve', boundTo(v));
-    expect(r.status).toBe(409);
-    const doc = JSON.parse(r.body) as { error: { code: string }; blockers: string[] };
-    expect(doc.error.code).toBe('refused-integrity');
-    expect(doc.blockers.some((b) => b.includes('GATE-REWORK'))).toBe(true);
+    expect(r.status).toBe(200);
+    const doc = JSON.parse(r.body) as { value: { stop: string; derivation: { action: string } } };
+    expect(doc.value.stop).toBe('boundary');
+    expect(doc.value.derivation.action).toBe('closure-needed');
     expect(await logTypes(server, FIRST)).toEqual(before);
   });
 
-  it('the card names the rework on the node itself (the next line is DERIVED, not worded locally)', { timeout: 30_000 }, async () => {
+  it('the rework is on the node itself (the next line is DERIVED, not worded locally)', { timeout: 30_000 }, async () => {
     const r = await get(server.url + `/api/confirm?id=${encodeURIComponent(FIRST)}`);
     expect(r.status).toBe(200);
-    const d = JSON.parse(r.body) as { detail: { rework: boolean; next: { verdict: string; gate?: string }; gates: { grill: { state: string } } } };
+    const d = JSON.parse(r.body) as {
+      detail: { status: string; rework: boolean; next: { verdict: string; gate?: string }; gates: { grill: { state: string } }; events: Array<{ type: string; feedback?: string }> };
+    };
+    expect(d.detail.status).toBe('rework');
     expect(d.detail.gates.grill.state).toBe('rejected');
     expect(d.detail.rework).toBe(true);
     expect(d.detail.next).toEqual({ verdict: 'rework', gate: 'grill' });
+    // the human's own feedback is in the record the verdict points at (12/06 renders it)
+    expect(d.detail.events.some((e) => e.type === 'rejected' && e.feedback === 'the contract is not right yet — rework it')).toBe(true);
   });
 });
 

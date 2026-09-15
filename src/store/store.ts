@@ -4,7 +4,7 @@ import { join, basename, resolve, sep } from 'node:path';
 import { getVOCAB } from './vocab.js';
 import { blobSha, stripMarkers } from './sha.js';
 import { loadDocsManifest, scanDocsDir, writeDocsManifest } from './docs.js';
-import { gateView, isGateEventType, workflowProblems, workflowState, type GateLifecycle, type GateView, type NextVerdict, type WorkflowState } from './workflow.js';
+import { gateView, isGateEventType, workflowProblems, workflowState, type GateLifecycle, type GateView, type NextVerdict } from './workflow.js';
 import type { OpLog } from '../abilities/obs/log.js';
 
 /** The object types `git cat-file` reports for a reference that RESOLVES — the batch
@@ -520,13 +520,7 @@ export class Store {
    *  owns the gate lifecycle every other gate reader consumes. This method is the
    *  store's name for it; nothing here re-reads the event tail. */
   private taskStatus(id: string): string {
-    return this.workflow(id).status;
-  }
-
-  /** The ONE workflow projection for a node (workflow.ts) — the status word, the derived
-   *  rework flag, the gate views and the card's next verdict, computed in ONE pass. */
-  private workflow(id: string): WorkflowState {
-    return workflowState(this.events(id));
+    return workflowState(this.events(id)).status;
   }
 
   private legStatus(id: string): string {
@@ -863,7 +857,10 @@ export class Store {
     const detail: TaskDetail = {
       id,
       isLeg: !id.includes('/'),
-      status: this.status(id),
+      // the card's status is the projection it ALREADY holds for a task (one pass, not
+      // two); a LEG's status is its children's aggregate, which the projection does not
+      // derive (`Store.legStatus`).
+      status: id.includes('/') ? wf.status : this.status(id),
       superseded: this.events(id).some((e) => e.type === 'superseded'),
       contract,
       gates: { grill: gate(wf.gates.grill), confirm: gate(wf.gates.confirm) },

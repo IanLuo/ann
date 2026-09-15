@@ -4,7 +4,6 @@ import { docsIndexFresh } from '../store/docs.js';
 import { Frame, FrameDeps, FrameResult } from './frame.js';
 import { runValidators } from './validators/index.js';
 import { workflowState } from '../store/workflow.js';
-import { JourneyEvent } from '../store/store.js';
 
 /**
  * L2 · THE OPERATOR ACTION `advance!` (functional-spec v2 F5 — the approve→execute
@@ -165,12 +164,6 @@ function advanceCard(s: DerivationSnapshot): string {
   return lines.join('\n');
 }
 
-/** The gate awaiting the human, if any — the ONE derivation's `waitingOn` (workflow.ts),
- *  never a second scan of the tail. */
-function undecidedGateOf(events: JourneyEvent[]): 'grill' | 'confirm' | undefined {
-  return workflowState(events).waitingOn;
-}
-
 /** Where the journey landed after a continue-leg run — derived from the frame stop and
  *  the task's log, never assumed (rule 4: the next human decision is NAMED). */
 function landingOf(commands: Commands, task: string, r: FrameResult): OperatorLanding {
@@ -178,7 +171,9 @@ function landingOf(commands: Commands, task: string, r: FrameResult): OperatorLa
     case 'completed':
       return { task, frameStop: r.stop, where: 'completed', advance: r.advance };
     case 'blocked-at-gate':
-      return { task, frameStop: r.stop, where: 'gate', gate: undecidedGateOf(commands.events(task)) };
+      // the gate awaiting the human is the ONE derivation's `waitingOn` (workflow.ts),
+      // never a second scan of the tail
+      return { task, frameStop: r.stop, where: 'gate', gate: workflowState(commands.events(task)).waitingOn };
     case 'blocked-waiting':
       // the two-phase wait: the confirm gate is decided (or verify waits for the empty
       // chain) and the RUNNER's evidence commit precedes the task's confirm-result gate

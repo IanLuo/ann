@@ -91,7 +91,9 @@ export interface FrameDeps {
 }
 
 /* The frame keeps NO gate-state reader of its own (leg 12/08): the former private copy
- * was DELETED — every resume read below is `gateLifecycle` (workflow.ts). */
+ * was DELETED — every resume read below is `gateLifecycle` (workflow.ts), and the
+ * tail-state-4 wait read is `undischargedWait` (the same function the status projection
+ * reads), called directly. */
 
 const today = (): string => new Date().toISOString().slice(0, 10);
 
@@ -248,7 +250,7 @@ export class Frame {
         if (!flow.chain.length) {
           result.problems = verifyFindings;
           // tail state 4, written once: an undischarged `waiting` is already the block
-          if (!this.pendingWait(taskId)) {
+          if (!undischargedWait(this.commands.events(taskId))) {
             const w = this.commands.append(taskId, { at: today(), type: 'waiting', note: verifyFindings.join('; ') } as unknown as JourneyEvent);
             if (!w.ok) return this.stopFailed(taskId, result, w.error);
           }
@@ -560,7 +562,7 @@ export class Frame {
       // `evidence.commits[]`. Until then — `waiting` (tail state 4, written once); the
       // release is the evidence, and a re-run then concludes. Docs are git content.
       this.enterPhase(result, 'verify');
-      if (!this.pendingWait(taskId)) {
+      if (!undischargedWait(this.commands.events(taskId))) {
         const w = this.commands.append(
           taskId,
           {
@@ -592,12 +594,6 @@ export class Frame {
   }
 
   /* ══ tail reads + the failure write ════════════════════════════════════════ */
-
-  /** Tail state 4: a `waiting` record with NO subsequent commit evidence still stands
-   *  (the ONE reading, workflow.ts — the status projection reads the same function). */
-  private pendingWait(taskId: string): boolean {
-    return undischargedWait(this.commands.events(taskId));
-  }
 
   private hasEvent(taskId: string, type: string): boolean {
     return this.commands.events(taskId).some((e) => e.type === type);

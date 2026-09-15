@@ -16,6 +16,13 @@ import type { JourneyEvent } from './store.js';
  * integrity check reported clean. An operator (and the driver) drove past the rejection
  * and did the work twice (12/05).
  *
+ * THE FIX (rework, 2026-09-15 — the rejected confirm gate's review): the projection
+ * derives the `rework` WORD for that state, so the rejected task is outside the ready set
+ * and no reader can propose it as fresh work; the `rework` flag and the `next` verdict
+ * still carry the gate and the human's own feedback. The reconciliation rule's earlier
+ * READY-word finding is RETIRED with the word (the same fact from the other side) — it had
+ * turned one human rejection into a journey-wide `check()` failure on every read.
+ *
  * This module is the ONE reading of the submitted|confirmed|rejected TRIPLE, and the
  * ONE status-word projection:
  *
@@ -26,10 +33,13 @@ import type { JourneyEvent } from './store.js';
  *   · `gateView(events, gate)` — the same ONE scan, with the facts its readers ask for
  *     (the indices the transcript's attempt boundary needs, the rejection history the
  *     reject bound counts, the rework prompt's feedback);
- *   · `workflowState(events)` — the status WORD plus the DERIVED `rework` flag, the
- *     `waitingOn` / `pendingWait` wait facts, and the derived `next` verdict (the card's
- *     next line: the VERDICT is derived here, the WORDING stays in the renderer);
- *   · `workflowProblems(id, state)` — the RECONCILIATION rule (below).
+ *   · `workflowState(events)` — the status WORD (`rework` included: a rejected bound gate
+ *     with no later submission at it derives that word — a task outside the ready set, so
+ *     nothing proposes or drives it), the DERIVED `rework` flag, the `waitingOn` /
+ *     `pendingWait` wait facts, and the derived `next` verdict (the card's next line: the
+ *     VERDICT is derived here, the WORDING stays in the renderer);
+ *   · `workflowProblems(id, state)` — the RECONCILIATION rule (below): the two guard
+ *     directions that remain now that the WORD itself derives the owed rework.
  *
  * NOTHING here is state: no new event type, no new stored field, no write path. `rework`
  * is derived (a rejected bound gate with no later submission at that gate; a
@@ -178,8 +188,12 @@ export interface NextVerdict {
 
 /** THE WORKFLOW-STATE PROJECTION — the status word, `rework` included. */
 export interface WorkflowState {
-  /** The status WORD (queued · active · blocked · done · failed · superseded · cancelled ·
-   *  accepted · deferred) — the same range `vocab.statuses` declares. */
+  /** The status WORD (queued · active · rework · blocked · done · failed · superseded ·
+   *  cancelled · accepted · deferred) — the same range `vocab.statuses` declares (`rework`
+   *  was added to it with this word). `rework` is the DERIVED word for a task owing a
+   *  re-submission at a rejected gate: not a CLOSED word (the leg aggregate, the leg gate
+   *  and the distance-to-goal read still count the task as open work) and not a READY one
+   *  (nothing proposes or drives it). */
   status: string;
   /** REWORK OWED, derived: a bound gate whose LAST decision is a rejection, with no
    *  later submission at that gate (a re-submission clears it). */
@@ -196,9 +210,19 @@ export interface WorkflowState {
  *  long-standing range (leg 08/09) — `superseded` is deliberately NOT in it, preserving
  *  the derivation exactly as it was. */
 const WAIT_EXEMPT = ['done', 'failed', 'cancelled', 'deferred'];
-/** The status range that claims the task is READY to run (the ready set) — the words a
- *  reconciliation rule must never see beside an owed rework. */
+/** The status range that claims the task is READY to run (the ready set) — the words the
+ *  proposal readers filter on (`frontmostReady` · `lookBack` · `advance()`). `rework` is
+ *  deliberately NOT in it: a task owing a re-submission at a rejected gate must never be
+ *  proposed as fresh work. That is PREVENTION, and it is why the reconciliation rule no
+ *  longer needs to report the mis-dispatch (12/08 rework — the review's call). */
 export const READY_STATUSES = ['queued', 'active'];
+
+/** The statuses the `rework` word must never override — the CLOSED set
+ *  (`CLOSED_TASK_STATUSES`, store.ts) plus `failed`: closed or exhausted work is not "owed
+ *  rework", and overriding it would re-open work the leg aggregate, the leg gate and the
+ *  distance-to-goal read count on. A KNOWING DUPLICATE of store.ts's `NOT_OPEN_TO_RUN` (the
+ *  same five words, one meaning), pinned by a test so the two cannot drift. */
+export const REWORK_EXEMPT = ['done', 'superseded', 'cancelled', 'deferred', 'failed'];
 
 /** A `waiting` record with NO subsequent commit evidence still stands (the empty-chain
  *  verify-wait; format v14 §3, resume tail-state 4). */
@@ -259,8 +283,14 @@ export function workflowState(events: JourneyEvent[]): WorkflowState {
     if (pendingWait) status = 'blocked';
   }
   // REWORK: the last decision at a bound gate is a rejection and no submission followed
-  // it (a re-submission makes the gate `submitted` again — the rework is cleared).
+  // it (a re-submission makes the gate `submitted` again — the rework is cleared). The WORD
+  // is the honest one — a rework-owed task is NOT ready (`READY_STATUSES` excludes it), so
+  // nothing proposes or drives it — while the flag and the `next` verdict keep the gate and
+  // the human's feedback a bare word cannot carry. A CLOSED or failed word is never
+  // overridden (`REWORK_EXEMPT`): closed work stays closed, so the leg aggregate, the leg
+  // gate and the distance-to-goal read are exactly what they were.
   const rejectedGate = (['grill', 'confirm'] as const).find((g) => gates[g].state === 'rejected');
+  if (rejectedGate && !REWORK_EXEMPT.includes(status)) status = 'rework';
   return {
     status,
     rework: rejectedGate !== undefined,
@@ -298,28 +328,31 @@ function nextVerdict(
  * integrity re-check and the WHAT'S NEXT card read them and can no longer call a
  * contradiction clean.
  *
- *   (a) `queued`/`active` (the READY words) while a bound gate's last decision is a
- *       REJECTION — the mis-dispatch: the rework is owed and nothing may drive it;
- *   (b) `accepted` with no confirm accept — the exit gate's word, unsupported;
+ *   (a) RETIRED (12/08 rework — the review's call): a READY word beside a last-decision
+ *       REJECTION at a bound gate is no longer a CONTRADICTION, because the projection now
+ *       derives the `rework` WORD for exactly that state (a word outside `READY_STATUSES`,
+ *       so nothing proposes it). Detection was replaced by prevention: the old finding
+ *       made every read fail integrity from the moment a human rejected one gate (a normal
+ *       act with a journey-wide blast radius). The finding is GONE by construction, not by
+ *       weakening: the word and the rule were the same fact seen from two sides.
+ *   (b) `accepted` but the exit gate's LAST decision is not an accept — the word's subject,
+ *       unsupported;
  *   (c) `blocked` with neither an undecided submission nor an undischarged `waiting` —
  *       a wait that nothing in the tail justifies.
  *
- * (b) and (c) cannot be produced by the projection above (that is the point of the
- * projection); they are the rule's other two directions, so a status word added later —
- * or a branch that drifts — fails here instead of shipping.
+ * (b) and (c) are the rule's GUARD directions: the word derivation above covers the shapes
+ * that used to reach (b) — notably the reachable accept → re-submit → reject tail, which
+ * now derives `rework` — so they are expected to be silent. They stay because a status
+ * word added later, or a branch that drifts, must FAIL here instead of shipping. Each
+ * message names the two DERIVED facts only: the earlier wording asserted a cause
+ * ("no confirm accept") that was FALSE for the shape that did reach it.
  */
 export function workflowProblems(id: string, wf: WorkflowState): string[] {
   const out: string[] = [];
-  if (READY_STATUSES.includes(wf.status)) {
-    const gate = (['grill', 'confirm'] as const).find((g) => wf.gates[g].state === 'rejected');
-    if (gate) {
-      out.push(
-        `GATE-REWORK: ${id} — the status word '${wf.status}' claims READY while the last decision at gate '${gate}' is a REJECTION with no re-submission (rework owed — the task must be reworked and re-submitted before anything drives it)`,
-      );
-    }
-  }
   if (wf.status === 'accepted' && wf.gates.confirm.state !== 'accepted') {
-    out.push(`GATE-STATUS: ${id} — the status word 'accepted' but the confirm gate's last decision is '${wf.gates.confirm.state}' (no confirm accept)`);
+    out.push(
+      `GATE-STATUS: ${id} — the status word 'accepted' but the confirm gate's last decision is '${wf.gates.confirm.state}' — that word requires the LAST decision at the exit gate to be an accept`,
+    );
   }
   if (wf.status === 'blocked' && !wf.waitingOn && !wf.pendingWait) {
     out.push(`GATE-STATUS: ${id} — the status word 'blocked' but nothing is pending: no undecided submission and no undischarged 'waiting'`);
