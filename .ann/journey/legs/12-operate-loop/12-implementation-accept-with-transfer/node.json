@@ -1,0 +1,43 @@
+{
+  "id": "12-operate-loop/12-implementation-accept-with-transfer",
+  "contract": {
+    "intent": "THE HALF ACCEPT, ENGINE SIDE — closing a task while its remaining scope moves to a named successor, as ONE validated act. The user's ask: 'I want to halfly accept — meaning the task I want to close, but need to open a new task for some continuing work'. The FORMAT already has the vocabulary and today it is unusable: `transferred {target, scope}` ('scope moved to a new task/leg', scope VERBATIM) and `gate-revised {old, new}` are legal, shape-checked append shapes (`store.ts:1391`, `:1486`) but NO command owns them — they can only be written by the raw general `append!` — so (a) the human's single decision becomes two unrelated writes in two different tools, (b) nothing validates F-AC16's 'the target must exist' at WRITE time (it fires later in check(), so an append can record a transfer to a node that does not exist), and (c) a genuinely unmet AC still blocks the close: `complete!` refuses with 'N acceptance criterion(s) carry no claim' (commands/index.ts:803) and a `transferred` scope is not credited — so the honest record is impossible and the operator is pushed into a false claim. Deliverable: ONE gesture that composes accept + revision + transfer with fail-closed validation, and the close rule that lets a transferred AC be satisfied-by-transfer. NOT a third verdict: the node's status stays honest (done), and the partiality lives in the checked link (target + scope). NOT a new state: no status word, no new event type — a `partial` status would ripple through the leg aggregate, the leg gate, the distance-to-goal read and the ready set, which is the blast radius the `rework` word cost 12/08. The two decision vocabularies stay binary (accept | reject); this is an ACCEPT WITH A BOUND SUCCESSOR.",
+    "acceptanceCriteria": [
+      "AC-1 — ONE GESTURE, VALIDATED AT WRITE TIME: the confirm accept carries an optional transfer — `gate! <id> confirm accept '<why>' --transfer <target> --scope '<verbatim ACs>'` (or a `transfer!` command; the grill decides which) — composing, in one act, the accept + `gate-revised {old,new}` + `transferred {target, scope}`. It refuses NAMED with ZERO writes when: the target does not exist as a leg/task id (F-AC16's rule lifted to write time, where today it only fires in check()) · the scope is empty · the gate is not confirm · the decision is not accept · the why is empty (12/11's rule, and the frame's own confirm-accept path must carry it too — the transfer option must not become a bypass around the required why).",
+      "AC-2 — THE CLOSE RULE: an AC named in a `transferred.scope` counts as SATISFIED-BY-TRANSFER in the conclusion predicate, so `complete!` and the gate's auto-close stop demanding a false claim for an unmet AC; the refusal that remains names exactly the ACs that are neither claimed NOR transferred, so the gap stays visible. The record therefore reads 'this AC moved to <target>', never 'this AC was met'.",
+      "AC-3 — NO NEW STATE, NOTHING ELSE MOVES: no new status word, no new event type, no change to the leg aggregate / the leg gate / the distance-to-goal read / the ready set (a test pins each of them unchanged); `transferred` and `gate-revised` keep their existing validated keys; the reject bound (3/gate) and the F-AC16 check keep firing; the gate decision stays binary.",
+      "AC-4 — ORDER-INDEPENDENT AND IDEMPOTENT: recording the transfer before or after the close satisfies F-AC16 (the current check is order-insensitive — a test pins both orders); a second identical transfer on the same node refuses by name (no duplicate scope records); a transfer whose target is a task in ANOTHER leg is allowed (the format's target is a leg/task id) and a self-target refuses.",
+      "AC-5 — NO REGRESSION, NO HISTORY REWRITE: full npm test green, npm run typecheck clean, captured checks (npm run build · ann check · ann verify) via capture!, ann check + ann verify clean on the live journey, committed with structured evidence (F-AC18); the existing journey is untouched (no live node carries a transfer today, and none is fabricated)."
+    ],
+    "workType": "implementation",
+    "targetAreas": [
+      "src/commands",
+      "src/store",
+      "src/flow"
+    ],
+    "requiredInputs": [
+      "journey-format-spec",
+      "flow-control-spec"
+    ],
+    "expectedOutputs": [
+      "the accept-with-transfer gesture (composed, validated, fail-closed)",
+      "the close rule crediting a transferred AC",
+      "tests: the refusals · the close rule · the order-independence · the pinned no-move set"
+    ]
+  },
+  "openQuestions": [
+    {
+      "id": "Q1",
+      "question": "Is the transfer an option on `gate!` (the human's one decision) or its own `transfer!` command (a separate record)?",
+      "blocking": false,
+      "defaultIfUnanswered": "an option on gate! — the human makes ONE decision; two commands re-create the two-gesture problem this task exists to fix"
+    },
+    {
+      "id": "Q2",
+      "question": "Does a transfer to a leg (rather than a task) require the leg to be spawned first, or may the gesture spawn it?",
+      "blocking": false,
+      "defaultIfUnanswered": "the target must EXIST (F-AC16, unchanged) — the successor is spawned first, by the human, or drafted for approval; this task never authors a contract"
+    }
+  ],
+  "createdAt": "2026-09-17"
+}

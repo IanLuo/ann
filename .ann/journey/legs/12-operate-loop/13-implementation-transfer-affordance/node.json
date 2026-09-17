@@ -1,0 +1,43 @@
+{
+  "id": "12-operate-loop/13-implementation-transfer-affordance",
+  "contract": {
+    "intent": "THE TRANSFER AFFORDANCE — the human's door for the half accept. 12-operate-loop/12 gives the engine ONE validated gesture (accept + gate-revised + transferred, with the close rule that credits a transferred AC); this task puts it on the page, so the confirm gate stops being a binary choice the operator can only make from a terminal. The measured state today: the service exposes exactly THREE writes — POST /api/gate {id, gate, decision, feedback} · /api/approve · /api/drive — and `append!`/`spawn!` are deliberately absent as routes (service.ts:170), so the card cannot write a transfer AND cannot create the successor it would point at. Deliverable, mirroring the driver/affordance split (12/02 → 12/04): a NAMED route over the engine gesture + the third action on the confirm card. The successor is the human's: the card offers existing tasks to point at, or a GENERATED draft for approval — never a machine spawn (the authored-work boundary).",
+    "acceptanceCriteria": [
+      "AC-1 — THE THIRD ACTION: the confirm gate's card gains 'Accept + continue elsewhere' beside Accept/Reject, shown only on a confirm gate with a live (submitted) decision. It collects exactly two things and nothing more: the SUCCESSOR (a picker over the leg's tasks — open and closed alike, since the target may be an existing node or a fresh one) and the SCOPE (prefilled, verbatim, from the ACs that carry no claim, editable before submit). The why (12/11's required field) rides the same form.",
+      "AC-2 — ONE NAMED ROUTE OVER THE SANCTIONED WRITERS: POST /api/transfer (or a transfer{} object on POST /api/gate — the grill decides), executing the engine gesture server-side, never a second write path. Body shape validated by NAME (id · gate · decision · transfer{target, scope} · why); a refusal round-trips as a NAMED error with ZERO writes — the /api/gate precedent, including its integrity behaviour.",
+      "AC-3 — THE SUCCESSOR IS THE HUMAN'S, AND THE CARD CANNOT LIE ABOUT IT: the picker lists real nodes only (the client cannot type an id the engine will reject — and the route refuses an unknown target regardless); a DRAFT path produces a GENERATED contract the human approves (labelled GENERATED, never auto-spawned) — the authored-work boundary holds at the surface.",
+      "AC-4 — THE OUTCOME IS VISIBLE: after the gesture the card shows the task closed WITH the successor named ('the rest is now <target>'), the transferred scope readable on the node, and — once 12/11 lands — the choice point appearing in the decisions read (the transfer with its why, not a bare status). A re-opened card shows the same; nothing is asserted that the log does not hold.",
+      "AC-5 — NO REGRESSION: full npm test green, npm run typecheck clean, captured checks (npm run build · ann check · ann verify) via capture!, ann check + ann verify clean on the live journey, committed with structured evidence (F-AC18). An e2e over real HTTP covers the route: the happy path, the unknown-target refusal, the empty-scope refusal, and the boundary state (a confirm gate with no submission cannot transfer)."
+    ],
+    "workType": "implementation",
+    "targetAreas": [
+      "src/surface",
+      "src/e2e"
+    ],
+    "requiredInputs": [
+      "functional-spec",
+      "architecture"
+    ],
+    "expectedOutputs": [
+      "POST /api/transfer (the route over the engine gesture)",
+      "the card's third action: successor picker + prefilled scope + the why",
+      "the outcome rendering (closed, with the successor named)",
+      "an e2e over real HTTP: happy path + the three refusals"
+    ]
+  },
+  "openQuestions": [
+    {
+      "id": "Q1",
+      "question": "Does the card allow picking a CLOSED task as the transfer target, or only open ones?",
+      "blocking": false,
+      "defaultIfUnanswered": "any real node — the format only requires the target to exist; the human may transfer to a task already done and follow it with a new one"
+    },
+    {
+      "id": "Q2",
+      "question": "Is the GENERATED-draft path in this slice, or only the existing-node picker?",
+      "blocking": false,
+      "defaultIfUnanswered": "existing node only in this slice — the draft path is the driver's/gate session's job (12/04's GENERATED pattern), and keeping it out keeps this slice small"
+    }
+  ],
+  "createdAt": "2026-09-17"
+}
