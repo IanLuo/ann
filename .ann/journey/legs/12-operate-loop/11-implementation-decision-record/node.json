@@ -1,0 +1,46 @@
+{
+  "id": "12-operate-loop/11-implementation-decision-record",
+  "contract": {
+    "intent": "THE CHOICE-MAKING POINT — the journey records what was done and what was decided, but not reliably WHY, and nothing shows a node's decisions AS decisions. The legs give a timeline of WORK; a timeline of CHOICES is missing. Measured loss, live: across the journey's 29 tasks, 49 gate accepts carry a why in 31 cases and NOTHING in 18 — the channel exists on the accept path and is never filled, because a rejection's why is FORCED by the rework loop and an accept's is not. The pieces already exist and are scattered: rejected/confirmed.feedback · evidence.answers[] {id, answer, provenance} · openQuestions {id, question, reason, blocking, defaultIfUnanswered} · gate-revised {old,new} · the step-level decisions[] and exactly ONE enforcement (high-impact-defaulted: a BLOCKING openQuestion resolved on a completed node must carry discussed|defaulted|inferred — the tech-stack lesson). Deliverable: the enforcement that matters plus the ONE read that makes choices visible. It does NOT add a per-task reason field: a static why in an immutable node.json could never be corrected, and a task is the wrong granularity for a choice point (a decision happens at a gate, a resolution or a scope change). ONE derivation, every reader consuming it — the 12/08 lesson (one gate derivation, not eleven) applied to decisions.",
+    "acceptanceCriteria": [
+      "AC-1 — THE WHY IS REQUIRED WHERE IT IS LOST: gate! <id> confirm accept REFUSES (NAMED, zero writes) without a non-empty why — the write-path rule shape of cancelled.reason, not a new field. The CLI and the served card's confirm form both carry it: the form asks before it writes, and a refusal round-trips as a named error, never a silent accept.",
+      "AC-2 — ONE DECISION DERIVATION + ONE READ: a single derivation over the event tail yields a node's choice points in order, each with what was decided · when · by whom (the recorded initiator) · WHY (the reason, or its absence NAMED) · and the event it lives in (gate decision · resolved openQuestion with its how: · gate-revised terms change · superseded/amended artifact). One read exposes it (ann --json decisions <id>, plus the card), rendering from that derivation ONLY — no reader re-scans the tail, and a test asserts every consumer AGREES on a fixture set covering each choice-point kind (the same shape as the 12/08 reader-agreement test).",
+      "AC-3 — THE HIGH-IMPACT RULE GENERALIZED: high-impact-defaulted extends from 'a blocking openQuestion on a completed node' to a gate accept that decides a high-impact fork; the rule and its code literal move together and the change is recorded as a reconciliation row in docs/resource-registry §5.",
+      "AC-4 — HONEST ABSENCE: a decision whose why was never recorded reads as MISSING — never inferred, never fabricated. The read names the gap, so the hole is visible instead of silent.",
+      "AC-5 — NO REGRESSION, NO HISTORY REWRITE: full npm test green, npm run typecheck clean, captured checks (npm run build · ann check · ann verify) via capture!, ann check + ann verify clean on the live journey, committed with structured evidence (F-AC18). The existing journey is untouched: 12/08's already-recorded decisions (bare accepts included) must still read correctly, with their missing whys named."
+    ],
+    "workType": "implementation",
+    "targetAreas": [
+      "src/store",
+      "src/commands",
+      "src/flow",
+      "src/surface",
+      "src/e2e"
+    ],
+    "requiredInputs": [
+      "journey-format-spec",
+      "resource-registry"
+    ],
+    "expectedOutputs": [
+      "the decisions derivation + its read (CLI + card)",
+      "the required-why write rule + the card form that carries it",
+      "the extended high-impact rule + its §5 reconciliation row",
+      "tests: the derivation · the reader agreement · the refusal · honest absence"
+    ]
+  },
+  "openQuestions": [
+    {
+      "id": "Q1",
+      "question": "Does the required why apply to EVERY confirm accept, or only to high-impact decisions?",
+      "blocking": false,
+      "defaultIfUnanswered": "every confirm accept — it is a task's terminal decision and the exact place the 18 whys were lost; grill accepts stay optional (an entry gate is cheap to re-obtain)"
+    },
+    {
+      "id": "Q2",
+      "question": "Does the card render the decisions inside the gate card, or as its own view?",
+      "blocking": false,
+      "defaultIfUnanswered": "its own view on the node card — the timeline of choices beside the timeline of work"
+    }
+  ],
+  "createdAt": "2026-09-17"
+}

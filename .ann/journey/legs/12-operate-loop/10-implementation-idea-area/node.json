@@ -1,0 +1,44 @@
+{
+  "id": "12-operate-loop/10-implementation-idea-area",
+  "contract": {
+    "intent": "THE IDEA AREA — ideas, materials and not-yet-decided material get a home WITH a life cycle, without polluting the journey. The gap: ann records commitments (contract · ACs · scope) and outcomes (evidence · checks) and has one node-scoped slot for pending questions (openQuestions, which already carries reason + affectedTaskIds), but nothing holds material that is not decided AT ALL — no question yet, no node, no shape. Such material currently lives in .agents/ drafts (plan · canvas): outside the store, untracked by the engine, with no life cycle and no bridge — which is exactly how the design drafts rot, and where the review findings of 12/08 were nearly lost. An idea is mutable, discardable and shapeless, so it must NOT be a journey event: the journey is append-only, hash-checked, derived and one-writer — an idea is the opposite on every axis — and check()/verify must never read it. Deliverable: a scratch area the engine owns (.ann/ideas/, the shape logs/ already has: engine-written, never read for state, never in check/verify), ONE gesture family (add · list · promote · drop), and ONE bridge — promote DRAFTS a task contract for the human's GO and never calls spawn! (the authored-work boundary: a machine authors no contract). This adds a rung BELOW the resolution ladder (derive → probe → infer → ask → block); it changes nothing in it.",
+    "acceptanceCriteria": [
+      "AC-1 — THE AREA: .ann/ideas/ holds one file per idea (id · text · created · refs? · status), project-level (it outlives a goal session — an idea can predate the session that promotes it) and committed (project material, not scratch): mutable by design — no hash, no lock, no gate, no schema beyond those fields. THE HARD RULE, tested: nothing in the journey reads it — check() · verify() · next · advance() · the packet · the gate reads must be provably independent of .ann/ideas/ (a test writes a malformed ideas file, and asserts every one of those reads is byte-identical).",
+      "AC-2 — THE GESTURES (writes end in !, reads never): idea! add '<text>' [--refs a,b] → a new idea, provenance from RECORDED_BY · idea! list [--all | --stale] → the open ideas with their age · idea! promote <id> → DRAFTS a task contract (intent + ACs) to stdout for the human's GO; it never calls spawn! and never writes the journey · idea! drop <id> → deletes the file (git is the history). Named failures, zero writes: an unknown id · an empty text · a drop of an already-promoted idea (that one refuses — the bridge is recorded).",
+      "AC-3 — THE BRIDGE, RECORDED ONCE: promotion marks the idea `promoted → <node id>` and the drafted contract's intent names the idea id; the node never names the idea back (no double-write — the journey must not depend on the scratch area), and an idea's status is its own file's field, never derived from the journey.",
+      "AC-4 — NOTHING ROTS: idea! list --stale names every idea older than the configured age that was never promoted; the read IS the product — no auto-deletion, ever (a machine does not discard the human's material).",
+      "AC-5 — NO REGRESSION: full npm test green, npm run typecheck clean, captured checks (npm run build · ann check · ann verify) via capture!, ann check + ann verify clean on the live journey, committed with structured evidence (F-AC18)."
+    ],
+    "workType": "implementation",
+    "targetAreas": [
+      "src/store",
+      "src/commands",
+      "src/surface",
+      "src/e2e"
+    ],
+    "requiredInputs": [
+      "core-design",
+      "architecture"
+    ],
+    "expectedOutputs": [
+      "the .ann/ideas/ area + its read/write in the store layer",
+      "the idea! gesture family (add · list · promote · drop)",
+      "tests: the boundary (no journey read touches ideas) · the bridge · the named failures"
+    ]
+  },
+  "openQuestions": [
+    {
+      "id": "Q1",
+      "question": "Is the ideas area project-level (outlives a goal session, committed) or session-level (archives with the journey)?",
+      "blocking": false,
+      "defaultIfUnanswered": "project-level and committed — an idea can predate the session that promotes it, and git holds the delete history"
+    },
+    {
+      "id": "Q2",
+      "question": "Does promote draft the contract in the CLI (stdout), or hand it to a session?",
+      "blocking": false,
+      "defaultIfUnanswered": "stdout first — keep the first slice dumb; the 12/09 session can consume the draft later"
+    }
+  ],
+  "createdAt": "2026-09-17"
+}
