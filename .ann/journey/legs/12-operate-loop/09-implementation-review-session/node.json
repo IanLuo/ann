@@ -1,0 +1,46 @@
+{
+  "id": "12-operate-loop/09-implementation-review-session",
+  "contract": {
+    "intent": "THE SESSION AT THE WALL — a REVIEW the human can employ at a gate stop, whose findings are a RECORD. Today a review is chat: 12/08's rejection stored a 3244-char digest as gate feedback, its per-finding list (F1-F11/G1-G6) was unreachable through the journey (recovered only from a reviewer's session transcript), and the rework's 'everything found was fixed' was therefore unverifiable — measured false: F5 fixed, G1 half, 8 of 11 still open. The interactive session ENGINE already exists and is area-neutral (src/flow/grill-session.ts: the round loop, the synthesis turn, a bounded DISCUSS, exhaustion-driven end + an anti-runaway ceiling, never-re-ask, InteractAbort, provider fail-closed) with four profiles (GOAL · SPECS · DESIGN · idea-validate). This task adds the FIFTH profile for a review at a task's CONFIRM gate and the RECORD its findings land in — reusing the loop, never rebuilding it. Design record: .agents/plan/gate-session-design.md (DRAFT; its §2 and §5 are this contract's source).",
+    "acceptanceCriteria": [
+      "AC-1 — ONE session at the gate, over the EXISTING core: a REVIEW_PROFILE over src/flow/grill-session.ts (the loop · the anti-runaway ceiling · the dedupe/never-re-ask · the synthesis turn · InteractAbort · provider fail-closed are REUSED, never re-implemented) plus the wiring that runs it at a task's CONFIRM gate — the gate in hand DERIVED (workflowState().waitingOn / detail.next), never guessed. Proof: a test drives a session on a fixture task with a scripted interact channel; the profile is the only area-specific code.",
+      "AC-2 — THE FINDINGS RECORD: the session lands STRUCTURED findings on the ADDRESSED node only — findings[] = {id, severity in matches|gap|regression|quality|uncertain, where (file:line), text, status} — through a sanctioned writer; no hand-written file, no write outside the addressed node, no new write path. DERIVED-READABLE: the confirm read (ann confirm <id> / the card payload) exposes them, and detail() does not re-derive them.",
+      "AC-3 — THE RECORD IS WHAT THE GATE AND THE REWORK READ: the gate read exposes PER-FINDING text + file:line (a digest is a defect, not a summary); a subsequent rework marks each finding resolved|open on the next pass, so 'everything found was fixed' becomes CHECKABLE rather than asserted. Proof: a fixture whose finding flips only with evidence.",
+      "AC-4 — BOUNDED, HONEST, NEVER DECIDES: the turn budget (the ceiling reused) · findings written AS ASSERTED (a session that dies mid-way loses nothing) · InteractAbort to an honest stop, never an inferred answer · provider failure fails closed · the session writes NO gate event (submitted/confirmed/rejected) — asserted by reading the node's events after a full session.",
+      "AC-5 — THE INPUTS ARE PROVEN SUFFICIENT (deterministic) AND THE ORACLE IS MEASURED (recorded): a unit test asserts the session's context CONTAINS what a review needs — the contract + ACs · the submission's commits AND the range they were made over · the captured checks at their sha · the resolved defining docs · any PRIOR findings. Then the session is RUN at 12/08's pending confirm gate (the recovered list F4·F6·F7·F8·F10·G1·G2·G3·G4·G5 is the answer key) and the outcome recorded as evidence: which prior findings it reproduces (F4 handlers.ts:433 · G1 approve.ts:212 · G5 ui-drill.test.ts:436 are the code-visible three) — a MISS is recorded as a finding about the CONTEXT (which input was missing), never hidden.",
+      "AC-6 — NO REGRESSION: full npm test green, npm run typecheck clean, captured checks (npm run build · ann check · ann verify) via capture!, ann check + ann verify clean on the live journey, committed with structured evidence (F-AC18)."
+    ],
+    "workType": "implementation",
+    "targetAreas": [
+      "src/flow",
+      "src/store",
+      "src/commands",
+      "src/surface",
+      "src/e2e"
+    ],
+    "requiredInputs": [
+      "journey-format-spec",
+      "context-packet-spec"
+    ],
+    "expectedOutputs": [
+      "src/flow/review-session.ts (the REVIEW_PROFILE)",
+      "the findings record shape + its read path",
+      "tests: the profile · the record · the bounds + the no-gate-write assertion"
+    ]
+  },
+  "openQuestions": [
+    {
+      "id": "Q1",
+      "question": "Where does the findings record land — the gate decision's feedback (no amendment, but prose) or a first-class structured record (checkable per-finding status on re-review)?",
+      "blocking": false,
+      "defaultIfUnanswered": "first-class structured record — checkability is the point; precedent: evidence.answers[] / the trace kind 'decide'"
+    },
+    {
+      "id": "Q2",
+      "question": "Confirm gate only in this slice, or the grill/contract review too?",
+      "blocking": false,
+      "defaultIfUnanswered": "confirm only — the deliverable review is where the 12/08 failure happened"
+    }
+  ],
+  "createdAt": "2026-09-17"
+}
