@@ -201,10 +201,33 @@ export interface TaskDetail {
   rework: boolean;
   /** The card's next line, DERIVED (the verdict; the wording is the renderer's). */
   next: NextVerdict;
+  /** THE DEPENDENCY EDGES, derived (leg 12/14). Artifact edges come from `requiredInputs`
+   *  (resolved · missing) and node edges from what the record NAMES — `affectedTaskIds`,
+   *  the contract's prose, the `extended` notes — split by how they were derived, never
+   *  asserted as a guarantee the format does not carry. */
+  deps: NodeDeps;
   artifacts: ArtifactRef[];
   events: JourneyEvent[];
   blockers: string[];
   tasks?: Array<{ id: string; status: string }>;
+}
+
+/** One dependency edge. `how` is the honesty label: an input RESOLVES or it does not; a
+ *  named node is a READING of the record, and the renderer must say so. */
+export interface NodeDep {
+  kind: 'input' | 'task';
+  /** the logical input name, or the referenced node id */
+  ref: string;
+  /** input: `path @ sha` or the missing marker · task: the target's derived status */
+  detail: string;
+  status: 'resolved' | 'missing' | 'absent';
+  how: 'requiredInputs' | 'affectedTaskIds' | 'named-in-record';
+}
+
+/** A node's dependency edges: what it DEPENDS ON, and which nodes NAME it. */
+export interface NodeDeps {
+  dependsOn: NodeDep[];
+  referencedBy: Array<{ id: string; status: string; how: NodeDep['how'] }>;
 }
 
 export interface ResultItem {
@@ -495,6 +518,92 @@ export class Store {
     const nested = (raw.contract as { openQuestions?: unknown } | undefined)?.openQuestions;
     const q = raw.openQuestions ?? nested;
     return Array.isArray(q) ? (q as Array<{ id?: string; question?: string; blocking?: boolean; defaultIfUnanswered?: string; affectedTaskIds?: string[] }>) : [];
+  }
+
+  /** THE DEPENDENCY EDGES (leg 12/14) — derived from the node's OWN record, in two kinds:
+   *
+   *  · **input edges** (`requiredInputs` → `resolveDoc`/`current`): a logical name either
+   *    RESOLVES to a path @ sha or it does not — the same resolution F-AC19 and the packet
+   *    use, never a second one.
+   *  · **task edges**: the format has NO task→task field (only `openQuestions[].affectedTaskIds`,
+   *    which nothing populates). So an edge is a READING of the record — a referenced node id
+   *    in the contract's prose or in an `extended` note — and each edge carries HOW it was
+   *    derived, so a prose mention is never rendered as a guarantee the format does not hold.
+   *
+   *  Plus the REVERSE edges (which nodes name this one), so a card can answer "what waits on
+   *  me?" as well as "what do I wait on?" — the question the journey could not answer by
+   *  command. Pure: reads node.json + the in-memory log, writes nothing. */
+  deps(id: string): NodeDeps {
+    const dependsOn: NodeDep[] = [];
+    const seen = new Set<string>();
+    const add = (d: NodeDep) => {
+      const k = `${d.kind}:${d.ref}`;
+      if (seen.has(k)) return;
+      seen.add(k);
+      dependsOn.push(d);
+    };
+
+    // input edges — the SAME resolution the F-AC19 check and the packet use
+    const raw = this.contract(id) as { contract?: Record<string, unknown> } | undefined;
+    const c = ((raw?.contract as { contract?: Record<string, unknown> } | undefined)?.contract ?? raw?.contract ?? {}) as Record<string, unknown>;
+    const inputs = Array.isArray(c.requiredInputs) ? (c.requiredInputs as unknown[]).filter((x): x is string => typeof x === 'string') : [];
+    for (const name of inputs) {
+      const doc = this.resolveDoc(name);
+      const cur = doc ?? this.current(name);
+      if (cur) add({ kind: 'input', ref: name, detail: `${cur.path}${cur.sha ? ` @ ${cur.sha}` : ''}`, status: 'resolved', how: 'requiredInputs' });
+      else add({ kind: 'input', ref: name, detail: 'does not resolve', status: 'missing', how: 'requiredInputs' });
+    }
+
+    // task edges — declared (affectedTaskIds) first, then read out of the record's prose
+    const declared = new Set<string>();
+    for (const q of this.openQuestions(id)) for (const t of q.affectedTaskIds ?? []) if (typeof t === 'string') declared.add(t);
+    for (const t of declared) add(this.taskEdge(t, 'affectedTaskIds'));
+    for (const t of this.namedNodes(id)) if (!declared.has(t)) add(this.taskEdge(t, 'named-in-record'));
+
+    // reverse edges — who names ME (walking the records, not a second store)
+    const referencedBy: NodeDeps['referencedBy'] = [];
+    for (const other of this.ids()) {
+      if (other === id) continue;
+      const names = new Set([...this.namedNodes(other), ...this.openQuestions(other).flatMap((q) => q.affectedTaskIds ?? [])]);
+      if (names.has(id)) referencedBy.push({ id: other, status: this.status(other), how: 'named-in-record' });
+    }
+    return { dependsOn, referencedBy };
+  }
+
+  private taskEdge(target: string, how: NodeDep['how']): NodeDep {
+    const exists = this.ids().includes(target);
+    return { kind: 'task', ref: target, detail: exists ? this.status(target) : 'not a node', status: exists ? 'resolved' : 'absent', how };
+  }
+
+  /** The node ids a node's OWN record names — its contract's prose (intent · ACs · expected
+   *  outputs) plus its `extended` notes, which is where a scope change names its siblings.
+   *  Two forms are read: the canonical `<leg>/<NN>-<slug>` and the short `<NN>/<NN>` the
+   *  journey's prose actually uses (resolved inside the same leg). A READING, labelled as
+   *  one — the format carries no such edge. */
+  private namedNodes(id: string): string[] {
+    const raw = this.contract(id) as { contract?: Record<string, unknown> } | undefined;
+    const c = (raw?.contract ?? {}) as Record<string, unknown>;
+    const prose = [c.intent, ...(Array.isArray(c.acceptanceCriteria) ? c.acceptanceCriteria : []), ...(Array.isArray(c.expectedOutputs) ? c.expectedOutputs : [])]
+      .filter((x): x is string => typeof x === 'string')
+      .join('\n');
+    const notes = this.events(id)
+      .filter((e) => e.type === 'extended' && typeof e.note === 'string')
+      .map((e) => String(e.note))
+      .join('\n');
+    const text = `${prose}\n${notes}`;
+    const out = new Set<string>();
+    const all = this.ids();
+    // canonical: <leg>/<NN>-<slug> — matched by PREFIX, so a short slug still lands
+    for (const m of text.matchAll(/\b([a-z0-9-]+)\/(\d{2}-[a-z0-9-]+)/g)) {
+      const hit = all.find((n) => n === `${m[1]}/${m[2]}` || n.startsWith(`${m[1]}/${m[2]}`));
+      if (hit && hit !== id) out.add(hit);
+    }
+    // short form: <NN>/<NN> (the journey's own prose, e.g. '12/11 AC-3')
+    for (const m of text.matchAll(/\b(\d{2})\/(\d{2})\b/g)) {
+      const hit = all.find((n) => new RegExp(`^${m[1]}-[a-z0-9-]+/${m[2]}-`).test(n));
+      if (hit && hit !== id) out.add(hit);
+    }
+    return [...out];
   }
 
   /** THE leg's completeness + counts, derived ONCE (leg 12 task 14). `legGateMet` answers a
@@ -898,6 +1007,7 @@ export class Store {
       gates: { grill: gate(wf.gates.grill), confirm: gate(wf.gates.confirm) },
       rework: wf.rework,
       next: wf.next,
+      deps: this.deps(id),
       artifacts,
       events: evs,
       blockers,

@@ -126,6 +126,15 @@ const nodeCardLines = (c: NodeCard): string[] => {
   }
   const outs = (contract.expectedOutputs as string[] | undefined) ?? [];
   lines.push(`  expectedOutputs: ${outs.length ? outs.join(' · ') : '(none)'}`);
+  // DEPENDENCY EDGES (leg 12/14): input edges resolve or they do not; task edges are a
+  // READING of the record (the format carries no task→task field) and say so.
+  const deps = c.deps;
+  if (deps && (deps.dependsOn.length || deps.referencedBy.length)) {
+    lines.push('  depends on:');
+    if (!deps.dependsOn.length) lines.push('    (nothing named)');
+    for (const d of deps.dependsOn) lines.push(`    - [${d.kind}${d.how === 'named-in-record' ? ' · read from the record' : ''}] ${d.ref} → ${d.detail} (${d.status})`);
+    lines.push(`  referenced by: ${deps.referencedBy.length ? deps.referencedBy.map((r) => `${r.id} (${r.status})`).join(' · ') : '(nobody)'}`);
+  }
   lines.push(`  workType: ${String(contract.workType ?? '(none — the chain falls back to the default)')}`);
   lines.push(`  flow: ${contract.flow === undefined ? '(none — workType selects the chain)' : JSON.stringify(contract.flow)}`);
   lines.push(`  model: ${String(contract.model ?? '(none — the provider default)')}`);

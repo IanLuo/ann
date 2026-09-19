@@ -814,6 +814,74 @@ describe('Store — commit traceability (format v10 §9)', () => {
   });
 });
 
+describe('Store — deps() (the dependency edges, leg 12/14)', () => {
+  beforeEach(() => { makeStore(); });
+  afterEach(() => { rmSync(root, { recursive: true, force: true }); });
+
+  it('reads INPUT edges from requiredInputs and TASK edges from the record, each labelled with how it was derived', () => {
+    // the docs manifest is what resolveDoc serves — one input resolves, one does not
+    mkdirSync(join(root, 'docs'), { recursive: true });
+    writeFileSync(join(root, 'docs', 'journey-format-spec.md'), '# Journey Format Spec\n');
+    writeFileSync(join(root, 'docs', 'manifest.json'), JSON.stringify({ 'journey-format-spec': 'docs/journey-format-spec.md' }));
+    writeNode('01-leg/01-a', { intent: 'the other task', acceptanceCriteria: ['x'] }, [ev('created'), ev('completed')]);
+    writeNode(
+      '01-leg/02-b',
+      {
+        intent: 'the reader',
+        acceptanceCriteria: ['x'],
+        requiredInputs: ['journey-format-spec', 'a-doc-nobody-wrote'],
+        expectedOutputs: ['what 01-leg/01-a produced'],
+      },
+      [ev('created')],
+    );
+    const d = new Store(root).deps('01-leg/02-b');
+    const input = d.dependsOn.filter((x) => x.kind === 'input');
+    expect(input.map((x) => `${x.ref}:${x.status}`)).toEqual(['journey-format-spec:resolved', 'a-doc-nobody-wrote:missing']);
+    expect(input[0]).toMatchObject({ how: 'requiredInputs' });
+    expect(input[0].detail).toContain('docs/journey-format-spec.md');
+    // the task edge is a READING of the prose, and says so
+    const task = d.dependsOn.filter((x) => x.kind === 'task');
+    expect(task.map((x) => x.ref)).toEqual(['01-leg/01-a']);
+    expect(task[0]).toMatchObject({ how: 'named-in-record', status: 'resolved' });
+    expect(task[0].detail).toBe('done');
+  });
+
+  it('reads the SHORT form the journey writes (12/11 · 01/02) and reports the REVERSE edges', () => {
+    writeNode('01-leg/01-a', { intent: 'x', acceptanceCriteria: ['x'] }, [ev('created'), ev('completed')]);
+    writeNode(
+      '01-leg/02-b',
+      { intent: 'x', acceptanceCriteria: ['x'] },
+      [ev('created'), ev('extended', { note: 'SCOPE: depends on 01/01 (its output) and on nothing else' })],
+    );
+    const s = new Store(root);
+    expect(s.deps('01-leg/02-b').dependsOn.filter((x) => x.kind === 'task').map((x) => x.ref)).toEqual(['01-leg/01-a']);
+    expect(s.deps('01-leg/01-a').referencedBy.map((r) => r.id)).toEqual(['01-leg/02-b']);
+    expect(s.deps('01-leg/01-a').referencedBy[0].status).toBe('queued'); // the REFERRER's status — who is waiting on me, and where it stands
+  });
+
+  it('a declared affectedTaskIds edge wins the label, and a named target that is GONE stays visible', () => {
+    writeNode(
+      '01-leg/03-c',
+      { intent: 'x', acceptanceCriteria: ['x'] },
+      [ev('created')],
+    );
+    mkdirSync(nodeDir('01-leg/04-d'), { recursive: true });
+    writeFileSync(
+      join(nodeDir('01-leg/04-d'), 'node.json'),
+      JSON.stringify({
+        id: '01-leg/04-d',
+        contract: { intent: 'x', acceptanceCriteria: ['x'] },
+        openQuestions: [{ id: 'Q1', question: 'q', blocking: true, affectedTaskIds: ['01-leg/03-c', '01-leg/99-gone'] }],
+        createdAt: '2026-08-19',
+      }),
+    );
+    writeFileSync(join(nodeDir('01-leg/04-d'), 'events.jsonl'), JSON.stringify(ev('created')) + '\n');
+    const edges = new Store(root).deps('01-leg/04-d').dependsOn.filter((x) => x.kind === 'task');
+    expect(edges.map((x) => `${x.ref}:${x.how}:${x.status}`)).toEqual(['01-leg/03-c:affectedTaskIds:resolved', '01-leg/99-gone:affectedTaskIds:absent']);
+    expect(edges[1].detail).toBe('not a node');
+  });
+});
+
 describe('Store — detail() (the full task/leg card)', () => {
   beforeEach(() => { makeStore(); });
   afterEach(() => { rmSync(root, { recursive: true, force: true }); });

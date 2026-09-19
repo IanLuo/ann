@@ -183,8 +183,7 @@ const confirmRead = (over: Record<string, unknown> = {}) => ({
     ...over,
   },
   results: [],
-});
-const packetRead = {
+});const packetRead = {
   pathDecisions: {},
   nodeContract: { intent: 'do the thing', expectedOutputs: ['the doc'] },
   dependencies: [{ name: 'core-design', status: 'resolved', path: 'docs/core-design.md', sha: 'abc1234', sourceType: 'derived-from' }],
@@ -279,6 +278,35 @@ const reads = (whatsnext: unknown, integ: unknown = integrity()): Record<string,
 });
 
 describe('the served page — a drill opens its own tab, and the URL is the drill', () => {
+  it('the card shows the DEPENDENCY EDGES — inputs resolved, and task edges labelled as read from the record (leg 12/14)', async () => {
+    const gateTab = boot(
+      {
+        ...reads(card()),
+        [`/api/confirm?id=${TASK}`]: gateCard({
+          deps: {
+            dependsOn: [
+              { kind: 'input', ref: 'journey-format-spec', detail: 'docs/journey-format-spec.md @ dca1018', status: 'resolved', how: 'requiredInputs' },
+              { kind: 'task', ref: '01-leg/02-b', detail: 'blocked', status: 'resolved', how: 'named-in-record' },
+              { kind: 'task', ref: '01-leg/09-gone', detail: 'not a node', status: 'absent', how: 'affectedTaskIds' },
+            ],
+            referencedBy: [{ id: '01-leg/03-c', status: 'queued', how: 'named-in-record' }],
+          },
+        }),
+      },
+      '#drill=gate&id=' + encodeURIComponent(TASK) + '&gate=confirm',
+    );
+    await flush();
+    const text = gateTab.get('card-node').textContent;
+    expect(text).toContain('depends on');
+    expect(text).toContain('journey-format-spec → docs/journey-format-spec.md @ dca1018');
+    // a TASK edge says it was read from the record — never dressed as a declared guarantee
+    expect(text).toContain('01-leg/02-b → blocked');
+    expect(text).toContain('read from the record');
+    expect(text).toContain('01-leg/09-gone → not a node'); // a named target that is gone stays VISIBLE
+    expect(text).toContain('referenced by');
+    expect(text).toContain('01-leg/03-c (queued)');
+  });
+
   it('the card renders, and every fact is a NEW-TAB link carrying its item', async () => {
     const page = boot(reads(card()));
     await flush();

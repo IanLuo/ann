@@ -19,6 +19,7 @@ const detail = (over: Partial<TaskDetail> = {}): TaskDetail => ({
   },
   rework: false,
   next: { verdict: 'waiting-on-decision', gate: 'confirm' },
+  deps: { dependsOn: [], referencedBy: [] },
   artifacts: [{ name: 'runner-review', path: '.ann/journey/legs/06-engine-build/09/artifacts/runner-review.md', sha: 'abc1234', role: 'current' }],
   events: [],
   blockers: [],

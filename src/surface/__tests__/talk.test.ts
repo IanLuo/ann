@@ -42,6 +42,7 @@ const detail: TaskDetail = {
   gates: { grill: { state: 'none' }, confirm: { state: 'none' } },
   rework: false,
   next: { verdict: 'queued' },
+  deps: { dependsOn: [], referencedBy: [] },
   artifacts: [],
   events: [],
   blockers: [],

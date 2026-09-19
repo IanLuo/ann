@@ -485,6 +485,16 @@ export const UI_HTML = `<!doctype html>
       (detail.inputs || []).forEach(function (i) {
         field(node, 'input ' + i.name, i.resolved ? i.path + ' @ ' + (i.sha || '(no sha)') : 'UNRESOLVED');
       });
+      // THE DEPENDENCY EDGES (detail.deps): input edges resolve or they do not; TASK edges
+      // are read from the record (the format carries no task→task field) and are labelled
+      // as a reading, so a prose mention is never shown as a guarantee.
+      var deps = detail.deps || { dependsOn: [], referencedBy: [] };
+      deps.dependsOn.forEach(function (d) {
+        field(node, 'depends on', d.ref + ' → ' + d.detail + (d.kind === 'task' ? ' [' + (d.how === 'named-in-record' ? 'read from the record' : d.how) + ']' : ''));
+      });
+      if (deps.referencedBy.length) {
+        field(node, 'referenced by', deps.referencedBy.map(function (r) { return r.id + ' (' + r.status + ')'; }).join(' · '));
+      }
       (detail.openQuestions || []).forEach(function (q) { field(node, 'open question' + (q.blocking ? ' [BLOCKING]' : ''), (q.id ? q.id + ': ' : '') + (q.question || '')); });
 
       // CLAIMS — how each acceptance criterion is met (resolved pointers), gaps named.
