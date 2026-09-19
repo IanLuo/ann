@@ -477,6 +477,38 @@ export class Store {
     }
   }
 
+  /** THE node's open questions — the ONE reader of the field's SHAPE.
+   *  format v14 §2: `openQuestions` is a TOP-LEVEL SIBLING of `contract`, never a contract
+   *  field; pre-v14 nodes that carry it INSIDE the contract still read (the fallback, never
+   *  the written shape). Every consumer comes here — the packet assembler and the
+   *  high-impact rule — because the v14 move was made in the WRITER and in the packet but
+   *  not in the rule, so the rule read a path no live node populates and never fired. */
+  openQuestions(id: string): Array<{
+    id?: string;
+    question?: string;
+    blocking?: boolean;
+    defaultIfUnanswered?: string;
+    affectedTaskIds?: string[];
+  }> {
+    const raw = this.contract(id) as { contract?: Record<string, unknown>; openQuestions?: unknown } | undefined;
+    if (!raw) return [];
+    const nested = (raw.contract as { openQuestions?: unknown } | undefined)?.openQuestions;
+    const q = raw.openQuestions ?? nested;
+    return Array.isArray(q) ? (q as Array<{ id?: string; question?: string; blocking?: boolean; defaultIfUnanswered?: string; affectedTaskIds?: string[] }>) : [];
+  }
+
+  /** THE leg's completeness + counts, derived ONCE (leg 12 task 14). `legGateMet` answers a
+   *  different question — is this leg's PREDECESSOR finished? — and the two were rendered
+   *  with the same words ('leg gate'), so one `ann next` printed `leg gate: MET` and
+   *  `leg gate UNMET: 4 done, 9 blocked` two lines apart. Every reader of the leg's own
+   *  progress consumes this; the counts and the verdict come from one pass. */
+  legProgress(legId: string): { total: number; done: number; blocked: number; open: number; complete: boolean } {
+    const tasks = this.tasksOf(legId);
+    const done = tasks.filter((t) => CLOSED_TASK_STATUSES.includes(this.taskStatus(t))).length;
+    const blocked = tasks.filter((t) => this.taskStatus(t) === 'blocked').length;
+    return { total: tasks.length, done, blocked, open: tasks.length - done, complete: tasks.length > 0 && done === tasks.length };
+  }
+
   events(id: string): JourneyEvent[] {
     return this.nodes.get(id)?.events ?? [];
   }

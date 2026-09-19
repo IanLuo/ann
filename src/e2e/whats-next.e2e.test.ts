@@ -434,11 +434,16 @@ describe('e2e — the operate loop: the WHAT\'S NEXT card + the approve (leg 11)
   });
 
   it('the BOUNDARY derivation (closure-needed) is PRESENTED and STOPS — no machine action', { timeout: 30_000 }, async () => {
-    // both tasks now wait on the runner: nothing ready, the leg gate unmet → the authored
-    // work is to CLOSE the leg (a gated human move), never a machine close
+    // both tasks now wait on the runner: nothing ready, so the ACTIVE leg is unfinished and
+    // the authored work is to CLOSE the leg (a gated human move), never a machine close.
+    // The label says the leg's OWN completeness — the leg GATE is a different fact
+    // (this leg's predecessor), answered by legGateMet, and the two must not share words
+    // (leg 12 task 14: one `ann next` used to print MET and UNMET one line apart).
     const v = await card(server);
     expect(v.advance.action).toBe('closure-needed');
-    expect(v.advance.detail).toContain('leg gate UNMET');
+    expect(v.advance.detail).toContain('unfinished');
+    expect(v.advance.detail).not.toMatch(/leg gate/i);
+    expect(v.legGate.met).toBe(true); // the predecessor IS done — the other fact, labelled
     expect(v.executable).toBe(false);
     const before = [await logTypes(server, FIRST), await logTypes(server, SECOND)];
     const r = await post(server.url + '/api/approve', boundTo(v));

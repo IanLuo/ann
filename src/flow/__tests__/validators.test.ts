@@ -87,6 +87,68 @@ describe('Validators (S4) — self-contained rule modules + derived registry', (
     expect(f[0].detail).toContain('Q1');
   });
 
+  describe('high-impact-defaulted — the FIELD PATH + the PER-QUESTION match (leg 12 task 11)', () => {
+    /** The v14 shape: openQuestions a TOP-LEVEL SIBLING of the contract (format §2).
+     *  The rule used to read `contract.openQuestions` — a path no v14 node populates —
+     *  which is why it never fired on a real node; its old test hand-wrote the pre-v14
+     *  nested shape, so the suite could not catch it. */
+    const writeV14 = (id: string, openQuestions: unknown[], events: Array<Record<string, unknown>>) => {
+      mkdirSync(nodeDir(id), { recursive: true });
+      writeFileSync(
+        join(nodeDir(id), 'node.json'),
+        JSON.stringify({ id, contract: { intent: 'x', acceptanceCriteria: ['AC1'] }, openQuestions, createdAt: '2026-08-23' }),
+      );
+      writeFileSync(join(nodeDir(id), 'events.jsonl'), events.map((e) => JSON.stringify(e)).join('\n') + '\n');
+    };
+    const DONE = [ev('created'), ev('confirmed', { gate: 'grill' }), ev('confirmed', { gate: 'confirm' }), ev('completed')];
+
+    it('flags a blocking question declared TOP-LEVEL (the live shape) with no answer', () => {
+      writeV14('06-engine-build/02-a', [{ id: 'Q1', question: 'which way?', blocking: true }], DONE);
+      const f = findingsBy(runValidators(new Store(root)), 'high-impact-defaulted');
+      expect(f.length).toBe(1);
+      expect(f[0].detail).toContain('Q1 carries no answer record');
+    });
+
+    it('still reads the legacy NESTED shape (the fallback, never the written shape)', () => {
+      writeNode('06-engine-build/03-a', { intent: 'x', acceptanceCriteria: ['AC1'], openQuestions: [{ id: 'Q9', question: 'legacy', blocking: true }] }, DONE);
+      const f = findingsBy(runValidators(new Store(root)), 'high-impact-defaulted');
+      expect(f.length).toBe(1);
+      expect(f[0].detail).toContain('Q9');
+    });
+
+    it('is SILENT when the question is answered with provenance discussed', () => {
+      writeV14('06-engine-build/04-a', [{ id: 'Q1', question: 'which way?', blocking: true }], [
+        ...DONE,
+        ev('evidence', { commits: [{ sha: 'abc1234' }], answers: [{ id: 'Q1', answer: 'this way', provenance: 'discussed' }] }),
+      ]);
+      expect(findingsBy(runValidators(new Store(root)), 'high-impact-defaulted')).toHaveLength(0);
+    });
+
+    it('flags an answer resolved as inferred/defaulted (the tech-stack lesson)', () => {
+      writeV14('06-engine-build/05-a', [{ id: 'Q1', question: 'which way?', blocking: true }], [
+        ...DONE,
+        ev('evidence', { commits: [{ sha: 'abc1234' }], answers: [{ id: 'Q1', answer: 'guessed', provenance: 'inferred' }] }),
+      ]);
+      const f = findingsBy(runValidators(new Store(root)), 'high-impact-defaulted');
+      expect(f.length).toBe(1);
+      expect(f[0].detail).toContain("resolved as 'inferred'");
+    });
+
+    it('matches PER QUESTION — one answered, the other not', () => {
+      writeV14('06-engine-build/06-a', [
+        { id: 'Q1', question: 'which way?', blocking: true },
+        { id: 'Q2', question: 'and this?', blocking: true },
+      ], [
+        ...DONE,
+        ev('evidence', { commits: [{ sha: 'abc1234' }], answers: [{ id: 'Q1', answer: 'this way', provenance: 'discussed' }] }),
+      ]);
+      const f = findingsBy(runValidators(new Store(root)), 'high-impact-defaulted');
+      expect(f.length).toBe(1);
+      expect(f[0].detail).toContain('Q2 carries no answer record');
+      expect(f[0].detail).not.toContain('Q1 carries no answer record');
+    });
+  });
+
   it('runs one rule against ONE node only (ann validate <id>)', () => {
     writeNode('06-engine-build/01-a', {}, [ev('created'), ev('completed')]); // gate-2 violation
     writeNode('06-engine-build/02-b', {}, [ev('created'), ev('completed')]); // gate-2 violation

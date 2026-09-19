@@ -238,15 +238,33 @@ export const highImpactDefaulted = {
     for (const id of targetsOf(ctx)) {
       const evs = ctx.store.events(id);
       if (!evs.some((e) => e.type === 'completed')) continue;
-      const c = ctx.store.contract(id) as { contract?: { openQuestions?: Array<{ blocking?: boolean; id?: string }> } } | undefined;
-      const blocking = (c?.contract?.openQuestions ?? []).filter((q) => q.blocking);
+      // THE FIELD PATH (fixed, leg 12 task 11): openQuestions is a TOP-LEVEL sibling of the
+      // contract since format v14 §2, read through the ONE accessor (store.openQuestions).
+      // The rule previously read `contract.openQuestions` — a path no v14 node populates —
+      // so it could never fire on a real node; its test hand-wrote the pre-v14 nested shape.
+      const blocking = ctx.store.openQuestions(id).filter((q) => q.blocking);
       if (!blocking.length) continue;
-      const answered = evs.filter((e) => e.type === 'evidence' && Array.isArray(e.answers) && (e.answers as unknown[]).length > 0);
-      if (!answered.length) {
+      // PER QUESTION, not "any answers anywhere": the answer-recording primitive
+      // (evidence.answers[] {id, answer, provenance}) keys on the question's id.
+      const answers = evs.flatMap((e) =>
+        e.type === 'evidence' && Array.isArray(e.answers) ? (e.answers as Array<{ id?: string; provenance?: string }>) : [],
+      );
+      const problems = blocking
+        .map((q) => {
+          const a = q.id ? answers.find((x) => x.id === q.id) : undefined;
+          if (!a) return `${q.id ?? '?'} carries no answer record`;
+          const how = String(a.provenance ?? '').toLowerCase();
+          // the tech-stack lesson: a high-impact resolution is only honest when it was
+          // DISCUSSED — a defaulted/inferred one without an explicit user decision is the
+          // thing this rule exists to catch.
+          return how === 'discussed' ? undefined : `${q.id ?? '?'} resolved as '${how || '(no provenance)'}' — a high-impact resolution must be 'discussed'`;
+        })
+        .filter((x): x is string => x !== undefined);
+      if (problems.length) {
         out.push({
           severity: 'warning',
           code: 'high-impact-defaulted',
-          detail: `${id}: completed with ${blocking.length} blocking open question(s) (${blocking.map((q) => q.id ?? '?').join(', ')}) but no answer record with provenance`,
+          detail: `${id}: completed with ${blocking.length} blocking open question(s) — ${problems.join(' · ')}`,
           nodeId: id,
         });
       }

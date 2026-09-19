@@ -94,7 +94,8 @@ export function assemblePacket(store: Store, nodeId: string): ContextPacket {
   const c = ((rawContract as { contract?: Record<string, unknown> }).contract ?? rawContract) as Record<string, unknown>;
   // format v14 §2: openQuestions is a TOP-LEVEL SIBLING of contract (legacy nodes that
   // carry it inside the contract still read — the fallback, never the written shape).
-  const openQ = ((contract?.openQuestions ?? c.openQuestions) ?? []) as Array<{ id?: string; question?: string; blocking?: boolean; defaultIfUnanswered?: string }>;
+  // ONE reader (store.openQuestions): the packet and the high-impact rule share it.
+  const openQ = store.openQuestions(nodeId);
 
   // dependencies: requiredInputs × resolveDoc/current(name) — provenance: derived-from
   const req = (Array.isArray(c.requiredInputs) ? c.requiredInputs : []) as string[];

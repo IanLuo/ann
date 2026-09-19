@@ -196,6 +196,24 @@ describe('advance — the leg gate validated from the logs, never assumed', () =
     expect(a.action).toBe('closure-needed');
     expect(a.detail).toContain('closure');
   });
+
+  it('the leg GATE and the leg UNFINISHED are different facts, and are labelled differently (leg 12 task 14)', () => {
+    // the live shape that produced the contradiction: the PREDECESSOR is done (so the leg
+    // gate is MET) while the ACTIVE leg has no ready task (so it is unfinished). Both used
+    // to print `leg gate …`, one line apart, in a single `ann next`.
+    writeNode('01-leg', []);
+    writeNode('01-leg/01-a', [ev('created'), ev('completed')]);
+    writeNode('02-leg', []);
+    writeNode('02-leg/01-a', [ev('created'), ev('completed')]);
+    writeNode('02-leg/02-b', [ev('created'), ev('submitted', { gate: 'grill' })]);
+    const c = commands();
+    expect(c.lookBack().legGate.met).toBe(true); // the gate: the predecessor is finished
+    const a = c.advance();
+    expect(a.action).toBe('closure-needed');
+    expect(a.detail).toContain('02-leg unfinished'); // the active leg's OWN completeness
+    expect(a.detail).toContain('1 done, 1 blocked'); // the counts come from the one derivation
+    expect(a.detail).not.toMatch(/leg gate/i); // one label per fact — never a second verdict
+  });
 });
 
 describe('advance — the FOUR-STATE GOAL CONSULT (goal-session-design §5)', () => {

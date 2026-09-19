@@ -1413,10 +1413,15 @@ export class Commands {
       if (ready.length) return { leg: working, action: 'continue-leg', detail: `next task: ${ready[0]} (${this.store.status(ready[0])})` };
       const done = tasks.filter((t) => CLOSED_TASK_STATUSES.includes(this.store.status(t))).length;
       const blocked = tasks.filter((t) => this.store.status(t) === 'blocked').length;
+      // THE LABEL SAYS WHAT IT MEANS (leg 12 task 14): this branch is the ACTIVE leg having
+      // no ready task — the leg's own incompleteness — NOT the leg gate (which asks whether
+      // this leg's PREDECESSOR is finished and is answered by legGateMet). Both used to say
+      // 'leg gate', so one `ann next` printed `leg gate: MET` and `leg gate UNMET: …`.
+      const progress = this.store.legProgress(working);
       return {
         leg: working,
         action: 'closure-needed',
-        detail: `leg gate UNMET: ${done} done, ${blocked} blocked, remaining not done — close via a gated closure task (transfer/defer, F-AC16) or resolve the blocked tasks`,
+        detail: `leg ${working} unfinished: ${progress.done} done, ${progress.blocked} blocked, no ready task — close via a gated closure task (transfer/defer, F-AC16) or resolve the blocked tasks`,
       };
     }
     // every spawned leg derives done → the frontmost not-done leg is where the review
