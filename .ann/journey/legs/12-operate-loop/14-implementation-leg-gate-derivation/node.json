@@ -1,0 +1,38 @@
+{
+  "id": "12-operate-loop/14-implementation-leg-gate-derivation",
+  "contract": {
+    "intent": "THE ONE-DERIVATION PRINCIPLE, APPLIED WHERE THE ENGINE STILL LEAKS. The adversarial review of the idea set found ann answering one question twice INSIDE A SINGLE READ: `ann next` prints `leg gate: MET` and, two lines later, `leg gate UNMET: 4 done, 9 blocked` — the first from `legGateMet` (src/store/store.ts:1848), the second from the empty-ready-set branch (src/commands/index.ts:1421). Two facts wearing one label. This is 12/08's disease (one gate state, ~11 independent readings) one level up: a DERIVED fact that two derivations render and nothing reconciles, so the contradiction is invisible until someone reads both lines. Deliverable: ONE leg-gate derivation every reader consumes, plus the same reader-AGREEMENT test shape 12/08 used — so a second answer is a test FAILURE rather than a nuance. SCOPE OUT (owned elsewhere, do not touch here): the dead `high-impact-defaulted` field path (12/11 AC-3 owns it) and the decisions read (12/11).",
+    "acceptanceCriteria": [
+      "AC-1 — ONE DERIVATION: a single function yields BOTH the leg's gate verdict (met | unmet) AND its counts (done · blocked · open), and every reader consumes it — `ann next` · `advance()` · the whatsnext card · the CLI. `legGateMet` and the empty-ready-set branch must both route through it, so the two answers become structurally the same answer; a test asserts that ONE read cannot print two different leg-gate verdicts on the live-shaped fixture (a leg with 4 done and 9 blocked children).",
+      "AC-2 — THE COUNTS COME FROM THE SAME PLACE AS THE VERDICT: the fixture set includes a mixed leg (done · blocked · rework · deferred children, plus a deferred-only leg) and asserts the counts and the verdict are produced by that one derivation — so 'N done, M blocked' can never drift from the gate verdict.",
+      "AC-3 — THE READER-AGREEMENT TEST, in 12/08's shape (src/store/__tests__/workflow.test.ts is the precedent): every consumer answers the same verdict on a fixture set covering met · unmet-with-ready · unmet-no-ready · all-done · deferred-only · rework-owed, and a disagreement is a FAILURE, not a nuance.",
+      "AC-4 — NO REGRESSION, NO VERDICT CHANGES: the fix removes the contradiction without changing any leg's derived status or gate verdict (asserted on the live journey and by the fixtures); full npm test green, npm run typecheck clean, captured checks (npm run build · ann check · ann verify) via capture!, ann check + ann verify clean on the live journey, committed with structured evidence (F-AC18)."
+    ],
+    "workType": "implementation",
+    "targetAreas": [
+      "src/store",
+      "src/commands",
+      "src/surface",
+      "src/e2e"
+    ],
+    "requiredInputs": [
+      "journey-format-spec",
+      "core-design"
+    ],
+    "expectedOutputs": [
+      "the ONE leg-gate derivation (verdict + counts)",
+      "every reader routed through it (next · advance · card · CLI)",
+      "the reader-agreement test in 12/08's shape",
+      "the live-shape fixture proving one read prints one verdict"
+    ]
+  },
+  "openQuestions": [
+    {
+      "id": "Q1",
+      "question": "Does the second label go, or do both labels stay and reconcile?",
+      "blocking": false,
+      "defaultIfUnanswered": "one verdict, one label — the counts stay beside it; two sentences saying opposite things in one read is the defect, whatever the words"
+    }
+  ],
+  "createdAt": "2026-09-19"
+}
