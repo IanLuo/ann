@@ -1,0 +1,47 @@
+{
+  "id": "12-operate-loop/16-implementation-review-residue",
+  "contract": {
+    "intent": "THE RESIDUE, OWNED. 12/08 was accepted at its confirm gate (2026-09-19) with its finding list recorded as 'the residue this gate names' — and NOTHING owned it. Two independent reviews now agree on what the residue is and on its priority. An independent advisor run against HEAD aee9e3 re-verified every finding on 12/08's record and confirmed that 12/08's AC-2 CLAIM ('EVERY reader consumes the ONE derivation and the duplicates are gone') is FALSIFIED IN-REPO: src/surface/handlers.ts:437 still reads the submitted|confirmed|rejected triple (it labels a gate 'confirmed' and asserts 'undecided' from a single event's type) and :571 still holds the literal ['queued','active'] beside READY_STATUSES — while the guard (src/store/__tests__/workflow.test.ts:533-543) is a LINE-REGEX that provably cannot catch that shape (it matches `filter(` on the same line as the two type comparisons; :437 is a ternary). The advisor's verdict on the accepted node: 'REJECT as delivered — the fix was a ~3-line reader sweep plus making the guard structural, well inside a rework'. The rest is quality/docs debt, all named: F6 (a dead consumer) · F7 (GateView.index written, read only by a test) · F10 (gate-queue ordering) · G1's LIVE half (src/surface/approve.ts:212 still asserts 'the approve and the drive run it fail-closed' while :53 in the same file says the opposite — /api/drive runs NO pre-check) · G2 (batchedResolved's doc contradicts unresolvedShas) · G3 (the closure validator calls store.check() a second time) · G4 (the integrity ingredient list prose-duplicated three ways) · G5 (a fixture builds the retired word 'confirmed') · store.ts re-spelling the decision pair beside GATE_DECISION_EVENTS · and two doc items (docs/resource-registry.md:86's stray blank line splitting §5's table; the colliding v4/v5 version labels on the two leg-12/08 rows). SCOPE OUT: AC-3(a) — a recorded, accepted deviation (the code is right, the contract text is stale) — and everything 09/10/11/12/13/14/15 own. This task writes NOTHING to 12/08 (it is closed); its own evidence names which findings it closes.",
+    "acceptanceCriteria": [
+      "AC-1 — THE AC-2 SWEEP (the one correctness-adjacent item): src/surface/handlers.ts stops reading the triple and consumes the derived gate view; the ready set stops being a literal (READY_STATUSES); and the guard becomes STRUCTURAL — or, if it stays a heuristic, it is reported as one and the shapes it cannot catch (the ternary at :437 among them) are NAMED in it. A test pins that a second reading cannot be introduced silently.",
+      "AC-2 — THE FALSE CLAIM IS GONE: src/surface/approve.ts no longer asserts a fail-closed pre-check that POST /api/drive does not run (:212 vs :53), and the drive's ACTUAL backstop is stated where the claim was; any repetition of the claim elsewhere (service.ts, ui.ts) is corrected in the same pass.",
+      "AC-3 — THE QUALITY ITEMS, EACH CLOSED: F6 (TaskDetail.rework's consumer decided ONCE — a consumer, or removal) · F7 (GateView.index's production reader decided ONCE) · F10 (the gate-queue ordering made deliberate, not incidental) · G2 (the doc and the code agree) · G3 (no second store.check()) · G4 (the ingredient list has ONE source) · G5 (no fixture builds an unobtainable word) · the decision pair is spelled once (GATE_DECISION_EVENTS) · and the two doc items (the split register table; the colliding version labels).",
+      "AC-4 — NOTHING IS CLOSED BY ASSERTION: a behaviour change carries a test; a comment or doc change names the TRUE fact and where it now lives. The task's evidence names, per item, what closed it.",
+      "AC-5 — CITATIONS CARRY THEIR ANCHOR (the oracle's own finding, turned into a rule): wherever this task's record cites a file:line, it names the COMMIT the line was read at — because 12/08's findings note cited b54b67a's lines without saying so, which made two of three anchors read as false 'MOVED' at HEAD and forced a git archaeology exercise to recover the truth.",
+      "AC-6 — NO REGRESSION: full npm test green, npm run typecheck clean, captured checks (npm run build · ann check · ann verify) via capture!, ann check + ann verify clean on the live journey, committed with structured evidence (F-AC18)."
+    ],
+    "workType": "implementation",
+    "targetAreas": [
+      "src/store",
+      "src/surface",
+      "src/flow",
+      "docs",
+      "src/e2e"
+    ],
+    "requiredInputs": [
+      "core-design",
+      "architecture"
+    ],
+    "expectedOutputs": [
+      "the AC-2 sweep + a structural (or honestly-limits) guard",
+      "the false drive claim corrected",
+      "the quality items closed with tests or corrected facts",
+      "the two doc items fixed"
+    ]
+  },
+  "openQuestions": [
+    {
+      "id": "Q1",
+      "question": "F6/F7: give the unused surface a consumer, or remove it?",
+      "blocking": false,
+      "defaultIfUnanswered": "decide once and record the decision — keep what a named pending consumer needs (12/06 for detail.rework), delete what has no named consumer, and say which in the evidence"
+    },
+    {
+      "id": "Q2",
+      "question": "Does this task supersede 12/08's AC-2 claim, or amend it?",
+      "blocking": false,
+      "defaultIfUnanswered": "neither — 12/08 is closed and immutable; this task's evidence states that the claim is now TRUE (the sweep) rather than rewriting the past"
+    }
+  ],
+  "createdAt": "2026-09-20"
+}
