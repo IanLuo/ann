@@ -1,0 +1,38 @@
+{
+  "id": "12-operate-loop/15-implementation-gate-brief",
+  "contract": {
+    "intent": "THE GATE BRIEF — the decision material in ONE read. The operator's live complaint: 'the reading is a lot'. Nine gates are pending and each one costs a contract of ~4,000-character intent + ACs, plus `extended` notes up to 4,378 characters, spread across `ann detail` · `ann events` · `ann packet` — so deciding a gate means paging through material that exists but was never assembled in the order a DECISION needs it. Deliverable: `ann brief <id> [chars]` — one deterministic read, NO LLM, no new state: status · gates · the next verdict · blockers · the contract with the WALLS CAPPED (each cut length written inline, never a silent truncation) · openQuestions WITH their defaults · the resolved inputs and the dependency edges (forward and reverse) · the decisions so far WITH their whys (an absent why NAMED, never inferred) · the conclusion (claims · unclaimed ACs · checks · why the close would refuse) · the latest `extended` note capped with its event index for the drill · and the next move. Every field comes from an EXISTING derivation — gateView/workflowState for the decisions, store.deps for the edges, Commands.conclusion for the close — because the first draft of this read re-scanned the submitted|confirmed|rejected triple and 12/08's own guard test FAILED it. The advisory session (12/09) consumes this brief as its input.",
+    "acceptanceCriteria": [
+      "AC-1 — ONE READ, NO SECOND DERIVATION: `ann brief <id> [chars]` assembles the decision material in one pass, and `--json` yields the same value; the decisions come from gateView/workflowState, the edges from store.deps, the close readiness from Commands.conclusion, the questions from store.openQuestions. No new state, no second scan of the triple (12/08's guard test is the pin — it caught the first draft).",
+      "AC-2 — THE CAPS ARE HONEST: the intent, each acceptance criterion and the latest extended note are cut with the CUT LENGTH written inline, so a truncated brief names what it is hiding and where the rest lives; `0` means UNCAPPED; the note carries its event index so the drill is one command.",
+      "AC-3 — THE ABSENCES ARE NAMED: a decision whose why was never recorded reads `(NOT RECORDED)` (never inferred, never fabricated); the close's refusal is reported as its NAMED code, or the brief says a confirm accept would auto-close; unclaimed ACs are listed by id.",
+      "AC-4 — THE PAGE CARRIES THE SAME BRIEF: the served gate card renders the brief from the SAME value (no second assembly, no re-derivation), so the human reads the decision material on the page as well as at the terminal.",
+      "AC-5 — NO REGRESSION: full `npm test` green, `npm run typecheck` clean, captured checks (npm run build · ann check · ann verify) via capture!, ann check + ann verify clean on the live journey, committed with structured evidence (F-AC18)."
+    ],
+    "workType": "implementation",
+    "targetAreas": [
+      "src/commands",
+      "src/surface",
+      "src/e2e"
+    ],
+    "requiredInputs": [
+      "journey-format-spec",
+      "core-design"
+    ],
+    "expectedOutputs": [
+      "the brief assembly + its caps (src/commands)",
+      "the CLI renderer + the command-table row (src/surface, README)",
+      "the same brief on the served card (src/surface)",
+      "tests: the caps · the named absences · the no-second-derivation pin"
+    ]
+  },
+  "openQuestions": [
+    {
+      "id": "Q1",
+      "question": "Is the brief a read only, or the seed of the advisory session (LLM advice on top)?",
+      "blocking": false,
+      "defaultIfUnanswered": "the read first — the session (12/09) consumes it; advice is the session's job, assembly is the read's"
+    }
+  ],
+  "createdAt": "2026-09-20"
+}
