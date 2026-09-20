@@ -136,7 +136,8 @@ const nodeCardLines = (c: NodeCard): string[] => {
   if (deps && (deps.dependsOn.length || deps.referencedBy.length)) {
     lines.push('  depends on:');
     if (!deps.dependsOn.length) lines.push('    (nothing named)');
-    for (const d of deps.dependsOn) lines.push(`    - [${d.kind}${d.how === 'named-in-record' ? ' · read from the record' : ''}] ${d.ref} → ${d.detail} (${d.status})`);
+    for (const d of deps.dependsOn)
+      lines.push(`    - [${d.kind}${d.kind === 'task' ? (d.how === 'declared' ? ' · DECLARED (binding)' : ' · read from the record (a hint)') : ''}] ${d.ref} → ${d.detail} (${d.status})`);
     lines.push(`  referenced by: ${deps.referencedBy.length ? deps.referencedBy.map((r) => `${r.id} (${r.status})`).join(' · ') : '(nobody)'}`);
   }
   lines.push(`  workType: ${String(contract.workType ?? '(none — the chain falls back to the default)')}`);
@@ -547,7 +548,8 @@ export const RENDERS: Record<string, Renderer> = {
     lines.push('---', 'DEPENDS ON');
     if (!v.inputs.length && !v.dependsOn.length) lines.push('  (nothing named)');
     for (const i of v.inputs) lines.push(`  [input] ${i.name} → ${i.detail} (${i.status})`);
-    for (const t of v.dependsOn) lines.push(`  [task] ${t.ref} → ${t.detail} (${t.status})${t.how === 'named-in-record' ? ' — read from the record' : ''}`);
+    for (const t of v.dependsOn)
+      lines.push(`  [task${t.how === 'declared' ? ' · DECLARED (binding)' : ' · read from the record (a hint, never binding)'}] ${t.ref} → ${t.detail} (${t.status})`);
     if (v.referencedBy.length) lines.push(`  referenced by: ${v.referencedBy.map((r) => `${r.id} (${r.status})`).join(' · ')}`);
     lines.push('---', `DECISIONS SO FAR (${v.decisions.length})`);
     if (!v.decisions.length) lines.push('  (none yet — this is a first-time gate)');

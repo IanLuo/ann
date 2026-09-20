@@ -126,7 +126,7 @@ const READ_CHARS = 200_000;
  *  because the spawn gate is not the only consumer that must agree with it: the semantic
  *  driver validates a DRAFTED contract against the same set (leg 12/02), so a generated
  *  draft is spawn-able by construction rather than refused by the human's `spawn!`. */
-export const CONTRACT_FIELDS = ['intent', 'acceptanceCriteria', 'targetAreas', 'requiredInputs', 'expectedOutputs', 'workType', 'flow', 'model', 'openQuestions'] as const;
+export const CONTRACT_FIELDS = ['intent', 'acceptanceCriteria', 'targetAreas', 'requiredInputs', 'expectedOutputs', 'workType', 'flow', 'model', 'openQuestions', 'dependsOn'] as const;
 
 export interface SpawnedNode {
   id: string;
@@ -456,6 +456,30 @@ export class Commands {
     const checklist = this.store.contractProblems(c);
     if (checklist.length) {
       return fail('F-AC19', `contract checklist (format v14 §2/§7):\n  - ${checklist.join('\n  - ')}`);
+    }
+    // THE DECLARED DEPENDENCIES (format v19, leg 12/17): validated HERE, at the one place a
+    // contract enters the journey — a declared edge that cannot be honoured must never be
+    // recorded (a vanished target blocks forever, a cycle blocks its own members).
+    const declaredDeps = (contract as { dependsOn?: unknown } | undefined)?.dependsOn;
+    if (declaredDeps !== undefined) {
+      if (!Array.isArray(declaredDeps) || declaredDeps.some((d) => typeof d !== 'string' || d.trim() === '')) {
+        return fail('dependsOn-shape', 'dependsOn must be an array of non-empty node ids');
+      }
+      const deps = declaredDeps as string[];
+      if (deps.includes(id)) return fail('dependsOn-self', `${id} cannot depend on itself`);
+      for (const d of deps) {
+        if (!d.includes('/')) return fail('dependsOn-target', `dependsOn target '${d}' is not a task id (legs are not dependency targets in this slice)`);
+        if (!this.store.ids().includes(d)) return fail('dependsOn-unknown', `dependsOn target '${d}' does not exist`);
+      }
+      // a CYCLE through the new edges: walk from each target back to `id`
+      const seen = new Set<string>();
+      const reaches = (from: string): boolean => {
+        if (from === id) return true;
+        if (seen.has(from)) return false;
+        seen.add(from);
+        return this.store.declaredDeps(from).some((t) => reaches(t));
+      };
+      for (const d of deps) if (reaches(d)) return fail('dependsOn-cycle', `dependsOn would create a cycle through '${d}'`);
     }
 
     try {

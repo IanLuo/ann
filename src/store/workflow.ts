@@ -180,6 +180,7 @@ export const gateViews = (events: JourneyEvent[]): GateViews => ({
 export type NextVerdictKind =
   | 'decide-now' // the gate IN HAND is submitted — the renderer's overlay, never derived here
   | 'waiting-on-decision' // an undecided submission is the next human move (`gate`)
+  | 'waiting-on-dependency' // a DECLARED dependency is unsatisfied — the task cannot proceed (`deps`)
   | 'waiting-on-runner' // the two-phase wait: the runner owes the evidence commit
   | 'conclusion-missing' // the exit gate is accepted; the conclusion evidence is not recorded
   | 'rework' // a rejected gate owes a re-submission (`gate`)
@@ -193,6 +194,21 @@ export interface NextVerdict {
   verdict: NextVerdictKind;
   gate?: 'grill' | 'confirm';
   status?: string;
+}
+
+/** The statuses that SATISFY a declared dependency (leg 12/17). `done`, `superseded` and
+ *  `cancelled` are settled work; `deferred` is deliberately ABSENT — deferring work does
+ *  not deliver it, and silently unblocking its dependents would turn a parked task into a
+ *  hidden dependency resolution (the blocker NAMES the deferred target instead, so the
+ *  human decides: un-defer, cancel, or change the dependency). */
+export const DEP_SATISFIED_STATUSES = ['done', 'superseded', 'cancelled'];
+
+/** A declared dependency that is NOT satisfied — the fact the projection takes as INPUT.
+ *  Dependencies are a GRAPH property, not a node property, so they arrive from the store
+ *  (which can see the other nodes) and this module stays pure over ONE node's tail. */
+export interface OpenDep {
+  id: string;
+  status: string;
 }
 
 /** THE WORKFLOW-STATE PROJECTION — the status word, `rework` included. */
@@ -212,6 +228,11 @@ export interface WorkflowState {
   waitingOn?: 'grill' | 'confirm';
   /** A `waiting` record with no later commit evidence (the two-phase verify-wait). */
   pendingWait: boolean;
+  /** DECLARED dependencies that are unsatisfied (leg 12/17) — empty when none are declared
+   *  or all are satisfied. When non-empty and the task would otherwise be READY, the word
+   *  is `blocked` and the verdict is `waiting-on-dependency`: a task cannot proceed while a
+   *  declared dependency is open, and the REASON is named rather than inferred. */
+  openDeps: OpenDep[];
   next: NextVerdict;
 }
 
@@ -246,7 +267,7 @@ export function undischargedWait(events: JourneyEvent[]): boolean {
  *  deferred); the GATE half of it comes from the gate views — an accept at the confirm
  *  gate sets the `accepted` word exactly where the event sits in the tail, so the word's
  *  order semantics are unchanged while nothing re-reads the triple. */
-export function workflowState(events: JourneyEvent[]): WorkflowState {
+export function workflowState(events: JourneyEvent[], deps: { open?: OpenDep[] } = {}): WorkflowState {
   const gates = gateViews(events);
   const acceptedAt = new Set(gates.confirm.accepted);
   let status = 'queued';
@@ -300,13 +321,21 @@ export function workflowState(events: JourneyEvent[]): WorkflowState {
   // gate and the distance-to-goal read are exactly what they were.
   const rejectedGate = GATE_ORDER.find((g) => gates[g].state === 'rejected');
   if (rejectedGate && !REWORK_EXEMPT.includes(status)) status = 'rework';
+  // THE DECLARED-DEPENDENCY GATE (leg 12/17): a task that would otherwise be PROPOSED
+  // (queued | active) cannot proceed while a declared dependency is open. `blocked` is the
+  // honest word — already outside READY_STATUSES (nothing proposes it) and outside
+  // CLOSED_TASK_STATUSES (the leg aggregate, the leg gate and the distance-to-goal read
+  // still count it as open work), so this override ripples into nothing.
+  const openDeps = deps.open ?? [];
+  if (openDeps.length && (status === 'queued' || status === 'active')) status = 'blocked';
   return {
     status,
     rework: rejectedGate !== undefined,
+    openDeps,
     gates,
     ...(waitingOn ? { waitingOn } : {}),
     pendingWait,
-    next: nextVerdict(status, gates, rejectedGate, waitingOn),
+    next: nextVerdict(status, gates, rejectedGate, waitingOn, openDeps),
   };
 }
 
@@ -317,12 +346,15 @@ function nextVerdict(
   gates: GateViews,
   rejectedGate: 'grill' | 'confirm' | undefined,
   waitingOn: 'grill' | 'confirm' | undefined,
+  openDeps: OpenDep[],
 ): NextVerdict {
   if (status === 'done') return { verdict: 'closed' };
   if (['failed', 'deferred', 'cancelled', 'superseded'].includes(status)) return { verdict: 'terminal', status };
   if (status === 'accepted') return { verdict: 'conclusion-missing' };
   if (rejectedGate) return { verdict: 'rework', gate: rejectedGate };
   if (status === 'blocked') {
+    // the REASON first: a dependency-blocked task must never read as a bare `blocked`
+    if (openDeps.length) return { verdict: 'waiting-on-dependency' };
     return waitingOn ? { verdict: 'waiting-on-decision', gate: waitingOn } : { verdict: 'waiting-on-runner' };
   }
   if (status === 'active') return { verdict: 'work-in-progress' };

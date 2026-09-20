@@ -496,7 +496,7 @@ export const UI_HTML = `<!doctype html>
       // as a reading, so a prose mention is never shown as a guarantee.
       var deps = detail.deps || { dependsOn: [], referencedBy: [] };
       deps.dependsOn.forEach(function (d) {
-        field(node, 'depends on', d.ref + ' → ' + d.detail + (d.kind === 'task' ? ' [' + (d.how === 'named-in-record' ? 'read from the record' : d.how) + ']' : ''));
+        field(node, 'depends on', d.ref + ' → ' + d.detail + (d.kind === 'task' ? ' [' + (d.how === 'declared' ? 'DECLARED — binding' : 'read from the record — a hint') + ']' : ''));
       });
       if (deps.referencedBy.length) {
         field(node, 'referenced by', deps.referencedBy.map(function (r) { return r.id + ' (' + r.status + ')'; }).join(' · '));

@@ -67,6 +67,51 @@ const stubCapture = (o: { exitCode?: number; exits?: Record<string, number>; out
   run: (name) => ({ exitCode: o.exits?.[name] ?? o.exitCode ?? 0, stdout: o.output ?? 'Tests  3 passed (3)\n', stderr: '' }),
 });
 
+describe('spawn! — DECLARED dependencies are validated where a contract enters (leg 12/17)', () => {
+  beforeEach(() => { makeStore(); });
+  afterEach(() => { rmSync(root, { recursive: true, force: true }); });
+  const dep = (deps: string[]) => ({ intent: 'x', acceptanceCriteria: ['x'], dependsOn: deps });
+
+  it('refuses SELF · UNKNOWN · NON-TASK · CYCLE · bad shape — each by name, writing nothing', () => {
+    writeNode('01-leg', CONTRACT, []);
+    writeNode('01-leg/01-a', CONTRACT, [ev('created')]);
+    const c = cmds();
+    const code = (id: string, deps: unknown) => {
+      const r = c.spawn(id, dep(deps as string[]));
+      return r.ok ? 'OK' : r.error.code;
+    };
+    // the happy path FIRST (a real dependency spawns)
+    expect(code('01-leg/02-b', ['01-leg/01-a'])).toBe('OK');
+    expect(c.store.status('01-leg/02-b')).toBe('blocked');
+    // …then each refusal, on a FRESH id (an existing id refuses as 'exists' before these)
+    expect(code('01-leg/06-f', ['01-leg/06-f'])).toBe('dependsOn-self');
+    expect(code('01-leg/07-g', ['01-leg/09-gone'])).toBe('dependsOn-unknown');
+    expect(code('01-leg/08-h', ['01-leg'])).toBe('dependsOn-target');
+    expect(code('01-leg/09-i', [''])).toBe('dependsOn-shape');
+    // A CHAIN is legal — and a CYCLE CANNOT BE CREATED THROUGH spawn at all: every target
+    // must already exist and a NEW node has no dependents, so nothing existing can point
+    // back at it. The spawn-time cycle guard is defensive insurance against a future writer
+    // path; the LIVE net is check() (Store.depCycleProblems), tested in the store suite
+    // against a hand-written cycle.
+    writeNode('01-leg/03-c', dep(['01-leg/02-b']), [ev('created')]);
+    const c2 = cmds(); // a FRESH store: the node written above is not in the earlier snapshot
+    expect(c2.spawn('01-leg/04-d', dep(['01-leg/03-c'])).ok).toBe(true); // a chain, not a cycle
+    expect(c2.store.check().join('\n')).not.toContain('CYCLE');
+    // and nothing was written by any refusal
+    expect(c.store.ids()).not.toContain('01-leg/04-d');
+    expect(c.store.ids()).not.toContain('01-leg/06-f');
+  });
+
+  it('a spawned dependency BLOCKS its dependent in the derived views', () => {
+    writeNode('01-leg', CONTRACT, []);
+    writeNode('01-leg/01-a', CONTRACT, [ev('created')]);
+    expect(cmds().spawn('01-leg/02-b', dep(['01-leg/01-a'])).ok).toBe(true);
+    const c = cmds();
+    expect(c.store.status('01-leg/02-b')).toBe('blocked');
+    expect(c.frontmostReady()?.task).toBe('01-leg/01-a');
+  });
+});
+
 describe('brief — the gate decision material in ONE read (leg 12/15)', () => {
   beforeEach(() => { makeStore(); });
   afterEach(() => { rmSync(root, { recursive: true, force: true }); });

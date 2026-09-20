@@ -4,6 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store, JourneyEvent } from '../store.js';
+import { Commands } from '../../commands/index.js';
 import { getVOCAB } from '../vocab.js';
 import { blobSha } from '../sha.js';
 
@@ -811,6 +812,89 @@ describe('Store — commit traceability (format v10 §9)', () => {
     ]);
     const problems = new Store(root).check();
     expect(problems.some((p) => p.includes('ran against'))).toBe(false);
+  });
+});
+
+describe('Store — DECLARED dependencies block (leg 12/17)', () => {
+  beforeEach(() => { makeStore(); });
+  afterEach(() => { rmSync(root, { recursive: true, force: true }); });
+
+  const contract = (over: Record<string, unknown> = {}) => ({ intent: 'x', acceptanceCriteria: ['x'], ...over });
+  const done = [ev('created'), ev('completed')];
+  const queued = [ev('created')];
+
+  it('a task whose DECLARED dependency is open derives `blocked` WITH its reason named', () => {
+    writeNode('01-leg/01-a', contract(), queued);
+    writeNode('01-leg/02-b', contract({ dependsOn: ['01-leg/01-a'] }), queued);
+    const s = new Store(root);
+    expect(s.status('01-leg/02-b')).toBe('blocked');
+    const d = s.detail('01-leg/02-b');
+    expect(d.next.verdict).toBe('waiting-on-dependency');
+    expect(d.blockers).toEqual(['dependency open: 01-leg/01-a (queued)']); // never a bare `blocked`
+  });
+
+  it('the SATISFYING set is done · superseded · cancelled — and a `deferred` target does NOT satisfy', () => {
+    const cases: Array<[string, Array<Record<string, unknown>>, string]> = [
+      ['01-leg/01-done', done, 'queued'],
+      ['01-leg/02-sup', [ev('created'), ev('superseded', { successor: { name: 'x', path: 'y' } })], 'queued'],
+      ['01-leg/03-canc', [ev('created'), ev('cancelled', { reason: 'no longer needed' })], 'queued'],
+      ['01-leg/04-defer', [ev('created'), ev('deferred', { reason: 'later' })], 'blocked'],
+    ];
+    for (const [t, evs] of cases) writeNode(t, contract(), evs);
+    writeNode('01-leg/09-x', contract({ dependsOn: ['01-leg/01-done'] }), queued);
+    writeNode('01-leg/10-y', contract({ dependsOn: ['01-leg/02-sup'] }), queued);
+    writeNode('01-leg/11-z', contract({ dependsOn: ['01-leg/03-canc'] }), queued);
+    writeNode('01-leg/12-w', contract({ dependsOn: ['01-leg/04-defer'] }), queued);
+    const s = new Store(root);
+    expect([s.status('01-leg/09-x'), s.status('01-leg/10-y'), s.status('01-leg/11-z')]).toEqual(['queued', 'queued', 'queued']);
+    expect(s.status('01-leg/12-w')).toBe('blocked'); // deferring work does not deliver it
+    expect(s.detail('01-leg/12-w').blockers).toEqual(['dependency open: 01-leg/04-defer (deferred)']);
+  });
+
+  it('EVERY reader that decides "can proceed" honours it — the four filters agree', () => {
+    writeNode('01-leg', contract(), []); // the LEG node (frontmostReady walks legs)
+    writeNode('01-leg/01-a', contract(), queued);
+    writeNode('01-leg/02-b', contract({ dependsOn: ['01-leg/01-a'] }), queued);
+    const c = new Commands(new Store(root), 'test');
+    expect(c.frontmostReady()?.task).toBe('01-leg/01-a'); // the blocked one is NOT proposed
+    expect(c.lookBack().frontmostReady?.task).toBe('01-leg/01-a');
+    expect(c.advance().detail).toContain('01-leg/01-a');
+    expect(c.advance().detail).not.toContain('01-leg/02-b');
+  });
+
+  it('a PROSE mention never blocks — only a declared edge can (AC-5)', () => {
+    writeNode('01-leg/01-a', contract(), queued);
+    writeNode('01-leg/02-b', contract({ intent: 'depends on 01/01 in prose but declares nothing' }), queued);
+    const s = new Store(root);
+    expect(s.status('01-leg/02-b')).toBe('queued'); // a reading is a HINT
+    expect(s.deps('01-leg/02-b').dependsOn.some((d) => d.ref === '01-leg/01-a' && d.how === 'named-in-record')).toBe(true);
+  });
+
+  it('a vanished target and a CYCLE are NAMED findings, and a cycle BLOCKS instead of hanging', () => {
+    // post-V9_CUTOFF (2026-08-21): a grandfathered node is skipped by check() reporting
+    const post = (id: string, c: Record<string, unknown>) => {
+      mkdirSync(nodeDir(id), { recursive: true });
+      writeFileSync(join(nodeDir(id), 'node.json'), JSON.stringify({ id, contract: c, createdAt: '2026-09-01' }));
+      writeFileSync(join(nodeDir(id), 'events.jsonl'), JSON.stringify(ev('created')) + '\n');
+    };
+    post('01-leg/01-a', contract({ dependsOn: ['01-leg/09-gone'] }));
+    post('01-leg/02-b', contract({ dependsOn: ['01-leg/03-c'] }));
+    post('01-leg/03-c', contract({ dependsOn: ['01-leg/02-b'] }));
+    const s = new Store(root);
+    expect(s.status('01-leg/01-a')).toBe('blocked'); // absent ⇒ not satisfied
+    expect(s.openDeps('01-leg/01-a')).toEqual([{ id: '01-leg/09-gone', status: 'absent' }]);
+    expect(s.status('01-leg/02-b')).toBe('blocked'); // fail-closed, no recursion
+    const problems = s.check().join('\n');
+    expect(problems).toContain("declared dependency '01-leg/09-gone' does not exist");
+    expect(problems).toContain('CYCLE');
+  });
+
+  it('NO RETRO-BLOCKING: a node that declares nothing is untouched by the feature (AC-6)', () => {
+    writeNode('01-leg/01-a', contract(), done);
+    writeNode('01-leg/02-b', contract(), queued);
+    const s = new Store(root);
+    expect(s.status('01-leg/02-b')).toBe('queued');
+    expect(s.detail('01-leg/02-b').blockers).toEqual([]);
   });
 });
 

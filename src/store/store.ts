@@ -4,7 +4,7 @@ import { join, basename, resolve, sep } from 'node:path';
 import { getVOCAB } from './vocab.js';
 import { blobSha, stripMarkers } from './sha.js';
 import { loadDocsManifest, scanDocsDir, writeDocsManifest } from './docs.js';
-import { GATE_DECISION_EVENTS, gateView, isGateEventType, workflowProblems, workflowState, type GateLifecycle, type GateView, type NextVerdict } from './workflow.js';
+import { DEP_SATISFIED_STATUSES, GATE_DECISION_EVENTS, gateView, isGateEventType, workflowProblems, workflowState, type GateLifecycle, type GateView, type NextVerdict } from './workflow.js';
 import type { OpLog } from '../abilities/obs/log.js';
 
 /** The object types `git cat-file` reports for a reference that RESOLVES — the batch
@@ -224,7 +224,7 @@ export interface NodeDep {
   /** input: `path @ sha` or the missing marker · task: the target's derived status */
   detail: string;
   status: 'resolved' | 'missing' | 'absent';
-  how: 'requiredInputs' | 'affectedTaskIds' | 'named-in-record';
+  how: 'requiredInputs' | 'declared' | 'affectedTaskIds' | 'named-in-record';
 }
 
 /** A node's dependency edges: what it DEPENDS ON, and which nodes NAME it. */
@@ -523,6 +523,26 @@ export class Store {
     return Array.isArray(q) ? (q as Array<{ id?: string; question?: string; blocking?: boolean; defaultIfUnanswered?: string; affectedTaskIds?: string[] }>) : [];
   }
 
+  /** THE DECLARED-DEPENDENCY CYCLE FINDINGS (leg 12/17) — a DFS over the declared edges
+   *  with a visiting set, so a cycle is NAMED (and its members stay blocked, fail-closed)
+   *  rather than recursing forever. Spawn refuses a cycle outright; this catches one that
+   *  entered through history. */
+  depCycleProblems(): string[] {
+    const out: string[] = [];
+    const seen = new Set<string>();
+    const walk = (id: string, path: string[]): void => {
+      if (path.includes(id)) {
+        out.push(`${id}: declared dependency CYCLE — ${[...path, id].join(' → ')} (12/17)`);
+        return;
+      }
+      if (seen.has(id)) return;
+      seen.add(id);
+      for (const t of this.declaredDeps(id)) if (this.nodes.has(t)) walk(t, [...path, id]);
+    };
+    for (const id of this.nodes.keys()) if (id.includes('/')) walk(id, []);
+    return out;
+  }
+
   /** THE F-AC16 CLOSURE FINDINGS — derived ONCE (G3): a task whose `completed` follows a
    *  `gate-revised` must carry `transferred` or `deferred`, and a `transferred` target must
    *  exist. check() reports these, and the closure-integrity validator consumes this method
@@ -587,8 +607,12 @@ export class Store {
       else add({ kind: 'input', ref: name, detail: 'does not resolve', status: 'missing', how: 'requiredInputs' });
     }
 
-    // task edges — declared (affectedTaskIds) first, then read out of the record's prose
-    const declared = new Set<string>();
+    // DECLARED dependencies first (format v19): the only kind that can BLOCK a task — they
+    // are validated at spawn (targets exist · no cycle) and derived into the status word.
+    for (const t of this.declaredDeps(id)) add(this.taskEdge(t, 'declared'));
+    // then the READING: affectedTaskIds (question-scoped) and the contract's prose — hints,
+    // never blocking (a stray number pair in prose must not deadlock the journey).
+    const declared = new Set<string>(this.declaredDeps(id));
     for (const q of this.openQuestions(id)) for (const t of q.affectedTaskIds ?? []) if (typeof t === 'string') declared.add(t);
     for (const t of declared) add(this.taskEdge(t, 'affectedTaskIds'));
     for (const t of this.namedNodes(id)) if (!declared.has(t)) add(this.taskEdge(t, 'named-in-record'));
@@ -693,8 +717,36 @@ export class Store {
   /** THE STATUS WORD — derived by the ONE workflow projection (workflow.ts), which also
    *  owns the gate lifecycle every other gate reader consumes. This method is the
    *  store's name for it; nothing here re-reads the event tail. */
+  /** THE DECLARED DEPENDENCIES (format v19, leg 12/17) — the node's own `contract.dependsOn`,
+   *  filtered to strings. A READING of prose is NOT this: only a DECLARED edge can block. */
+  declaredDeps(id: string): string[] {
+    const raw = this.contract(id) as { contract?: Record<string, unknown> } | undefined;
+    const c = (raw?.contract ?? {}) as Record<string, unknown>;
+    const d = c.dependsOn;
+    return Array.isArray(d) ? d.filter((x): x is string => typeof x === 'string' && x.trim() !== '') : [];
+  }
+
+  /** The declared dependencies that are NOT satisfied — the fact the projection takes as
+   *  input. SATISFACTION reads the target's OWN status (done · superseded · cancelled; a
+   *  `deferred` target does NOT satisfy, and neither does an ABSENT one): the raw
+   *  projection is called WITHOUT deps, so this derivation terminates on ANY graph — a
+   *  declared cycle blocks its members (fail-closed) instead of recursing forever, and
+   *  check() names it. */
+  openDeps(id: string): Array<{ id: string; status: string }> {
+    return this.declaredDeps(id)
+      .map((t) => {
+        const exists = this.ids().includes(t);
+        const status = exists ? workflowState(this.events(t)).status : 'absent';
+        return { id: t, status };
+      })
+      .filter((d) => !DEP_SATISFIED_STATUSES.includes(d.status));
+  }
+
   private taskStatus(id: string): string {
-    return workflowState(this.events(id)).status;
+    // ONE clause, ONE place: the projection gets the dependency facts as INPUT, so every
+    // reader that filters on the status word (frontmostReady · lookBack · advance() · the
+    // CLI state line) honours a declared dependency without changing a line of its own.
+    return workflowState(this.events(id), { open: this.openDeps(id) }).status;
   }
 
   private legStatus(id: string): string {
@@ -1008,7 +1060,10 @@ export class Store {
    *  projection (workflow.ts) — this card derives nothing about a gate itself. */
   detail(id: string): TaskDetail {
     const evs = this.events(id);
-    const wf = workflowState(evs);
+    // THE ONE PROJECTION, WITH THE DEP FACTS (12/17): detail() reads the same derivation
+    // every other reader does — building it WITHOUT the dependencies is how a card could
+    // say `queued` for a task the readers refuse to propose.
+    const wf = workflowState(evs, { open: this.openDeps(id) });
     const gate = (g: GateView): DetailGate => ({ state: g.state, ...(g.at ? { at: g.at } : {}) });
     // unwrap the contract (defensive: legacy double-nested {contract:{contract:{…}}})
     const contract = this.contractOf(id);
@@ -1028,6 +1083,9 @@ export class Store {
     const blockers = (['grill', 'confirm'] as const)
       .filter((g) => wf.gates[g].undecided)
       .map((g) => `submitted (gate=${g}) awaiting decision`);
+    // THE REASON IS NAMED (12/17 AC-3): a dependency-blocked task never reads as a bare
+    // `blocked` — the target AND its status travel with it.
+    for (const d of wf.openDeps) blockers.push(`dependency open: ${d.id} (${d.status})`);
     const detail: TaskDetail = {
       id,
       isLeg: !id.includes('/'),
@@ -1819,12 +1877,18 @@ export class Store {
       // derived gate lifecycle — a READY word beside an owed rework (the mis-dispatch),
       // `accepted` without a confirm accept, `blocked` with nothing pending. Tasks only:
       // a LEG's status is an aggregate of its children, not the tail projection.
-      if (id.includes('/')) for (const p of workflowProblems(id, workflowState(this.events(id)))) problems.push(p);
+      if (id.includes('/')) for (const p of workflowProblems(id, workflowState(this.events(id), { open: this.openDeps(id) }))) problems.push(p);
+      // 12/17: a DECLARED dependency whose target has vanished, and a cycle that entered
+      // through history — both NAMED, never a silent block and never a hang.
+      for (const t of id.includes('/') ? this.declaredDeps(id) : []) {
+        if (!this.nodes.has(t)) problems.push(`${id}: declared dependency '${t}' does not exist (12/17)`);
+      }
     }
     // F-AC16 closure invariants — ONE derivation (G3): check() consumes it here, and the
     // closure-integrity VALIDATOR consumes the same method instead of calling check() again
     // from inside check() (which re-ran the whole rule set, per-sha git spawns and all).
     for (const p of this.closureProblems()) problems.push(p);
+    for (const p of this.depCycleProblems()) problems.push(p);
     // F-AC18 (v9; v10/this leg amended): every task SPAWNED under v9 that completes must
     // have concluded — structured commit evidence (evidence.commits[], format v10 §3/§14).
     // Docs are git content: the commit evidence IS the conclusion (the lock is retired).
