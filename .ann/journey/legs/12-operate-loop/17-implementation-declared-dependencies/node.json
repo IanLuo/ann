@@ -1,0 +1,47 @@
+{
+  "id": "12-operate-loop/17-implementation-declared-dependencies",
+  "contract": {
+    "intent": "DEPENDENCIES THAT BLOCK. Today 'dependency' means two different things and only one of them blocks. INPUT edges (`requiredInputs` → a resolved path @ sha) DO block: F-AC19 refuses the spawn, and the frame refuses to run while the packet's readiness is unmet (frame.ts:199). TASK edges do not exist as a concept at all — the format carries no task→task field — so the dependency map is a READING (12/14's Store.deps: openQuestions[].affectedTaskIds + the contract's prose + the extended notes) and a READING MUST NEVER BLOCK: a stray number pair or a passing mention would deadlock the journey. That is not hypothetical — the derived map today mixes real couplings (13 needs 12's gesture) with noise (a task 'depends on' one it merely names). Deliverable: a DECLARED `dependsOn: [<node id>]` in the contract, validated at spawn (the target exists · no self-reference · no cycle), and DERIVED into the status so a task whose declared dependency is unsatisfied derives `blocked` — because the FOUR readers that decide 'can proceed' all filter READY_STATUSES and read store.status (commands/index.ts:1475/1484/1509, handlers.ts:585), ONE clause in the ONE status derivation (Store.taskStatus → workflowState, store.ts:696) makes them all honour it, and the reason is NAMED (the blockers list + a `waiting-on-dependency` next verdict + the brief's line) so 'blocked because dependency' is visible rather than inferred. NOT a new status word: `blocked` already sits OUTSIDE READY_STATUSES (so nothing proposes it) and OUTSIDE CLOSED_TASK_STATUSES (so the leg aggregate, the leg gate and the distance-to-goal read still count it as open work) — the ripple is nil, which is precisely why 12/08's `rework` word is NOT the precedent here.",
+    "acceptanceCriteria": [
+      "AC-1 — THE FIELD: `contract.dependsOn?: string[]` (NODE IDS, never paths) + the journey-format-spec amendment that declares it. `spawn!` REFUSES by name with zero writes on: a self-dependency · a target that does not exist · a non-task id · a cycle. `check()` re-flags a declared target that has since vanished, and reports a cycle that entered through history.",
+      "AC-2 — THE BLOCKING DERIVATION, IN ONE PLACE: Store.taskStatus (the ONE status derivation) yields `blocked` when the workflow word is OPEN and a declared dependency is unsatisfied. The four readers need NO change, and a test asserts each one honours it: frontmostReady · lookBack's front?ready · advance() · the CLI state line.",
+      "AC-3 — THE REASON IS NAMED: an unsatisfied declared dependency appears in the node's blockers with the target AND the target's status, and in the `next` verdict as `waiting-on-dependency`. A dependency-blocked task never reads as a bare `blocked` — the brief and the card show it, and `ann next` says which task waits on which.",
+      "AC-4 — WHAT SATISFIES, AND THE DEADLOCK RULE: satisfied = the target is `done` | `superseded` | `cancelled`. NOT `deferred` (deferring work must not silently unblock its dependents — the human decides: un-defer, cancel, or change the dependency) and NOT absent (a vanished target is a NAMED finding, neither a silent block nor a silent pass). On ANY graph the derivation TERMINATES — a cycle that reached history is a named finding, never a hang.",
+      "AC-5 — THE DEPS READ LEARNS THE DISTINCTION: Store.deps labels a DECLARED edge ('declared') apart from the reading ('named-in-record'), and only the declared kind can block. A test asserts that a prose-only mention never blocks a task — the hint stays a hint.",
+      "AC-6 — NO REGRESSION, AND NO RETRO-BLOCKING: full npm test green, npm run typecheck clean, captured checks (npm run build · ann check · ann verify) via capture!, ann check + ann verify clean on the live journey, committed with structured evidence (F-AC18). Enabling the feature must not block a single live task: no node carries dependsOn today (a test asserts the live journey's statuses are unchanged by the feature), and the prose-read edges stay non-blocking."
+    ],
+    "workType": "implementation",
+    "targetAreas": [
+      "src/store",
+      "src/commands",
+      "src/surface",
+      "src/e2e"
+    ],
+    "requiredInputs": [
+      "journey-format-spec",
+      "core-design"
+    ],
+    "expectedOutputs": [
+      "the declared dependsOn field + the format amendment",
+      "the blocking derivation in the one status place",
+      "the named reason (blockers · the waiting-on-dependency verdict · the brief)",
+      "the deps read's declared-vs-read labelling",
+      "tests: the refusals · the four readers · the satisfaction set · no retro-blocking"
+    ]
+  },
+  "openQuestions": [
+    {
+      "id": "Q1",
+      "question": "Does a DEFERRED target satisfy a dependency?",
+      "blocking": false,
+      "defaultIfUnanswered": "no — deferring work does not deliver it; the dependent stays blocked and the blocker NAMES the deferred target, so the human decides (un-defer, cancel, or change the dependency)"
+    },
+    {
+      "id": "Q2",
+      "question": "May a LEG be a dependency target (meaning all its tasks are closed), or tasks only?",
+      "blocking": false,
+      "defaultIfUnanswered": "tasks only in this slice — a leg target is sugar whose semantics (all tasks closed? the leg gate?) deserve their own decision"
+    }
+  ],
+  "createdAt": "2026-09-20"
+}
