@@ -47,6 +47,9 @@ export interface NodeCard extends TaskDetail {
   createdAt: string;
   openQuestions: Array<{ id?: string; question?: string; blocking?: boolean; defaultIfUnanswered?: string }>;
   inputs: Array<{ name: string; resolved: boolean; path?: string; sha?: string }>;
+  /** THE GATE BRIEF (leg 12/15) — the SAME assembled value `ann brief` prints, carried on
+   *  the card so the page and the terminal render ONE assembly (never a second read). */
+  brief: Brief;
   /** v18 §3 — the structured conclusion, lined up against the contract's ACs. `check` is
    *  the ac→check MAPPING and `bound` is that mapping resolved against the log (leg 12/03). */
   claims: Array<{
@@ -563,7 +566,13 @@ export const RENDERS: Record<string, Renderer> = {
       if (n.truncated) lines.push(`  … the rest is on the record: ann events ${v.id} ${n.index}`);
     }
     lines.push('---', 'NEXT MOVE');
-    lines.push(`  decide the ${v.next.gate ?? 'gate'} gate: ann gate! ${v.id} ${v.next.gate ?? '<grill|confirm>'} accept|reject '<why>'`);
+    if (v.next.gate) {
+      lines.push(`  decide the ${v.next.gate} gate: ann gate! ${v.id} ${v.next.gate} accept|reject '<why>'`);
+    } else if (v.next.verdict === 'entry-accepted' || v.next.verdict === 'work-in-progress') {
+      lines.push(`  no gate is in hand — the WORK is next: ann run! ${v.id} (or implement, then ann capture! / ann evidence! and submit! at the confirm gate)`);
+    } else {
+      lines.push(`  nothing to decide: ${v.next.verdict}${v.next.status ? ` (${v.next.status})` : ''}`);
+    }
     lines.push(`  deeper: ann detail ${v.id} · ann events ${v.id} · ann packet ${v.id} · ann brief ${v.id} <noteChars>`);
     return block(lines);
   },

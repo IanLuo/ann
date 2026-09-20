@@ -424,11 +424,16 @@ export const UI_HTML = `<!doctype html>
       }
       evs.forEach(function (e) {
         var li = el('li');
+        // A NOTE IS CAPPED on the card (the brief's own rule): a 4,000-character extended
+        // note is unreadable in a list row — the row is a drill anyway, so the text is
+        // shortened with the cut NAMED, never hidden.
+        var note = e.note || '';
+        var shown = note.length > 240 ? note.slice(0, 240) + '… (+' + (note.length - 240) + ' chars — drill for the full record)' : note;
         li.appendChild(
           drillLink(
             { kind: 'event', id: id, n: e.n, gate: gate || null },
             'drill',
-            e.n + '. ' + e.at + '  ' + e.type + (e.gate ? ' (gate=' + e.gate + ')' : '') + (e.note ? ' — ' + e.note : '') + ' ›',
+            e.n + '. ' + e.at + '  ' + e.type + (e.gate ? ' (gate=' + e.gate + ')' : '') + (shown ? ' — ' + shown : '') + ' ›',
           ),
         );
         list.appendChild(li);
@@ -496,6 +501,25 @@ export const UI_HTML = `<!doctype html>
         field(node, 'referenced by', deps.referencedBy.map(function (r) { return r.id + ' (' + r.status + ')'; }).join(' · '));
       }
       (detail.openQuestions || []).forEach(function (q) { field(node, 'open question' + (q.blocking ? ' [BLOCKING]' : ''), (q.id ? q.id + ': ' : '') + (q.question || '')); });
+
+      // THE DECISION MATERIAL (detail.brief — the SAME value 'ann brief' renders, never a
+      // second assembly): the choices already made WITH their whys (an absent why is named,
+      // never inferred) and whether a close would pass right now. This is the block the
+      // human reads INSTEAD of scrolling the contract + the event log.
+      var brief = detail.brief || {};
+      (brief.decisions || []).forEach(function (d) {
+        field(node, 'decision', d.at + '  ' + d.type + '@' + d.gate + ' — ' + (d.note || '') + '  · why: ' + (d.why ? d.why : '(NOT RECORDED)'));
+      });
+      if (brief.conclusion) {
+        var un = (brief.conclusion.unclaimed || []).length;
+        field(
+          node,
+          'close',
+          brief.closeBlocker
+            ? 'REFUSED now — ' + brief.closeBlocker.code
+            : 'a confirm accept would auto-close (claims: ' + (brief.conclusion.claims || []).length + (un ? ', UNCLAIMED: ' + un : ', every AC claimed') + ')',
+        );
+      }
 
       // CLAIMS — how each acceptance criterion is met (resolved pointers), gaps named.
       // A pointer that NAMES a result item is itself a DRILL (the git submit, the local

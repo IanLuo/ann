@@ -180,6 +180,7 @@ const confirmRead = (over: Record<string, unknown> = {}) => ({
     openQuestions: [],
     claims: [],
     checks: [],
+    brief: { decisions: [], conclusion: { claims: [], unclaimed: [], checks: [] } },
     ...over,
   },
   results: [],
@@ -231,6 +232,10 @@ const gateCard = (over: Record<string, unknown> = {}) => ({
     next: { verdict: 'waiting-on-decision', gate: 'confirm' },
     inputs: [],
     openQuestions: [],
+    brief: {
+      decisions: [{ at: '2026-09-19', type: 'rejected', gate: 'confirm', note: 'rejected (ianluo)', why: 'the AC is not met yet' }],
+      conclusion: { claims: [{ ac: 'AC-1', statement: 'x', evidence: [] }], unclaimed: [], checks: [] },
+    },
     claims: [{ ac: 'AC-1', statement: 'the thing is done', evidence: [`${SHA} [resolved]`] }],
     checks: [{ command: 'npm test', result: 'pass', sha: SHA }],
     ...over,
@@ -305,6 +310,37 @@ describe('the served page — a drill opens its own tab, and the URL is the dril
     expect(text).toContain('01-leg/09-gone → not a node'); // a named target that is gone stays VISIBLE
     expect(text).toContain('referenced by');
     expect(text).toContain('01-leg/03-c (queued)');
+  });
+
+  it('the card carries the DECISION MATERIAL — decisions with their whys, the close readiness, and a CAPPED note row (leg 12/15 AC-4)', async () => {
+    const gateTab = boot(
+      {
+        ...reads(card()),
+        [`/api/confirm?id=${TASK}`]: gateCard(),
+        [`/api/events?id=${TASK}`]: {
+          ...eventsRead,
+          events: [
+            ...eventsRead.events,
+            { n: 9, at: '2026-09-19', type: 'extended', note: 'N'.repeat(900) },
+          ],
+        },
+      },
+      '#drill=gate&id=' + encodeURIComponent(TASK) + '&gate=confirm',
+    );
+    await flush();
+    const node = gateTab.get('card-node').textContent;
+    // the choice already made, WITH its why (the same value `ann brief` prints)
+    expect(node).toContain('decision');
+    expect(node).toContain('rejected@confirm');
+    expect(node).toContain('why: the AC is not met yet');
+    // and whether a close would pass right now
+    expect(node).toContain('close');
+    expect(node).toContain('auto-close');
+    // a 900-char note is CUT on the card, with the cut NAMED and the drill intact
+    await flush();
+    const events = gateTab.get('card-events').textContent;
+    expect(events).toContain('… (+660 chars');
+    expect(events).not.toContain('N'.repeat(400));
   });
 
   it('the card renders, and every fact is a NEW-TAB link carrying its item', async () => {

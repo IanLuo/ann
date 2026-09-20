@@ -334,6 +334,9 @@ function nodeCard(ctx: CliContext, id: string): NodeCard {
     createdAt: typeof raw.createdAt === 'string' ? raw.createdAt : ctx.store.createdAt(id),
     openQuestions: (raw.openQuestions ?? nested ?? []) as NodeCard['openQuestions'],
     inputs: resolveInputs(ctx, d.contract),
+    // THE BRIEF (12/15 AC-4): the card renders the SAME assembled value `ann brief` prints
+    // — one assembly, two renderings (the terminal and the page), never a second read.
+    brief: ctx.commands.brief(id),
     claims: [
       ...conclusion.claims.map((c) => ({ ...c, evidence: c.evidence.map((p) => `${p} [${resolvePointer(ctx, p)}]`) })),
       ...conclusion.unclaimed.map((u) => ({ ac: u.ac, statement: '', evidence: [] as string[], acText: u.acText })),
