@@ -10,6 +10,7 @@ import {
 import { join, dirname, resolve } from 'node:path';
 import { execSync, execFileSync } from 'node:child_process';
 import { Store, resolveStoreLocation, storeJourneyDir } from '../store/store.js';
+import { READY_STATUSES, gateView } from '../store/workflow.js';
 import type { StoreLocation, JourneyEvent, ResultItem, TaskDetail } from '../store/store.js';
 import { scanDocsDir, loadDocsManifest, writeDocsManifest, docsIndexFresh, docSha } from '../store/docs.js';
 import { Commands, CommandResult, GOAL_SEED_GUARD, nodeIdOf } from '../commands/index.js';
@@ -434,8 +435,21 @@ function eventLinks(ctx: CliContext, id: string, e: JourneyEvent): Array<{ kind:
     });
   }
   if (typeof e.gate === 'string') {
-    const state = e.type === 'confirmed' ? 'confirmed' : e.type === 'rejected' ? 'rejected' : 'submitted (undecided)';
-    links.push({ kind: 'gate', what: `${e.gate} — ${state}`, detail: 'the gate card (contract · gate states · results)', command: `ann confirm ${id}` });
+    // AC-2's hole, closed (12/16 F4): this used to READ THE TRIPLE — it labelled the gate
+    // with the EVENT's word as if it were the gate's STATE (a confirmed event is `accepted`
+    // in the lifecycle vocabulary), and it asserted "undecided" from a single event, which
+    // is FALSE for a submission that was decided later in the tail. Now: the event names
+    // itself, and the gate's STATE (when this event is the gate's last one) comes from the
+    // ONE derivation.
+    const view = gateView(ctx.store.events(id), e.gate);
+    const isLast = view.index === ctx.store.events(id).indexOf(e);
+    const gate = view.state === 'submitted' ? 'waiting on a decision' : view.state;
+    links.push({
+      kind: 'gate',
+      what: `${e.gate} — ${e.type}${isLast ? ` (the gate is now ${gate})` : ''}`,
+      detail: 'the gate card (contract · gate states · results)',
+      command: `ann confirm ${id}`,
+    });
   }
   for (const [field, kind] of [['successor', 'node'], ['target', 'node']] as const) {
     const v = (e as Record<string, unknown>)[field];
@@ -568,7 +582,7 @@ export const HANDLERS: Record<string, Handler> = {
     if (active) {
       const tasks = ctx.store.tasksOf(active);
       const doneN = tasks.filter((t) => ctx.store.status(t).startsWith('done')).length;
-      const ready = tasks.filter((t) => ['queued', 'active'].includes(ctx.store.status(t)));
+      const ready = tasks.filter((t) => READY_STATUSES.includes(ctx.store.status(t)));
       state += ` · ${active} in progress (${doneN}/${tasks.length} tasks done)`;
       if (ready.length) state += ` — frontmost-ready: ${ready[0]} (${ctx.store.status(ready[0])})`;
     }

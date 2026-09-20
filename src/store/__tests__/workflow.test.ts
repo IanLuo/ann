@@ -524,12 +524,16 @@ describe('the readers AGREE (AC-2) — one fixture set, all four gate states', (
         if (entry.isDirectory()) {
           if (entry.name === '__tests__') continue; // fixtures build tails, they do not derive
           walk(p, acc);
-        } else if (entry.name.endsWith('.ts')) acc.push(p);
+        } else if (entry.name.endsWith('.ts') && !entry.name.endsWith('.test.ts')) acc.push(p); // tests build fixtures; they do not derive
       }
       return acc;
     })(dir);
-    // the two shapes a second reading of the triple always took: the type-ARRAY, and a
-    // tail SCAN over the decided pair. Both are only legal in workflow.ts.
+    // A HEURISTIC, AND NOW AN HONEST ONE (12/16 AC-1): the two shapes a second reading has
+    // taken are the type-ARRAY and a tail SCAN over the decided pair — but a reader written
+    // another way (a TERNARY on e.type, a switch, a Set) slipped past this scan, which is
+    // exactly how handlers.ts:437 survived 12/08. The STRUCTURAL pin is the ALLOWLIST below:
+    // any file that NAMES the decision event types at all must be registered with a reason,
+    // so a new reader fails by name instead of hiding in a shape this regex cannot match.
     const ARRAYS = [/\[\s*'submitted'\s*,\s*'confirmed'\s*,\s*'rejected'\s*\]/, /[\['"]confirmed['"]\s*,\s*['"]rejected['"]/];
     const SCAN = /(slice|some|filter|find|indexOf|includes|lastIndexOf)\(/;
     const offenders: string[] = [];
@@ -544,6 +548,35 @@ describe('the readers AGREE (AC-2) — one fixture set, all four gate states', (
       });
     }
     expect(offenders).toEqual([]);
+
+    // THE STRUCTURAL PIN (12/16 AC-1): every file that mentions the decision event types is
+    // REGISTERED here with the reason it may. A new reader — whatever shape it takes — fails
+    // this test by name until someone states why it is allowed.
+    const ALLOWED: Record<string, string> = {
+      'src/store/store.ts': 'the single writer: the per-type field whitelist + shape checks (WRITES and validates, never derives a state)',
+      'src/commands/index.ts': 'the gate decision WRITE — GATE_DECISION_EVENTS, writing not reading',
+      'src/flow/semantic-driver.ts': 'the closed set refuses a gate decision by NAME',
+      'src/store/vocab.ts': 'the registry declaration of the decision mapping',
+      'src/store/docs.ts': 'the retired doc vocab it refuses by name',
+      'src/flow/types.ts': 'the step contract declares the gate event types a step may produce',
+      'src/flow/intents.ts': 'the intent vocabulary names the gate writes it defers',
+      'src/abilities/obs/log.ts': 'the operational log names the phase, not the gate state',
+      'src/flow/frame.ts': 'compares the DERIVED lifecycle state (gateLifecycle), never the event type — :313 tail state 2',
+      'src/surface/renderers.ts': 'renders the DERIVED state word — one glyph per lifecycle value',
+      'src/surface/command-renderers.ts': 'renders the DERIVED state word — one glyph per lifecycle value',
+      'src/surface/handlers.ts': 'the event-drill label reads gateView (12/16 AC-1) + the derived state comparisons',
+      'src/surface/ui.ts': 'the page compares the DERIVED state to decide the in-hand gate',
+      'src/evals/fixtures.ts': 'fixture TAILS (built data for the eval harness), not a reader',
+    };
+    const unregistered: string[] = [];
+    for (const f of files) {
+      const rel = relative(process.cwd(), f);
+      if (f.endsWith(join('src', 'store', 'workflow.ts'))) continue;
+      const text = readFileSync(f, 'utf8');
+      if (!/['"](submitted|confirmed|rejected)['"]/.test(text)) continue;
+      if (!(rel in ALLOWED)) unregistered.push(rel);
+    }
+    expect(unregistered, `these files name the gate event types without being registered in ALLOWED (add one, with the reason): ${unregistered.join(', ')}`).toEqual([]);
   });
 });
 

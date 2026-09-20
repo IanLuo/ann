@@ -26,7 +26,8 @@
  *                                  it, and so it says). It carries NO integrity verdict: the
  *                                  full pre-check cost ~3.3s and ran on every load (leg
  *                                  12/07), so the card says it is unchecked and asks for the
- *                                  snapshot below.
+ *                                  snapshot below. What the check RE-RUNS is listed in ONE
+ *                                  place — approve.ts's INTEGRITY_UNCHECKED (G4).
  *   GET  /api/integrity          → THE LAZY INTEGRITY SNAPSHOT (leg 12/07): the SAME
  *                                  fail-closed pre-check the approve refuses on, asked for
  *                                  on the page's own clock. The card shows a pending state

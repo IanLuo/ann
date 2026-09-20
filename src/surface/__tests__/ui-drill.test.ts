@@ -497,7 +497,7 @@ describe('the served page — a drill opens its own tab, and the URL is the dril
   it('a result drill from a gate DECIDED since the link was made shows no decision it cannot take', async () => {
     const decided: Record<string, unknown> = {
       ...reads(card()),
-      [`/api/confirm?id=${TASK}`]: gateCard({ gates: { grill: { state: 'accepted' }, confirm: { state: 'confirmed', at: '2026-09-12' } } }),
+      [`/api/confirm?id=${TASK}`]: gateCard({ gates: { grill: { state: 'accepted' }, confirm: { state: 'accepted', at: '2026-09-12' } } }),
       [`/api/results?id=${TASK}&n=1`]: resultsRead,
     };
     const tab = boot(decided, '#drill=result&id=' + encodeURIComponent(TASK) + '&gate=confirm&n=1');

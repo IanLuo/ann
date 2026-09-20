@@ -47,6 +47,13 @@ import type { JourneyEvent } from './store.js';
  * the closure semantics (F-AC16) are untouched.
  */
 
+/** THE GATE ORDER — declared once, and declared as ORDER, not as an incidental literal
+ *  (F10): every reader that walks the gates (the queue, the blockers, the projection)
+ *  consumes this, so "grill before confirm" is a decision the code states rather than a
+ *  side effect of someone's array literal. Entry precedes exit: a task cannot reach its
+ *  confirm gate before its entry gate is accepted (GATE-SEQ). */
+export const GATE_ORDER = ['grill', 'confirm'] as const;
+
 /** The gate TRIPLE — the only event types this module reads, declared once. */
 export const GATE_EVENT_TYPES = ['submitted', 'confirmed', 'rejected'] as const;
 export type GateEventType = (typeof GATE_EVENT_TYPES)[number];
@@ -83,9 +90,11 @@ export interface GateView {
   gate: string;
   /** The gate's lifecycle: the LAST submitted|confirmed|rejected at this gate. */
   state: GateLifecycle;
-  /** That event's tail index (-1 when the gate has no triple event at all). */
-  index: number;
   at?: string;
+  /** The tail index of the gate's LAST triple event (-1 when the gate has no triple event
+   *  at all) — read by the event-drill label (12/16), which needs to know whether the event
+   *  it is describing is still the gate's latest. */
+  index: number;
   /** An UNDECIDED submission: someone submitted and no decision followed. Equivalent to
    *  `state === 'submitted'` by construction — never derive it a second way. */
   undecided: boolean;
@@ -275,7 +284,7 @@ export function workflowState(events: JourneyEvent[]): WorkflowState {
     }
   });
   // the wait re-derivations: an undecided submission, or an undischarged `waiting`
-  const waits = (['grill', 'confirm'] as const).filter((g) => gates[g].undecided);
+  const waits = GATE_ORDER.filter((g) => gates[g].undecided);
   const waitingOn = waits.length ? waits.reduce((best, g) => (gates[g].undecidedIndex > gates[best].undecidedIndex ? g : best)) : undefined;
   const pendingWait = undischargedWait(events);
   if (!WAIT_EXEMPT.includes(status)) {
@@ -289,7 +298,7 @@ export function workflowState(events: JourneyEvent[]): WorkflowState {
   // the human's feedback a bare word cannot carry. A CLOSED or failed word is never
   // overridden (`REWORK_EXEMPT`): closed work stays closed, so the leg aggregate, the leg
   // gate and the distance-to-goal read are exactly what they were.
-  const rejectedGate = (['grill', 'confirm'] as const).find((g) => gates[g].state === 'rejected');
+  const rejectedGate = GATE_ORDER.find((g) => gates[g].state === 'rejected');
   if (rejectedGate && !REWORK_EXEMPT.includes(status)) status = 'rework';
   return {
     status,

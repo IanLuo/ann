@@ -4,7 +4,7 @@ import { join, basename, resolve, sep } from 'node:path';
 import { getVOCAB } from './vocab.js';
 import { blobSha, stripMarkers } from './sha.js';
 import { loadDocsManifest, scanDocsDir, writeDocsManifest } from './docs.js';
-import { gateView, isGateEventType, workflowProblems, workflowState, type GateLifecycle, type GateView, type NextVerdict } from './workflow.js';
+import { GATE_DECISION_EVENTS, gateView, isGateEventType, workflowProblems, workflowState, type GateLifecycle, type GateView, type NextVerdict } from './workflow.js';
 import type { OpLog } from '../abilities/obs/log.js';
 
 /** The object types `git cat-file` reports for a reference that RESOLVES — the batch
@@ -197,7 +197,10 @@ export interface TaskDetail {
   superseded: boolean;
   contract: Record<string, unknown> | undefined;
   gates: { grill: DetailGate; confirm: DetailGate };
-  /** REWORK OWED (derived — a rejected bound gate with no later submission at it). */
+  /** REWORK OWED (derived — a rejected bound gate with no later submission at it).
+   *  DECIDED (12/16, F6): kept although no production consumer reads it YET — 12/06
+   *  (rework-visible) is the NAMED pending consumer and the projection derives the flag
+   *  either way; the reader-agreement test pins it meanwhile. */
   rework: boolean;
   /** The card's next line, DERIVED (the verdict; the wording is the renderer's). */
   next: NextVerdict;
@@ -518,6 +521,36 @@ export class Store {
     const nested = (raw.contract as { openQuestions?: unknown } | undefined)?.openQuestions;
     const q = raw.openQuestions ?? nested;
     return Array.isArray(q) ? (q as Array<{ id?: string; question?: string; blocking?: boolean; defaultIfUnanswered?: string; affectedTaskIds?: string[] }>) : [];
+  }
+
+  /** THE F-AC16 CLOSURE FINDINGS — derived ONCE (G3): a task whose `completed` follows a
+   *  `gate-revised` must carry `transferred` or `deferred`, and a `transferred` target must
+   *  exist. check() reports these, and the closure-integrity validator consumes this method
+   *  rather than calling check() from inside check(). Tasks only — leg roots carry no events
+   *  by construction. */
+  closureProblems(): string[] {
+    const out: string[] = [];
+    const allIds = new Set(this.nodes.keys());
+    for (const [id, node] of this.nodes) {
+      if (!id.includes('/')) continue;
+      let revised = -1,
+        completed = -1,
+        closureOk = false;
+      const targets: string[] = [];
+      node.events.forEach((e, i) => {
+        if (e.type === 'gate-revised') revised = i;
+        if (e.type === 'completed') completed = i;
+        if (e.type === 'transferred' || e.type === 'deferred') closureOk = true;
+        if (e.type === 'transferred' && e.target) targets.push(e.target);
+      });
+      if (revised >= 0 && completed > revised && !closureOk) {
+        out.push(`${id}: gate-revised but closed without transferred/deferred (F-AC16)`);
+      }
+      for (const t of targets) {
+        if (!allIds.has(t)) out.push(`${id}: transferred target '${t}' does not exist (F-AC16)`);
+      }
+    }
+    return out;
   }
 
   /** THE DEPENDENCY EDGES (leg 12/14) — derived from the node's OWN record, in two kinds:
@@ -1072,8 +1105,10 @@ export class Store {
 
   /** The batch half — ONE `git cat-file --batch-check` for every plain hex name, returning
    *  the names that RESOLVE (git reported a real object type). A git that cannot run, or a
-   *  reply whose shape we do not understand, resolves NOTHING and leaves the caller to probe
-   *  per name — the answer is then slow, never quietly wrong. */
+   *  reply we cannot parse, resolves NOTHING — and `unresolvedShas` then treats a BATCHED
+   *  name as unresolved WITHOUT probing it per name (G2: this comment used to claim the
+   *  caller probes, which the code does not do; the direction stays fail-closed — a git
+   *  that cannot answer reports unresolved, never resolved). */
   private batchedResolved(batchable: string[]): Set<string> {
     const resolved = new Set<string>();
     if (!batchable.length) return resolved;
@@ -1557,7 +1592,7 @@ export class Store {
       }
       // G1: gate accept persists the human's rationale as `feedback` on the confirmed
       // event (rejected already records it) — both must be strings when present.
-      if ((e.type === 'rejected' || e.type === 'confirmed') && e.feedback !== undefined && typeof e.feedback !== 'string') {
+      if ((Object.values(GATE_DECISION_EVENTS) as string[]).includes(e.type) && e.feedback !== undefined && typeof e.feedback !== 'string') {
         throw new Error(`append rejected: ${e.type}.feedback must be a string`);
       }
       // v14 §3: the gate②-to-commit content binding — submit!(confirm) records the
@@ -1786,28 +1821,10 @@ export class Store {
       // a LEG's status is an aggregate of its children, not the tail projection.
       if (id.includes('/')) for (const p of workflowProblems(id, workflowState(this.events(id)))) problems.push(p);
     }
-    // F-AC16 closure invariants: completed-after-gate-revised requires transferred|deferred;
-    // transferred targets must exist. Tasks only (leg roots carry no events by construction).
-    const allIds = new Set(this.nodes.keys());
-    for (const [id, node] of this.nodes) {
-      if (!id.includes('/')) continue;
-      let revised = -1,
-        completed = -1,
-        closureOk = false;
-      const targets: string[] = [];
-      node.events.forEach((e, i) => {
-        if (e.type === 'gate-revised') revised = i;
-        if (e.type === 'completed') completed = i;
-        if (e.type === 'transferred' || e.type === 'deferred') closureOk = true;
-        if (e.type === 'transferred' && e.target) targets.push(e.target);
-      });
-      if (revised >= 0 && completed > revised && !closureOk) {
-        problems.push(`${id}: gate-revised but closed without transferred/deferred (F-AC16)`);
-      }
-      for (const t of targets) {
-        if (!allIds.has(t)) problems.push(`${id}: transferred target '${t}' does not exist (F-AC16)`);
-      }
-    }
+    // F-AC16 closure invariants — ONE derivation (G3): check() consumes it here, and the
+    // closure-integrity VALIDATOR consumes the same method instead of calling check() again
+    // from inside check() (which re-ran the whole rule set, per-sha git spawns and all).
+    for (const p of this.closureProblems()) problems.push(p);
     // F-AC18 (v9; v10/this leg amended): every task SPAWNED under v9 that completes must
     // have concluded — structured commit evidence (evidence.commits[], format v10 §3/§14).
     // Docs are git content: the commit evidence IS the conclusion (the lock is retired).

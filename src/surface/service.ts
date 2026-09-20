@@ -33,8 +33,8 @@ import { UI_HTML } from './ui.js';
  * `GET /api/integrity` is the ONE LAZY READ (leg 12/07): the card's full fail-closed
  * integrity pre-check, on demand. It is deliberately NOT part of `GET /api/whatsnext` —
  * the pre-check cost ~3.3s (187 per-sha `git cat-file` spawns) and ran on EVERY page load.
- * The check itself is unchanged and still guards the APPROVE (the operator action runs it
- * fail-closed before anything executes); `POST /api/drive` runs no such pre-check — its
+ * The check itself is unchanged and still guards the APPROVE — the ingredient list lives
+ * ONCE, in approve.ts's INTEGRITY_UNCHECKED (G4) — and `POST /api/drive` runs no pre-check: its
  * backstop is the store's own write guard. This route only lets the page display the
  * approve's verdict without blocking.
  *

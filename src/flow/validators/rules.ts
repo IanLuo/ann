@@ -55,7 +55,9 @@ export const closureIntegrity = {
   params: {},
   run(ctx: ValidatorContext): RuleFinding[] {
     const out: RuleFinding[] = [];
-    for (const p of ctx.store.check()) {
+    // G3: the F-AC16 derivation ONCE — this rule used to call ctx.store.check() from
+    // inside check(), re-running every rule and the per-sha git spawns it triggers.
+    for (const p of ctx.store.closureProblems()) {
       if (p.includes('gate-revised') || p.includes('transferred')) out.push({ severity: 'error', code: 'closure-integrity', detail: p });
     }
     return out;

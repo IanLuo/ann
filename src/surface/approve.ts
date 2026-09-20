@@ -49,8 +49,10 @@ import type { OpLog } from '../abilities/obs/log.js';
  *
  *      THE INTEGRITY PRE-CHECK IS NOT RUN HERE (leg 12/07, MEASURED: it cost ~3.3s of
  *      every page load — 187 per-sha `git cat-file` spawns inside `Store.check()`, which
- *      the pre-check ran twice). The pre-check is the APPROVE's own guard: the approve
- *      below runs it fail-closed BEFORE anything executes (rule 1 of the operator action),
+ *      the pre-check ran twice). The pre-check is the APPROVE's own guard — the ingredient
+ *      list it re-runs lives ONCE, in INTEGRITY_UNCHECKED below (G4: it used to be
+ *      restated here, in service.ts and in ui.ts). The approve runs it fail-closed BEFORE
+ *      anything executes (rule 1 of the operator action),
  *      and nothing here weakens that. `POST /api/drive` runs NO such pre-check — its
  *      backstop is the store's own write guard, and this card's verdict speaks for the
  *      approve, never for the drive. The display gets the same answer on demand and on its
@@ -209,8 +211,11 @@ export function whatsNext(root: string, log?: OpLog): WhatsNextView {
     legGate: lb.legGate,
     pendingGates: lb.pendingGates,
     // NO pre-check here (leg 12/07): the same call at this spot cost ~3.3s per page load.
-    // The approve and the drive run it fail-closed themselves; the card fetches the
-    // verdict lazily through `integritySnapshot`. The read says exactly that, and no more.
+    // THE APPROVE runs it fail-closed (rule 1 of the operator action); the DRIVE does NOT
+    // — POST /api/drive runs no such pre-check at all (G1/12-16: this comment used to say
+    // "the approve and the drive", which was false and contradicted :53 in this same file).
+    // The card fetches the verdict lazily through `integritySnapshot`; the one ingredient
+    // list lives in INTEGRITY_UNCHECKED below, never restated.
     integrity: { state: 'unchecked', note: INTEGRITY_UNCHECKED },
     chainSteps: frontmostChainSteps(ctx, root, lb.frontmostReady),
     executable: advance.action === 'continue-leg' && !!lb.frontmostReady,
