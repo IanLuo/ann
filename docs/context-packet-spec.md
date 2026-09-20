@@ -61,7 +61,7 @@
 | `pathDecisions` | the node's id / structure | `nodeId` · `isLeg` (no `/`) · `leg` (first segment) · `route` (path segments) · `depth` (segment count) |
 | `nodeContract` | `node.json` contract | the contract itself (intent · ACs · targetAreas · requiredInputs · expectedOutputs · openQuestions) — never rewritten, read only |
 | `dependencies` | `requiredInputs` × `current(name)` | per input: `resolved` → the current artifact's `path` + `sha` + a **bounded excerpt**; `missing` → status missing + the name as `blocker`. `sourceType` is always `derived-from` (resolution via current()). **No inference, no probing in v1.** |
-| `readiness` | the dependencies + blocking questions | `ready: true` iff every dependency is `resolved` AND no blocking open question is unanswered; else `ready: false` + named `blockers[]` |
+| `readiness` | the dependencies · blocking questions · **open DECLARED dependencies (v19/12-17)** | `ready: true` iff every dependency is `resolved` AND no blocking open question is unanswered AND no declared dependency is open; else `ready: false` + named `blockers[]` (an open declared dependency reads `dependency open: <id> (<status>)`). This is the ENFORCEMENT seam: the frame refuses to run an unready task, so the clause blocks execution, not merely the proposal |
 | `siblingStatus` | the leg's task group + the node's children | direct siblings' + children's **statuses only — never content** (leg roots: siblings only, no children) |
 | `bindingState` | the node's evidence events | external `links` (evidence.refs[] that are http(s) URLs) — nothing else in v1 |
 | `openQuestions` | the contract's openQuestions | declared questions with provenance `declared at spawn`; status `open` in v1 (answers are not yet recorded as structured events) |

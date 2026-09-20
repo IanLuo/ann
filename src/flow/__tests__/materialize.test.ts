@@ -109,6 +109,19 @@ describe('Context assembler (S3) — deterministic packet (context-packet-spec)'
     expect(p.readiness.blockers).toContain('blocking question unanswered: Q1');
   });
 
+  it('an OPEN DECLARED dependency is a readiness blocker (12/17) — the frame cannot start the task', () => {
+    const id = '06-engine-build/14-dep';
+    mkdirSync(nodeDir(id), { recursive: true });
+    writeFileSync(join(nodeDir(id), 'node.json'), JSON.stringify({ id, contract: { intent: 'x', acceptanceCriteria: ['AC1'], dependsOn: ['06-engine-build/13-a'] }, createdAt: '2026-09-01' }));
+    writeFileSync(join(nodeDir(id), 'events.jsonl'), JSON.stringify(ev('created')) + '\n');
+    mkdirSync(nodeDir('06-engine-build/13-a'), { recursive: true }); // the TARGET node must exist
+    writeFileSync(join(nodeDir('06-engine-build/13-a'), 'node.json'), JSON.stringify({ id: '06-engine-build/13-a', contract: { intent: 'x', acceptanceCriteria: ['x'] }, createdAt: '2026-09-01' }));
+    writeFileSync(join(nodeDir('06-engine-build/13-a'), 'events.jsonl'), JSON.stringify(ev('created')) + '\n');
+    const p = assemblePacket(new Store(root), id);
+    expect(p.readiness.ready).toBe(false);
+    expect(p.readiness.blockers).toContain('dependency open: 06-engine-build/13-a (queued)');
+  });
+
   it('collects sibling statuses and children — statuses only, no content', () => {
     writeNode('06-engine-build', {}, []);
     writeNode('06-engine-build/01-a', {}, [ev('created'), ev('completed')]);

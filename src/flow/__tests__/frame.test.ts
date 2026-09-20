@@ -335,6 +335,23 @@ describe('fail-closed before any write', () => {
     expect(r.stop).toBe('not-ready');
     expect(r.phase).toBe('materialize');
   });
+
+  it('refuses to RUN a task whose DECLARED dependency is open (12/17 — the action seam, not just the proposal)', async () => {
+    const c = setup([ev('created')], { ...CONTRACT, dependsOn: ['01-leg/09-dep'] });
+    // the dependency TARGET exists and is open
+    mkdirSync(join(root, '.ann', 'journey', 'legs', '01-leg', '09-dep'), { recursive: true });
+    writeFileSync(join(root, '.ann', 'journey', 'legs', '01-leg', '09-dep', 'node.json'), JSON.stringify({ id: '01-leg/09-dep', contract: { intent: 'x', acceptanceCriteria: ['x'] }, createdAt: '2026-09-01' }));
+    writeFileSync(join(root, '.ann', 'journey', 'legs', '01-leg', '09-dep', 'events.jsonl'), JSON.stringify(ev('created')) + '\n');
+    chainFile([{ id: 'envision' }]);
+    const r = await run(c, [mkStep('envision')]);
+    expect(r.stop).toBe('not-ready');
+    expect(r.phase).toBe('materialize');
+    // the blocker names the target (the status reads `absent` HERE because this store's
+    // snapshot predates the node written above; the existing-but-open form is pinned in
+    // materialize.test.ts). What matters at this seam: the run REFUSES with zero writes.
+    expect(r.problems.join('\n')).toContain('dependency open: 01-leg/09-dep');
+    expect(c.events(TASK).map((e) => e.type)).toEqual(['created']); // ZERO writes — the dead end the proposal path alone left open
+  });
 });
 
 describe('conditional execution (flow.conditionals)', () => {
