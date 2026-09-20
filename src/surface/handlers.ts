@@ -282,6 +282,7 @@ const COMMANDS: Array<{ name: string; args: string; desc: string }> = [
   { name: 'detail', args: '<id>', desc: 'a node\'s full derived detail: contract · gate states · artifacts (historical only) · blockers · events tail' },
   { name: 'results', args: '<id> [n]', desc: 'a task\'s results by kind (commit/ref/evidence/link); with n, drill into one (commit=git show, ref=file/dir, evidence=event) · alias --results' },
   { name: 'packet', args: '<id>', desc: 'the node\'s deterministic context packet (context-packet-spec; derived on demand, never saved) · alias --packet' },
+  { name: 'brief', args: '<id>', desc: 'THE GATE BRIEF — the decision material for one node in one read: status/gates/next · intent + ACs · openQuestions WITH their defaults · inputs and dependency edges · the decisions so far WITH their whys · the conclusion (claims/checks/close readiness) · the latest extended note CAPPED (read by pointer, never in full) · alias --brief' },
   { name: 'validate', args: '[id]', desc: 'run the enabled validator rules (all nodes, or one node) — rule-id\'d deterministic findings · alias --validate' },
   { name: 'rules', args: '[--write]', desc: 'the DERIVED check-rules registry (self-contained rule modules are the source) · alias --rules; --write regenerates rules/check/rules.json' },
   { name: 'docs', args: '[--write]', desc: 'the docs→git resolution index (docs/manifest.json — generated from docs/, never hand-maintained) · alias --docs; --write regenerates the manifest' },
@@ -738,6 +739,15 @@ export const HANDLERS: Record<string, Handler> = {
   },
 
   packet: (ctx) => ({ ok: true, value: assemblePacket(ctx.store, resolveId(ctx, ctx.args[1])) }),
+
+  /* brief — the decision material in ONE read (leg 12/15): the human-facing brief the
+     advisory session consumes too. Deterministic, capped, never a second derivation. */
+  brief: (ctx) => {
+    const id = resolveId(ctx, ctx.args[1]);
+    if (!ctx.store.contract(id)) return boom('no-contract', `no node ${id} — nothing to brief`);
+    const cap = ctx.args[2] && /^\d+$/.test(ctx.args[2]) ? Number(ctx.args[2]) : undefined;
+    return { ok: true, value: ctx.commands.brief(id, cap ? { noteChars: cap } : {}) };
+  },
 
   validate: (ctx) => {
     const id = ctx.args[1];

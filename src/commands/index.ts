@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join, relative } from 'node:path';
-import { Store, JourneyEvent, NodeDir, ResultItem, TaskDetail, CLOSED_TASK_STATUSES, type CheckView } from '../store/store.js';
+import { Store, JourneyEvent, NodeDir, ResultItem, TaskDetail, CLOSED_TASK_STATUSES, type CheckView, type NodeDep } from '../store/store.js';
 import { blobSha, stripMarkers } from '../store/sha.js';
 import { getVOCAB } from '../store/vocab.js';
 import { GATE_DECISION_EVENTS, READY_STATUSES, gateView, workflowState, type GateLifecycle } from '../store/workflow.js';
@@ -153,6 +153,30 @@ export interface GateOutcome {
   /** A confirm accept that left the task `accepted` because the conclusion evidence is
    *  MISSING: the explicit gesture still owed (`complete!`, with its no-evidence refusal). */
   pending?: string;
+}
+
+/** THE GATE BRIEF (leg 12/15) — the decision material, in the order a decision needs it.
+ *  Deterministic assembly of what the record already holds; the `latestNote` is CAPPED so
+ *  a 4k-character note never has to be read in full to decide a gate. */
+export interface Brief {
+  id: string;
+  isLeg: boolean;
+  status: string;
+  gates: { grill: string; confirm: string };
+  next: TaskDetail['next'];
+  intent: string;
+  acceptanceCriteria: string[];
+  openQuestions: Array<{ id?: string; question?: string; blocking: boolean; defaultIfUnanswered?: string }>;
+  inputs: Array<{ name: string; detail: string; status: string }>;
+  dependsOn: NodeDep[];
+  referencedBy: Array<{ id: string; status: string; how: string }>;
+  decisions: Array<{ at: string; type: string; gate: string; note: string; why?: string }>;
+  conclusion: ConclusionView;
+  /** Why the close would REFUSE right now (the F-AC18 predicate: a captured pass bound to a
+   *  cited commit), or absent when a confirm accept would auto-close. */
+  closeBlocker?: { code: string; message?: string };
+  latestNote?: { at: string; chars: number; text: string; truncated: boolean; index: number };
+  blockers: string[];
 }
 
 /** The STRUCTURED CONCLUSION as the log holds it (format v18) — the ONE derivation the
@@ -830,6 +854,79 @@ export class Commands {
       return fail('store-refused', (e as Error).message);
     }
     return ok({ at: this.today });
+  }
+
+  /** THE GATE BRIEF (leg 12/15) — the DECISION MATERIAL for one node, assembled in ONE
+   *  read so a human never has to page through a contract, a 4k-character note and the
+   *  event log to decide a gate. Deterministic — no LLM, no new state: everything here is
+   *  already in the record, put in the order a decision needs it. The `latestNote` is
+   *  CAPPED — the whole point: a big `extended` note is read by pointer, never in full.
+   *  The advisory SESSION (12/09) consumes this; so does the human at the terminal. */
+  brief(id: string, opts: { noteChars?: number } = {}): Brief {
+    const d = this.detail(id);
+    const contract = (d.contract ?? {}) as Record<string, unknown>;
+    const evs = d.events;
+    // THE CAPS: a brief is DECISION MATERIAL, not a transcript. The intent and each AC are
+    // cut with the CUT LENGTH written inline (a silent truncation would hide the
+    // decision's substance); 0 = uncapped.
+    const cap = opts.noteChars ?? 700;
+    const cut = (s: string, n: number): string => (n > 0 && s.length > n ? `${s.slice(0, n)}… (+${(s.length - n).toLocaleString()} chars — ann detail ${id})` : s);
+    // THE ONE DERIVATION, CONSUMED (12/08's AC-2): a node's decisions come from
+    // `gateView`, never from a second scan of the submitted|confirmed|rejected triple —
+    // the guard test in workflow.test.ts fails on the scan idiom, which is how this
+    // helper was caught re-deriving what the engine already derives.
+    const decisions = (['grill', 'confirm'] as const)
+      .flatMap((gate) => {
+        const v = gateView(evs, gate);
+        return [...v.accepted, ...v.rejected].map((i) => ({ i, gate }));
+      })
+      .sort((a, b) => a.i - b.i)
+      .map(({ i, gate }) => {
+        const e = evs[i];
+        return {
+          at: String(e.at ?? ''),
+          type: e.type,
+          gate,
+          note: String(e.note ?? ''),
+          ...(typeof e.feedback === 'string' && e.feedback.trim() ? { why: e.feedback } : {}),
+        };
+      });
+    const notes = evs.filter((e) => e.type === 'extended' && typeof e.note === 'string');
+    const lastNote = notes[notes.length - 1];
+    const noteText = lastNote ? String(lastNote.note) : undefined;
+    return {
+      id,
+      isLeg: d.isLeg,      status: d.status,
+      gates: { grill: d.gates.grill.state, confirm: d.gates.confirm.state },
+      next: d.next,
+      intent: cut(String(contract.intent ?? ''), 600),
+      acceptanceCriteria: Array.isArray(contract.acceptanceCriteria) ? (contract.acceptanceCriteria as string[]).map((a) => cut(a, 300)) : [],
+      openQuestions: this.store.openQuestions(id).map((q) => ({
+        ...(q.id ? { id: q.id } : {}),
+        ...(q.question ? { question: q.question } : {}),
+        blocking: q.blocking === true,
+        ...(q.defaultIfUnanswered ? { defaultIfUnanswered: q.defaultIfUnanswered } : {}),
+      })),
+      inputs: d.deps.dependsOn.filter((x) => x.kind === 'input').map((x) => ({ name: x.ref, detail: x.detail, status: x.status })),
+      dependsOn: d.deps.dependsOn.filter((x) => x.kind === 'task'),
+      referencedBy: d.deps.referencedBy,
+      decisions,
+      conclusion: this.conclusion(id),
+      ...(this.closeEvidenceBlocker(id) ? { closeBlocker: this.closeEvidenceBlocker(id) } : {}),
+      ...(noteText
+        ? {
+            latestNote: {
+              at: String(lastNote.at ?? ''),
+              chars: noteText.length,
+              // 0 = uncapped (the same convention as the intent/AC caps)
+              text: cap > 0 ? noteText.slice(0, cap) : noteText,
+              truncated: cap > 0 && noteText.length > cap,
+              index: evs.indexOf(lastNote) + 1,
+            },
+          }
+        : {}),
+      blockers: d.blockers,
+    };
   }
 
   /**

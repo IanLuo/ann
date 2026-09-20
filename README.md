@@ -71,6 +71,7 @@ session (unchanged); a bad/absent target fails closed at startup (named error, e
 | `detail` | `<id>` | a node's full derived detail: contract · gate states · artifacts (historical only) · blockers · events tail | `yes` |
 | `results` | `<id> [n]` | a task's results by kind (commit/ref/evidence/link); with n, drill into one (commit=git show, ref=file/dir, evidence=event) · alias --results | `yes` |
 | `packet` | `<id>` | the node's deterministic context packet (context-packet-spec; derived on demand, never saved) · alias --packet | `yes` |
+| `brief` | `<id>` | THE GATE BRIEF — the decision material for one node in one read: status/gates/next · intent + ACs · openQuestions WITH their defaults · inputs and dependency edges · the decisions so far WITH their whys · the conclusion (claims/checks/close readiness) · the latest extended note CAPPED (read by pointer, never in full) · alias --brief | `yes` |
 | `validate` | `[id]` | run the enabled validator rules (all nodes, or one node) — rule-id'd deterministic findings · alias --validate | `yes` |
 | `rules` | `[--write]` | the DERIVED check-rules registry (self-contained rule modules are the source) · alias --rules; --write regenerates rules/check/rules.json | `yes` |
 | `docs` | `[--write]` | the docs→git resolution index (docs/manifest.json — generated from docs/, never hand-maintained) · alias --docs; --write regenerates the manifest | `yes` |

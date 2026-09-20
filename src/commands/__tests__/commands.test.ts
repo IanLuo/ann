@@ -67,6 +67,61 @@ const stubCapture = (o: { exitCode?: number; exits?: Record<string, number>; out
   run: (name) => ({ exitCode: o.exits?.[name] ?? o.exitCode ?? 0, stdout: o.output ?? 'Tests  3 passed (3)\n', stderr: '' }),
 });
 
+describe('brief — the gate decision material in ONE read (leg 12/15)', () => {
+  beforeEach(() => { makeStore(); });
+  afterEach(() => { rmSync(root, { recursive: true, force: true }); });
+
+  const LONG = 'x'.repeat(1200);
+  const writeOpenQ = (id: string, qs: unknown[], events: Array<Record<string, unknown>>) => {
+    mkdirSync(join(nodeDir(id), 'artifacts'), { recursive: true });
+    writeFileSync(join(nodeDir(id), 'node.json'), JSON.stringify({ id, contract: { intent: LONG, acceptanceCriteria: ['AC ' + LONG] }, openQuestions: qs, createdAt: '2026-08-27' }));
+    writeFileSync(join(nodeDir(id), 'events.jsonl'), events.map((e) => JSON.stringify(e)).join('\n') + '\n');
+  };
+
+  it('assembles the decision material and CAPS the walls (intent · AC · the latest note), each cut with its length NAMED', () => {
+    writeOpenQ(
+      '01-leg/01-a',
+      [{ id: 'Q1', question: 'which way?', blocking: true, defaultIfUnanswered: 'this way' }],
+      [
+        ev('created'),
+        ev('submitted', { gate: 'grill' }),
+        ev('confirmed', { gate: 'grill', feedback: 'the approach is right, start here', note: 'accepted (test)' }),
+        ev('extended', { note: LONG }),
+      ],
+    );
+    const b = cmds().brief('01-leg/01-a');
+    expect(b.status).toBe('queued'); // the grill was ACCEPTED in this fixture — the entry gate is passed
+    expect(b.gates.grill).toBe('accepted');
+    expect(b.next.verdict).toBe('entry-accepted');
+    // the caps: cut, and the cut length written down (never a silent truncation)
+    expect(b.intent.length).toBeLessThan(700);
+    expect(b.intent).toContain('+');
+    expect(b.acceptanceCriteria[0]).toContain('ann detail 01-leg/01-a');
+    expect(b.latestNote?.truncated).toBe(true);
+    expect(b.latestNote?.chars).toBe(1200);
+    expect(b.latestNote?.index).toBe(4); // the event's number, for the drill
+    // the decision material a human needs, in order
+    expect(b.openQuestions).toEqual([{ id: 'Q1', question: 'which way?', blocking: true, defaultIfUnanswered: 'this way' }]);
+    expect(b.decisions).toEqual([{ at: '2026-08-27', type: 'confirmed', gate: 'grill', note: 'accepted (test)', why: 'the approach is right, start here' }]);
+    // an uncapped read is available, and 0 means UNCAPPED
+    expect(cmds().brief('01-leg/01-a', { noteChars: 0 }).latestNote?.text.length).toBe(1200);
+  });
+
+  it('names the ABSENCE of a why (never infers one) and reports why the close would refuse', () => {
+    writeNode('01-leg/02-b', { intent: 'x', acceptanceCriteria: ['AC1'] }, [
+      ev('created'),
+      ev('submitted', { gate: 'grill' }),
+      ev('confirmed', { gate: 'grill' }), // a BARE accept — the measured 19
+      ev('submitted', { gate: 'confirm' }),
+    ]);
+    const b = cmds().brief('01-leg/02-b');
+    expect(b.decisions[0].why).toBeUndefined();
+    expect(b.conclusion.unclaimed.length).toBe(1);
+    expect(b.closeBlocker).toBeDefined();
+    expect(b.closeBlocker?.code).toBeTruthy();
+  });
+});
+
 describe('spawn! — the contract schema gate (core-design §1, §8:289)', () => {
   beforeEach(() => { makeStore(); writeNode('01-leg', {}); });
   afterEach(() => { rmSync(root, { recursive: true, force: true }); });

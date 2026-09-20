@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import type { TaskDetail, ResultItem, CheckView } from '../store/store.js';
 import type { GoalView } from '../commands/index.js';
+import type { Brief } from '../commands/index.js';
 import { renderStatusTree, renderGateCard, renderPlan, renderDrift, renderLedger, renderGoal, deferredLines, PlanLeg, PlanAhead } from './renderers.js';
 import type { DeferredTask } from '../commands/index.js';
 import { MANIFEST_FILE } from '../store/docs.js';
@@ -519,6 +520,51 @@ export const RENDERS: Record<string, Renderer> = {
     for (const r of v.sessions) lines.push(`  ${r.session} · goal ${r.goal} (${r.status}) · ${r.verdict} · ${r.legs} leg(s)`);
     const first = v.sessions[0];
     if (typeof first.store === 'string') lines.push(`  load one read-only: ANN_STORE="${first.store}" ann journey|status|specs|goal|…`);
+    return block(lines);
+  },
+
+  brief: (value) => {
+    const v = value as Brief;
+    const lines: string[] = [];
+    lines.push(`BRIEF: ${v.id} (${v.isLeg ? 'leg' : 'task'})`);
+    lines.push(
+      `status: ${v.status} · grill ${v.gates.grill} · confirm ${v.gates.confirm} · next: ${v.next.verdict}${v.next.gate ? ` (${v.next.gate})` : ''}`,
+    );
+    if (v.blockers.length) lines.push(`blockers: ${v.blockers.join(' · ')}`);
+    lines.push('---', 'CONTRACT');
+    lines.push(`  intent: ${v.intent || '(none)'}`);
+    v.acceptanceCriteria.forEach((a, i) => lines.push(`  AC-${i + 1}: ${a}`));
+    const blocking = v.openQuestions.filter((q) => q.blocking);
+    lines.push('---', `OPEN QUESTIONS (${v.openQuestions.length})${blocking.length ? ` — ${blocking.length} BLOCKING (the node is gated until answered)` : ''}`);
+    if (!v.openQuestions.length) lines.push('  (none declared)');
+    for (const q of v.openQuestions) {
+      lines.push(`  ${q.id ?? '?'}${q.blocking ? ' [BLOCKING]' : ''}: ${q.question ?? ''}`);
+      if (q.defaultIfUnanswered) lines.push(`      default if unanswered: ${q.defaultIfUnanswered}`);
+    }
+    lines.push('---', 'DEPENDS ON');
+    if (!v.inputs.length && !v.dependsOn.length) lines.push('  (nothing named)');
+    for (const i of v.inputs) lines.push(`  [input] ${i.name} → ${i.detail} (${i.status})`);
+    for (const t of v.dependsOn) lines.push(`  [task] ${t.ref} → ${t.detail} (${t.status})${t.how === 'named-in-record' ? ' — read from the record' : ''}`);
+    if (v.referencedBy.length) lines.push(`  referenced by: ${v.referencedBy.map((r) => `${r.id} (${r.status})`).join(' · ')}`);
+    lines.push('---', `DECISIONS SO FAR (${v.decisions.length})`);
+    if (!v.decisions.length) lines.push('  (none yet — this is a first-time gate)');
+    for (const d of v.decisions) {
+      lines.push(`  ${d.at} ${d.type}@${d.gate} — ${d.note}`);
+      lines.push(`      why: ${d.why ?? '(NOT RECORDED)'}`);
+    }
+    const unclaimed = v.conclusion.unclaimed ?? [];
+    lines.push('---', 'CONCLUSION');
+    lines.push(`  claims: ${v.conclusion.claims.length}${unclaimed.length ? ` · UNCLAIMED: ${unclaimed.map((u) => u.ac).join(', ')}` : ' · every AC claimed'} · checks: ${v.conclusion.checks.length}`);
+    lines.push(`  close: ${v.closeBlocker ? `REFUSED now — ${v.closeBlocker.code}` : 'a confirm accept would auto-close (the evidence bound is satisfied)'}`);
+    if (v.latestNote) {
+      const n = v.latestNote;
+      lines.push('---', `LATEST NOTE (extended · ${n.at} · ${n.chars} chars${n.truncated ? ' — CAPPED HERE' : ''})`);
+      for (const l of n.text.split('\n')) lines.push(`  ${l}`);
+      if (n.truncated) lines.push(`  … the rest is on the record: ann events ${v.id} ${n.index}`);
+    }
+    lines.push('---', 'NEXT MOVE');
+    lines.push(`  decide the ${v.next.gate ?? 'gate'} gate: ann gate! ${v.id} ${v.next.gate ?? '<grill|confirm>'} accept|reject '<why>'`);
+    lines.push(`  deeper: ann detail ${v.id} · ann events ${v.id} · ann packet ${v.id} · ann brief ${v.id} <noteChars>`);
     return block(lines);
   },
 
