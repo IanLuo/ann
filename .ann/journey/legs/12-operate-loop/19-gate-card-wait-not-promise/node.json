@@ -1,0 +1,26 @@
+{
+  "id": "12-operate-loop/19-gate-card-wait-not-promise",
+  "contract": {
+    "workType": "implementation",
+    "intent": "THE GATE CARD NEVER PROMISES A RUN THE ENGINE REFUSES — found by the operator reading the live card: when a task's gate is SUBMITTED and its executability is BLOCKED (an open declared dependency), the card states the refusal and then contradicts itself two lines later — `next: decide it now — accepting grill lets the work start`, and the step's own `what` (`the contract gate — approving it lets the work start`). detail.readiness sits unread a few fields above both. 12/18's AC-3 says the gate wait and the executability render as SEPARATE facts 'so neither is ever mistranslated into the other' — and this sentence IS the mistranslation: it asserts the ENGINE's answer (the run starts) from the HUMAN's fact (a gate was submitted). The operator's rule: a task with a dependency should read `waiting on <the dependency>`, not an unlock claim. The decision itself stays the human's (12/17: the block is on EXECUTION, not on gate decisions) — so Accept/Reject stay available and the card says exactly what they do. READS ONLY: no new state, no new event, no new status word, no new write path, no new dependency.",
+    "acceptanceCriteria": [
+      "THE CARD CONSULTS READINESS — ONCE: the `next:` line and the step's `what` line are derived from detail.readiness (12/18's ONE derivation; the page never re-derives), so a submitted gate whose readiness is BLOCKED can never print an unlock claim. Proof: rendering a card whose grill is submitted and whose dependency is open prints NO 'lets the work start' / 'lets it land', and names the wait instead.",
+      "THE WAIT IS NAMED, NOT DESCRIBED: in that state the card reads `waiting on` with the DERIVATION's own blocker string — `dependency open: <id> (<status>)` (12/17's wording, never a second phrasing) — so the operator sees WHAT is being waited on, by id and status.",
+      "THE DECISION STAYS THE HUMAN'S, AND SAYS WHAT IT DOES: Accept and Reject remain available while the run is refused (12/17: a gate decision is not work — the operator may need to reject, cancel or defer), and the wording says exactly that and no more: an accept settles the CONTRACT and does not start the work. The card never implies the accept is pointless, and never implies it runs the task.",
+      "NO REGRESSION ON THE READY CASE: a submitted gate with readiness READY still reads 'accepting it lets the work start' (entry) and the confirm/close wording (exit) — pinned by test, unchanged.",
+      "ONE WORDING, EVERY ROW: the CLI leg card's TASKS list carries the per-task verdict too (12/18's `execVerdict`, the same formatter `ann status` and the plan use) — today it is the one row left printing a bare status. The page and the CLI never say different things about the same task.",
+      "READS ONLY + VERIFIED: no new event type, no new status, no new write path, no new deps, minimal vanilla UI. Full suite green, npm run typecheck clean, ann check/verify clean, committed with evidence."
+    ],
+    "targetAreas": [
+      "src/surface"
+    ],
+    "requiredInputs": [
+      "context-packet-spec",
+      "journey-format-spec"
+    ],
+    "dependsOn": [
+      "12-operate-loop/17-implementation-declared-dependencies"
+    ]
+  },
+  "createdAt": "2026-09-21"
+}
