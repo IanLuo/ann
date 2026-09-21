@@ -24,11 +24,28 @@ export interface StatusRow {
   id: string;
   status: string;
   superseded: boolean;
+  /** A TASK row's executability (12/18) — the engine's own answer, printed BESIDE the
+   *  status word so `blocked` stops meaning two different things. ABSENT on a leg. */
+  readiness?: { ready: boolean; blockers: string[] };
 }
 
-/** F10 — the tree/status view: one line per node, id-padded, status + superseded marker. */
+/** THE VERDICT SUFFIX (12/18) — ONE wording for every row that prints a task beside its
+ *  status word (`ann status`, the plan's task list, the served page's page-script copy).
+ *  NO readiness ⇒ NO text: a leg is never run, and absence must not read as READY. */
+export function execVerdict(row: { readiness?: { ready: boolean; blockers: string[] } }): string {
+  if (!row.readiness) return '';
+  return row.readiness.ready
+    ? ' · executability READY'
+    : ` · executability BLOCKED — ${row.readiness.blockers.join('; ')}`;
+}
+
+/** F10 — the tree/status view: one line per node, id-padded, status + superseded marker,
+ *  and (on a task) the executability verdict that separates the human's hold from the
+ *  engine's refusal. */
 export function renderStatusTree(rows: StatusRow[]): string {
-  return rows.map((r) => `${r.id.padEnd(58)} ${r.status}${r.superseded ? ' · artifact superseded' : ''}`).join('\n');
+  return rows
+    .map((r) => `${r.id.padEnd(58)} ${r.status}${r.superseded ? ' · artifact superseded' : ''}${execVerdict(r)}`)
+    .join('\n');
 }
 
 export interface GateCardData {
@@ -82,7 +99,9 @@ export interface PlanLeg {
   id: string;
   status: string;
   superseded: boolean;
-  tasks?: Array<{ id: string; status: string; superseded?: boolean }>;
+  /** Each task row carries its OWN executability (12/18) — the same verdict `ann status`
+   *  and the served page print, from the same derivation. */
+  tasks?: Array<{ id: string; status: string; superseded?: boolean; readiness?: { ready: boolean; blockers: string[] } }>;
 }
 
 export interface PlanAhead {
@@ -120,7 +139,9 @@ export function renderPlan(legs: PlanLeg[], ahead: PlanAhead): string {
   for (const leg of legs) {
     const suffix = leg.tasks?.length
       ? ' — tasks: ' +
-        leg.tasks.map((t) => `${t.id.replace(leg.id + '/', '')}:${t.status}${t.superseded ? ' · artifact superseded' : ''}`).join(', ')
+        leg.tasks
+          .map((t) => `${t.id.replace(leg.id + '/', '')}:${t.status}${t.superseded ? ' · artifact superseded' : ''}${execVerdict(t)}`)
+          .join(', ')
       : '';
     out.push(`${leg.id.padEnd(6)} ${leg.status}${leg.superseded ? ' · superseded' : ''}${suffix}`);
   }

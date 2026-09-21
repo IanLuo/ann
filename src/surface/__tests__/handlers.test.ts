@@ -429,6 +429,61 @@ describe('THE PER-TASK EXECUTABILITY READ — the card and the gate queue (leg 1
     expect(out).toContain('WAITING ON YOU: 07-leg/01-implementation-thing — gate grill submitted, undecided · accepting it makes the task runnable');
     expect(out).toContain('WAITING ON YOU: 07-leg/02-implementation-other — gate grill submitted, undecided · it would still not run — dependency open: 07-leg/09-x (queued)');
   });
+
+  /* The EXIT gate is not a run (12/18): by the time confirm is submitted the work is done,
+   * so "accepting it makes the task runnable" is false there — and it was printed anyway
+   * until this branch. `closesOnAccept` is the auto-close predicate itself, so the two exit
+   * rows are decidable without re-deriving anything. */
+  it('an EXIT gate row says what that accept DOES — close, or leave the close owed (12/18)', () => {
+    const out = RENDERS.next(
+      {
+        lookBack: {
+          activeLeg: '07-leg',
+          activeLegStatus: 'queued',
+          alsoReady: [],
+          legGate: { met: true },
+          pendingGates: [
+            { task: '07-leg/03-implementation-closeable', gate: 'confirm', readiness: { ready: true, blockers: [] }, closesOnAccept: true },
+            { task: '07-leg/04-implementation-owing', gate: 'confirm', readiness: { ready: true, blockers: [] }, closesOnAccept: false },
+          ],
+        },
+        advance: { action: 'continue-leg', detail: 'next task: 07-leg/03-implementation-closeable (blocked)' },
+      },
+      createContext(root, ['next']).renderEnv(),
+    );
+    expect(out).toContain('gate confirm submitted, undecided · accepting it closes the task (the conclusion evidence is present)');
+    expect(out).toContain('gate confirm submitted, undecided · accepting it accepts the task — the close would still refuse, so `complete!` is owed');
+    expect(out).not.toContain('makes the task runnable'); // an exit accept is never a run
+  });
+
+  /* AC-2 — the ROW, not just the card: `ann journey`'s leg/task list and `ann status` are
+   * where the sweep is read, and a row that carried only `status` said `blocked` for both
+   * facts. */
+  it('the journey leg/task rows AND `ann status` carry the verdict per task (AC-2)', () => {
+    write('07-leg', { contract: contract() }, [ev('created')]);
+    write('07-leg/01-implementation-thing', { contract: contract() }, [ev('created'), ev('submitted', { gate: 'grill' })]);
+    write('07-leg/02-implementation-other', { contract: contract({ dependsOn: ['07-leg/09-x'] }) }, [ev('created')]);
+    write('07-leg/09-x', { contract: contract() }, [ev('created')]);
+
+    const jctx = createContext(root, ['journey']);
+    const jout = HANDLERS.journey(jctx) as { value: { legs: Array<{ tasks: Array<Record<string, unknown>> }> } };
+    expect(jout.value.legs[0].tasks).toEqual([
+      // the human's wait (the gate) and the engine's answer (ready) kept apart on one row
+      expect.objectContaining({ id: '07-leg/01-implementation-thing', status: 'blocked', readiness: { ready: true, blockers: [] } }),
+      expect.objectContaining({ id: '07-leg/02-implementation-other', readiness: { ready: false, blockers: ['dependency open: 07-leg/09-x (queued)'] } }),
+      expect.objectContaining({ id: '07-leg/09-x' }),
+    ]);
+    const jtext = RENDERS.journey(jout.value, jctx.renderEnv());
+    expect(jtext).toContain('01-implementation-thing:blocked · executability READY');
+    expect(jtext).toContain('02-implementation-other:blocked · executability BLOCKED — dependency open: 07-leg/09-x (queued)');
+
+    const sctx = createContext(root, ['status']);
+    const srows = HANDLERS.status(sctx) as { value: Array<Record<string, unknown>> };
+    expect(RENDERS.status(srows.value, sctx.renderEnv())).toContain(
+      '07-leg/02-implementation-other',
+    );
+    expect(RENDERS.status(srows.value, sctx.renderEnv())).toContain('· executability BLOCKED — dependency open: 07-leg/09-x (queued)');
+  });
 });
 
 describe('README command table — the copy stays aligned with `ann commands`', () => {

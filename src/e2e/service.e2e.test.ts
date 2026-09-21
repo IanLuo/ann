@@ -462,8 +462,11 @@ describe('e2e — the DEFERRED surface in the service + the served page (leg 12 
     // the deferred SEMANTICS are unchanged: the task closed its leg, and it is no gate
     const status = JSON.parse(cli(root, ['--json', 'status', DLEG]).stdout) as Array<{ id: string; status: string }>;
     expect(status).toEqual([
+      // the LEG row answers for itself only; the TASK row carries its executability (12/18).
+      // Readiness is the FRAME's own predicate (inputs · blocking questions · declared deps),
+      // so a deferral — the operator's act, already the status word — leaves it satisfied.
       { id: DLEG, status: 'done', superseded: false },
-      { id: DTASK, status: 'deferred', superseded: false },
+      { id: DTASK, status: 'deferred', superseded: false, readiness: { ready: true, blockers: [] } },
     ]);
     expect(JSON.parse((await get(server.url + '/api/gates')).body)).toEqual([]);
   });

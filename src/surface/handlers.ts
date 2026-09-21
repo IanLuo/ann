@@ -499,7 +499,14 @@ export const HANDLERS: Record<string, Handler> = {
       superseded: hasSuperseded(ctx, l),
       tasks: ctx.store
         .tasksOf(l)
-        .map((t) => ({ id: t, status: ctx.store.status(t), superseded: hasSuperseded(ctx, t) })),
+        // EACH ROW CARRIES THE VERDICT, not just the status word (12/18) — the leg list is
+        // where the walk starts, and a bare `blocked` there does not say by whom.
+        .map((t) => ({
+          id: t,
+          status: ctx.store.status(t),
+          superseded: hasSuperseded(ctx, t),
+          readiness: ctx.store.readiness(t),
+        })),
     }));
     const lb = ctx.commands.lookBack();
     const ahead = {

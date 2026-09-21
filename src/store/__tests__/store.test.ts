@@ -1140,15 +1140,19 @@ describe('Store — detail() (the full task/leg card)', () => {
     expect(s.current('x-spec')?.producer).toBe('01-goal/01-b');
   });
 
-  it('lists a leg\'s tasks with statuses', () => {
+  it('lists a leg\'s tasks with statuses AND each one\'s own readiness (12/18)', () => {
     writeNode('06-engine-build', {}, []);
     writeNode('06-engine-build/01-a', {}, [ev('created'), ev('completed')]);
     writeNode('06-engine-build/02-b', {}, [ev('created')]);
     const d = new Store(root).detail('06-engine-build');
     expect(d.isLeg).toBe(true);
+    // THE LEG ITSELF answers nothing; its TASKS each answer for themselves — a row list
+    // that carried only `status` is where the human's hold and the engine's refusal
+    // were indistinguishable.
+    expect(d.readiness).toBeUndefined();
     expect(d.tasks).toEqual([
-      { id: '06-engine-build/01-a', status: 'done' },
-      { id: '06-engine-build/02-b', status: 'queued' },
+      { id: '06-engine-build/01-a', status: 'done', readiness: { ready: true, blockers: [] } },
+      { id: '06-engine-build/02-b', status: 'queued', readiness: { ready: true, blockers: [] } },
     ]);
   });
 });

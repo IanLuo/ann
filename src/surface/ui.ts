@@ -258,6 +258,14 @@ export const UI_HTML = `<!doctype html>
     m.className = isError ? 'message error' : 'message';
   }
   function shorten(s, n) { s = String(s || ''); return s.length > n ? s.slice(0, n - 1) + '…' : s; }
+  /** THE PER-TASK EXECUTABILITY VERDICT (leg 12/18) — the ENGINE's answer on a row that
+   *  otherwise carries the bare status word. A row with no readiness (a leg) says nothing:
+   *  absent is not the same as READY. */
+  function execVerdict(t) {
+    var rd = t && t.readiness;
+    if (!rd) return '';
+    return rd.ready ? ' · executability READY' : ' · executability BLOCKED — ' + (rd.blockers || []).join('; ');
+  }
   function delivered(g) {
     var d = g.delivered || { commits: 0, claims: 0, unclaimed: 0, checks: 0, bound: 0 };
     if (!d.commits && !d.claims && !d.checks) return 'nothing delivered yet';
@@ -284,7 +292,7 @@ export const UI_HTML = `<!doctype html>
       var sec = el('section', null, 'leg');
       sec.appendChild(el('h3', leg.id + ' · ' + leg.status));
       (leg.tasks || []).forEach(function (t) {
-        var b = el('button', t.id + ' · ' + t.status, 'task status-' + t.status);
+        var b = el('button', t.id + ' · ' + t.status + execVerdict(t), 'task status-' + t.status);
         b.addEventListener('click', function () { openCard(t.id, undecidedGate(t.id)); });
         sec.appendChild(b);
       });
@@ -1069,7 +1077,7 @@ export const UI_HTML = `<!doctype html>
       (d.blockers || []).forEach(function (b) { field(node, 'blocker', b); });
       var tasks = d.tasks || [];
       node.appendChild(el('h3', 'Tasks (' + tasks.length + ') — drill into any one'));
-      tasks.forEach(function (t) { nodeDrillButton(node, t.id, t.id + ' · ' + t.status); });
+      tasks.forEach(function (t) { nodeDrillButton(node, t.id, t.id + ' · ' + t.status + execVerdict(t)); });
       if (!tasks.length) node.appendChild(el('p', '(this leg holds no tasks — an EMPTY front leg is advance-leg: the next leg is AUTHORED work, never a machine spawn)', 'muted'));
       return loadEvents(leg, null);
     });
@@ -1084,9 +1092,18 @@ export const UI_HTML = `<!doctype html>
     if (!gates.length) { node.appendChild(el('p', 'none — no undecided submission on the active leg.', 'muted')); return; }
     gates.forEach(function (p) {
       node.appendChild(drillLink({ kind: 'gate', id: p.task, gate: p.gate }, 'task', p.task + ' · ' + p.gate + ' (decide it) ›'));
-      // WHAT THE DECISION UNLOCKS (12/18) — the engine's answer beside the human's.
+      // WHAT THE DECISION UNLOCKS (12/18) — the engine's answer beside the human's, and
+      // the GATE'S ROLE: an ENTRY accept makes the task runnable; an EXIT accept is not a
+      // run at all — it closes the task when the conclusion evidence is there, and otherwise
+      // leaves the close owed. One sentence cannot serve both gates.
       var rd = p.readiness || { ready: true, blockers: [] };
-      node.appendChild(el('p', rd.ready ? 'accepting it makes the task runnable' : 'it would still not run after accepting — ' + rd.blockers.join('; '), 'muted'));
+      node.appendChild(el('p', p.gate === 'confirm'
+        ? (p.closesOnAccept
+          ? 'accepting it closes the task — the conclusion evidence is present'
+          : 'accepting it accepts the task: the close would still refuse, so complete! is owed')
+        : (rd.ready
+          ? 'accepting it makes the task runnable'
+          : 'it would still not run — ' + rd.blockers.join('; ')), 'muted'));
     });
   }
   /** The derivation itself: the F5 pull proposal and everything it reads (the look-back).

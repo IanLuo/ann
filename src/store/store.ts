@@ -216,7 +216,11 @@ export interface TaskDetail {
    *  A fact SEPARATE from the gate wait: `blockers` above names the human's pending
    *  decision, this names the engine's own refusal. ABSENT on a LEG (see `detail()`). */
   readiness?: { ready: boolean; blockers: string[] };
-  tasks?: Array<{ id: string; status: string }>;
+  /** A LEG'S TASKS. Each carries its OWN `readiness` (12/18): a list of task rows that
+   *  printed only `status` made a blocked-because-human and a blocked-because-engine look
+   *  identical — the exact confusion this read exists to end, at the level where the walk
+   *  actually starts. */
+  tasks?: Array<{ id: string; status: string; readiness: { ready: boolean; blockers: string[] } }>;
 }
 
 /** One dependency edge. `how` is the honesty label: an input RESOLVES or it does not; a
@@ -1134,7 +1138,7 @@ export class Store {
     // is ABSENT (a `ready: true` on a leg whose children are all blocked would be exactly
     // the one-word-two-facts confusion this read exists to end). No surface asks a leg.
     if (!detail.isLeg) detail.readiness = this.readiness(id);
-    if (detail.isLeg) detail.tasks = this.tasksOf(id).map((t) => ({ id: t, status: this.status(t) }));
+    if (detail.isLeg) detail.tasks = this.tasksOf(id).map((t) => ({ id: t, status: this.status(t), readiness: this.readiness(t) }));
     return detail;
   }
 

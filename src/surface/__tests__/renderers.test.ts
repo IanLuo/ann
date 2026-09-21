@@ -39,6 +39,21 @@ describe('renderStatusTree (F10 — tree view)', () => {
     expect(text).toContain('06-engine-build/09-s6-runner-reviewer');
     expect(text.split('\n')).toHaveLength(3);
   });
+
+  /* AC-2 (leg 12/18) — the sweep is where a `blocked` row is read at a glance, so the
+   * verdict belongs on the line: the engine's refusal beside the status word, and NOTHING
+   * where there is no readiness to print (a leg, and the rows above that predate it). */
+  it('a TASK row carries the executability verdict; a row without one prints nothing (12/18)', () => {
+    const text = renderStatusTree([
+      { id: '01-leg', status: 'blocked', superseded: false },
+      { id: '01-leg/01-a', status: 'blocked', superseded: false, readiness: { ready: true, blockers: [] } },
+      { id: '01-leg/02-b', status: 'blocked', superseded: false, readiness: { ready: false, blockers: ['submitted (gate=grill) awaiting decision'] } },
+    ]);
+    const [leg, a, b] = text.split('\n');
+    expect(leg.endsWith('blocked')).toBe(true); // a leg is never run — no verdict to print
+    expect(a).toContain('blocked · executability READY');
+    expect(b).toContain('blocked · executability BLOCKED — submitted (gate=grill) awaiting decision');
+  });
 });
 
 describe('renderGateCard (F11 — step card)', () => {

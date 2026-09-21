@@ -251,7 +251,7 @@ export interface LookBack {
   frontmostReady?: FrontmostReady;
   alsoReady: FrontmostReady[];
   legGate: { met: boolean; blocker?: string };
-  pendingGates: Array<{ task: string; gate: string; readiness: { ready: boolean; blockers: string[] } }>;
+  pendingGates: Array<Pick<PendingGate, 'task' | 'gate' | 'readiness' | 'closesOnAccept'>>;
   /** The OUTSTANDING DEFERRED WORK (leg 12 task 01): a deferred task closes its leg, so
    *  the pull surface (frontmost-ready / pending gates) never names it — this is the one
    *  read that keeps the postponed obligation visible. Always present ([] when none). */
@@ -278,6 +278,13 @@ export interface PendingGate {
    *  accepting this gate makes the task runnable, or whether the engine would still
    *  refuse it (and why) — never inferred from the word `blocked`. */
   readiness: { ready: boolean; blockers: string[] };
+  /** PRESENT ON AN EXIT GATE ONLY (leg 12/18): an accept here does not make the task
+   *  runnable — the work is already done — it CLOSES it. This is the auto-close predicate
+   *  itself (`closeEvidenceBlocker`: evidence present · a CAPTURED pass bound to a cited
+   *  commit · no captured failure on those bytes), so a queue row never promises a close
+   *  the gesture would refuse; when false the accept leaves the task `accepted` and names
+   *  the `complete!` still owed. */
+  closesOnAccept?: boolean;
 }
 
 /** The advance view (flow-control v6 §2/§5 — the leg gate validated from logs). */
@@ -1350,6 +1357,10 @@ export class Commands {
           bound: this.store.capturedPassBound(id) && this.store.capturedFailCited(id) === undefined ? 1 : 0,
         },
         readiness: this.store.readiness(id),
+        // AN EXIT GATE'S QUESTION IS THE CLOSE, NOT READINESS (12/18): the work is done by
+        // then. The predicate is the auto-close's own (`closeEvidenceBlocker`) — asked here,
+        // never restated, so the row and the gesture can never disagree.
+        ...(gate === 'confirm' ? { closesOnAccept: this.closeEvidenceBlocker(id) === undefined } : {}),
       });
     }
     return out;
@@ -1444,12 +1455,20 @@ export class Commands {
     return this.store.status(id);
   }
 
-  statuses(filter?: string): Array<{ id: string; status: string; superseded: boolean }> {
+  /** EVERY NODE'S ROW. A TASK row carries `readiness` (12/18) — the engine's answer BESIDE
+   *  the status word — because `blocked` alone does not say whether the human or the engine
+   *  is the one holding it. A LEG carries none: a leg is never run (see `Store.readiness`). */
+  statuses(filter?: string): Array<{ id: string; status: string; superseded: boolean; readiness?: { ready: boolean; blockers: string[] } }> {
     return this.store
       .ids()
       .sort()
       .filter((id) => !filter || id.includes(filter))
-      .map((id) => ({ id, status: this.store.status(id), superseded: this.store.events(id).some((e) => e.type === 'superseded') }));
+      .map((id) => ({
+        id,
+        status: this.store.status(id),
+        superseded: this.store.events(id).some((e) => e.type === 'superseded'),
+        ...(id.includes('/') ? { readiness: this.store.readiness(id) } : {}),
+      }));
   }
 
   detail(id: string): TaskDetail {
@@ -1516,7 +1535,9 @@ export class Commands {
     const legGate = activeLeg ? this.store.legGateMet(activeLeg) : { met: true };
     const pendingGates: LookBack['pendingGates'] = [];
     for (const t of this.store.tasksOf(activeLeg ?? '')) {
-      for (const p of this.pendingGatesOf(t)) pendingGates.push({ task: p.task, gate: p.gate, readiness: p.readiness });
+      for (const p of this.pendingGatesOf(t)) {
+        pendingGates.push({ task: p.task, gate: p.gate, readiness: p.readiness, ...(p.closesOnAccept === undefined ? {} : { closesOnAccept: p.closesOnAccept }) });
+      }
     }
     return {
       ...(activeLeg ? { activeLeg, activeLegStatus: this.store.status(activeLeg) } : {}),

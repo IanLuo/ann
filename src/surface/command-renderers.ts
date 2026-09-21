@@ -364,7 +364,7 @@ export const RENDERS: Record<string, Renderer> = {
         frontmostReady?: { task: string; status: string };
         alsoReady: Array<{ task: string; status: string }>;
         legGate: { met: boolean; blocker?: string };
-        pendingGates: Array<{ task: string; gate: string; readiness: { ready: boolean; blockers: string[] } }>;
+        pendingGates: Array<{ task: string; gate: string; readiness: { ready: boolean; blockers: string[] }; closesOnAccept?: boolean }>;
         deferred?: DeferredTask[];
       };
       advance: { action: string; detail: string };
@@ -378,12 +378,19 @@ export const RENDERS: Record<string, Renderer> = {
     if (!lb.frontmostReady && lb.activeLeg && lb.activeLegStatus === 'done') {
       lines.push('  LEG GATE REVIEW: all spawned tasks done — verify the epic ACs before advancing');
     }
-    // the gate queue carries BOTH facts (12/18): the decision that is owed, and what the
-    // engine would still refuse after it — so a start gate is decidable at a glance.
+    // the gate queue carries BOTH facts (12/18): the decision that is owed, and WHAT IT DOES
+    // — so a start gate is decidable at a glance. The two roles ask different questions: an
+    // ENTRY gate unlocks the RUN (readiness), an EXIT gate closes the task (the work is
+    // already done by then) — so an exit row says what the accept closes, never "runnable".
     for (const p of lb.pendingGates) {
-      const unlock = p.readiness?.ready
-        ? 'accepting it makes the task runnable'
-        : `it would still not run — ${p.readiness?.blockers.join('; ') ?? 'readiness unknown'}`;
+      const unlock =
+        p.gate === 'confirm'
+          ? p.closesOnAccept
+            ? 'accepting it closes the task (the conclusion evidence is present)'
+            : 'accepting it accepts the task — the close would still refuse, so `complete!` is owed'
+          : p.readiness?.ready
+            ? 'accepting it makes the task runnable'
+            : `it would still not run — ${p.readiness?.blockers.join('; ') ?? 'readiness unknown'}`;
       lines.push(`  WAITING ON YOU: ${p.task} — gate ${p.gate} submitted, undecided · ${unlock}`);
     }
     lines.push(`  leg gate: ${lb.legGate.met ? 'MET' : `UNMET — ${lb.legGate.blocker}`}`);

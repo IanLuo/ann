@@ -152,7 +152,13 @@ const SHA = 'abc1234';
 
 const journey = {
   ahead: { activeLeg: LEG, frontmostReady: { task: TASK, status: 'queued' }, legGate: { met: true } },
-  legs: [{ id: LEG, status: 'queued', tasks: [{ id: TASK, status: 'queued' }] }],
+  legs: [
+    {
+      id: LEG,
+      status: 'queued',
+      tasks: [{ id: TASK, status: 'queued', readiness: { ready: true, blockers: [] } }],
+    },
+  ],
 };
 const card = (over: Record<string, unknown> = {}) => ({
   advance: { leg: LEG, action: 'continue-leg', detail: `next task: ${TASK} (queued)` },
@@ -203,7 +209,7 @@ const detailRead = {
   artifacts: [],
   events: [],
   blockers: [],
-  tasks: [{ id: TASK, status: 'queued' }],
+  tasks: [{ id: TASK, status: 'queued', readiness: { ready: true, blockers: [] } }],
 };
 const nextRead = {
   advance: { leg: LEG, action: 'continue-leg', detail: `next task: ${TASK} (queued)` },
@@ -403,6 +409,53 @@ describe('the served page — a drill opens its own tab, and the URL is the dril
     expect(deeper.fetched).toContain(`/api/packet?id=${TASK}`);
   });
 
+  /* AC-2 (leg 12/18) — THE ROW WHERE THE WALK STARTS. The leg list and the leg tab's task
+   * buttons used to print the bare status word, so `blocked`-because-a-human-owes-a-decision
+   * and `blocked`-because-the-engine-refuses read identically. Both rows carry the verdict
+   * now: the same word the card and the gate queue carry. */
+  it('the task rows carry the verdict — the journey leg list AND the leg tab (leg 12/18)', async () => {
+    const blocked = { ready: false, blockers: ['dependency open: 01-leg/09-x (queued)'] };
+    const j = {
+      ahead: { activeLeg: LEG, frontmostReady: { task: TASK, status: 'blocked' }, legGate: { met: true } },
+      legs: [
+        {
+          id: LEG,
+          status: 'blocked',
+          tasks: [
+            { id: TASK, status: 'blocked', readiness: blocked },
+            { id: '01-leg/02-b', status: 'queued', readiness: { ready: true, blockers: [] } },
+          ],
+        },
+      ],
+    };
+    const d = {
+      ...detailRead,
+      status: 'blocked',
+      tasks: [
+        { id: TASK, status: 'blocked', readiness: blocked },
+        { id: '01-leg/02-b', status: 'queued', readiness: { ready: true, blockers: [] } },
+      ],
+    };
+    const page = boot({ ...reads(card()), '/api/journey': j, [`/api/detail?id=${LEG}`]: d });
+    await flush();
+    // the journey list
+    expect(page.get('legs').text()).toContain('01-leg/01-a · blocked · executability BLOCKED — dependency open: 01-leg/09-x (queued)');
+    expect(page.get('legs').text()).toContain('01-leg/02-b · queued · executability READY');
+    // …and the leg tab, whose task rows are the same read one level down
+    const tab = await openTab(page.get('wn-facts').link('leg gate'), { ...reads(card()), [`/api/detail?id=${LEG}`]: d });
+    expect(tab.get('card-node').text()).toContain('executability BLOCKED — dependency open: 01-leg/09-x (queued)');
+    expect(tab.get('card-node').text()).toContain('executability READY');
+  });
+
+  /* ABSENT IS NOT READY (leg 12/18): a row with no readiness — a leg, which is never run —
+   * says NOTHING. Printing `executability READY` there would be the same one-word-two-facts
+   * error in a new place. */
+  it('a leg row prints no verdict at all (leg 12/18)', async () => {
+    const page = boot({ ...reads(card()), '/api/journey': { ...journey, legs: [{ id: LEG, status: 'queued', tasks: [] }] } });
+    await flush();
+    expect(page.get('legs').text()).not.toContain('executability');
+  });
+
   it('the derivation tab shows the whole look-back, its items drillable in turn', async () => {
     const page = boot(reads(card()));
     await flush();
@@ -442,7 +495,26 @@ describe('the served page — a drill opens its own tab, and the URL is the dril
     const tab = await openTab(page.get('wn-facts').link('pending gates'), reads(twoGates));
     const body = tab.get('card-node').textContent;
     expect(body).toContain('accepting it makes the task runnable');
-    expect(body).toContain('it would still not run after accepting — dependency open: 01-leg/09-x (queued)');
+    expect(body).toContain('it would still not run — dependency open: 01-leg/09-x (queued)');
+  });
+
+  /* The EXIT gate is not a run (leg 12/18). `closesOnAccept` is the auto-close predicate
+   * itself, so the sentence is decidable: an accept that CLOSES says so; one that leaves the
+   * close owed says that, and neither borrows the entry gate's "makes the task runnable". */
+  it('an EXIT gate row says what that accept does — close, or leave the close owed (12/18)', async () => {
+    const exits = card({
+      pendingGates: [
+        { task: TASK, gate: 'confirm', readiness: { ready: true, blockers: [] }, closesOnAccept: true },
+        { task: '01-leg/02-b', gate: 'confirm', readiness: { ready: true, blockers: [] }, closesOnAccept: false },
+      ],
+    });
+    const page = boot(reads(exits));
+    await flush();
+    const tab = await openTab(page.get('wn-facts').link('pending gates'), reads(exits));
+    const body = tab.get('card-node').textContent;
+    expect(body).toContain('accepting it closes the task — the conclusion evidence is present');
+    expect(body).toContain('the close would still refuse, so complete! is owed');
+    expect(body).not.toContain('makes the task runnable');
   });
 
   it('THE PAGE RENDERS BEFORE THE INTEGRITY VERDICT — a pending state, never a blank claim', async () => {
