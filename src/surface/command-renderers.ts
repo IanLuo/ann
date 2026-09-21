@@ -114,6 +114,15 @@ const nodeCardLines = (c: NodeCard): string[] => {
   const lines: string[] = [];
   lines.push(`${c.isLeg ? 'LEG' : 'TASK'}: ${c.id}`);
   lines.push(`status: ${c.status}${c.superseded ? ' · superseded producer' : ''} · created ${c.createdAt || '(unknown)'}`);
+  // THE TWO ANSWERS, KEPT APART (leg 12/18): whether the ENGINE could run the task now
+  // (readiness — the fact the frame enforces) and whether a HUMAN decision is pending.
+  // Both used to read as the bare word `blocked`, which is two different situations.
+  if (!c.isLeg) {
+    const r = c.readiness ?? { ready: true, blockers: [] };
+    lines.push(`executability: ${r.ready ? 'READY — the frame could run it now' : `BLOCKED — ${r.blockers.join('; ')}`}`);
+    const waiting = (['grill', 'confirm'] as const).filter((g) => c.gates[g].state === 'submitted');
+    lines.push(`waiting on: ${waiting.length ? `${waiting.map((g) => `${g} (${g === 'grill' ? 'entry' : 'exit'})`).join(' · ')} gate submitted, undecided — yours` : 'no gate decision'}`);
+  }
   lines.push('---', 'NODE (node.json — immutable, written once at spawn)');
   lines.push(`  intent: ${String(contract.intent ?? '(none)')}`);
   const acs = (contract.acceptanceCriteria as string[] | undefined) ?? [];
@@ -355,7 +364,7 @@ export const RENDERS: Record<string, Renderer> = {
         frontmostReady?: { task: string; status: string };
         alsoReady: Array<{ task: string; status: string }>;
         legGate: { met: boolean; blocker?: string };
-        pendingGates: Array<{ task: string; gate: string }>;
+        pendingGates: Array<{ task: string; gate: string; readiness: { ready: boolean; blockers: string[] } }>;
         deferred?: DeferredTask[];
       };
       advance: { action: string; detail: string };
@@ -369,7 +378,14 @@ export const RENDERS: Record<string, Renderer> = {
     if (!lb.frontmostReady && lb.activeLeg && lb.activeLegStatus === 'done') {
       lines.push('  LEG GATE REVIEW: all spawned tasks done — verify the epic ACs before advancing');
     }
-    for (const p of lb.pendingGates) lines.push(`  WAITING ON YOU: ${p.task} — gate ${p.gate} submitted, undecided`);
+    // the gate queue carries BOTH facts (12/18): the decision that is owed, and what the
+    // engine would still refuse after it — so a start gate is decidable at a glance.
+    for (const p of lb.pendingGates) {
+      const unlock = p.readiness?.ready
+        ? 'accepting it makes the task runnable'
+        : `it would still not run — ${p.readiness?.blockers.join('; ') ?? 'readiness unknown'}`;
+      lines.push(`  WAITING ON YOU: ${p.task} — gate ${p.gate} submitted, undecided · ${unlock}`);
+    }
     lines.push(`  leg gate: ${lb.legGate.met ? 'MET' : `UNMET — ${lb.legGate.blocker}`}`);
     if (v.advance.action === 'none') {
       if (v.goal) lines.push(`  goal: ${v.goal.goalId} [${v.goal.goalStatus}] — verdict ${v.goal.verdict}`);

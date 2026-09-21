@@ -236,7 +236,12 @@ describe('e2e — the minimal service + UI (AC-1: the thin binding over the comm
     // the CLI's own look-back sees only the ACTIVE leg's — the reason /api/gates exists
     const next = JSON.parse(cli(root, ['--json', 'next']).stdout) as { lookBack: { activeLeg: string; pendingGates: unknown[] } };
     expect(next.lookBack.activeLeg).toBe(LEG2);
-    expect(next.lookBack.pendingGates).toEqual([{ task: T2, gate: 'grill' }, { task: T3, gate: 'grill' }]);
+    // …and each row carries the ENGINE's own fact beside the human's wait (12/18): neither
+    // contract declares an input, a blocking question or a dependency, so both are runnable.
+    expect(next.lookBack.pendingGates).toEqual([
+      { task: T2, gate: 'grill', readiness: { ready: true, blockers: [] } },
+      { task: T3, gate: 'grill', readiness: { ready: true, blockers: [] } },
+    ]);
   });
 
   it('the configured apiKey appears in NO response body — and the credential-bearing reads are not exposed (NFR-SEC-1)', { timeout: 30_000 }, async () => {

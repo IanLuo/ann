@@ -68,7 +68,9 @@ describe('lookBack — the observer view', () => {
     const lb = commands().lookBack();
     expect(lb.activeLeg).toBe('01-leg');
     expect(lb.frontmostReady).toEqual({ leg: '01-leg', task: '01-leg/02-b', status: 'queued' });
-    expect(lb.pendingGates).toEqual([{ task: '01-leg/03-c', gate: 'grill' }]);
+    expect(lb.pendingGates).toEqual([
+      { task: '01-leg/03-c', gate: 'grill', readiness: { ready: true, blockers: [] } }, // the row carries the engine's fact too (12/18)
+    ]);
   });
 
   it('a DECIDED submission is not a pending gate', () => {
@@ -99,6 +101,7 @@ describe('pendingGates — the WHOLE-JOURNEY gate queue (the service/UI WAITING 
         intent: 'Build the thing',
         since: '2026-08-27',
         delivered: { commits: 0, claims: 0, unclaimed: 1, checks: 0, bound: 0 },
+        readiness: { ready: true, blockers: [] },
       },
     ]);
   });

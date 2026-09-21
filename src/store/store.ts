@@ -212,6 +212,10 @@ export interface TaskDetail {
   artifacts: ArtifactRef[];
   events: JourneyEvent[];
   blockers: string[];
+  /** CAN THE FRAME RUN THIS TASK NOW — the readiness the frame enforces, per task (12/18).
+   *  A fact SEPARATE from the gate wait: `blockers` above names the human's pending
+   *  decision, this names the engine's own refusal. ABSENT on a LEG (see `detail()`). */
+  readiness?: { ready: boolean; blockers: string[] };
   tasks?: Array<{ id: string; status: string }>;
 }
 
@@ -742,6 +746,29 @@ export class Store {
       .filter((d) => !DEP_SATISFIED_STATUSES.includes(d.status));
   }
 
+  /** THE READINESS DERIVATION — ONE place (leg 12/18): every requiredInput resolved · no
+   *  blocking openQuestion unanswered · no DECLARED dependency open. This is the fact the
+   *  FRAME enforces (frame.ts refuses to run an unready task, so the declared-dependency
+   *  clause blocks EXECUTION, not merely the proposal) and the fact the card owes per task
+   *  — so it lives in L0, where the packet (flow/materialize) and the node read (detail)
+   *  both consume it, and a second derivation never exists to drift.
+   *
+   *  The blocker strings are the packet's own (context-packet-spec §readiness), in the
+   *  packet's order: inputs, then questions, then declared dependencies. Only DECLARED
+   *  dependencies gate — the `named-in-record` edges are a READING of the record (12/14),
+   *  and a reading must never deadlock the journey (12/17). */
+  readiness(id: string): { ready: boolean; blockers: string[] } {
+    const blockers: string[] = [];
+    const req = this.contractOf(id).requiredInputs;
+    for (const name of Array.isArray(req) ? req : []) {
+      if (typeof name !== 'string' || !name.trim()) continue;
+      if (!this.resolveDoc(name) && !this.current(name)) blockers.push(`missing requiredInput: ${name}`);
+    }
+    for (const q of this.openQuestions(id)) if (q.blocking) blockers.push(`blocking question unanswered: ${q.id ?? q.question}`);
+    for (const dep of this.openDeps(id)) blockers.push(`dependency open: ${dep.id} (${dep.status})`);
+    return { ready: blockers.length === 0, blockers };
+  }
+
   private taskStatus(id: string): string {
     // ONE clause, ONE place: the projection gets the dependency facts as INPUT, so every
     // reader that filters on the status word (frontmostReady · lookBack · advance() · the
@@ -1103,6 +1130,10 @@ export class Store {
       events: evs,
       blockers,
     };
+    // A LEG IS NEVER RUN — its tasks are, so the question has no answer there and the field
+    // is ABSENT (a `ready: true` on a leg whose children are all blocked would be exactly
+    // the one-word-two-facts confusion this read exists to end). No surface asks a leg.
+    if (!detail.isLeg) detail.readiness = this.readiness(id);
     if (detail.isLeg) detail.tasks = this.tasksOf(id).map((t) => ({ id: t, status: this.status(t) }));
     return detail;
   }

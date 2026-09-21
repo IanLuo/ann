@@ -119,10 +119,10 @@ export function assemblePacket(store: Store, nodeId: string): ContextPacket {
   // run a task whose readiness is unmet (frame.ts), so a declared dependency blocks
   // EXECUTION (run! · the frame · the driver), not merely the proposal. Without it the
   // block was visible and unproposed but still performable.
-  const blockers: string[] = [];
-  for (const d of dependencies) if (d.status === 'missing') blockers.push(`missing requiredInput: ${d.blocker}`);
-  for (const q of openQ) if (q.blocking) blockers.push(`blocking question unanswered: ${q.id ?? q.question}`);
-  for (const dep of store.openDeps(nodeId)) blockers.push(`dependency open: ${dep.id} (${dep.status})`);
+  //
+  // ONE DERIVATION (12/18): the verdict moved to `Store.readiness` — the node card shows
+  // the SAME fact (detail.readiness), so the packet is a consumer here, never the owner.
+  const readiness = store.readiness(nodeId);
 
   // siblingStatus: the leg's task group + the node's children — statuses only
   const siblings = isLeg ? [] : store.tasksOf(segs[0]).map((t) => ({ id: t, status: store.status(t) }));
@@ -160,7 +160,7 @@ export function assemblePacket(store: Store, nodeId: string): ContextPacket {
       openQuestions: openQ,
     },
     dependencies,
-    readiness: { ready: blockers.length === 0, blockers },
+    readiness,
     siblingStatus: { siblings, children },
     bindingState: { links },
     openQuestions: questions,

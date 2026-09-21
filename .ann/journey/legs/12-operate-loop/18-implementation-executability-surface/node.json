@@ -1,0 +1,31 @@
+{
+  "id": "12-operate-loop/18-implementation-executability-surface",
+  "contract": {
+    "intent": "THE PER-TASK EXECUTABILITY READ AT THE START GATE — the human deciding an entry (grill) gate cannot see whether the task could actually RUN once accepted. The refusal is real since 12/17 (readiness carries the declared-dependency clause, so the frame refuses to execute an unready task with ZERO writes) and the reason is named in `detail.blockers` (`dependency open: <id> (<status>)`) — but the SURFACE shows it ONE task wide: the readiness verdict is rendered on the WHAT'S NEXT card (the frontmost-ready task's packet drill) and by `ann packet`, while the node card and the journey / gate-queue rows show the bare word `blocked` — which today means TWO things at once (the human has not decided this gate · the engine cannot run this task), and with no frontmost-ready task the page shows no readiness at all. This task puts the ONE readiness derivation on every task's card and row, with its blockers NAMED, and keeps the two questions apart. READS ONLY: no new state, no new event, no new status word, no new write path.",
+    "acceptanceCriteria": [
+      "ONE SOURCE — the executability the card shows IS the readiness the frame enforces: the clause is EXTRACTED from materialize() into ONE function both the packet and the node read consume (never a second derivation — the 12/08 reconciliation and the 12/14 one-derivation principle). Proof: a test asserts the card's verdict and `ann packet <id>`'s readiness AGREE on a fixture set covering ready · an unresolved input · an unanswered blocking openQuestion · an OPEN declared dependency",
+      "THE READ IS PER TASK — `ann detail <id>` (text and --json, value-canonical) and the node card carry the executability verdict + its named blockers for EVERY task, not only the frontmost-ready one, and the journey / gate-queue rows carry the same word per task so a start gate is decidable at a glance; the blocker NAMES the reason (an open declared dependency reads `dependency open: <id> (<status>)` — 12/17's wording, never a second phrasing)",
+      "TWO QUESTIONS, TWO FACTS — the gate wait and the executability render as SEPARATE facts: a task whose only pending item is the human's undecided gate reads EXECUTABLE with the gate wait named beside it, so neither 'the human has not decided' nor 'the engine cannot run it' is ever mistranslated into the other. The derivation keeps the existing status words (no new word)",
+      "HINTS NEVER GATE (the deadlock guard) — executability reads DECLARED dependencies only: a task whose dependency edges are all `named-in-record` reads executable, and no hint edge (however many, however reciprocal) can ever make a task non-executable (12/17: a reading must never deadlock the journey). The hint edges stay VISIBLE and LABELLED as hints — never as blockers. Proof: a fixture with a reciprocal hint pair (12 ↔ 13's shape) reads executable",
+      "NOBODY ELSE MOVES — reads only: no new event type, no new status, no new write path; the leg aggregate, the leg gate, the ready set, `next`'s proposal and the distance-to-goal read are pinned UNCHANGED by tests; the UI keeps its minimal vanilla style (no new deps)",
+      "Full suite green (the baseline at the time of the work + additions), npm run typecheck clean, ann check/verify clean on the live journey; committed with evidence"
+    ],
+    "targetAreas": [
+      "src/flow",
+      "src/commands",
+      "src/surface",
+      "src/e2e"
+    ],
+    "requiredInputs": [
+      "context-packet-spec",
+      "journey-format-spec",
+      "resource-registry"
+    ],
+    "workType": "implementation",
+    "dependsOn": [
+      "12-operate-loop/08-implementation-one-gate-derivation",
+      "12-operate-loop/17-implementation-declared-dependencies"
+    ]
+  },
+  "createdAt": "2026-09-21"
+}

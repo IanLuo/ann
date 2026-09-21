@@ -428,6 +428,23 @@ describe('the served page — a drill opens its own tab, and the URL is the dril
     expect(gateTab.get('card-gates').textContent).toContain('grill');
   });
 
+  /* AC-2/AC-3 (leg 12/18) — the start gate is the decision the read exists for: the row
+   * carries the decision owed AND what the engine would still refuse after accepting it. */
+  it('the pending-gates row carries the executability BESIDE the gate wait (leg 12/18)', async () => {
+    const twoGates = card({
+      pendingGates: [
+        { task: TASK, gate: 'grill', readiness: { ready: true, blockers: [] } },
+        { task: '01-leg/02-b', gate: 'grill', readiness: { ready: false, blockers: ['dependency open: 01-leg/09-x (queued)'] } },
+      ],
+    });
+    const page = boot(reads(twoGates));
+    await flush();
+    const tab = await openTab(page.get('wn-facts').link('pending gates'), reads(twoGates));
+    const body = tab.get('card-node').textContent;
+    expect(body).toContain('accepting it makes the task runnable');
+    expect(body).toContain('it would still not run after accepting — dependency open: 01-leg/09-x (queued)');
+  });
+
   it('THE PAGE RENDERS BEFORE THE INTEGRITY VERDICT — a pending state, never a blank claim', async () => {
     // The pre-check is fetched lazily (leg 12/07): while it is in flight the card is fully
     // rendered, says it does not know yet, and offers no approve — never a verdict it never got.

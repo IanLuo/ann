@@ -46,6 +46,7 @@ const detail: TaskDetail = {
   artifacts: [],
   events: [],
   blockers: [],
+  readiness: { ready: true, blockers: [] },
 };
 
 describe('GateTalk — the gate talk-loop (F7)', () => {

@@ -898,6 +898,128 @@ describe('Store — DECLARED dependencies block (leg 12/17)', () => {
   });
 });
 
+describe('Store — readiness, the ONE executability derivation (leg 12/18)', () => {
+  beforeEach(() => { makeStore(); });
+  afterEach(() => { rmSync(root, { recursive: true, force: true }); });
+
+  const contract = (over: Record<string, unknown> = {}) => ({ intent: 'x', acceptanceCriteria: ['x'], ...over });
+  const queued = [ev('created')];
+  /** node.json as the journey writes it — `writeNode` takes only the contract, and
+   *  openQuestions is a TOP-LEVEL sibling (format v14 §2). */
+  const writeRaw = (id: string, node: Record<string, unknown>, events: Array<Record<string, unknown>>) => {
+    mkdirSync(nodeDir(id), { recursive: true });
+    writeFileSync(join(nodeDir(id), 'node.json'), JSON.stringify({ id, createdAt: '2026-09-20', ...node }));
+    writeFileSync(join(nodeDir(id), 'events.jsonl'), events.map((e) => JSON.stringify(e)).join('\n') + '\n');
+  };
+
+  it('names EVERY open clause at once, in the packet\'s order: inputs · questions · declared deps', () => {
+    writeNode('01-leg/09-other', contract(), queued);
+    writeRaw(
+      '01-leg/01-a',
+      {
+        contract: contract({ requiredInputs: ['no-such-doc'], dependsOn: ['01-leg/09-other'] }),
+        openQuestions: [
+          { id: 'Q1', question: 'which way?', blocking: true },
+          { id: 'Q2', question: 'and this?', blocking: false }, // NOT blocking — never a blocker
+        ],
+      },
+      queued,
+    );
+    const s = new Store(root);
+    expect(s.readiness('01-leg/01-a')).toEqual({
+      ready: false,
+      blockers: ['missing requiredInput: no-such-doc', 'blocking question unanswered: Q1', 'dependency open: 01-leg/09-other (queued)'],
+    });
+    // the CARD carries the same derivation, not a second one
+    expect(s.detail('01-leg/01-a').readiness).toEqual(s.readiness('01-leg/01-a'));
+  });
+
+  /* AC-3 — the whole point of the read: `blocked` used to mean two different situations.
+   * The gate wait is the HUMAN's fact (detail.blockers); executability is the ENGINE's
+   * (detail.readiness). Neither may be mistranslated into the other. */
+  it('TWO QUESTIONS, TWO FACTS: an undecided gate leaves the task EXECUTABLE', () => {
+    writeNode('01-leg/01-a', contract(), [ev('created'), ev('submitted', { gate: 'grill' })]);
+    const d = new Store(root).detail('01-leg/01-a');
+    expect(d.readiness).toEqual({ ready: true, blockers: [] }); // the ENGINE could run it now
+    expect(d.status).toBe('blocked'); // the HUMAN owes the decision — its own word
+    expect(d.blockers).toEqual(['submitted (gate=grill) awaiting decision']); // named as the gate wait, never as executability
+  });
+
+  /* AC-4 — the DEADLOCK GUARD. A `named-in-record` edge is a READING of the record
+   * (12/14). 12/13's shape is the live case: two tasks whose prose names each other, so
+   * treating a reading as a dependency would deadlock the journey. Only DECLARED edges
+   * gate (12/17). */
+  it('HINTS NEVER GATE: a RECIPROCAL hint pair reads executable, and the edges stay visible as hints', () => {
+    writeNode('01-leg/01-a', contract({ intent: 'the reader — its output feeds 01/02' }), queued);
+    writeNode('01-leg/02-b', contract({ intent: 'the writer — depends on 01/01 in prose' }), queued);
+    const s = new Store(root);
+    // the edges ARE derived — the guard below is not vacuous
+    const tasks = (id: string) => s.deps(id).dependsOn.filter((x) => x.kind === 'task');
+    expect(tasks('01-leg/01-a').map((x) => `${x.ref}:${x.how}`)).toEqual(['01-leg/02-b:named-in-record']);
+    expect(tasks('01-leg/02-b').map((x) => `${x.ref}:${x.how}`)).toEqual(['01-leg/01-a:named-in-record']);
+    // ...and NOTHING gates: both are executable, both stay queued
+    expect([s.readiness('01-leg/01-a'), s.readiness('01-leg/02-b')]).toEqual([
+      { ready: true, blockers: [] },
+      { ready: true, blockers: [] },
+    ]);
+    expect([s.status('01-leg/01-a'), s.status('01-leg/02-b')]).toEqual(['queued', 'queued']);
+    expect(s.openDeps('01-leg/01-a')).toEqual([]); // DECLARED is the only kind `openDeps` knows
+  });
+
+  it('a LEG has no executability — the field is ABSENT, not a per-task claim about its children', () => {
+    writeNode('01-leg', contract(), []);
+    writeNode('01-leg/01-a', contract({ requiredInputs: ['no-such-doc'] }), queued); // the leg's OWN record is clean
+    const leg = new Store(root).detail('01-leg');
+    expect(leg.isLeg).toBe(true);
+    expect(leg.readiness).toBeUndefined(); // `ready: true` here would be the very confusion the read exists to end
+    expect(leg.status).toBe('queued'); // the leg's own derivation is untouched
+    // the per-task read is unaffected — the task itself still answers
+    expect(new Store(root).detail('01-leg/01-a').readiness).toEqual({ ready: false, blockers: ['missing requiredInput: no-such-doc'] });
+  });
+
+  /* AC-5 — NOBODY ELSE MOVES. The new read is a READ: no event, no status, no write path
+   * (the ledger would catch a write anyway — this asserts it at the call). */
+  it('the read writes NOTHING — events.jsonl is byte-identical after readiness/detail/next', () => {
+    writeNode('01-leg', contract(), []);
+    writeNode('01-leg/01-a', contract({ requiredInputs: ['no-such-doc'] }), queued);
+    const file = join(nodeDir('01-leg/01-a'), 'events.jsonl');
+    const before = readFileSync(file, 'utf8');
+    const s = new Store(root);
+    s.readiness('01-leg/01-a');
+    s.detail('01-leg/01-a');
+    new Commands(s, 'test').lookBack();
+    expect(readFileSync(file, 'utf8')).toBe(before);
+  });
+
+  /* AC-5 — the claim is exactly this: an UNREADY task moves the existing derivations no
+   * more than a comparable READY one does. Two fixtures that differ in ONE thing (whether
+   * 02-b's required input resolves), every existing read compared pairwise. */
+  it('NOBODY ELSE MOVES: unready ≠ a new state — the leg aggregate · ready set · leg gate · next are unchanged', () => {
+    const reads = () => {
+      const s = new Store(root);
+      const c = new Commands(s, 'test');
+      return { leg: s.status('01-leg'), status: s.status('01-leg/02-b'), frontmostReady: c.frontmostReady(), lookBack: c.lookBack(), advance: c.advance() };
+    };
+    const fixture = (input: string) => {
+      makeStore();
+      mkdirSync(join(root, 'docs'), { recursive: true });
+      writeFileSync(join(root, 'docs', 'exists.md'), '# exists\n');
+      writeFileSync(join(root, 'docs', 'manifest.json'), JSON.stringify({ 'a-doc-that-exists': 'docs/exists.md' }));
+      writeNode('01-leg', contract(), []);
+      writeNode('01-leg/01-a', contract(), queued);
+      writeNode('01-leg/02-b', contract({ requiredInputs: [input] }), queued);
+      const ready = new Store(root).readiness('01-leg/02-b').ready;
+      return { root, reads: reads(), ready };
+    };
+    const resolvable = fixture('a-doc-that-exists');
+    rmSync(resolvable.root, { recursive: true, force: true });
+    const missing = fixture('no-such-doc');
+    expect([resolvable.ready, missing.ready]).toEqual([true, false]); // the ONLY difference
+    expect(missing.reads).toEqual(resolvable.reads); // …and every existing derivation is identical
+    expect(missing.reads.status).toBe('queued'); // never a new status word: the FRAME refuses, not the state machine
+  });
+});
+
 describe('Store — deps() (the dependency edges, leg 12/14)', () => {
   beforeEach(() => { makeStore(); });
   afterEach(() => { rmSync(root, { recursive: true, force: true }); });

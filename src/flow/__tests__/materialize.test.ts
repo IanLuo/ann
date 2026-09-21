@@ -122,6 +122,36 @@ describe('Context assembler (S3) — deterministic packet (context-packet-spec)'
     expect(p.readiness.blockers).toContain('dependency open: 06-engine-build/13-a (queued)');
   });
 
+  /* AC-1 (12/18) — ONE SOURCE. The card's executability (`ann detail` / the node card,
+   * which is `Store.detail(id).readiness`) and the packet's readiness are ONE derivation
+   * (`Store.readiness`), consumed by both. This is the guard against a second one being
+   * introduced: it compares the two reads across all four shapes of the clause AND pins the
+   * expected verdict per case, so neither side can drift silently. */
+  it('ONE SOURCE: the card\'s executability IS the packet\'s readiness — agreed on all four shapes (12/18)', () => {
+    writeNode('06-engine-build/05-target', { intent: 'x', acceptanceCriteria: ['x'] }, [ev('created')]);
+    const cases: Array<[string, Record<string, unknown>]> = [
+      ['06-engine-build/01-ready', { contract: { intent: 'x', acceptanceCriteria: ['AC1'] } }],
+      ['06-engine-build/02-input', { contract: { intent: 'x', acceptanceCriteria: ['AC1'], requiredInputs: ['no-such-artifact'] } }],
+      ['06-engine-build/03-question', { contract: { intent: 'x', acceptanceCriteria: ['AC1'] }, openQuestions: [{ id: 'Q1', question: 'which way?', blocking: true }] }],
+      ['06-engine-build/04-dep', { contract: { intent: 'x', acceptanceCriteria: ['AC1'], dependsOn: ['06-engine-build/05-target'] } }],
+    ];
+    for (const [id, body] of cases) {
+      mkdirSync(nodeDir(id), { recursive: true });
+      writeFileSync(join(nodeDir(id), 'node.json'), JSON.stringify({ id, createdAt: '2026-09-21', ...body }));
+      writeFileSync(join(nodeDir(id), 'events.jsonl'), JSON.stringify(ev('created')) + '\n');
+    }
+    const s = new Store(root);
+    const card = Object.fromEntries(cases.map(([id]) => [id, s.detail(id).readiness]));
+    const packet = Object.fromEntries(cases.map(([id]) => [id, assemblePacket(s, id).readiness]));
+    expect(packet).toEqual(card); // the two reads never disagree
+    expect(card).toEqual({
+      '06-engine-build/01-ready': { ready: true, blockers: [] },
+      '06-engine-build/02-input': { ready: false, blockers: ['missing requiredInput: no-such-artifact'] },
+      '06-engine-build/03-question': { ready: false, blockers: ['blocking question unanswered: Q1'] },
+      '06-engine-build/04-dep': { ready: false, blockers: ['dependency open: 06-engine-build/05-target (queued)'] },
+    });
+  });
+
   it('collects sibling statuses and children — statuses only, no content', () => {
     writeNode('06-engine-build', {}, []);
     writeNode('06-engine-build/01-a', {}, [ev('created'), ev('completed')]);

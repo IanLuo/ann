@@ -483,6 +483,16 @@ export const UI_HTML = `<!doctype html>
       node.replaceChildren();
       var c = detail.contract || {};
       field(node, 'status', detail.status + (detail.createdAt ? ' · created ' + detail.createdAt : ''));
+      // THE TWO ANSWERS, KEPT APART (leg 12/18): the ENGINE's answer (could the frame run
+      // it now — the same readiness the frame enforces) beside the HUMAN's (a gate decision
+      // is owed). Both used to read as the bare word blocked.
+      if (!detail.isLeg) {
+        var rd = detail.readiness || { ready: true, blockers: [] };
+        field(node, 'executability', rd.ready ? 'READY — the frame could run it now' : 'BLOCKED — ' + rd.blockers.join('; '));
+        var gs = detail.gates || {};
+        var owed = ['grill', 'confirm'].filter(function (g) { return gs[g] && gs[g].state === 'submitted'; });
+        field(node, 'waiting on', owed.length ? owed.join(' · ') + ' gate submitted, undecided — yours' : 'no gate decision owed');
+      }
       field(node, 'intent', c.intent || '(none)');
       var acs = c.acceptanceCriteria || [];
       acs.forEach(function (ac, i) { field(node, 'AC-' + (i + 1), ac); });
@@ -1074,6 +1084,9 @@ export const UI_HTML = `<!doctype html>
     if (!gates.length) { node.appendChild(el('p', 'none — no undecided submission on the active leg.', 'muted')); return; }
     gates.forEach(function (p) {
       node.appendChild(drillLink({ kind: 'gate', id: p.task, gate: p.gate }, 'task', p.task + ' · ' + p.gate + ' (decide it) ›'));
+      // WHAT THE DECISION UNLOCKS (12/18) — the engine's answer beside the human's.
+      var rd = p.readiness || { ready: true, blockers: [] };
+      node.appendChild(el('p', rd.ready ? 'accepting it makes the task runnable' : 'it would still not run after accepting — ' + rd.blockers.join('; '), 'muted'));
     });
   }
   /** The derivation itself: the F5 pull proposal and everything it reads (the look-back).

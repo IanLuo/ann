@@ -1,0 +1,5 @@
+{"at":"2026-09-21","type":"created","note":"spawned by bookkeeper (agent)"}
+{"at":"2026-09-21","type":"submitted","gate":"grill","note":"submitted for the grill gate (agent)"}
+{"at":"2026-09-21","type":"confirmed","gate":"grill","note":"accepted (ianluo)"}
+{"at":"2026-09-21","type":"activated","note":"activated by the frame"}
+{"at":"2026-09-21","type":"waiting","note":"waiting for the runner: no evidence.commits[] recorded since activation (empty chain — the runner does the work)"}

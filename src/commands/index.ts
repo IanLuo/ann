@@ -251,7 +251,7 @@ export interface LookBack {
   frontmostReady?: FrontmostReady;
   alsoReady: FrontmostReady[];
   legGate: { met: boolean; blocker?: string };
-  pendingGates: Array<{ task: string; gate: string }>;
+  pendingGates: Array<{ task: string; gate: string; readiness: { ready: boolean; blockers: string[] } }>;
   /** The OUTSTANDING DEFERRED WORK (leg 12 task 01): a deferred task closes its leg, so
    *  the pull surface (frontmost-ready / pending gates) never names it — this is the one
    *  read that keeps the postponed obligation visible. Always present ([] when none). */
@@ -273,6 +273,11 @@ export interface PendingGate {
   intent: string;
   since: string;
   delivered: { commits: number; claims: number; unclaimed: number; checks: number; bound: number };
+  /** WHAT A DECISION WOULD UNLOCK (leg 12/18): the SAME readiness the frame enforces
+   *  (Store.readiness — one derivation), so a human reading the queue sees whether
+   *  accepting this gate makes the task runnable, or whether the engine would still
+   *  refuse it (and why) — never inferred from the word `blocked`. */
+  readiness: { ready: boolean; blockers: string[] };
 }
 
 /** The advance view (flow-control v6 §2/§5 — the leg gate validated from logs). */
@@ -1344,6 +1349,7 @@ export class Commands {
           // promises a close the predicate would refuse.
           bound: this.store.capturedPassBound(id) && this.store.capturedFailCited(id) === undefined ? 1 : 0,
         },
+        readiness: this.store.readiness(id),
       });
     }
     return out;
@@ -1510,7 +1516,7 @@ export class Commands {
     const legGate = activeLeg ? this.store.legGateMet(activeLeg) : { met: true };
     const pendingGates: LookBack['pendingGates'] = [];
     for (const t of this.store.tasksOf(activeLeg ?? '')) {
-      for (const p of this.pendingGatesOf(t)) pendingGates.push({ task: p.task, gate: p.gate });
+      for (const p of this.pendingGatesOf(t)) pendingGates.push({ task: p.task, gate: p.gate, readiness: p.readiness });
     }
     return {
       ...(activeLeg ? { activeLeg, activeLegStatus: this.store.status(activeLeg) } : {}),

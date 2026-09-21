@@ -23,6 +23,7 @@ const detail = (over: Partial<TaskDetail> = {}): TaskDetail => ({
   artifacts: [{ name: 'runner-review', path: '.ann/journey/legs/06-engine-build/09/artifacts/runner-review.md', sha: 'abc1234', role: 'current' }],
   events: [],
   blockers: [],
+  readiness: { ready: true, blockers: [] },
   ...over,
 });
 

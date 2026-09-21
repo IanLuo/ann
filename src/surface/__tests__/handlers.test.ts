@@ -364,6 +364,73 @@ describe('STRUCTURED EVIDENCE — claims/checks at the gate (format v18)', () =>
   });
 });
 
+describe('THE PER-TASK EXECUTABILITY READ — the card and the gate queue (leg 12/18)', () => {
+  const write = (id: string, body: Record<string, unknown>, events: Array<Record<string, unknown>>) => {
+    mkdirSync(dir(id), { recursive: true });
+    writeFileSync(join(dir(id), 'node.json'), JSON.stringify({ id, createdAt: '2026-09-21', ...body }));
+    writeFileSync(join(dir(id), 'events.jsonl'), events.map((e) => JSON.stringify(e)).join('\n') + '\n');
+  };
+  const contract = (over: Record<string, unknown> = {}) => ({ intent: 'the thing', acceptanceCriteria: ['AC-1'], ...over });
+  const card = (id: string) => (HANDLERS.detail(createContext(root, ['detail', id])) as { value: NodeCard }).value;
+  const text = (id: string) => RENDERS.detail(card(id), createContext(root, ['detail']).renderEnv());
+
+  it('the card carries the verdict + the NAMED blockers per task — text AND the JSON value (AC-2)', () => {
+    write('07-leg/01-implementation-thing', { contract: contract({ requiredInputs: ['core-design', 'ghost-input'] }) }, [ev('created')]);
+    expect(card('07-leg/01-implementation-thing').readiness).toEqual({ ready: false, blockers: ['missing requiredInput: ghost-input'] });
+    const t = text('07-leg/01-implementation-thing');
+    expect(t).toContain('executability: BLOCKED — missing requiredInput: ghost-input');
+    expect(t).toContain('status: queued'); // NOT the word `blocked`: the state word is unchanged (AC-3)
+  });
+
+  /* AC-3 — the situation the whole read exists for: at a start gate the human sees ONE word
+   * (`blocked`) for TWO different facts. They are now rendered apart. */
+  it('TWO QUESTIONS, TWO FACTS: an undecided gate reads EXECUTABLE, with the gate wait named beside it', () => {
+    write('07-leg/01-implementation-thing', { contract: contract() }, [ev('created'), ev('submitted', { gate: 'grill' })]);
+    const t = text('07-leg/01-implementation-thing');
+    expect(t).toContain('executability: READY — the frame could run it now');
+    expect(t).toContain('waiting on: grill (entry) gate submitted, undecided — yours');
+    // …and the card still reports the human wait where the human wait is reported
+    expect(t).toContain('BLOCKED — waiting on human:');
+    expect(t).toContain('submitted (gate=grill) awaiting decision');
+  });
+
+  it('an open DECLARED dependency uses 12/17\'s wording — never a second phrasing (AC-2)', () => {
+    write('07-leg/09-other', { contract: contract() }, [ev('created')]);
+    write('07-leg/01-implementation-thing', { contract: contract({ dependsOn: ['07-leg/09-other'] }) }, [ev('created')]);
+    expect(text('07-leg/01-implementation-thing')).toContain('executability: BLOCKED — dependency open: 07-leg/09-other (queued)');
+  });
+
+  it('a LEG card carries neither line — a leg is never run, so it is never asked', () => {
+    write('07-leg', { contract: contract() }, [ev('created')]);
+    write('07-leg/01-implementation-thing', { contract: contract() }, [ev('created')]);
+    const t = text('07-leg');
+    expect(t).toContain('LEG: 07-leg');
+    expect(t).not.toContain('executability:');
+    expect(t).not.toContain('waiting on:');
+  });
+
+  it('the GATE QUEUE carries both facts per task, so a start gate is decidable at a glance (AC-2)', () => {
+    const out = RENDERS.next(
+      {
+        lookBack: {
+          activeLeg: '07-leg',
+          activeLegStatus: 'queued',
+          alsoReady: [],
+          legGate: { met: false, blocker: 'the previous leg is not done' },
+          pendingGates: [
+            { task: '07-leg/01-implementation-thing', gate: 'grill', readiness: { ready: true, blockers: [] } },
+            { task: '07-leg/02-implementation-other', gate: 'grill', readiness: { ready: false, blockers: ['dependency open: 07-leg/09-x (queued)'] } },
+          ],
+        },
+        advance: { action: 'continue-leg', detail: 'next task: 07-leg/01-implementation-thing (blocked)' },
+      },
+      createContext(root, ['next']).renderEnv(),
+    );
+    expect(out).toContain('WAITING ON YOU: 07-leg/01-implementation-thing — gate grill submitted, undecided · accepting it makes the task runnable');
+    expect(out).toContain('WAITING ON YOU: 07-leg/02-implementation-other — gate grill submitted, undecided · it would still not run — dependency open: 07-leg/09-x (queued)');
+  });
+});
+
 describe('README command table — the copy stays aligned with `ann commands`', () => {
   it('is row-for-row identical to the rendered table (the derived doc is the source)', () => {
     const ctx = createContext(root, ['commands']);
