@@ -484,6 +484,27 @@ describe('THE PER-TASK EXECUTABILITY READ — the card and the gate queue (leg 1
     );
     expect(RENDERS.status(srows.value, sctx.renderEnv())).toContain('· executability BLOCKED — dependency open: 07-leg/09-x (queued)');
   });
+
+  /* AC-5 of 12/19 — the leg card's own TASKS list was the ONE row left printing the bare
+   * status, so `ann journey <leg>` and the served page could say different things about the
+   * same task. It now carries the SAME verdict every other row prints.
+   * (A LEG is never run, so the leg's OWN lines stay absent — pinned by the test above.) */
+  it('the leg card’s TASKS list carries the verdict per task, like every other row (12/19 AC-5)', () => {
+    write('07-leg', { contract: contract() }, [ev('created')]);
+    write('07-leg/01-implementation-thing', { contract: contract() }, [ev('created'), ev('submitted', { gate: 'grill' })]);
+    write('07-leg/02-implementation-other', { contract: contract({ dependsOn: ['07-leg/09-x'] }) }, [ev('created')]);
+    write('07-leg/09-x', { contract: contract() }, [ev('created')]);
+
+    const t = text('07-leg');
+    expect(t).toContain('TASKS');
+    // the human's wait and the engine's answer, kept apart on the row — the CLI's own words
+    expect(t).toContain('07-leg/01-implementation-thing  blocked · executability READY');
+    expect(t).toContain('07-leg/02-implementation-other  blocked · executability BLOCKED — dependency open: 07-leg/09-x (queued)');
+    expect(t).toContain('07-leg/09-x  queued · executability READY');
+    // …while the LEG's own lines stay absent: the colon-form field is the node's, and a leg
+    // is never run, so it is never asked (12/18, unchanged)
+    expect(t).not.toContain('executability:');
+  });
 });
 
 describe('README command table — the copy stays aligned with `ann commands`', () => {

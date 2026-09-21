@@ -239,6 +239,24 @@ export const UI_HTML = `<!doctype html>
     grill: { role: 'entry', badge: 'ENTRY', what: 'the contract gate — approving it lets the work start' },
     confirm: { role: 'exit', badge: 'EXIT', what: 'the result gate — approving it closes the task when the conclusion evidence is recorded (the same rule the frame runs), otherwise it awaits complete!' }
   };
+  /** THE UNLOCK CLAIM, ONLY WHEN THE ENGINE AGREES (leg 12/19): the step's what line and the
+   *  decide-now line both asserted the ENGINE's answer — the work starts, it lands — from
+   *  the HUMAN's fact (a gate was submitted), while detail.readiness (12/18's ONE
+   *  derivation) sat unread a few fields above them. A submitted gate whose run the engine
+   *  REFUSES says what its accept settles, and NAMES THE WAIT in the derivation's own
+   *  blocker string — never a second phrasing of the same fact. */
+  function runBlocked(rd) { return !!rd && rd.ready === false; }
+  function waitOn(rd) { return 'waiting on ' + (rd.blockers || []).join('; '); }
+  /** The step's what, from readiness. An ENTRY accept is the run's trigger, so it is the one
+   *  that can promise a run the engine refuses; the EXIT gate's sentence is about the CLOSE,
+   *  which readiness does not decide (12/18: an exit gate's question is the close), so its
+   *  wording is untouched in both states. */
+  function stepWhat(gate, rd) {
+    var s = STEP[gate];
+    if (!s) return '';
+    if (s.role !== 'entry' || !runBlocked(rd)) return s.what;
+    return 'the contract gate — approving it settles the contract; it does not start the work';
+  }
 
   function byId(id) { return document.getElementById(id); }
   function el(tag, text, cls) {
@@ -343,7 +361,7 @@ export const UI_HTML = `<!doctype html>
       b.appendChild(el('span', step.badge + ' · ' + g.gate, 'badge ' + step.role));
       b.appendChild(el('span', shorten(g.intent, 110), 'q-title'));
       b.appendChild(el('span', g.task + '  ·  leg ' + (g.leg || '') + '  ·  waiting since ' + (g.since || '?'), 'q-meta'));
-      b.appendChild(el('span', step.what, 'q-do ' + step.role));
+      b.appendChild(el('span', stepWhat(g.gate, g.readiness), 'q-do ' + step.role));
       b.appendChild(el('span', 'delivered: ' + delivered(g), 'q-meta'));
       b.addEventListener('click', function () { openCard(g.task, g.gate); });
       li.appendChild(b);
@@ -386,6 +404,15 @@ export const UI_HTML = `<!doctype html>
     if (gate && gateState(detail, gate).state === 'submitted') verdict = 'decide-now';
     switch (verdict) {
       case 'decide-now':
+        // A SUBMITTED GATE IS NOT AN UNLOCK (12/19): the decision is the human's and stays
+        // available, but any claim about the RUN comes from readiness, never from the
+        // submission. Blocked, the accept is named for what it settles — the entry gate's
+        // contract, the exit gate's result — and the wait is the derivation's own string.
+        if (runBlocked(detail.readiness)) {
+          return 'decide it now — accepting ' + gate + ' settles the ' +
+            (STEP[gate].role === 'entry' ? 'contract; it does not start the work' : 'result') +
+            ' — ' + waitOn(detail.readiness);
+        }
         return 'decide it now — accepting ' + gate + ' ' + (STEP[gate].role === 'entry' ? 'lets the work start' : 'lets it land');
       case 'closed':
         return 'closed';
@@ -474,7 +501,7 @@ export const UI_HTML = `<!doctype html>
           : 'TASK · ' + detail.status;
       byId('card-title').textContent = id;
       byId('card-what').textContent = decidable
-        ? step.what +
+        ? stepWhat(gate, detail.readiness) +
           (gate === 'confirm'
             ? ' — every result and evidence item below DRILLS IN: the commit’s git show, the local file at its path'
             : '')

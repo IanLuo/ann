@@ -288,6 +288,77 @@ const reads = (whatsnext: unknown, integ: unknown = integrity()): Record<string,
   '/api/next': nextRead,
 });
 
+describe('the served page — a submitted gate is never an unlock claim (leg 12/19)', () => {
+  /** A task whose grill is SUBMITTED and whose declared dependency is still open: the
+   *  human owes a decision, and the ENGINE refuses the run. The card must say both. */
+  const submittedGrill = (over: Record<string, unknown> = {}) =>
+    gateCard({
+      status: 'blocked',
+      gates: { grill: { state: 'submitted', at: '2026-09-21' }, confirm: { state: 'none' } },
+      next: { verdict: 'waiting-on-decision', gate: 'grill' },
+      readiness: { ready: false, blockers: ['dependency open: 01-leg/02-b (queued)'] },
+      ...over,
+    });
+  const bootGrill = async (over: Record<string, unknown> = {}) => {
+    const tab = boot({ ...reads(card()), [`/api/confirm?id=${TASK}`]: submittedGrill(over) }, '#drill=gate&id=' + encodeURIComponent(TASK) + '&gate=grill');
+    await flush();
+    return tab;
+  };
+
+  it('AC-1/AC-2 — the card names the WAIT in the derivation’s own words and prints NO unlock claim', async () => {
+    const tab = await bootGrill();
+    const next = tab.get('card-next').textContent;
+    const what = tab.get('card-what').textContent;
+    // the wait, by id and status — 12/17's wording, not a second phrasing of the same fact
+    expect(next).toContain('waiting on dependency open: 01-leg/02-b (queued)');
+    // …and the engine's answer is never asserted from the human's fact
+    for (const line of [next, what]) {
+      expect(line).not.toContain('lets the work start');
+      expect(line).not.toContain('lets it land');
+    }
+  });
+
+  it('AC-3 — the decision stays the human’s, and the card says exactly what an accept does', async () => {
+    const tab = await bootGrill();
+    expect(tab.get('card-decide').hidden, 'Accept/Reject stay available while the run is refused').toBe(false);
+    const next = tab.get('card-next').textContent;
+    // an accept settles the CONTRACT and does not start the work — never pointless, never a run
+    expect(next).toContain('settles the contract');
+    expect(next).toContain('does not start the work');
+    expect(tab.get('card-what').textContent).toContain('does not start the work');
+  });
+
+  it('AC-4 — the READY cases keep their wording: the entry accept starts the work', async () => {
+    const tab = await bootGrill({ readiness: { ready: true, blockers: [] } });
+    expect(tab.get('card-next').textContent).toContain('accepting grill lets the work start');
+    expect(tab.get('card-what').textContent).toContain('approving it lets the work start');
+    expect(tab.get('card-next').textContent).not.toContain('waiting on');
+  });
+
+  it('AC-4 — the READY exit gate is untouched: an accept lands it, and readiness is not its question', async () => {
+    const tab = boot({ ...reads(card()), [`/api/confirm?id=${TASK}`]: gateCard() }, '#drill=gate&id=' + encodeURIComponent(TASK) + '&gate=confirm');
+    await flush();
+    expect(tab.get('card-next').textContent).toContain('accepting confirm lets it land');
+    // the exit gate's `what` is about the CLOSE in both states — readiness never rewrites it
+    expect(tab.get('card-what').textContent).toContain('approving it closes the task when the conclusion evidence is recorded');
+  });
+
+  it('AC-4 — an EXIT gate whose run is refused still makes no run claim', async () => {
+    const tab = boot(
+      {
+        ...reads(card()),
+        [`/api/confirm?id=${TASK}`]: gateCard({ readiness: { ready: false, blockers: ['dependency open: 01-leg/02-b (queued)'] } }),
+      },
+      '#drill=gate&id=' + encodeURIComponent(TASK) + '&gate=confirm',
+    );
+    await flush();
+    const next = tab.get('card-next').textContent;
+    expect(next).not.toContain('lets it land');
+    expect(next).toContain('waiting on dependency open: 01-leg/02-b (queued)');
+    expect(tab.get('card-decide').hidden).toBe(false); // the decision is still yours to make
+  });
+});
+
 describe('the served page — a drill opens its own tab, and the URL is the drill', () => {
   it('the card shows the DEPENDENCY EDGES — inputs resolved, and task edges labelled as read from the record (leg 12/14)', async () => {
     const gateTab = boot(

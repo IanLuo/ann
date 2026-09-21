@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import type { TaskDetail, ResultItem, CheckView } from '../store/store.js';
 import type { GoalView } from '../commands/index.js';
 import type { Brief } from '../commands/index.js';
-import { renderStatusTree, renderGateCard, renderPlan, renderDrift, renderLedger, renderGoal, deferredLines, PlanLeg, PlanAhead } from './renderers.js';
+import { renderStatusTree, renderGateCard, renderPlan, renderDrift, renderLedger, renderGoal, deferredLines, execVerdict, PlanLeg, PlanAhead } from './renderers.js';
 import type { DeferredTask } from '../commands/index.js';
 import { MANIFEST_FILE } from '../store/docs.js';
 
@@ -196,7 +196,9 @@ const nodeCardLines = (c: NodeCard): string[] => {
   for (const a of c.artifacts) lines.push(`  - ${a.name} @ ${a.sha || '(no sha)'} [${a.role}]`, `      ${a.path}`);
   if (c.tasks) {
     lines.push('---', 'TASKS');
-    for (const t of c.tasks) lines.push(`  ${t.id}  ${t.status}`);
+    // THE SAME VERDICT EVERY OTHER ROW PRINTS (12/19 AC-5): this was the one row left
+    // printing the bare status, so the CLI and the page could disagree about one task.
+    for (const t of c.tasks) lines.push(`  ${t.id}  ${t.status}${execVerdict(t)}`);
   }
   if (c.blockers.length) {
     lines.push('---', 'BLOCKED — waiting on human:');
