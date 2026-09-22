@@ -105,6 +105,14 @@ export const UI_HTML = `<!doctype html>
   .deferred button { display: block; width: 100%; padding: .6rem .25rem; background: none; border: 0; color: var(--fg); font: inherit; text-align: left; cursor: pointer; }
   .deferred button:hover .q-title { color: var(--accent); }
   .badge.deferred { color: var(--warn); }
+  /* the REWORK rows (leg 12 task 06): a task owing a re-submission at a REJECTED gate is
+     open work but not READY work, and its gate is not undecided — so like a deferred task
+     it appears in neither the ready list nor the gate queue, and needs its own rows */
+  .rework { margin: .75rem 0 0; }
+  .rework li { border-top: 1px solid var(--line); }
+  .rework button { display: block; width: 100%; padding: .6rem .25rem; background: none; border: 0; color: var(--fg); font: inherit; text-align: left; cursor: pointer; }
+  .rework button:hover .q-title { color: var(--accent); }
+  .badge.rework { color: var(--warn); }
   .task { display: block; width: 100%; padding: .3rem .35rem; background: none; border: 0; border-left: 2px solid var(--line); color: var(--muted); font: inherit; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .85rem; text-align: left; cursor: pointer; }
   .task:hover { color: var(--fg); border-left-color: var(--accent); }
   .status-done { color: var(--ok); }
@@ -214,6 +222,8 @@ export const UI_HTML = `<!doctype html>
     <div id="legs"></div>
     <h3 id="deferred-head" hidden>Deferred — still owing</h3>
     <ul class="deferred" id="deferred"></ul>
+    <h3 id="rework-head" hidden>Rework owed — a rejected gate</h3>
+    <ul class="rework" id="rework"></ul>
   </section>
   <section class="card card-body" id="card" hidden>
     <h2 id="card-step-label">Gate card</h2>
@@ -353,6 +363,29 @@ export const UI_HTML = `<!doctype html>
     });
   }
 
+  /** THE REWORK ROWS (leg 12 task 06) — the rework owed at a REJECTED gate. The same shape
+   *  as the deferred rows, for the same reason: the task derives the rework word, which is
+   *  outside the ready set, and its gate is not undecided — so it is in neither the ready
+   *  list nor WAITING ON YOU, and without these rows the human's rejection vanishes from the
+   *  page. One row per task: its id, the gate, and the human's feedback VERBATIM. The row
+   *  drills into the node (presented, never decided — the re-submission is the human's). */
+  function renderRework(rework) {
+    var rows = rework || [];
+    var list = byId('rework');
+    list.replaceChildren();
+    byId('rework-head').hidden = !rows.length;
+    rows.forEach(function (r) {
+      var li = el('li');
+      var b = el('button');
+      b.appendChild(el('span', 'REWORK', 'badge rework'));
+      b.appendChild(el('span', r.task + '  ·  leg ' + (r.leg || '') + '  ·  the ' + (r.gate || 'gate') + ' gate was REJECTED' + (r.since ? ' (' + r.since + ')' : ''), 'q-title'));
+      b.appendChild(el('span', 'feedback: ' + (r.feedback || '(no feedback recorded)'), 'q-meta'));
+      b.addEventListener('click', function () { openCard(r.task, r.gate); });
+      li.appendChild(b);
+      list.appendChild(li);
+    });
+  }
+
   // ── the WAITING ON YOU queue: every undecided submission, EACH NAMED AS ITS STEP ──
   var queue = [];
   function undecidedGate(id) {
@@ -409,6 +442,17 @@ export const UI_HTML = `<!doctype html>
    *  disagree with check(), the queue, the driver or the CLI. The ONE thing this side
    *  adds is the gate IN HAND (the page knows which gate the operator clicked): a
    *  submitted gate in hand is decidable NOW. */
+  /** The human's own words at the last rejection — read from the brief the card ALREADY
+   *  carries (the same assembly the gate card's decisions field prints), never a second
+   *  read of the log. The rework line says WHAT was rejected; this says WHY, verbatim. */
+  function reworkWhy(detail) {
+    var decisions = (detail.brief || {}).decisions || [];
+    for (var i = decisions.length - 1; i >= 0; i--) {
+      if (decisions[i].type === 'rejected') return decisions[i].why ? ' — the feedback: ' + decisions[i].why : ' — (no feedback recorded)';
+    }
+    return '';
+  }
+
   function nextLine(detail, gate) {
     var v = detail.next || {};
     var verdict = v.verdict;
@@ -432,7 +476,7 @@ export const UI_HTML = `<!doctype html>
       case 'conclusion-missing':
         return 'the exit gate is accepted but the conclusion evidence is MISSING — record it, then close: complete! ' + detail.id;
       case 'rework':
-        return 'REWORK OWED — the last decision at the ' + (v.gate || 'gate') + ' gate is a REJECTION; the task must be reworked and re-submitted there before it can run';
+        return 'REWORK OWED — the last decision at the ' + (v.gate || 'gate') + ' gate is a REJECTION; the task must be reworked and re-submitted there before it can run' + reworkWhy(detail);
       case 'waiting-on-decision':
         return 'waiting on a decision — ' + (v.gate === 'confirm' ? 'confirm (exit)' : v.gate === 'grill' ? 'grill (entry)' : 'a gate') + ' is in WAITING ON YOU';
       case 'waiting-on-runner':
@@ -692,6 +736,7 @@ export const UI_HTML = `<!doctype html>
     'continue-leg': { run: true, what: 'the machine can run this step through the frame' },
     'advance-leg': { run: false, what: 'NOT machine-executable — the authored-work boundary: the front leg is empty, so the next leg is AUTHORED work (a human writes the contract), never a machine spawn' },
     'closure-needed': { run: false, what: 'NOT machine-executable — the authored-work boundary: the leg gate is unmet, so closing it is a GATED HUMAN move (a closure task: transfer or defer), never a machine close' },
+    'rework-needed': { run: false, what: 'NOT machine-executable — a bound gate was REJECTED and the task owes a rework: the move is the HUMAN’s (rework the contract, then re-submit it at THAT gate), never a machine run against the rejected bytes and never a closure' },
     'none': { run: false, what: 'NOT machine-executable — the authored-work boundary: every spawned leg is done; the goal consult is the human verdict (goal! met), never a machine seal' }
   };
   var EMPTY_CHAIN = 'nothing to execute — the frame activates the task and waits for the runner (empty chain)';
@@ -1342,6 +1387,7 @@ export const UI_HTML = `<!doctype html>
       renderState(r[0].doc.ahead || {});
       renderLegs(r[0].doc.legs || []);
       renderDeferred((r[0].doc.ahead || {}).deferred);
+      renderRework((r[0].doc.ahead || {}).rework);
       renderQueue(r[1].status === 200 ? r[1].doc : []);
       if (r[2].status !== 200) wnMessage("what's-next unavailable: " + JSON.stringify(r[2].doc.error), true);
       else { renderWhatsNext(r[2].doc); loadIntegrity(); } // the verdict is fetched LAZILY, after the render

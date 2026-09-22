@@ -82,7 +82,7 @@ session (unchanged); a bad/absent target fails closed at startup (named error, e
 | `goal` | `` | the goal-session view (goal-session-design §9): goalId · status · the authored goal doc (docs/goal.md) · the generated contract · structural state · verdict (met/unconfirmed/open) · legs (status words only) · alias --goal | `yes` |
 | `flow` | `<id>` | a task's RESOLVED flow + chain validation (the data the frame will execute) · alias --flow | `yes` |
 | `run!` | `<id>` | WRITE — run a task through the FRAME (materialize → grill → activate → execute → verify → confirm → commit); resumable, stops at the first block | `yes` |
-| `advance!` | `` | WRITE — the OPERATOR ACTION (F5 approve→execute): integrity re-checked fail-closed → the advance re-derived (a stale proposal executes nothing) → the ADVANCE card + the builder's ONE approve → continue-leg runs the frontmost-ready through the frame (run!) and lands at its next human gate; advance-leg / closure-needed / none are NOT machine-executable — the boundary/closure/goal-consult card, then stop | `yes` |
+| `advance!` | `` | WRITE — the OPERATOR ACTION (F5 approve→execute): integrity re-checked fail-closed → the advance re-derived (a stale proposal executes nothing) → the ADVANCE card + the builder's ONE approve → continue-leg runs the frontmost-ready through the frame (run!) and lands at its next human gate; advance-leg / closure-needed / rework-needed / none are NOT machine-executable — the boundary/closure/rework/goal-consult card, then stop | `yes` |
 | `commands` | `` | this table as markdown (the derived doc) · alias --commands | `yes` |
 | `help` | `` | usage · alias --help / -h | `yes` |
 | `read` | `<name>` | the L1 CONTENT read view — marker-stripped content + path + sha; resolves via the docs manifest (the forward path), with a legacy current-artifact fallback for history · alias --read | `yes` |
@@ -178,10 +178,11 @@ accepted task still lacks the evidence) flow instead.
 approve makes `advance!` re-check integrity (fail-closed on dirty state), re-derive the
 advance (a stale proposal executes nothing), and on continue-leg run the
 frontmost-ready through the frame — landing at the next human gate, never silently
-past one. advance-leg / closure-needed / none are NOT machine-executable: the
-boundary/closure/goal-consult card is presented and it stops (the authored-work
-boundary, flow-control-spec v7 §5 — never a machine spawn, never a machine gate
-answer).
+past one. advance-leg / closure-needed / rework-needed / none are NOT
+machine-executable: the boundary/closure/rework/goal-consult card is presented and it
+stops (the authored-work boundary, flow-control-spec v7 §5 — never a machine spawn,
+never a machine gate answer; a rework is authored work at a gate the human already
+decided, never a run against the rejected bytes).
 
 ### The operational log — observability for debugging
 

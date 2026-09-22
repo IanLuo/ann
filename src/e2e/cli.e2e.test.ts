@@ -252,6 +252,71 @@ describe('e2e — the CLI binary', () => {
     expect(out(cli(root, ['journey']))).not.toContain('DEFERRED');
   });
 
+  /* Leg 12 task 06 — THE REWORK MUST BE VISIBLE. The production shape (leg 12/05, 2026-09-14):
+   * a grill gate REJECTED with feedback. The task is open work but NOT ready work, and its gate
+   * is decided, so every pull surface used to drop it — `next` proposed it as frontmost-ready
+   * (a worker could be dispatched against the contract the human refused) or reported
+   * `closure-needed`, whose remedy is transfer/defer. The rejection was invisible. */
+  it('the REWORK surface — a rejected gate stays visible in next + journey, with the feedback VERBATIM (leg 12 task 06)', () => {
+    const FEEDBACK = 'the log should have tracing id and layer id, to indicate their timeline and location';
+    prep(root, LEG, TASK);
+    cli(root, ['spawn!', LEG, CONTRACT('the first leg')]);
+    cli(root, ['spawn!', TASK, CONTRACT('do the thing')]);
+    expect(out(cli(root, ['submit!', TASK, 'grill']))).toContain('submitted grill');
+    expect(out(cli(root, ['gate!', TASK, 'grill', 'reject', FEEDBACK]))).toContain('gate grill: reject');
+
+    // the task is NOT ready work — a rework is owed, and the derivation says so by name
+    const n = out(cli(root, ['next']));
+    expect(n).toContain('REWORK OWED — a rejected gate owes a re-submission');
+    expect(n).toContain(`${TASK} — rework owed at the grill gate (`); // the since-date is the log's own
+    expect(n).toContain(`feedback: ${FEEDBACK}`);
+    expect(n).not.toContain('transfer/defer'); // never the closure remedy
+    expect(n).toContain('rework-needed'); // the derivation, not continue-leg and not closure-needed
+
+    // `journey`'s WHAT IS AHEAD shows the same, beside the state lines
+    const j = out(cli(root, ['journey']));
+    expect(j).toContain('REWORK OWED — a rejected gate owes a re-submission');
+    expect(j).toContain(`feedback: ${FEEDBACK}`);
+    // …and the unfinished line names the RE-SUBMISSION, never the closure remedy (gated
+    // closure task = transfer/defer, the wrong move for a rejected contract)
+    expect(j).toContain('waiting on a re-submission at the grill gate');
+    expect(j).not.toContain('gated closure task');
+
+    // the JSON value (the shape the service route serves) carries the structured row
+    const expected = [{ task: TASK, leg: LEG, gate: 'grill', feedback: FEEDBACK, since: expect.any(String) }];
+    const nv = JSON.parse(cli(root, ['--json', 'next']).stdout) as { lookBack: { rework: unknown[] } };
+    expect(nv.lookBack.rework).toEqual(expected);
+    const jv = JSON.parse(cli(root, ['--json', 'journey']).stdout) as { ahead: { rework: unknown[] } };
+    expect(jv.ahead.rework).toEqual(expected);
+
+    // THE CARD carries the human's own words too — the row is not the only place they live
+    const card = out(cli(root, ['detail', TASK]));
+    expect(card).toContain('REWORK OWED');
+    expect(card).toContain('the grill gate');
+    expect(card).toContain(FEEDBACK);
+    expect(out(cli(root, ['confirm', TASK]))).toContain(FEEDBACK);
+
+    // the fix is a re-submission AT THAT GATE — the rejection is not a permanent wedge
+    expect(out(cli(root, ['status', TASK]))).toContain('rework');
+    expect(out(cli(root, ['submit!', TASK, 'grill']))).toContain('submitted grill');
+    expect(out(cli(root, ['next']))).not.toContain('REWORK OWED');
+  });
+
+  it('no rework owed → next/journey are unchanged (no REWORK section) (leg 12 task 06)', () => {
+    prep(root, LEG, TASK);
+    cli(root, ['spawn!', LEG, CONTRACT('the first leg')]);
+    cli(root, ['spawn!', TASK, CONTRACT('do the thing')]);
+    expect(out(cli(root, ['next']))).not.toContain('REWORK');
+    expect(out(cli(root, ['journey']))).not.toContain('REWORK');
+    // …and an ACCEPTED gate is still plain ready work — the 12/08 contrast, at the CLI seam
+    cli(root, ['submit!', TASK, 'grill']);
+    cli(root, ['gate!', TASK, 'grill', 'accept', 'looks right']);
+    const n = out(cli(root, ['next']));
+    expect(n).toContain(`frontmost-ready: ${TASK} (queued)`);
+    expect(n).toContain('continue-leg');
+    expect(n).not.toContain('REWORK');
+  });
+
   it('evidence! + complete! — the close gestures, with named refusals and no hand-written JSON', () => {
     prep(root, LEG, TASK);
     cli(root, ['spawn!', LEG, CONTRACT('the first leg')]);

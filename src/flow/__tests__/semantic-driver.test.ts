@@ -285,18 +285,23 @@ describe('AC-2 — it NEVER answers a gate and never self-closes', () => {
     // mis-dispatch the flattened `queued` word used to produce
     expect(c.status(TASK)).toBe('rework');
     expect(c.gateState(TASK, 'grill')).toBe('rejected');
-    expect(c.advance().action).toBe('closure-needed');
+    // THE DERIVATION NAMES THE REWORK (12/06) — it used to be `closure-needed`, whose remedy
+    // is transfer/defer and which the driver DRAFTED A CLOSURE for: the wrong authored work
+    // for a task that only needs its contract fixed.
+    expect(c.advance().action).toBe('rework-needed');
+    expect(c.advance().detail).toContain('grill');
     const before = logSnapshot(c);
     const { llm } = fakeLlm([call('run!', { id: TASK })]);
     const r = await drive(c, llm);
-    // the loop takes the boundary arm (the draft it offers is the human's to approve) —
-    // it never runs the rework-owed task, never answers its gate, never self-closes
-    expect(['draft-invalid', 'boundary-drafted']).toContain(r.stop);
+    // the loop takes the REWORK arm and DRAFTS NOTHING (12/06 — it used to draft): a rework
+    // is authored work at a gate the human already decided. It never runs the rework-owed
+    // task, never answers its gate, never self-closes.
+    expect(r.stop).toBe('boundary-rework');
     expect(logSnapshot(c)).toEqual(before); // ZERO writes
     expect(c.status(TASK)).toBe('rework'); // the gate is still the human's
   });
 
-  it('an EXPLICIT run! on a rework-owed task is refused at the pre-flight: lands at the gate with ZERO writes', async () => {
+  it('an EXPLICIT run! on a rework-owed task is landed at its BOUND gate by the pre-flight (a NAMED LANDING, not a refusal) — ZERO writes', async () => {
     writeNode('01-leg', []);
     writeNode(TASK, [ev('created'), ev('submitted', { gate: 'grill' }), ev('rejected', { gate: 'grill' })]);
     // a READY sibling keeps the derivation at continue-leg, so the loop actually reaches
@@ -308,8 +313,36 @@ describe('AC-2 — it NEVER answers a gate and never self-closes', () => {
     const { llm } = fakeLlm([call('run!', { id: TASK })]);
     const r = await drive(c, llm);
     expect(r.stop).toBe('human-gate');
-    expect(r.routeReason).toContain("'rejected'");
+    expect(r.routeReason).toContain('REJECTION');
+    expect(r.routeReason).toContain('grill');
     expect(logSnapshot(c)).toEqual(before);
+  });
+
+  it('THE HOLE 12/06 CLOSED: a CONFIRM-rejected task is landed at ITS gate — the grill-only check drove it as fresh work', async () => {
+    writeNode('01-leg', []);
+    // the gate IN HAND is confirm and its last decision is a rejection, while the grill is
+    // ACCEPTED — so the old grill-only pre-flight passed this task straight through and ran
+    // it as fresh work, redoing a task the human had already refused
+    writeNode(TASK, [
+      ev('created'),
+      ev('submitted', { gate: 'grill' }),
+      ev('confirmed', { gate: 'grill' }),
+      ev('submitted', { gate: 'confirm' }),
+      ev('rejected', { gate: 'confirm', feedback: 'the result is not what the ACs asked for' }),
+    ]);
+    // a READY sibling keeps the derivation at continue-leg, so the loop reaches the call
+    writeNode('01-leg/02-b', [ev('created'), ev('submitted', { gate: 'grill' }), ev('confirmed', { gate: 'grill' })]);
+    const c = commands();
+    expect(c.status(TASK)).toBe('rework');
+    expect(c.gateState(TASK, 'confirm')).toBe('rejected');
+    expect(c.advance().action).toBe('continue-leg');
+    const before = logSnapshot(c);
+    const { llm } = fakeLlm([call('run!', { id: TASK })]);
+    const r = await drive(c, llm);
+    expect(r.stop).toBe('human-gate');
+    expect(r.routeReason).toContain('confirm');
+    expect(r.routeReason).toContain('the result is not what the ACs asked for');
+    expect(logSnapshot(c)).toEqual(before); // ZERO writes — the re-submission stays the human's
   });
 
   it('submit! is the driver\'s present act: it opens the gate and lands, and the note carries the provenance', async () => {

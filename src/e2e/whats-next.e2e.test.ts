@@ -22,8 +22,8 @@ import net from 'node:net';
  *     optimistic local edit); the run's writes are exactly the frame's (activate + the
  *     verify wait), never a gate answer, never a self-close;
  *   · the DIRTY state refuses with the NAMED blockers carried through (AC-2, care c);
- *   · the BOUNDARY derivations (advance-leg · closure-needed · none) present and STOP —
- *     200, nothing executed, zero writes (the authored-work boundary, flow-control v7 §5);
+ *   · the BOUNDARY derivations (advance-leg · closure-needed · rework-needed · none) present
+ *     and STOP — 200, nothing executed, zero writes (the authored-work boundary, v7 §5);
  *   · a STALE proposal refuses (nothing executed);
  *   · the NO-SUBMISSION gate refuses fail-closed with the named message — the daemon never
  *     prompts (care a), zero writes;
@@ -594,8 +594,15 @@ describe('e2e — the approve FAILS CLOSED: no submission (care a) and a dirty s
  * journey-wide `check()` failure on every read. This suite pins the prevention over HTTP:
  * the word, the CLEAN integrity read, the derivation (the authored-work boundary, never
  * continue-leg) and the derived verdict carrying the gate + the human's feedback.
+ *
+ * 12/06 CONTINUES IT (the rework must be VISIBLE): the WORD alone still left the state
+ * unreadable — the steering surfaces fell into `closure-needed`, whose remedy is
+ * transfer/defer and for which the driver drafts a CLOSURE, and nothing anywhere named the
+ * gate or the human's feedback. This suite now pins the derivation as `rework-needed`, the
+ * look-back's OWN rework section (gate + feedback verbatim), and the feedback reaching the
+ * brief the card renders.
  */
-describe('e2e — a REJECTED bound gate derives the `rework` WORD: not proposed, journey CLEAN (12/08)', () => {
+describe('e2e — a REJECTED bound gate: the `rework` WORD, then the `rework-needed` DERIVATION (12/08 + 12/06)', () => {
   let root: string;
   let server!: Server;
 
@@ -613,9 +620,15 @@ describe('e2e — a REJECTED bound gate derives the `rework` WORD: not proposed,
     // the WORD is the honest one — and it is exactly what keeps the task out of the ready set
     expect(await taskStatus(server, FIRST)).toBe('rework');
     const v = await card(server);
-    // no ready work in the leg → the derivation is the authored-work boundary, never the
-    // continue-leg invitation that drove 12/05 twice
-    expect(v.advance.action).toBe('closure-needed');
+    // NO READY WORK AND A REWORK OWED (12/06) → the derivation is `rework-needed`: never the
+    // continue-leg invitation that drove 12/05 twice, and never the `closure-needed` branch
+    // this state used to fall into — whose remedy is transfer/defer (the WRONG move for a
+    // task that only needs its contract fixed) and for which the driver drafts a CLOSURE.
+    // The detail names the task, the GATE, and the human's own feedback.
+    expect(v.advance.action).toBe('rework-needed');
+    expect(v.advance.detail).toContain('REWORK');
+    expect(v.advance.detail).toContain('grill');
+    expect(v.advance.detail).toContain('the contract is not right yet — rework it');
     expect(v.frontmost).toBeUndefined();
     expect(v.executable).toBe(false); // the approve is not even offered
     // …and the journey is CLEAN: one human rejection no longer fails every read (the wedge
@@ -629,22 +642,46 @@ describe('e2e — a REJECTED bound gate derives the `rework` WORD: not proposed,
     expect(r.status).toBe(200);
     const doc = JSON.parse(r.body) as { value: { stop: string; derivation: { action: string } } };
     expect(doc.value.stop).toBe('boundary');
-    expect(doc.value.derivation.action).toBe('closure-needed');
+    expect(doc.value.derivation.action).toBe('rework-needed');
     expect(await logTypes(server, FIRST)).toEqual(before);
+  });
+
+  it('the look-back carries the rework as its OWN section — the gate and the feedback VERBATIM (12/06)', { timeout: 30_000 }, async () => {
+    const r = await get(server.url + '/api/journey');
+    expect(r.status).toBe(200);
+    const ahead = (JSON.parse(r.body) as { ahead: { rework: Array<Record<string, string>> } }).ahead;
+    // the same derivation `ann next` reads — the page and the CLI can never disagree about
+    // it; a rework-owed task is in neither the ready list nor WAITING ON YOU, so without this
+    // section the human's rejection is invisible to every machine surface
+    expect(ahead.rework).toEqual([
+      { task: FIRST, leg: LEG, gate: 'grill', feedback: 'the contract is not right yet — rework it', since: expect.any(String) },
+    ]);
   });
 
   it('the rework is on the node itself (the next line is DERIVED, not worded locally)', { timeout: 30_000 }, async () => {
     const r = await get(server.url + `/api/confirm?id=${encodeURIComponent(FIRST)}`);
     expect(r.status).toBe(200);
     const d = JSON.parse(r.body) as {
-      detail: { status: string; rework: boolean; next: { verdict: string; gate?: string }; gates: { grill: { state: string } }; events: Array<{ type: string; feedback?: string }> };
+      detail: {
+        status: string;
+        rework: boolean;
+        next: { verdict: string; gate?: string };
+        gates: { grill: { state: string } };
+        events: Array<{ type: string; feedback?: string }>;
+        brief: { decisions: Array<{ type: string; gate: string; why?: string }> };
+      };
     };
     expect(d.detail.status).toBe('rework');
     expect(d.detail.gates.grill.state).toBe('rejected');
     expect(d.detail.rework).toBe(true);
     expect(d.detail.next).toEqual({ verdict: 'rework', gate: 'grill' });
-    // the human's own feedback is in the record the verdict points at (12/06 renders it)
+    // THE FEEDBACK THE VERDICT POINTS AT (12/06 — this comment used to promise it): it is in
+    // the record, AND in the brief the card already carries as `why`, which is exactly what
+    // the rework line renders — the page's `nextLine` and the CLI's `nodeCardLines` both read
+    // it there, so neither re-words it. (The rendering itself is pinned in ui-drill.test.ts
+    // and command-renderers.test.ts; this is the payload both read.)
     expect(d.detail.events.some((e) => e.type === 'rejected' && e.feedback === 'the contract is not right yet — rework it')).toBe(true);
+    expect(d.detail.brief.decisions.some((dec) => dec.type === 'rejected' && dec.why === 'the contract is not right yet — rework it')).toBe(true);
   });
 });
 

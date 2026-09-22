@@ -826,6 +826,107 @@ describe('the served page — the DEFERRED work is visible (leg 12 task 01)', ()
   });
 });
 
+/**
+ * Leg 12 task 06 — THE REWORK MUST BE VISIBLE. A task owing a re-submission at a REJECTED
+ * gate derives the rework word, which is outside the ready set, and its gate is not
+ * undecided: so it is in neither the ready list nor WAITING ON YOU, and without its own list
+ * the human's rejection vanishes from the page while the CLI still reads a boundary. Same
+ * rows, off the SAME `ahead.rework` the journey route carries (`/api/journey`); each DRILLS
+ * into its node with the rejected gate in hand — presented, never decided (the re-submission
+ * is the human's move, never the machine's).
+ */
+const RW_LEG = '12-operate-loop';
+const RW = `${RW_LEG}/05-implementation-observability-log`;
+const RW_FEEDBACK = 'the log should have tracing id and layer id';
+const RW_SINCE = '2026-09-14';
+const reworkJourney = {
+  ahead: {
+    activeLeg: RW_LEG,
+    activeLegStatus: 'rework',
+    legGate: { met: true },
+    rework: [{ task: RW, leg: RW_LEG, gate: 'grill', feedback: RW_FEEDBACK, since: RW_SINCE }],
+  },
+  legs: [{ id: RW_LEG, status: 'rework', tasks: [{ id: RW, status: 'rework' }] }],
+};
+const reworkCard = {
+  advance: { leg: RW_LEG, action: 'rework-needed', detail: `${RW} owes a REWORK at the grill gate — the human rejected it: "${RW_FEEDBACK}". Rework and re-submit THERE` },
+  legGate: { met: true },
+  pendingGates: [],
+  executable: false,
+};
+const reworkReads = (): Record<string, unknown> => ({
+  ...reads(reworkCard),
+  '/api/journey': reworkJourney,
+  [`/api/confirm?id=${RW}`]: confirmRead({
+    id: RW,
+    status: 'rework',
+    rework: true,
+    next: { verdict: 'rework', gate: 'grill' },
+    gates: { grill: { state: 'rejected', at: RW_SINCE }, confirm: { state: 'none' } },
+    brief: {
+      decisions: [{ at: RW_SINCE, type: 'rejected', gate: 'grill', note: 'rejected (ianluo)', why: RW_FEEDBACK }],
+      conclusion: { claims: [], unclaimed: [], checks: [] },
+    },
+  }),
+});
+
+describe('the served page — the REWORK OWED is visible (leg 12 task 06)', () => {
+  it('renders the row: the task, the REJECTED gate, and the human feedback VERBATIM', async () => {
+    const page = boot(reworkReads());
+    await flush();
+    expect(page.get('rework-head').hidden).toBe(false);
+    const rows = page.get('rework').text();
+    expect(rows).toContain(RW);
+    expect(rows).toContain('grill gate was REJECTED');
+    expect(rows).toContain(RW_FEEDBACK); // the human's own words — never re-worded
+    expect(rows).toContain(RW_SINCE);
+    // the leg line reads rework — the derived word 12/08 landed, now carried to the page
+    expect(page.get('legs').text()).toContain(`${RW_LEG} · rework`);
+  });
+
+  it('a rework row drills into its node WITH the rejected gate in hand — presented, never decided', async () => {
+    const page = boot(reworkReads());
+    await flush();
+    const row = page.get('rework').descendants().find((c) => c.tag === 'button');
+    expect(row, 'the rework row is not a drill').toBeDefined();
+    row!.click();
+    await flush();
+    expect(page.fetched).toContain(`/api/confirm?id=${RW}`);
+    expect(page.get('card-title').textContent).toBe(RW);
+    // the card names the REWORK as the next line, and the human's feedback with it — the
+    // WHY used to live only in the raw event dump
+    expect(page.get('card-next').textContent).toContain('REWORK OWED');
+    expect(page.get('card-next').textContent).toContain('grill');
+    expect(page.get('card-next').textContent).toContain(RW_FEEDBACK);
+  });
+
+  it("WHAT'S NEXT presents the rework NEED derivation — never a dead approve button", async () => {
+    const page = boot(reworkReads());
+    await flush();
+    expect(page.get('wn-action').textContent).toBe('rework-needed');
+    expect(page.get('wn-detail').textContent).toContain('grill');
+    expect(page.get('wn-detail').textContent).toContain(RW_FEEDBACK);
+    // the authored-work boundary: presented and stopped, and never offerable to the machine
+    expect(page.get('wn-badge').textContent).toBe('PRESENTED AND STOPPED');
+    expect(page.get('drive').disabled).toBe(true);
+  });
+
+  it('no rework owed → the section is HIDDEN, never left showing a stale row', async () => {
+    const page = boot({ ...reads(card()), '/api/journey': journey });
+    await flush();
+    expect(page.get('rework-head').hidden).toBe(true);
+    expect(page.get('rework').text()).toBe('');
+  });
+
+  it('the served bytes carry the section — the markup a browser gets, not just the render', async () => {
+    // FakeEl parses no static attributes, so the SHIPPED page is asserted against the bytes
+    // the server actually serves: the head, the list, and their ids
+    expect(UI_HTML).toContain('<h3 id="rework-head" hidden>Rework owed — a rejected gate</h3>');
+    expect(UI_HTML).toContain('<ul class="rework" id="rework"></ul>');
+    expect(UI_HTML).toContain('.badge.rework');
+  });
+});
+
 describe('the served page — the node’s EVENT LIST is on the card (leg 10/04’s read, wired in)', () => {
   it('lists the node’s events in LOG ORDER, each row a NEW-TAB drill into the raw record', async () => {
     const gateReads: Record<string, unknown> = { ...reads(card()), [`/api/confirm?id=${TASK}`]: gateCard() };

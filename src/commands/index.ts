@@ -230,6 +230,24 @@ export interface DeferredTask {
   plan?: string;
 }
 
+/** ONE REWORK-OWED TASK (leg 12 task 06 — THE REWORK MUST BE VISIBLE): the task, the leg
+ *  it stalled, the gate whose LAST decision was a rejection, the human's `feedback`
+ *  VERBATIM, and when. Derived from the log alone — the bound gate's `lastRejection`
+ *  (`workflow.ts` GateView) is the ONE derivation of "the last decision was a rejection",
+ *  so this read never re-derives it. A rework-owed task is OPEN but NOT in READY_STATUSES:
+ *  the pull surfaces (frontmost-ready / pending gates) skip it by construction, so without
+ *  this read the human's rejection is invisible to every machine surface — the hole 12/05
+ *  drove through twice. */
+export interface ReworkTask {
+  task: string;
+  leg: string;
+  /** The gate whose LAST decision was the rejection — never arbitrary, so the type says
+   *  so (a caller that must name a gate to the human gets the same narrowing free). */
+  gate: 'grill' | 'confirm';
+  feedback: string;
+  since: string;
+}
+
 /** The path-looking token in a deferred reason: a relative path with a doc/code
  *  extension. Deliberately conservative — a token that is not OBVIOUSLY a path (a URL, a
  *  bare word, a sentence fragment) is not one, and the reason is then printed verbatim
@@ -256,6 +274,11 @@ export interface LookBack {
    *  the pull surface (frontmost-ready / pending gates) never names it — this is the one
    *  read that keeps the postponed obligation visible. Always present ([] when none). */
   deferred: DeferredTask[];
+  /** THE OUTSTANDING REWORK (leg 12 task 06): a task owing a re-submission at a REJECTED
+   *  gate is open work but NOT ready work (`READY_STATUSES`), and its gate is not
+   *  `undecided`, so both pull surfaces skip it — the same invisibility `deferred` exists
+   *  to cure, for the same reason. Always present ([] when none). */
+  rework: ReworkTask[];
 }
 
 /** ONE WAITING GATE, with what a human needs to SEE it (the queue's label): the gate's
@@ -290,7 +313,12 @@ export interface PendingGate {
 /** The advance view (flow-control v6 §2/§5 — the leg gate validated from logs). */
 export interface AdvanceView {
   leg: string;
-  action: 'continue-leg' | 'advance-leg' | 'closure-needed' | 'none';
+  /** `rework-needed` (leg 12 task 06) is the rework OWED at a rejected gate: not
+   *  continue-leg (that would dispatch a worker against the contract the human rejected),
+   *  and deliberately not `closure-needed` (whose remedy is transfer/defer, and which the
+   *  driver drafts a CLOSURE for — the wrong move entirely for a task that needs its
+   *  contract fixed). */
+  action: 'continue-leg' | 'advance-leg' | 'closure-needed' | 'rework-needed' | 'none';
   detail: string;
 }
 
@@ -1388,6 +1416,39 @@ export class Commands {
     return out.sort((a, b) => a.task.localeCompare(b.task));
   }
 
+  /** THE REWORK READ (leg 12 task 06 — THE REWORK MUST BE VISIBLE) — the obligations the
+   *  pull surface drops for the same reason it drops the deferred: a task owing a
+   *  re-submission at a REJECTED gate derives the `rework` WORD, which is outside
+   *  `READY_STATUSES` (so frontmost-ready never proposes it) and its gate is not
+   *  `undecided` (so the gate queue never names it). Without this read the human's
+   *  rejection is invisible to every machine surface — the hole 12/05 drove through twice.
+   *
+   *  Read-only, derived on demand over the logs: no event, no state, no write path. The
+   *  gate and the feedback come from the SAME projection the status word came from
+   *  (`workflowState().next`, then that gate's `lastRejection`), so the row's gate can
+   *  never disagree with the word that selected it. */
+  reworkWork(): ReworkTask[] {
+    const out: ReworkTask[] = [];
+    for (const id of this.store.ids()) {
+      if (!id.includes('/')) continue;
+      if (this.store.status(id) !== 'rework') continue;
+      const wf = workflowState(this.store.events(id));
+      // the verdict carries the gate (`gate` is optional on the union, so narrow on it —
+      // a `rework` verdict always derives one); no gate means no row to word.
+      const gate = wf.next.verdict === 'rework' ? wf.next.gate : undefined;
+      if (!gate) continue;
+      const rejection = gateView(this.store.events(id), gate).lastRejection;
+      out.push({
+        task: id,
+        leg: id.split('/')[0],
+        gate,
+        feedback: rejection?.feedback ?? '',
+        since: String(rejection?.at ?? ''),
+      });
+    }
+    return out.sort((a, b) => a.task.localeCompare(b.task));
+  }
+
   /** Uncommitted TRACKED changes under the moving tree (.ann/journey) — `??` lines
    *  are untracked scratch and never a refusal basis. Non-git roots read clean (the
    *  guard is about not losing tracked work, not about git being present). */
@@ -1546,6 +1607,7 @@ export class Commands {
       legGate,
       pendingGates,
       deferred: this.deferredWork(),
+      rework: this.reworkWork(),
     };
   }
 
@@ -1559,6 +1621,24 @@ export class Commands {
       const tasks = this.store.tasksOf(working);
       const ready = tasks.filter((t) => READY_STATUSES.includes(this.store.status(t)));
       if (ready.length) return { leg: working, action: 'continue-leg', detail: `next task: ${ready[0]} (${this.store.status(ready[0])})` };
+      // THE REWORK OWED (leg 12 task 06): a task whose bound gate was REJECTED is open but
+      // NOT ready, so it is filtered out above and — before this branch — fell into
+      // `closure-needed`, whose remedy is transfer/defer. That named the WRONG move for a
+      // task that only needs its contract fixed, and it was not merely cosmetic: the driver
+      // drafts a CLOSURE for `closure-needed` (semantic-driver.ts). This branch comes first
+      // so the rejection is what the human reads; the two genuine closure branches below
+      // (an exhausted leg, an unmet leg gate) are untouched.
+      const rework = this.reworkWork().filter((r) => r.leg === working);
+      if (rework.length) {
+        const r = rework[0];
+        return {
+          leg: working,
+          action: 'rework-needed',
+          detail: `${r.task} owes a REWORK at the ${r.gate} gate — the human rejected it${
+            r.feedback ? `: "${r.feedback}"` : ' (no feedback recorded)'
+          }. Rework and re-submit THERE; this is neither fresh work to dispatch nor a leg to close`,
+        };
+      }
       const done = tasks.filter((t) => CLOSED_TASK_STATUSES.includes(this.store.status(t))).length;
       const blocked = tasks.filter((t) => this.store.status(t) === 'blocked').length;
       // THE LABEL SAYS WHAT IT MEANS (leg 12 task 14): this branch is the ACTIVE leg having

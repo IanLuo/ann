@@ -294,7 +294,7 @@ const COMMANDS: Array<{ name: string; args: string; desc: string }> = [
   { name: 'goal', args: '', desc: 'the goal-session view (goal-session-design §9): goalId · status · the authored goal doc (docs/goal.md) · the generated contract · structural state · verdict (met/unconfirmed/open) · legs (status words only) · alias --goal' },
   { name: 'flow', args: '<id>', desc: 'a task\'s RESOLVED flow + chain validation (the data the frame will execute) · alias --flow' },
   { name: 'run!', args: '<id>', desc: 'WRITE — run a task through the FRAME (materialize → grill → activate → execute → verify → confirm → commit); resumable, stops at the first block' },
-  { name: 'advance!', args: '', desc: 'WRITE — the OPERATOR ACTION (F5 approve→execute): integrity re-checked fail-closed → the advance re-derived (a stale proposal executes nothing) → the ADVANCE card + the builder\'s ONE approve → continue-leg runs the frontmost-ready through the frame (run!) and lands at its next human gate; advance-leg / closure-needed / none are NOT machine-executable — the boundary/closure/goal-consult card, then stop' },
+  { name: 'advance!', args: '', desc: 'WRITE — the OPERATOR ACTION (F5 approve→execute): integrity re-checked fail-closed → the advance re-derived (a stale proposal executes nothing) → the ADVANCE card + the builder\'s ONE approve → continue-leg runs the frontmost-ready through the frame (run!) and lands at its next human gate; advance-leg / closure-needed / rework-needed / none are NOT machine-executable — the boundary/closure/rework/goal-consult card, then stop' },
   { name: 'commands', args: '', desc: 'this table as markdown (the derived doc) · alias --commands' },
   { name: 'help', args: '', desc: 'usage · alias --help / -h' },
   { name: 'read', args: '<name>', desc: 'the L1 CONTENT read view — marker-stripped content + path + sha; resolves via the docs manifest (the forward path), with a legacy current-artifact fallback for history · alias --read' },
@@ -518,6 +518,9 @@ export const HANDLERS: Record<string, Handler> = {
       // the outstanding deferred work rides the journey view (leg 12 task 01) — the
       // same derivation `next` reads, never a second one
       deferred: lb.deferred,
+      // …and so does the REWORK OWED at a rejected gate (leg 12 task 06) — the same
+      // derivation `next` reads, so the page and the CLI can never disagree about it
+      rework: lb.rework,
     };
     return { ok: true, value: { legs: rows, ahead } };
   },

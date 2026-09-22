@@ -3,8 +3,8 @@ import { join } from 'node:path';
 import type { TaskDetail, ResultItem, CheckView } from '../store/store.js';
 import type { GoalView } from '../commands/index.js';
 import type { Brief } from '../commands/index.js';
-import { renderStatusTree, renderGateCard, renderPlan, renderDrift, renderLedger, renderGoal, deferredLines, execVerdict, PlanLeg, PlanAhead } from './renderers.js';
-import type { DeferredTask } from '../commands/index.js';
+import { renderStatusTree, renderGateCard, renderPlan, renderDrift, renderLedger, renderGoal, deferredLines, reworkLines, execVerdict, PlanLeg, PlanAhead } from './renderers.js';
+import type { DeferredTask, ReworkTask } from '../commands/index.js';
 import { MANIFEST_FILE } from '../store/docs.js';
 
 /**
@@ -191,6 +191,15 @@ const nodeCardLines = (c: NodeCard): string[] => {
   const gateLine = (g: { state: string; at?: string }) =>
     `GATE ${g.state === 'accepted' ? '✓' : g.state === 'rejected' ? '✗' : g.state === 'submitted' ? '…' : '·'} ${g.state}${g.at ? ` (${g.at})` : ''}`;
   lines.push(`  ${gateLine(c.gates.grill)} — grilling (entry)`, `  ${gateLine(c.gates.confirm)} — confirm-result (exit)`);
+  // THE REWORK OWED (leg 12 task 06): the gate states above print `rejected` and stop
+  // there, so the WHY reached only the raw event dump. The feedback is the human's own,
+  // read from the brief this card ALREADY carries — the same assembly `ann brief` prints
+  // (never a second read of the log), and printed verbatim, exactly as that command does.
+  if (c.rework) {
+    const why = c.brief.decisions.filter((d) => d.type === 'rejected').pop()?.why;
+    lines.push(`REWORK OWED — the last decision at the ${c.next?.gate ?? 'bound'} gate was a REJECTION: rework it and re-submit at that gate`);
+    lines.push(`  feedback: ${why ? why : '(NOT RECORDED)'}`);
+  }
   lines.push('---', 'ARTIFACTS');
   if (!c.artifacts.length) lines.push('  (none locked)');
   for (const a of c.artifacts) lines.push(`  - ${a.name} @ ${a.sha || '(no sha)'} [${a.role}]`, `      ${a.path}`);
@@ -368,6 +377,7 @@ export const RENDERS: Record<string, Renderer> = {
         legGate: { met: boolean; blocker?: string };
         pendingGates: Array<{ task: string; gate: string; readiness: { ready: boolean; blockers: string[] }; closesOnAccept?: boolean }>;
         deferred?: DeferredTask[];
+        rework?: ReworkTask[];
       };
       advance: { action: string; detail: string };
       goal?: { goalId: string; goalStatus: string; verdict: string };
@@ -398,7 +408,7 @@ export const RENDERS: Record<string, Renderer> = {
     lines.push(`  leg gate: ${lb.legGate.met ? 'MET' : `UNMET — ${lb.legGate.blocker}`}`);
     if (v.advance.action === 'none') {
       if (v.goal) lines.push(`  goal: ${v.goal.goalId} [${v.goal.goalStatus}] — verdict ${v.goal.verdict}`);
-    } else if (!lb.frontmostReady && !lb.pendingGates.length) {
+    } else if (!lb.frontmostReady && !lb.pendingGates.length && v.advance.action !== 'rework-needed') {
       lines.push('  no ready action — resolve blocked tasks or close via a gated closure task');
     }
     lines.push(`  advance: ${v.advance.action} — ${v.advance.detail}`);
@@ -406,6 +416,10 @@ export const RENDERS: Record<string, Renderer> = {
     // state line above is never replaced — the exhausted consult and the deferred
     // obligation are both shown.
     if (lb.deferred?.length) lines.push(...deferredLines(lb.deferred));
+    // The REWORK OWED (leg 12 task 06), appended the same way — and the 'no ready action'
+    // line above is SUPPRESSED when one is owed, because it names the wrong move there
+    // (resolve the blocked / close via a closure task); the rework section says the real one.
+    if (lb.rework?.length) lines.push(...reworkLines(lb.rework));
     return block(lines);
   },
 
@@ -998,8 +1012,8 @@ interface RunValue {
 interface AdvanceValue {
   stop: 'refused-integrity' | 'declined' | 'stale-proposal' | 'boundary' | 'advanced';
   phase: string;
-  derivation: { leg: string; action: 'continue-leg' | 'advance-leg' | 'closure-needed' | 'none'; detail: string };
-  reDerivation?: { leg: string; action: 'continue-leg' | 'advance-leg' | 'closure-needed' | 'none'; detail: string };
+  derivation: { leg: string; action: 'continue-leg' | 'advance-leg' | 'closure-needed' | 'rework-needed' | 'none'; detail: string };
+  reDerivation?: { leg: string; action: 'continue-leg' | 'advance-leg' | 'closure-needed' | 'rework-needed' | 'none'; detail: string };
   blockers: string[];
   frontmost?: { leg: string; task: string; status: string };
   goal?: { goalId?: string; goalStatus?: string; verdict: string; structural: { exhausted: boolean; detail: string } };
@@ -1039,6 +1053,21 @@ function boundaryLines(v: AdvanceValue): string[] {
       '  re-scopes itself silently. Resolve the blocked tasks, or author a gated closure task (a sibling)',
       '  that records gate-revised / transferred / deferred on the task and concludes through its own',
       '  gate①/gate② — the look-back then derives the next advance.',
+    ];
+  }
+  if (d.action === 'rework-needed') {
+    // WITHOUT this arm the derivation falls into the goal consult below and tells the operator the
+    // journey is exhausted — offering goal! met / goal! archive for a task whose gate the human
+    // REJECTED. The remedy is neither a closure nor a seal: it is authored work at that gate.
+    return [
+      head,
+      `  derivation: ${d.detail}`,
+      '  a rework is AUTHORED WORK at the gate that decided (flow-control v7 §5): the human already made',
+      '  the decision, and re-submitting to it is theirs too — never a machine run against the rejected',
+      '  bytes, and never a closure (the closure remedy is transfer/defer, the wrong move entirely).',
+      '  Rework the contract, then re-submit it AT THAT gate:',
+      '      ann submit! <task> <grill|confirm>      (re-submitting clears the owed rework)',
+      '  advance! then re-derives continue-leg and runs the front-most ready task.',
     ];
   }
   // action 'none' — the four-state goal consult (goal-session-design §5)

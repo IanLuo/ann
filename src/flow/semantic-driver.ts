@@ -303,6 +303,11 @@ export type DriverStop =
   | 'boundary-drafted'
   /** The `none` boundary: the goal consult is presented and the loop stops (design Q3). */
   | 'boundary-none'
+  /** The REWORK boundary (leg 12 task 06): a bound gate was REJECTED, so the move is the
+   *  human's own rework at that gate — presented and stopped, and NOTHING is drafted: a
+   *  rework is never a machine-authored contract, and it is emphatically not the closure
+   *  `closure-needed` would have drafted for the same task. */
+  | 'boundary-rework'
   /** The drafted contract failed validation — nothing is offered for approval. */
   | 'draft-invalid'
   /** A VALIDATED call the command layer refused (a named blocker), or a frame stop that
@@ -473,6 +478,18 @@ export async function runSemanticDriver(deps: DriverDeps): Promise<DriverResult>
       return {
         ...base('boundary-none', `the derivation is 'none' — the goal consult is presented and the loop stops (design Q3: goal! met · archive · a new leg are HUMAN moves; the driver drafts nothing here and writes nothing)`),
         ...(goal ? { consult: goal } : {}),
+        ...(resumed ? { resumed } : {}),
+      };
+    }
+    // rework-needed (leg 12 task 06) — PRESENT AND STOP, drafting nothing. The human
+    // already decided at this gate (they rejected); the next move is theirs, and it is
+    // specific: rework the contract and re-submit it THERE. Falling through to the draft
+    // arm below would draft a CLOSURE for a task that only needs its contract fixed —
+    // the exact wrong authored work, and the reason this word is not `closure-needed`.
+    if (first.advance.action === 'rework-needed') {
+      await channel.present(reworkCard(first.advance));
+      return {
+        ...base('boundary-rework', `the derivation is 'rework-needed' — a bound gate was REJECTED and the task owes a re-submission there: the driver drafts NOTHING (a rework is authored work at a gate the human already decided) and writes nothing`),
         ...(resumed ? { resumed } : {}),
       };
     }
@@ -678,6 +695,25 @@ async function execRun(deps: DriverDeps, channel: PresentOnlyInteract, taskId: s
   const args = { id: taskId };
   const before = commands.events(taskId).length;
   const wroteNow = (): string[] => commands.events(taskId).slice(before).map((e) => `${taskId}: ${e.type}${typeof e.gate === 'string' ? `@${e.gate}` : ''}`);
+
+  // A TASK OWING A REWORK IS NOT FRESH WORK (leg 12 task 06). The grill check below reads
+  // ONE gate, so a task whose CONFIRM gate was rejected drove straight through it as fresh
+  // work — this closes that hole, and it covers both gates at once because the derived
+  // `rework` word already means "the LAST decision at a bound gate was a rejection, with no
+  // re-submission since". The mechanism, as AC-3 asks to record, is a NAMED LANDING (not a
+  // refusal): the run stops AT the gate that owes the rework, with zero writes, and names
+  // the human's own feedback — the same treatment the grill branch already gives.
+  const owed = commands.reworkWork().find((r) => r.task === taskId);
+  if (owed) {
+    return {
+      kind: 'landed',
+      executed: { turn, call: 'run!', args, output: { preflight: `the ${owed.gate} gate is rejected — a rework is owed` }, wrote: [] },
+      landing: { where: 'gate', task: taskId, gate: owed.gate },
+      reason: `'run!' did not run ${taskId}: the LAST decision at its ${owed.gate} gate is a REJECTION — the task owes a rework and a re-submission there${
+        owed.feedback ? ` ("${owed.feedback}")` : ''
+      }, which is the human's move, never a machine run (nothing was written)`,
+    };
+  }
 
   const grill = commands.gateState(taskId, 'grill');
   if (grill !== 'accepted') {
@@ -909,6 +945,15 @@ function consultCard(obs: DriverObservation, goal: GoalView | undefined): string
     goal ? `  goal: ${goal.goalId ?? '(none)'} · structural: ${goal.structural.detail} · verdict: ${goal.verdict}` : '  goal: (absent)',
     '  the session-end moves are HUMAN moves: (1) goal! met · (2) a new work leg (spawn! + a task) · (3) goal! archive & a new goal.',
     '  the driver drafts nothing here and writes nothing (design Q3).',
+  ].join('\n');
+}
+
+function reworkCard(advance: AdvanceView): string {
+  return [
+    `REWORK OWED — the derivation is 'rework-needed' (${advance.leg})`,
+    `  ${advance.detail}`,
+    '  the rework is AUTHORED WORK at a gate the human already decided: the driver drafts nothing and writes nothing.',
+    '  the move: rework the contract, then re-submit it at that gate (ann submit!) — never dispatch a worker against the rejected bytes.',
   ].join('\n');
 }
 

@@ -167,6 +167,78 @@ describe('renderPlan (F12 — full plan)', () => {
     expect(text).not.toContain('DEFERRED');
   });
 
+  /* Leg 12 task 06 — the REWORK surface: a task owing a re-submission at a REJECTED gate is
+   * open work but NOT ready work, and its gate is not undecided, so both pull surfaces skip
+   * it. Same treatment as the deferred: shown ALONGSIDE the state lines, never instead. */
+  it('surfaces the REWORK OWED beside the state lines, with the gate and the feedback verbatim', () => {
+    const text = renderPlan(
+      [{ id: '12-operate-loop', status: 'rework', superseded: false, tasks: [{ id: '12-operate-loop/05-implementation-observability-log', status: 'rework' }] }],
+      {
+        alsoReady: [],
+        legGate: { met: true },
+        rework: [
+          {
+            task: '12-operate-loop/05-implementation-observability-log',
+            leg: '12-operate-loop',
+            gate: 'grill',
+            feedback: 'the log should have tracing id and layer id',
+            since: '2026-09-14',
+          },
+        ],
+      },
+    );
+    expect(text).toContain('REWORK OWED — a rejected gate owes a re-submission');
+    expect(text).toContain('12-operate-loop/05-implementation-observability-log — rework owed at the grill gate (2026-09-14)');
+    expect(text).toContain('feedback: the log should have tracing id and layer id');
+    expect(text).toContain('no active leg — previous leg derived done; LEG GATE REVIEW'); // the state line survives
+    expect(hasScalarProgress(text)).toBe(false);
+  });
+
+  it('no rework owed → WHAT IS AHEAD is unchanged (no REWORK section)', () => {
+    const text = renderPlan([{ id: '01-goal', status: 'done', superseded: false }], { alsoReady: [], legGate: { met: true } });
+    expect(text).not.toContain('REWORK');
+  });
+
+  it('the unfinished line names the RE-SUBMISSION when a rework is owed — never the closure remedy', () => {
+    const text = renderPlan(
+      [{ id: '12-operate-loop', status: 'rework', superseded: false, tasks: [{ id: '12-operate-loop/05-implementation-observability-log', status: 'rework' }] }],
+      {
+        activeLeg: '12-operate-loop',
+        activeLegStatus: 'rework',
+        alsoReady: [],
+        legGate: { met: true },
+        rework: [
+          { task: '12-operate-loop/05-implementation-observability-log', leg: '12-operate-loop', gate: 'grill', feedback: 'no tracing id', since: '2026-09-14' },
+        ],
+      },
+    );
+    expect(text).toContain('unfinished: 12-operate-loop/05-implementation-observability-log (rework)');
+    expect(text).toContain('waiting on a re-submission at the grill gate');
+    expect(text).not.toContain('gated closure task'); // transfer/defer — the wrong move here
+    // the rework of ANOTHER leg never re-words this leg's wait
+    const other = renderPlan(
+      [{ id: '01-leg', status: 'blocked', superseded: false, tasks: [{ id: '01-leg/01-a', status: 'blocked' }] }],
+      {
+        activeLeg: '01-leg',
+        activeLegStatus: 'blocked',
+        alsoReady: [],
+        legGate: { met: true },
+        rework: [{ task: '02-leg/01-b', leg: '02-leg', gate: 'grill', feedback: 'x', since: '2026-09-14' }],
+      },
+    );
+    expect(other).toContain('waiting on a human (a gate decision or a gated closure task)');
+  });
+
+  it('a rejection with NO feedback still names the gate — never a blank line', () => {
+    const text = renderPlan([{ id: '01-goal', status: 'done', superseded: false }], {
+      alsoReady: [],
+      legGate: { met: true },
+      rework: [{ task: '01-goal/01-a', leg: '01-goal', gate: 'confirm', feedback: '', since: '' }],
+    });
+    expect(text).toContain('rework owed at the confirm gate');
+    expect(text).toContain('feedback: (no feedback recorded)');
+  });
+
   it('a genuinely closed leg DOES print the leg-gate review line', () => {
     const text = renderPlan(
       [{ id: '07-operator-advance', status: 'done', superseded: false, tasks: [{ id: '07-operator-advance/01-implementation-advance', status: 'done' }] }],

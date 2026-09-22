@@ -25,9 +25,10 @@ import { workflowState } from '../store/workflow.js';
  *      contract, answers no gate on its own, and self-closes nothing;
  *   4. land at the next human gate, never silently past one.
  * Per-derivation (v7 §2/§5): continue-leg → run the frontmost-ready through the frame;
- * advance-leg / closure-needed / none are NOT machine-executable — present the
- * boundary/closure/goal-consult card and stop (never a machine spawn, never a machine
- * contract author, never a machine closure).
+ * advance-leg / closure-needed / rework-needed / none are NOT machine-executable — present
+ * the boundary/closure/rework/goal-consult card and stop (never a machine spawn, never a
+ * machine contract author, never a machine closure, never a machine run against a contract
+ * a human already rejected).
  *
  * The APPROVE is this action's only human decision (over the ADVANCE card). JSON and
  * automated initiators cannot drive it — the approve is a human call (AC-6, recorded on
@@ -43,7 +44,8 @@ export type OperatorStop =
   | 'declined'
   /** AC-2 — the re-derivation contradicts the approved proposal; nothing executed. */
   | 'stale-proposal'
-  /** AC-4 — advance-leg/closure-needed/none are NOT machine-executable; card + stop. */
+  /** AC-4 — advance-leg/closure-needed/rework-needed/none are NOT machine-executable;
+   *  card + stop. */
   | 'boundary'
   /** AC-3 — continue-leg executed: the frontmost-ready ran through the frame. */
   | 'advanced';

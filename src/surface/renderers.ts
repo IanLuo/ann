@@ -1,5 +1,5 @@
 import { TaskDetail, ResultItem, CLOSED_TASK_STATUSES } from '../store/store.js';
-import type { GoalView, DeferredTask } from '../commands/index.js';
+import type { GoalView, DeferredTask, ReworkTask } from '../commands/index.js';
 
 /**
  * S8 — THE RENDERERS (functional-spec F10/F11/F12; ann-system-design §1 "Renderers":
@@ -115,6 +115,9 @@ export interface PlanAhead {
    *  closed its leg (leg 12 task 01). Shown as their OWN section, never folded into the
    *  active-leg state lines. */
   deferred?: DeferredTask[];
+  /** THE REWORK OWED at a REJECTED gate (leg 12 task 06) — shown as its OWN section beside
+   *  the deferred one, for the same reason: the pull surfaces skip it by construction. */
+  rework?: ReworkTask[];
 }
 
 /** THE DEFERRED SECTION — the outstanding deferred obligations, ONE pure formatter the
@@ -129,6 +132,21 @@ export function deferredLines(deferred: DeferredTask[]): string[] {
     out.push(`  ${redact(d.task)} — deferred${d.since ? ` (${d.since})` : ''}`);
     out.push(`    reason: ${d.reason ? redact(d.reason) : '(no reason recorded)'}`);
     if (d.plan) out.push(`    plan: ${redact(d.plan)}`);
+  }
+  return out;
+}
+
+/** THE REWORK SECTION (leg 12 task 06) — the rework owed at a REJECTED gate. The same
+ *  pure-formatter shape as `deferredLines`, for the same reason: a rework-owed task is open
+ *  work but NOT ready work (`READY_STATUSES` excludes the `rework` word), and its gate is
+ *  not `undecided`, so both pull surfaces — frontmost-ready and the gate queue — skip it and
+ *  nothing else names it. The id, the gate, and the human's feedback VERBATIM, then the move;
+ *  never re-worded, never counted as progress (status words only, AC5). */
+export function reworkLines(rework: ReworkTask[]): string[] {
+  const out = ['REWORK OWED — a rejected gate owes a re-submission (rework it, then submit! at THAT gate):'];
+  for (const r of rework) {
+    out.push(`  ${redact(r.task)} — rework owed at the ${r.gate} gate${r.since ? ` (${r.since})` : ''}`);
+    out.push(`    feedback: ${r.feedback ? redact(r.feedback) : '(no feedback recorded)'}`);
   }
   return out;
 }
@@ -160,8 +178,15 @@ export function renderPlan(legs: PlanLeg[], ahead: PlanAhead): string {
       out.push(`frontmost-ready: ${ahead.frontmostReady.task} (${ahead.frontmostReady.status})`);
       for (const t of ahead.alsoReady) out.push(`  also ready: ${t.task} (${t.status})`);
     } else if (unfinished.length) {
+      // …and when the wait is an owed REWORK, the remedy named is the re-submission — never the
+      // gated closure task, which is transfer/defer: the wrong move for a task that only needs
+      // its contract fixed at the gate the human already decided (leg 12 task 06).
+      const owed = (ahead.rework ?? []).filter((r) => r.leg === ahead.activeLeg);
+      const remedy = owed.length
+        ? `waiting on a re-submission at the ${owed[0].gate} gate — the REWORK below names it`
+        : 'waiting on a human (a gate decision or a gated closure task)';
       out.push(
-        `no ready tasks in leg — unfinished: ${unfinished.map((t) => `${t.id} (${t.status})`).join(', ')}${gateNote} — waiting on a human (a gate decision or a gated closure task)`,
+        `no ready tasks in leg — unfinished: ${unfinished.map((t) => `${t.id} (${t.status})`).join(', ')}${gateNote} — ${remedy}`,
       );
     } else if (ahead.legGate.met) {
       out.push('LEG GATE REVIEW: all spawned tasks done — verify the epic ACs (node.json contract) before advancing or spawning remaining tasks');
@@ -176,6 +201,12 @@ export function renderPlan(legs: PlanLeg[], ahead: PlanAhead): string {
   if (ahead.deferred?.length) {
     out.push('');
     out.push(...deferredLines(ahead.deferred));
+  }
+  // The REWORK owed rides the same section (leg 12 task 06) — the state lines above are
+  // never replaced by it either: the owed rework is shown ALONGSIDE them.
+  if (ahead.rework?.length) {
+    out.push('');
+    out.push(...reworkLines(ahead.rework));
   }
   out.push('');
   out.push('(grounded in: statuses + gates + validation — run --check / validate.mjs for the proof)');

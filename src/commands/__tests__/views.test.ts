@@ -200,6 +200,45 @@ describe('advance — the leg gate validated from the logs, never assumed', () =
     expect(a.detail).toContain('closure');
   });
 
+  it('a REWORK OWED → rework-needed, naming the gate and the human\'s feedback VERBATIM (leg 12 task 06)', () => {
+    // THE LIVE SHAPE: leg 12/05's grill was rejected, and for seven days `next` proposed the
+    // task as frontmost-ready — a worker could be dispatched against the contract the human
+    // had refused. The task is open work but NOT ready work, so it used to fall through to
+    // `closure-needed`, whose remedy is transfer/defer: the wrong move entirely, and the one
+    // the driver drafts a CLOSURE for.
+    writeNode('01-leg', []);
+    writeNode('01-leg/01-a', [ev('created'), ev('submitted', { gate: 'grill' }), ev('rejected', { gate: 'grill', feedback: 'the log needs a tracing id' })]);
+    const c = commands();
+    expect(c.status('01-leg/01-a')).toBe('rework'); // the word 12/08 derives
+    const a = c.advance();
+    expect(a.action).toBe('rework-needed');
+    expect(a.detail).toContain('01-leg/01-a');
+    expect(a.detail).toContain('owes a REWORK at the grill gate'); // the word, the gate, VERBATIM
+    expect(a.detail).toContain('the log needs a tracing id'); // the human's own words
+    // the remedy points AT THE GATE — and BOTH wrong moves are disclaimed by name: this is
+    // not fresh work to dispatch (what the flattened `queued` word produced) and not a leg
+    // to close (what `closure-needed` proposed)
+    expect(a.detail).toContain('Rework and re-submit THERE');
+    expect(a.detail).toContain('neither fresh work to dispatch nor a leg to close');
+    expect(a.detail).not.toContain('transfer/defer'); // never the closure remedy
+    // …and the LOOK-BACK carries it as its own section, beside the deferred one — the read
+    // that keeps it visible when a sibling keeps the derivation at continue-leg
+    expect(c.lookBack().rework).toEqual([
+      { task: '01-leg/01-a', leg: '01-leg', gate: 'grill', feedback: 'the log needs a tracing id', since: '2026-08-27' },
+    ]);
+  });
+
+  it('ready work WINS over an owed rework — a leg with both still continues (leg 12 task 06)', () => {
+    writeNode('01-leg', []);
+    writeNode('01-leg/01-a', [ev('created'), ev('submitted', { gate: 'grill' }), ev('rejected', { gate: 'grill', feedback: 'no' })]);
+    writeNode('01-leg/02-b', [ev('created')]);
+    const c = commands();
+    const a = c.advance();
+    expect(a.action).toBe('continue-leg'); // a sibling's rework never blocks the ready work
+    expect(a.detail).toContain('01-leg/02-b');
+    expect(c.lookBack().rework.map((r) => r.task)).toEqual(['01-leg/01-a']); // still VISIBLE
+  });
+
   it('the leg GATE and the leg UNFINISHED are different facts, and are labelled differently (leg 12 task 14)', () => {
     // the live shape that produced the contradiction: the PREDECESSOR is done (so the leg
     // gate is MET) while the ACTIVE leg has no ready task (so it is unfinished). Both used
