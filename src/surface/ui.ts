@@ -192,6 +192,17 @@ export const UI_HTML = `<!doctype html>
     <div class="actions" id="wn-actions" hidden>
       <button class="accept" id="approve">Approve &amp; run the next step</button>
     </div>
+    <div class="actions" id="drive-area">
+      <button class="ghost" id="drive">Drive it — the model picks the next call</button>
+      <span class="muted" id="drive-why"></span>
+    </div>
+    <p class="muted" id="drive-cost">A DRIVE runs the engine's own LLM loop — REAL provider calls, billed to the SERVER-SIDE key, which never reaches this page. One operate-loop action at a time (the slot is shared with Approve). A provider failure stops the run with ZERO writes.</p>
+    <div id="drive-view" hidden>
+      <h3 id="drive-head"></h3>
+      <p class="message" id="drive-state"></p>
+      <ul id="drive-turns"></ul>
+      <div id="drive-draft"></div>
+    </div>
     <p class="message" id="wn-message"></p>
   </section>
   <section class="queue" id="queue-view">
@@ -785,6 +796,120 @@ export const UI_HTML = `<!doctype html>
     else if (v.executable) wnMessage('nothing to approve — the integrity snapshot could not be read; the approve would re-check it fail-closed, so read it again with Refresh.');
     else wnMessage('nothing to approve — no frontmost-ready task.');
     // blocked-and-continuable: keep whatever the last action said — the blocker list is the message
+    driveEnablement(v, step);
+  }
+
+  /** THE DRIVE AFFORDANCE'S HONEST STATE (leg 12/04 AC-1) — NEVER a dead button. The drive
+   *  button lives on the card whether or not it can run, and when it cannot it says WHY, in
+   *  the same terms the approve uses: a boundary derivation (the move is the human's), the
+   *  tree dirty (with the named blockers), the snapshot still in flight, or no ready task.
+   *  The page never guesses a verdict the write would then refuse. */
+  function driveEnablement(v, step) {
+    var why = byId('drive-why');
+    var button = byId('drive');
+    var off = !step.run
+      ? 'off — ' + v.advance.action + ': the move here is yours, not the machine’s'
+      : wnIntegrity.state === 'checking'
+        ? 'off — the integrity snapshot is still being read; Refresh re-reads it'
+        : wnIntegrity.state === 'dirty'
+          ? 'off — the tree is dirty: ' + (wnIntegrity.blockers || []).length + ' named blocker(s) below'
+          : !v.executable
+            ? 'off — no frontmost-ready task to drive'
+            : '';
+    button.disabled = !!off;
+    why.textContent = off;
+    return off;
+  }
+
+  /** THE DRIVE (AC-1…AC-3) — the SAME loop the CLI drive runs, triggered from the card. The
+   *  route re-derives and re-checks fail-closed, so this handler CLAIMS nothing: it renders
+   *  what came back, named state by named state. A refusal (busy · provider · read-only) is
+   *  shown with the server's own words; a run is rendered turn by turn. */
+  function drive() {
+    var button = byId('drive');
+    byId('drive-view').hidden = false;
+    byId('drive-head').textContent = 'the drive';
+    byId('drive-turns').replaceChildren();
+    byId('drive-draft').replaceChildren();
+    driveMessage('driving — the model is choosing the next call. This is a REAL provider call on the server’s key.', false);
+    button.disabled = true;
+    fetch('/api/drive', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{}'
+    })
+      .then(function (r) { return r.json().then(function (doc) { return { status: r.status, doc: doc }; }); })
+      .then(function (r) {
+        if (r.status !== 200) {
+          // a NAMED stop before the loop even ran: drive-busy (the shared slot) · provider
+          // config · read-only. The server's message is the state; nothing is invented.
+          var e = r.doc.error || {};
+          byId('drive-head').textContent = 'the drive — STOPPED: ' + (e.code || r.status);
+          driveMessage((e.code || 'refused') + ' — ' + (e.message || ''), true);
+          return null;
+        }
+        renderDrive(r.doc.value);
+        return refresh();
+      })
+      .catch(function (e) { driveMessage('drive request failed: ' + e.message, true); })
+      .then(function () {
+        // the card owns the enablement (it knows the derivation + the integrity verdict);
+        // re-deriving here would be a second opinion the write could contradict.
+        if (whatsNext) driveEnablement(whatsNext, DERIVATION[whatsNext.advance.action] || { run: false });
+      });
+  }
+  function driveMessage(text, isError) {
+    var m = byId('drive-state');
+    m.textContent = text || '';
+    m.className = isError ? 'message error' : 'message';
+  }
+  /** WHAT THE RUN DID (AC-2): the stop and its route reason · every call that EXECUTED (the
+   *  accepted ones, with what they wrote) · the call that was REFUSED BY NAME, when the loop
+   *  ended on one · and the DRAFTED contract, marked GENERATED, for the human's decision. */
+  function renderDrive(v) {
+    var head = byId('drive-head');
+    head.textContent = 'the drive — STOPPED: ' + v.stop + ' · ' + v.turns + ' turn(s) · ' +
+      v.provider + (v.model ? ' · ' + v.model : '') + ' · run ' + v.runId;
+    driveMessage('why it stopped: ' + v.routeReason, v.stop === 'provider-failure' || v.stop === 'refusal');
+
+    var turns = byId('drive-turns');
+    turns.replaceChildren();
+    (v.executed || []).forEach(function (e) {
+      var li = el('li');
+      li.appendChild(el('span', 'turn ' + e.turn + '  ' + e.call + '  ', 'k'));
+      li.appendChild(el('span', 'ACCEPTED — ' + (e.wrote && e.wrote.length ? 'wrote ' + e.wrote.join(' · ') : 'no write')));
+      turns.appendChild(li);
+    });
+    if (v.refusal) {
+      var li = el('li');
+      li.appendChild(el('span', 'turn ' + v.turns + '  ' + (v.refusal.call || '(no call named)') + '  ', 'k'));
+      li.appendChild(el('span', 'REFUSED BY NAME — ' + v.refusal.code + ': ' + v.refusal.reason));
+      turns.appendChild(li);
+    }
+    if (!(v.executed || []).length && !v.refusal) {
+      turns.appendChild(el('li', 'no call was made — the loop stopped before choosing one', 'muted'));
+    }
+    renderDraft(v.draft);
+  }
+  /** THE DRAFTED CONTRACT (AC-2) — GENERATED, and the spawn! stays the HUMAN's act. The
+   *  page POINTS AT THE COMMAND rather than offering a spawn button (recorded decision):
+   *  the spawn! is deliberately not a route on this service — the named scope boundary — and
+   *  adding one would make the page a command runner to save a copy-paste. The card shows
+   *  the bytes so the human can read them before spawning, and says plainly that nothing
+   *  was spawned. */
+  function renderDraft(d) {
+    var box = byId('drive-draft');
+    box.replaceChildren();
+    if (!d) return;
+    var p = d.provenance;
+    box.appendChild(el('h4', 'A contract was drafted at the authored-work boundary — nothing was spawned'));
+    box.appendChild(el('p', d.label + ' (model ' + p.model + ' · provider ' + p.provider + ' · turn ' + p.turn + ' · run ' + p.runId + ')', 'k'));
+    box.appendChild(el('p', 'kind: ' + d.kind + ' · id: ' + d.id));
+    box.appendChild(el('p', 'grounded on: ' + (d.groundedOn || []).join(' · ')));
+    box.appendChild(el('p', 'rationale: ' + (d.rationale || '(none)')));
+    box.appendChild(el('p', 'contract: ' + JSON.stringify(d.contract)));
+    box.appendChild(el('p', 'read those bytes, then make it real yourself: ann ' + d.approve.act + ' ' + d.approve.id + " '" + JSON.stringify(d.approve.contract) + "'", 'k'));
+    box.appendChild(el('p', 'the machine never spawns — this draft is a proposal, and the id above is free until YOU take it.', 'muted'));
   }
 
   /** The integrity fact's words — the state the page actually knows, never more. */
@@ -1201,6 +1326,7 @@ export const UI_HTML = `<!doctype html>
     return l.task + ' stopped (' + l.frameStop + '): ' + (l.problems || []).join('; ');
   }
   byId('approve').addEventListener('click', approve);
+  byId('drive').addEventListener('click', drive);
   // the head is itself a drill: a NEW-TAB link to the derivation (the markup carries the
   // same href/target; this keeps it true wherever the render moves the action)
   byId('wn-action').href = drillHref({ kind: 'advance' });

@@ -22,6 +22,9 @@ class FakeEl {
   readonly tag: string;
   className = '';
   hidden = false;
+  /** A button's own state — the drive affordance's honest enablement is `disabled` plus the
+   *  reason beside it, so the fake DOM models the property the page writes. */
+  disabled = false;
   href = '';
   target = '';
   rel = '';
@@ -884,5 +887,187 @@ describe('the served page — the node’s EVENT LIST is on the card (leg 10/04�
     const tab = await openTab(gateTab.get('card-results').link('commit'), gateReads);
     expect(tab.get('card-events-h').hidden).toBe(true);
     expect(tab.get('card-events').textContent).toBe('');
+  });
+});
+
+describe('the served page — the drive affordance (leg 12/04)', () => {
+  /** THE DRIVE'S OWN RESULT, in the shape the driver returns it: a named stop and its route
+   *  reason, the calls that EXECUTED, the call that was REFUSED BY NAME, the turn/run identity. */
+  const driveResult = (over: Record<string, unknown> = {}) => ({
+    stop: 'refused-proposal',
+    routeReason: 'the model proposed a call outside the closed set',
+    turns: 3,
+    provider: 'stub',
+    model: 'stub-model-1',
+    runId: 'run-42',
+    executed: [
+      { turn: 1, call: 'run!', args: { id: TASK }, output: {}, wrote: [TASK] },
+      { turn: 2, call: 'submit!', args: { id: TASK, gate: 'grill' }, output: {}, wrote: [] },
+    ],
+    refusal: { code: 'forbidden-call', call: 'spawn!', reason: "'spawn!' is deliberately OUT of the closed set" },
+    ...over,
+  });
+  /** THE DRAFT at the authored-work boundary — the shape `DriverDraft` declares. */
+  const draft = (over: Record<string, unknown> = {}) => ({
+    label: 'GENERATED',
+    provenance: { model: 'stub-model-1', provider: 'stub', turn: 2, runId: 'run-42', at: '2026-09-22' },
+    kind: 'task',
+    id: '02-leg/01-authored',
+    contract: { intent: 'the next leg’s first task', acceptanceCriteria: ['it is authored'] },
+    groundedOn: ['docs/epic.md', 'the goal'],
+    rationale: 'the front leg is empty, so the next move is authored work',
+    validated: { fields: ['intent'], problems: [] },
+    approve: {
+      act: 'spawn!',
+      id: '02-leg/01-authored',
+      contract: { intent: 'the next leg’s first task', acceptanceCriteria: ['it is authored'] },
+      then: 'submit! its grill gate',
+    },
+    ...over,
+  });
+  const driveReads = (whatsnext: unknown, integ?: unknown, drive?: unknown): Record<string, unknown> => {
+    const r = reads(whatsnext, integ);
+    if (drive !== undefined) r['/api/drive'] = drive;
+    return r;
+  };
+  /** Boot the page on a CLEAN tree with a continuable derivation and click Drive. */
+  const bootDrive = async (drive: unknown) => {
+    const tab = boot(driveReads(card(), integrity(), drive));
+    await flush();
+    tab.get('drive').click();
+    await flush();
+    return tab;
+  };
+
+  it('AC-1 — the affordance is never a dead button: a clean, continuable, executable journey leaves it ON', async () => {
+    const tab = boot(driveReads(card()));
+    await flush();
+    expect(tab.get('drive').hidden).toBe(false);
+    expect(tab.get('drive').disabled).toBe(false);
+    expect(tab.get('drive-why').textContent).toBe('');
+    // the run view is SHUT in the served markup until a run exists — this stub DOM carries no
+    // attributes, so the initial state is asserted on the bytes the server actually sends
+    expect(UI_HTML).toContain('<div id="drive-view" hidden>');
+  });
+
+  it('AC-1 — the authored-work boundary turns it OFF and names the derivation, not the button', async () => {
+    const tab = boot(driveReads(card({ advance: { leg: LEG, action: 'advance-leg', detail: 'the front leg is empty' }, executable: false })));
+    await flush();
+    expect(tab.get('drive').disabled).toBe(true);
+    const why = tab.get('drive-why').textContent;
+    expect(why).toContain('advance-leg');
+    expect(why).toContain('the move here is yours, not the machine’s');
+  });
+
+  it('AC-1 — a DIRTY tree turns it OFF and carries the named blocker count the list below shows', async () => {
+    const tab = boot(driveReads(card(), integrity({ clean: false, blockers: [DIRTY, 'untracked file: src/x.ts'] })));
+    await flush();
+    expect(tab.get('drive').disabled).toBe(true);
+    expect(tab.get('drive-why').textContent).toContain('the tree is dirty: 2 named blocker(s)');
+  });
+
+  it('AC-1 — an integrity snapshot still IN FLIGHT turns it OFF rather than guessing a verdict', async () => {
+    const tab = boot(driveReads(card()));
+    await flush();
+    const inFlight = boot(driveReads(card()), '', ['/api/integrity']);
+    await flush();
+    expect(inFlight.get('drive').disabled).toBe(true);
+    expect(inFlight.get('drive-why').textContent).toContain('the integrity snapshot is still being read');
+    expect(tab.get('drive').disabled).toBe(false); // the contrast: the landed verdict enables it
+  });
+
+  it('AC-1 — no frontmost-ready task turns it OFF and says so', async () => {
+    const tab = boot(driveReads(card({ executable: false })));
+    await flush();
+    expect(tab.get('drive').disabled).toBe(true);
+    expect(tab.get('drive-why').textContent).toContain('no frontmost-ready task to drive');
+  });
+
+  it('AC-3 — the cost and the credential are on the page BEFORE any click', async () => {
+    // this notice is SERVED MARKUP the script never touches, so the assertion is on the bytes
+    // the server sends: it is on screen on load, before the button can be pressed at all
+    const cost = UI_HTML.match(/<p class="muted" id="drive-cost">([^<]*)<\/p>/)?.[1] ?? '';
+    // the provider calls are real and billed server-side — the key never reaches this page
+    expect(cost).toContain('REAL provider calls');
+    expect(cost).toContain('SERVER-SIDE key');
+    expect(cost).toContain('never reaches this page');
+    // one operate-loop action at a time — the slot is shared with Approve
+    expect(cost).toContain('shared with Approve');
+    // …and a provider failure is a stop with zero writes, not a fabricated advance
+    expect(cost).toContain('ZERO writes');
+  });
+
+  it('AC-2 — the outcome is rendered turn by turn: what ran, and what was refused BY NAME', async () => {
+    const tab = await bootDrive({ value: driveResult() });
+    expect(tab.fetched).toContain('/api/drive');
+    expect(tab.get('drive-view').hidden).toBe(false);
+    const head = tab.get('drive-head').textContent;
+    expect(head).toContain('STOPPED: refused-proposal');
+    expect(head).toContain('3 turn(s)');
+    expect(head).toContain('stub');
+    expect(head).toContain('stub-model-1');
+    expect(head).toContain('run run-42');
+    expect(tab.get('drive-state').textContent).toContain('why it stopped: the model proposed a call outside the closed set');
+    const turns = tab.get('drive-turns').textContent;
+    expect(turns).toContain('turn 1  run!');
+    expect(turns).toContain('ACCEPTED — wrote ' + TASK);
+    expect(turns).toContain('turn 2  submit!');
+    expect(turns).toContain('ACCEPTED — no write');
+    expect(turns).toContain('REFUSED BY NAME — forbidden-call');
+    expect(turns).toContain("'spawn!' is deliberately OUT of the closed set");
+    // a run that made no call says exactly that, never an empty list
+    const quiet = await bootDrive({ value: driveResult({ executed: [], refusal: undefined, turns: 1 }) });
+    expect(quiet.get('drive-turns').textContent).toContain('no call was made — the loop stopped before choosing one');
+  });
+
+  it('AC-2 — the DRAFT is presented as GENERATED, with its provenance, and the spawn stays the human’s', async () => {
+    const tab = await bootDrive({ value: driveResult({ stop: 'boundary-drafted', draft: draft() }) });
+    expect(tab.get('drive-head').textContent).toContain('STOPPED: boundary-drafted');
+    const box = tab.get('drive-draft');
+    const text = box.textContent;
+    expect(text).toContain('nothing was spawned');
+    expect(text).toContain('GENERATED (model stub-model-1 · provider stub · turn 2 · run run-42)');
+    expect(text).toContain('kind: task · id: 02-leg/01-authored');
+    expect(text).toContain('grounded on: docs/epic.md · the goal');
+    expect(text).toContain('rationale: the front leg is empty');
+    // the bytes are shown, and the human is POINTED AT THE COMMAND — no spawn button is offered
+    expect(text).toContain('contract: ' + JSON.stringify(draft().contract));
+    expect(text).toContain('read those bytes, then make it real yourself: ann spawn! 02-leg/01-authored');
+    expect(text).toContain('the machine never spawns');
+    expect(box.descendants().filter((c) => c.tag === 'button'), 'the page is not a command runner').toEqual([]);
+    expect(box.descendants().filter((c) => c.tag === 'a'), 'a draft is a proposal, not a link that acts').toEqual([]);
+    // a run that drafted nothing shows no draft section at all — never an empty GENERATED shell
+    const quiet = await bootDrive({ value: driveResult() });
+    expect(quiet.get('drive-draft').textContent).toBe('');
+  });
+
+  it('AC-1 — a NON-200 stop is rendered from the server’s own code and message, inventing nothing', async () => {
+    // the real 409 `drive-busy` (the slot shared with Approve) is proven in the e2e, where the
+    // status is real; here the page's own half: a refusal is the server's words, never a guess
+    const tab = await boot(driveReads(card()));
+    await flush();
+    tab.get('drive').click();
+    await flush();
+    expect(tab.get('drive-head').textContent).toBe('the drive — STOPPED: not-found');
+    expect(tab.get('drive-state').textContent).toContain('not-found — /api/drive');
+    expect(tab.get('drive-view').hidden).toBe(false);
+  });
+
+  it('AC-1 — a provider that fails mid-run is a NAMED stop with ZERO writes, shown as the fact it is', async () => {
+    // the run reaches the provider and the provider breaks: the loop stops by name, writes
+    // nothing, and the page shows the reason with the error styling — never a silent end
+    const tab = await bootDrive({
+      value: driveResult({ stop: 'provider-failure', routeReason: 'the provider returned 502', executed: [], refusal: undefined, turns: 1 }),
+    });
+    expect(tab.get('drive-head').textContent).toContain('STOPPED: provider-failure');
+    expect(tab.get('drive-state').textContent).toContain('why it stopped: the provider returned 502');
+    expect(tab.get('drive-state').className).toContain('error');
+    expect(tab.get('drive-turns').textContent).toContain('no call was made — the loop stopped before choosing one');
+  });
+
+  it('AC-1 — the button is never left dead: after the run the slot is free, so it re-enables', async () => {
+    const tab = await bootDrive({ value: driveResult() });
+    expect(tab.get('drive').disabled, 'the drive held the slot only while it ran').toBe(false);
+    expect(tab.get('drive-why').textContent).toBe('');
   });
 });
