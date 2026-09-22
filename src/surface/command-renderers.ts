@@ -200,6 +200,19 @@ const nodeCardLines = (c: NodeCard): string[] => {
     lines.push(`REWORK OWED — the last decision at the ${c.next?.gate ?? 'bound'} gate was a REJECTION: rework it and re-submit at that gate`);
     lines.push(`  feedback: ${why ? why : '(NOT RECORDED)'}`);
   }
+  // THE FINDINGS RECORD (leg 12/09): a review's findings, PER FINDING — the id a rework
+  // flips, the severity, the `file:line` it was read at, its status, and the finding's own
+  // words. 12/08 stored a 3241-char digest as gate feedback and its list was unreachable
+  // through the journey; a digest is not a record, so this prints the record, never a summary
+  // of it. Read from the brief this card ALREADY carries (the same assembly `ann brief`
+  // prints), never a second read of the log.
+  const rv = c.brief.findings;
+  lines.push('---', `FINDINGS (a review's record — ${rv.reviews ? `${rv.reviews} pass${rv.reviews === 1 ? '' : 'es'}, latest ${rv.at}${rv.anchor ? `, cited at ${rv.anchor}` : ''}` : 'no review has landed'})`);
+  if (!rv.findings.length) lines.push('  (none recorded — ann review! <id> reviews the delivery at its confirm gate)');
+  for (const f of rv.findings) {
+    lines.push(`  ${f.id}  [${f.severity}]  ${f.status}${f.stale ? ' · NOT RE-ASSESSED by the latest pass' : ''}  ${f.where}`);
+    lines.push(`      ${f.text}`);
+  }
   lines.push('---', 'ARTIFACTS');
   if (!c.artifacts.length) lines.push('  (none locked)');
   for (const a of c.artifacts) lines.push(`  - ${a.name} @ ${a.sha || '(no sha)'} [${a.role}]`, `      ${a.path}`);
@@ -600,6 +613,15 @@ export const RENDERS: Record<string, Renderer> = {
     lines.push('---', 'CONCLUSION');
     lines.push(`  claims: ${v.conclusion.claims.length}${unclaimed.length ? ` · UNCLAIMED: ${unclaimed.map((u) => u.ac).join(', ')}` : ' · every AC claimed'} · checks: ${v.conclusion.checks.length}`);
     lines.push(`  close: ${v.closeBlocker ? `REFUSED now — ${v.closeBlocker.code}` : 'a confirm accept would auto-close (the evidence bound is satisfied)'}`);
+    // THE REVIEW RECORD (leg 12/09) — the gate's own material: what a review found, per
+    // finding, so the human deciding this gate reads the record and not a digest of it.
+    const fv = v.findings;
+    lines.push('---', `FINDINGS (the review record — ${fv.reviews ? `${fv.reviews} pass${fv.reviews === 1 ? '' : 'es'}, latest ${fv.at}${fv.anchor ? `, cited at ${fv.anchor}` : ''}` : 'NO REVIEW HAS LANDED — ann review! ' + v.id})`);
+    if (!fv.findings.length) lines.push('  (none recorded)');
+    for (const f of fv.findings) {
+      lines.push(`  ${f.id}  [${f.severity}]  ${f.status}${f.stale ? ' · NOT RE-ASSESSED by the latest pass' : ''}  ${f.where}`);
+      lines.push(`      ${f.text}`);
+    }
     if (v.latestNote) {
       const n = v.latestNote;
       lines.push('---', `LATEST NOTE (extended · ${n.at} · ${n.chars} chars${n.truncated ? ' — CAPPED HERE' : ''})`);

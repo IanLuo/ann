@@ -339,6 +339,66 @@ function checkShapeProblem(c: unknown, allowCaptured: boolean): string | undefin
   return undefined;
 }
 
+/** A FINDING's severity vocabulary (leg 12/09) — CLOSED at the writer, like a check's
+ *  `result`, so the gate never has to interpret a word. `matches` is a finding too: an AC
+ *  that checks out IS a result of the review, and a list that could only report faults
+ *  could not show a clean read. */
+export const REVIEW_SEVERITIES = ['matches', 'gap', 'regression', 'quality', 'uncertain'] as const;
+export type ReviewSeverity = (typeof REVIEW_SEVERITIES)[number];
+/** A finding's status — the word a RE-REVIEW flips. `open` is what a first review lands;
+ *  `resolved` is a claim that evidence covers it, and the next pass re-checks it. */
+export const REVIEW_STATUSES = ['open', 'resolved'] as const;
+
+/** A FINDING's shape (leg 12/09) — the structured record a REVIEW lands, so that what a
+ *  review found is CHECKABLE rather than a digest nobody can act on. 12/08's rejection
+ *  stored a 3241-char prose summary as gate feedback and its per-finding list survived only
+ *  in a reviewer's chat transcript; this is the shape that replaces that.
+ *
+ *  Strict at the single writer, like every other shape here — a malformed finding is refused
+ *  BY NAME, never stored as prose the gate would then have to interpret. `where` and
+ *  `provenance` are both REQUIRED: a finding with no location is not re-checkable (the whole
+ *  reason this record exists), and a finding whose author is unknown is indistinguishable
+ *  from a human's. A session that genuinely cannot localize a suspicion records severity
+ *  'uncertain' with the pointer it does have rather than a bare assertion. */
+function findingShapeProblem(f: unknown): string | undefined {
+  if (!f || typeof f !== 'object' || Array.isArray(f)) return 'each finding must be an object';
+  const r = f as Record<string, unknown>;
+  const unknown = Object.keys(r).filter((k) => !['id', 'severity', 'where', 'text', 'status', 'provenance'].includes(k));
+  if (unknown.length) return `unknown field(s) '${unknown.join(', ')}' on a finding (id · severity · where · text · status · provenance)`;
+  if (typeof r.id !== 'string' || !r.id.trim()) return "a finding needs an 'id' — the handle a re-review flips (F1, G2, …)";
+  if (!(REVIEW_SEVERITIES as readonly unknown[]).includes(r.severity)) {
+    return `finding '${String(r.id)}'.severity must be one of ${REVIEW_SEVERITIES.join('|')}, got ${JSON.stringify(r.severity)}`;
+  }
+  if (typeof r.where !== 'string' || !r.where.trim()) {
+    return `finding '${String(r.id)}' needs 'where' — the file:line it was read at (an unlocalized finding is not re-checkable)`;
+  }
+  if (typeof r.text !== 'string' || !r.text.trim()) return `finding '${String(r.id)}' needs 'text' — what was found`;
+  if (!(REVIEW_STATUSES as readonly unknown[]).includes(r.status)) {
+    return `finding '${String(r.id)}'.status must be one of ${REVIEW_STATUSES.join('|')}, got ${JSON.stringify(r.status)}`;
+  }
+  if (typeof r.provenance !== 'string' || !r.provenance.trim()) {
+    return `finding '${String(r.id)}' needs 'provenance' — who asserted it (the model/provider, or the human); an author-less finding is indistinguishable from a human's`;
+  }
+  return undefined;
+}
+
+/** ONE recorded FINDING as the log holds it — the shared reading of a review, so the card,
+ *  the gate and any rework can never read a finding differently. */
+export interface ReviewFindingView {
+  id: string;
+  severity: ReviewSeverity;
+  where: string;
+  text: string;
+  status: 'open' | 'resolved';
+  provenance: string;
+  at: string;
+}
+
+/** A finding as it is LANDED — everything but `at`. The landing date is not the finder's
+ *  to assert: it is the event's, stamped by the writer and read back per finding, so a
+ *  `file:line` always says which pass read it. */
+export type ReviewFindingInput = Omit<ReviewFindingView, 'at'>;
+
 /** ONE recorded CHECK as the log holds it — the shared reading of a run: the command,
  *  the result, and `source` (captured = the engine ran it and read the real exit code — a
  *  FACT; reported = the runner typed it — a CLAIM). One shape, so the card, the close and
@@ -1648,7 +1708,7 @@ export class Store {
       created: ['at', 'type', 'note'],
       activated: ['at', 'type', 'note'],
       extended: ['at', 'type', 'note'],
-      evidence: ['at', 'type', 'note', 'commits', 'refs', 'answers', 'trace', 'claims', 'checks'],
+      evidence: ['at', 'type', 'note', 'commits', 'refs', 'answers', 'trace', 'claims', 'checks', 'findings', 'anchorSha'],
       'artifact-locked': ['at', 'type', 'note', 'artifact'],
       completed: ['at', 'type', 'note'],
       failed: ['at', 'type', 'note'],
@@ -1751,6 +1811,25 @@ export class Store {
           const problem = checkShapeProblem(c, opts.allowCaptured === true);
           if (problem) throw new Error(`append rejected: evidence.checks — ${problem}`);
         }
+      }
+      // leg 12/09 — THE FINDINGS RECORD: a review's structured findings. Strict at the single
+      // writer like the conclusion above, so what a review found is checkable rather than a
+      // digest: a malformed finding is refused BY NAME and nothing is written.
+      if (e.findings !== undefined) {
+        if (!Array.isArray(e.findings) || !e.findings.length) {
+          throw new Error('append rejected: evidence.findings must be a non-empty [{id, severity, where, text, status, provenance}, …] — a review that found nothing records no findings');
+        }
+        for (const f of e.findings) {
+          const problem = findingShapeProblem(f);
+          if (problem) throw new Error(`append rejected: evidence.findings — ${problem}`);
+        }
+      }
+      // THE ANCHOR (leg 12/09): the commit a review's citations were READ AT. A `file:line`
+      // without it is not re-checkable — 12/09's own recorded oracle run re-checked line
+      // numbers at HEAD that had been read one commit earlier and produced two false "MOVED"
+      // verdicts. Optional (a review may cite nothing), a sha when present.
+      if (e.anchorSha !== undefined && (typeof e.anchorSha !== 'string' || !/^[0-9a-f]{7,40}$/.test(e.anchorSha))) {
+        throw new Error('append rejected: evidence.anchorSha must be a commit sha (7-40 hex) — the commit the findings were read at');
       }
     }
     if (e.type === 'transferred' && (typeof e.target !== 'string' || typeof e.scope !== 'string')) {

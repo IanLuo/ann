@@ -622,6 +622,23 @@ export const UI_HTML = `<!doctype html>
         );
       }
 
+      // THE REVIEW RECORD (leg 12/09) — what a review of this delivery FOUND, per finding,
+      // read from the SAME assembled field the terminal prints (brief.findings) and never a
+      // second read of the log. A review's findings are per finding instead of a digest for
+      // one measured reason: a digest cannot be checked, so 'everything found was fixed' has
+      // nothing to be measured against. One line per finding: its id, severity, status (and
+      // an omission, named — a finding the latest pass did not re-assess), where it points,
+      // and what it says.
+      var fv = brief.findings || {};
+      if (fv.reviews) {
+        field(node, 'review', fv.reviews + ' pass' + (fv.reviews === 1 ? '' : 'es') + ' (latest ' + fv.at + ') · cited at ' + (fv.anchor || '(none)'));
+        (fv.findings || []).forEach(function (f) {
+          field(node, 'finding', f.id + '  [' + f.severity + ']  ' + f.status + (f.stale ? '  · NOT RE-ASSESSED by the latest pass' : '') + '  ' + f.where + ' — ' + f.text);
+        });
+      } else {
+        field(node, 'review', 'no review has landed (ann review! ' + (detail.id || '') + ' runs one at the confirm gate)');
+      }
+
       // CLAIMS — how each acceptance criterion is met (resolved pointers), gaps named.
       // A pointer that NAMES a result item is itself a DRILL (the git submit, the local
       // file path) — one list, one numbering ('ann results <id> <n>'); prose stays text.

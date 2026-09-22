@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join, relative } from 'node:path';
-import { Store, JourneyEvent, NodeDir, ResultItem, TaskDetail, CLOSED_TASK_STATUSES, type CheckView, type NodeDep } from '../store/store.js';
+import { Store, JourneyEvent, NodeDir, ResultItem, TaskDetail, CLOSED_TASK_STATUSES, type CheckView, type NodeDep, type ReviewFindingInput, type ReviewFindingView } from '../store/store.js';
 import { blobSha, stripMarkers } from '../store/sha.js';
 import { getVOCAB } from '../store/vocab.js';
 import { GATE_DECISION_EVENTS, READY_STATUSES, gateView, workflowState, type GateLifecycle } from '../store/workflow.js';
@@ -172,6 +172,10 @@ export interface Brief {
   referencedBy: Array<{ id: string; status: string; how: string }>;
   decisions: Array<{ at: string; type: string; gate: string; note: string; why?: string }>;
   conclusion: ConclusionView;
+  /** THE REVIEW RECORD (leg 12/09) — what a review of this task found, per finding, as the
+   *  gate read exposes it. A gate that shows the conclusions but not the findings is the
+   *  gate 12/08 had: its rejection carried a prose digest and nothing checkable. */
+  findings: ReviewFindingsView;
   /** Why the close would REFUSE right now (the F-AC18 predicate: a captured pass bound to a
    *  cited commit), or absent when a confirm accept would auto-close. */
   closeBlocker?: { code: string; message?: string };
@@ -206,6 +210,26 @@ export interface ConclusionView {
   unclaimed: Array<{ ac: string; acText: string }>;
   /** The commits this task's conclusion cites (evidence.commits[].sha). */
   cited: string[];
+}
+
+/** A REVIEW's structured findings, derived (leg 12/09). The REWORK READING is the point: a
+ *  finding's identity is its `id`, so the LATEST landing for an id wins — a re-review does
+ *  not stack a second list beside the first, it FLIPS each finding's `status`. That is what
+ *  turns "everything found was fixed" from an assertion into something checkable, which is
+ *  the failure 12/08 measured (1 of 11 fixed, claimed as all). */
+export interface ReviewFindingsView {
+  /** One entry per finding id, in first-appearance order, each at its LATEST recorded status. */
+  findings: Array<ReviewFindingView & { pass: number; stale?: boolean }>;
+  /** How many review PASSES landed (a landing is a pass, not a finding) — so a card can say
+   *  the list was re-checked rather than leaving a stale list looking current. */
+  reviews: number;
+  /** The date of the latest landing ('' when no review has landed). */
+  at: string;
+  /** The commit the latest pass anchored its citations to (evidence.anchorSha), or '' — a
+   *  `file:line` says nothing about WHICH bytes it was read at, and 12/09's own recorded
+   *  oracle run produced two false MOVED verdicts by re-checking line numbers at HEAD when
+   *  they had been read one commit earlier. */
+  anchor: string;
 }
 
 export interface FrontmostReady {
@@ -736,6 +760,57 @@ export class Commands {
   }
 
   /**
+   * THE FINDINGS RECORD (leg 12/09 AC-2) — a REVIEW's structured findings, landed on the
+   * ADDRESSED node and nowhere else. This is the record 12/08 did not have: its rejection
+   * stored a 3241-char digest as gate feedback, the per-finding list was unreachable through
+   * the journey, and "everything found was fixed" could not be checked — it was measured
+   * false (1 of 11 fixed). A findings landing is what makes that checkable.
+   *
+   * A thin VALIDATED FRONT over the general append, exactly like `evidence!`: the SHAPE stays
+   * the single writer's (`appendEvent` re-validates via `findingShapeProblem`), and this adds
+   * only the gesture's precondition. Confinement is STRUCTURAL, not a check — `this.node(id)`
+   * mints the one write target, so an append can never be aimed at a sibling or the root.
+   *
+   * DELIBERATELY NOT A CONCLUSION: no `commits`, no `claims`, no `checks`. So a findings
+   * landing moves nothing that a close reads — `conclusion(id).cited`, the close-evidence
+   * blocker and the confirm-accept auto-close are all untouched by a review, and a session
+   * can therefore never close a task as a side effect of reviewing it (AC-4).
+   */
+  landFindings(
+    id: string,
+    findings: ReviewFindingInput[],
+    opts: { anchorSha?: string; note?: string } = {},
+  ): CommandResult<{ findings: number }> {
+    return this.loggedWrite('review', [id, findings, opts], () => this.landFindingsImpl(id, findings, opts));
+  }
+
+  private landFindingsImpl(
+    id: string,
+    findings: ReviewFindingInput[],
+    opts: { anchorSha?: string; note?: string },
+  ): CommandResult<{ findings: number }> {
+    if (!id.includes('/')) return fail('leg-gate-write', 'leg roots carry no review — findings belong to tasks');
+    if (!this.store.ids().includes(id)) return fail('no-node', `no node ${id}`);
+    if (!Array.isArray(findings) || !findings.length) {
+      return fail('no-findings', 'a findings landing requires at least one finding — a review that found nothing records no findings');
+    }
+    // Thin front only: the deep shape (severity vocabulary, status, provenance) is the single
+    // writer's — a malformed finding is refused BY NAME there, never softened here.
+    try {
+      this.store.appendEvent(this.node(id), {
+        at: this.today,
+        type: 'evidence',
+        note: opts.note?.trim() ? opts.note : `review findings landed (${this.who})`,
+        findings,
+        ...(opts.anchorSha ? { anchorSha: opts.anchorSha } : {}),
+      });
+    } catch (e) {
+      return fail('store-refused', (e as Error).message);
+    }
+    return ok({ findings: findings.length });
+  }
+
+  /**
    * `capture!` — THE CAPTURED CHECK (leg 12 task 03: "the record is a consequence, not a
    * claim"). It RUNS one project command from the CLOSED ALLOWLIST and records what
    * happened as a FACT: `{command, result, exitCode, detail, sha, source:'captured'}` —
@@ -976,6 +1051,7 @@ export class Commands {
       referencedBy: d.deps.referencedBy,
       decisions,
       conclusion: this.conclusion(id),
+      findings: this.reviewFindings(id),
       ...(this.closeEvidenceBlocker(id) ? { closeBlocker: this.closeEvidenceBlocker(id) } : {}),
       ...(noteText
         ? {
@@ -1735,6 +1811,51 @@ export class Commands {
     // a claim that matched no AC is KEPT (an author's extra claim is data, never dropped)
     for (const [k, c] of latest.entries()) if (!used.has(k)) claims.push({ ...c, acText: '', ...(bound(c.check) ? { bound: bound(c.check)! } : {}) });
     return { claims, checks, unclaimed, cited };
+  }
+
+  /** THE STRUCTURED FINDINGS, derived from the log (leg 12/09) — the ONE place a review's
+   *  findings are read: the card renders them, the gate and any rework read them, and a
+   *  re-review supersedes them. Derived on every read like `conclusion`, never cached and
+   *  never stored twice.
+   *
+   *  A finding's identity is its `id` and the LATEST landing for an id WINS — the same
+   *  rework model as a claim, and the reason a re-review FLIPS a status instead of stacking
+   *  a second list. A list that only ever grew could not answer "was it fixed?", which is
+   *  exactly what 12/08 asserted falsely (1 of 11 findings fixed, claimed as all of them). */
+  reviewFindings(id: string): ReviewFindingsView {
+    const latest = new Map<string, ReviewFindingView & { pass: number }>();
+    let reviews = 0; // LANDINGS, not findings — a pass that found nothing still counts
+    let at = '';
+    let anchor = '';
+    for (const e of this.store.events(id)) {
+      if (e.type !== 'evidence' || !Array.isArray(e.findings)) continue;
+      reviews++;
+      at = String(e.at ?? '');
+      if (typeof e.anchorSha === 'string') anchor = e.anchorSha;
+      for (const f of e.findings) {
+        const r = f as { id?: unknown; severity?: unknown; where?: unknown; text?: unknown; status?: unknown; provenance?: unknown };
+        const fid = String(r.id ?? '').trim();
+        // The writer already refused an id-less finding, so this is a defensive skip over
+        // legacy/hand-written history — never a crash, never an invented id.
+        if (!fid) continue;
+        latest.set(fid, {
+          id: fid,
+          severity: r.severity as ReviewFindingView['severity'],
+          where: String(r.where ?? ''),
+          text: String(r.text ?? ''),
+          status: r.status as ReviewFindingView['status'],
+          provenance: String(r.provenance ?? ''),
+          at: String(e.at ?? ''),
+          pass: reviews,
+        });
+      }
+    }
+    // STALE — a finding the LATEST pass did not re-assess. This is the whole checkability
+    // property made visible: SILENT DISAPPEARANCE is exactly how 12/08's findings got lost
+    // (a rejection stored as prose, a rework that claimed "all fixed"), so an omission is
+    // reported as an omission rather than quietly dropped from the list.
+    const findings = [...latest.values()].map((f) => ({ ...f, ...(f.pass < reviews ? { stale: true } : {}) }));
+    return { findings, reviews, at, anchor };
   }
 
   /** The comparison key for an AC (and a claim's `ac`): case/whitespace-insensitive, so

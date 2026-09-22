@@ -40,6 +40,7 @@ import { loadProjectFlow, resolveChain, validateChain } from '../flow/chain.js';
 import { Frame } from '../flow/frame.js';
 import { runGoalSeed } from '../flow/goal-seed.js';
 import { runSpecSession, docsSpecsTarget, DEFAULT_SPEC_NAME } from '../flow/spec-doc.js';
+import { runReviewSession } from '../flow/review-session.js';
 import { runOperatorAction, OperatorStop } from '../flow/operator-action.js';
 import { buildAbilities } from '../abilities/index.js';
 import { resolveConfig } from '../flow/config.js';
@@ -305,6 +306,7 @@ const COMMANDS: Array<{ name: string; args: string; desc: string }> = [
   { name: 'evidence!', args: "<id> <sha>[,<sha>…] [--refs a.md,b.md] [--note '<text>'] [--claims '<json>'] [--checks '<json>']", desc: "WRITE — the CONCLUSION record (F-AC18): structured commit evidence naming the committed doc/code that carries the deliverable (commits[] non-empty, a sha per entry) plus the OPTIONAL structured conclusion (format v18, MECHANICAL since leg 12/03): --claims = one {ac, check?, statement?, evidence?} per acceptance criterion — `check` is the ac→CHECK MAPPING (the recorded run that covers the AC; `statement` is optional prose, derived from the mapping when absent) and evidence entries are POINTERS (commit sha · ref path · doc name) resolved at READ time; --checks = {command, result: pass|fail, detail?, sha?, source?} (what was RUN) — a check without a `source` is LABELLED `reported` by the writer, and `source:'captured'` is REFUSED here (engine-produced: run capture!); the shape stays the store's — a validated front over the same L1 write, provenance from RECORDED_BY, and a bad JSON argument writes nothing" },
   { name: 'capture!', args: "<id> '<command>'", desc: CAPTURE_COMMAND_DESC },
   { name: 'complete!', args: '<id> [--note \'<text>\']', desc: 'WRITE — the EXPLICIT DONE terminal (a confirm accept auto-closes on evidence, so this gesture is the accepted-without-evidence exception; an already-completed task gets an idempotent refusal): refuses without the confirm gate\'s LAST decision being an ACCEPT and without the conclusion evidence — the F-AC18 predicate (TIGHTENED, leg 12/03: a REPORTED check is refused by name; leg 12/02: so is a CAPTURED FAILURE recorded on a CITED commit — `cited-check-failed`): evidence.commits[] AND the structured conclusion (a claim per acceptance criterion, each mapped to a check the log holds) AND at least one CAPTURED pass bound to a cited commit AND no captured failure on one' },
+  { name: 'review!', args: '<id>', desc: 'WRITE — THE REVIEW SESSION at a task\'s CONFIRM gate (the gate DERIVED from the node, never guessed): an interactive review of the DELIVERY whose outcome is a RECORD — structured findings (id · severity one of matches/gap/regression/quality/uncertain · a `file:line` pointer · text · status) landed on the ADDRESSED node through the one writer, exposed per-finding by ann confirm/brief/detail. It DECIDES NOTHING: no gate event is ever written, the human\'s `gate!` gesture still decides, and the record is what a later rework marks resolved/open (JSON refuses: interactive terminal only)' },
   { name: 'goal!', args: 'met [feedback]', desc: 'WRITE — the HUMAN verdict that seals a structurally-exhausted session (goal-met on the goal root); refused for automated (agent) initiators, double-met, and any undecided submission' },
   { name: 'goal!', args: 'archive [--override]', desc: 'WRITE — guarded structural reset: move .ann/journey → .ann/archive/sessions/<ts>-<slug>/ for a fresh goal; refuses without a met verdict (or --override), on store-external verify drifts, and on uncommitted tracked .ann/journey changes' },
   { name: 'goal!', args: 'seed [goal-statement]', desc: 'WRITE — grill a goal at SESSION scope (EMPTY journey seeds new; a RE-SEEDABLE sole unconsumed goal is REPLACED after re-grilling — consumed/met goals refuse): the interactive idea-validation session (grill → batch-ask → research → re-grill → human verdict); on solid, synthesize goal.md (Goal:/Success criteria:) + seed/re-seed the goal leg + write docs/goal.md + regenerate the manifest; revise/reject seeds nothing' },
@@ -1335,6 +1337,51 @@ async function specInteractive(ctx: CliContext): Promise<Outcome> {
   return { ok: true, value: { written: true, mode, name, path: r.path, sha: r.sha } };
 }
 
+/* review! — THE REVIEW SESSION carve-out (leg 12/09). NOT value-canonical: it drives a
+ * terminal review session whose OUTPUT IS A RECORD, so JSON refuses up-front. The gate in
+ * hand is DERIVED from the node's own workflow projection, never guessed: a review runs
+ * where the delivered bytes are being decided — the CONFIRM gate — and nowhere else. */
+async function reviewInteractive(ctx: CliContext): Promise<Outcome> {
+  if (ctx.json) {
+    return boom(
+      'review-interactive',
+      'review! is an INTERACTIVE review session — it needs a terminal; JSON mode cannot drive it (run it in a terminal, or read the record: ann --json brief <id>|confirm <id>|detail <id>)',
+    );
+  }
+  const id = resolveId(ctx, ctx.args[1]);
+  const d = ctx.commands.detail(id);
+  // THE GATE IN HAND IS DERIVED — never guessed, and refused BY NAME when it is not there.
+  // `waiting-on-decision` and `rework` are the two states in which the confirm gate is the
+  // human's next move: a first decision, and a re-submission after a rejection.
+  const next = d.next;
+  if (d.isLeg || next.gate !== 'confirm') {
+    return boom(
+      'not-at-confirm-gate',
+      `review! ${id}: nothing to review — the node is not deciding its CONFIRM gate. In hand: ${next.verdict}${next.gate ? ` (${next.gate} gate)` : ''}${d.isLeg ? ' — a LEG is not reviewed, its tasks are' : ''}. A review runs at the confirm gate, where the delivered bytes are decided (see: ann next)`,
+    );
+  }
+  const r = await runReviewSession(ctx.commands, buildAbilities(getAdapter(undefined, ctx.root, { runId: ctx.log.runId, traceId: ctx.log.traceId })), id);
+  if (!r.ok) {
+    // emit() prints the error once (stderr in text, the error doc in JSON) — never twice
+    return { ok: false, error: { code: r.error.code, message: r.error.blocker, text: `${r.error.code}: ${r.error.blocker}` }, exitCode: 1 };
+  }
+  const head =
+    r.outcome === 'recorded'
+      ? `review! ${id}: the findings are RECORDED (pass ${r.passes}, ${r.rounds} round${r.rounds === 1 ? '' : 's'})`
+      : `review! ${id}: ${r.outcome === 'aborted' ? 'ABORTED — the session stopped' : 'the round ceiling was hit'} — ${r.note}`;
+  console.log(head);
+  if (!r.findings.length) console.log('  (no findings landed — this review recorded nothing)');
+  for (const f of r.findings) {
+    console.log(`  ${f.id}  [${f.severity}]  ${f.status}${f.stale ? ' · NOT RE-ASSESSED by the latest pass' : ''}  ${f.where}`);
+    console.log(`      ${f.text}`);
+  }
+  console.log(`  cited at ${r.anchor || '(no anchor — the log records no commit to cite)'} · read it back: ann brief ${id} · ann confirm ${id}`);
+  // THE SESSION DECIDED NOTHING — so the next move names the HUMAN's own gesture.
+  console.log("NEXT MOVE — the gate is YOURS, not the session's:");
+  console.log(`  decide it: ann gate! ${id} confirm accept|reject '<why>'`);
+  return { ok: true, value: { outcome: r.outcome, rounds: r.rounds, passes: r.passes, anchor: r.anchor, findings: r.findings } };
+}
+
 /* ── the alias map (the `--x` command forms — NOT the stripped --project/--json) ── */
 const ALIAS: Record<string, string> = {
   '--journey': 'journey',
@@ -1367,7 +1414,7 @@ const ALIAS: Record<string, string> = {
 
 /** The journey-addressing WRITES a read-only target refuses (config!/cred!/project!
  *  never touch the store, so they stay available). docs/rules --write refuse too. */
-const JOURNEY_REFUSED_WRITES = new Set(['append!', 'spawn!', 'submit!', 'gate!', 'evidence!', 'capture!', 'complete!', 'goal!', 'run!', 'spec!', 'advance!']);
+const JOURNEY_REFUSED_WRITES = new Set(['append!', 'spawn!', 'submit!', 'gate!', 'evidence!', 'capture!', 'complete!', 'review!', 'goal!', 'run!', 'spec!', 'advance!']);
 /** Bare write names (no `!`) — a named hint, never silent. */
 const WRITES = ['append', 'spawn', 'submit', 'gate', 'evidence', 'capture', 'complete', 'cred'];
 
@@ -1448,6 +1495,12 @@ export async function runMain(rawArgv: string[] = process.argv.slice(2)): Promis
     // an interactive terminal grilling session — JSON refuses up-front inside each.
     if (canonical === 'goal!' && (args[1] ?? '') === 'seed') {
       const out = await goalSeedInteractive(ctx);
+      logCommand(cmdlog, out, json);
+      if (!out.ok) throw new CommandExit(out.error.code, out.error.message, { text: out.error.text, exitCode: out.exitCode });
+      return;
+    }
+    if (canonical === 'review!') {
+      const out = await reviewInteractive(ctx);
       logCommand(cmdlog, out, json);
       if (!out.ok) throw new CommandExit(out.error.code, out.error.message, { text: out.error.text, exitCode: out.exitCode });
       return;

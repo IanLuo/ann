@@ -53,6 +53,13 @@ import { isUnresolved, makeDedupeLabeler, humanChannel } from './session-shared.
  *        round) / skip, and the session continues while the human digs. GO is ONLY ever
  *        the human's call.
  *
+ * ONE OPTIONAL AREA HOOK adds a turn, and only when a profile declares it (leg 12/09): a
+ * profile may carry {@link GrillProfile.findings}, which makes each round end with a
+ * strict-JSON FINDINGS turn whose parsed list is handed to {@link GrillOptions.onFindings}.
+ * That is the whole of the difference between a session that talks and a session whose
+ * output is a RECORD — and a profile that does not declare it (every other area) runs
+ * exactly the loop above, with no extra turn and no extra model call.
+ *
  * The session ends on a GO (converged), a skip / abort (the human quits), or — only if
  * the loop keeps being asked to continue without converging — the anti-runaway ceiling.
  * That ceiling stop is never the normal end; it closes with a FULL LLM-written synthesis
@@ -102,6 +109,18 @@ export interface GrillProfile {
   /** The in-session refine ask — how the human reshapes the subject mid-session. */
   refineAsk: string;
 
+  /** THE FINDINGS HOOK (leg 12/09) — OPTIONAL, and the only area hook that adds a turn.
+   *  When a profile declares it the loop runs ONE extra strict-JSON turn per round and hands
+   *  the parsed list to {@link GrillOptions.onFindings}, which is what makes a session
+   *  RECORD-producing rather than conversation-only. When it is ABSENT — every other profile —
+   *  the loop is byte-identically unchanged: no extra model call, no extra turn.
+   *
+   *  `instruction` must demand strict JSON of the form `{"findings": [ … ]}`. The loop knows
+   *  nothing about what a finding IS: it parses the array, passes the RAW items on, and the
+   *  AREA validates their shape — an area's vocabulary (its severities, its pointer format)
+   *  must not leak into the area-neutral core. */
+  findings?: { instruction: string };
+
   /** Bounded rounds / in-discussion exchanges per round — the area's defaults (a caller
    *  overrides per-run; flow-control §3 — never unbounded). */
   defaultMaxRounds: number;
@@ -123,6 +142,12 @@ export interface GrillOptions {
   context?: GroundingInput[];
   /** Contract constraints: ACs, scope, non-negotiables. */
   constraints?: string[];
+  /** Where a round's findings LAND — declared together with {@link GrillProfile.findings},
+   *  and ignored (never called) by a profile that does not declare the hook. Called once per
+   *  round AS ASSERTED, so a session that dies mid-way has already landed everything it found
+   *  rather than losing the lot; the last call before the session ends carries the freshest
+   *  list. Awaited, so a landing failure is the session's failure. */
+  onFindings?: (items: unknown[]) => void | Promise<void>;
   /** Bounded rounds (flow-control §3 — never unbounded). */
   maxRounds?: number;
   /** Bounded in-discussion exchanges per round (flow-control §3 — never unbounded). */
@@ -257,6 +282,24 @@ const parseDecision = (text: string): { ok: true; value: DecisionReply } | { ok:
 };
 
 const renderHistory = (h: { who: string; text: string }[]): string => h.map((e) => `${e.who}: ${e.text}`).join('\n') || '(none yet)';
+
+/** Deterministic parse of the findings turn's strict-JSON reply — the same honesty layer as
+ *  its siblings. The loop requires only that the turn produced a `findings` ARRAY and passes
+ *  the items on UNINTERPRETED (what a finding is, and whether its shape holds, is the AREA's
+ *  contract); unparseable or mis-shaped output is a failure, never fabricated. */
+const parseFindings = (text: string): { ok: true; value: unknown[] } | { ok: false; blocker: string } => {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(unquote(text));
+  } catch {
+    return { ok: false, blocker: 'the findings turn returned unparseable output — treated as failure, never fabricated' };
+  }
+  const o = parsed as Record<string, unknown> | null;
+  if (!o || !Array.isArray(o.findings)) {
+    return { ok: false, blocker: 'the findings turn output violated the shape contract ({"findings": [ … ]}) — treated as failure' };
+  }
+  return { ok: true, value: o.findings };
+};
 
 /** Deterministic parse of the discuss turn's strict-JSON reply (the honesty layer —
  *  unparseable/malformed output is a failure, never fabricated). */
@@ -425,6 +468,37 @@ export class GrillSession {
       const needsReasoning = askedThisRound > 0 || [...open.values()].some((q) => q.impact !== 'low') || artifact.validation.some((v) => v.verdict !== 'ok');
       const history: { who: string; text: string }[] = []; // THIS round's discussion transcript
 
+      /** THE FINDINGS TURN (leg 12/09) — one per round, and ONLY for a profile that declares
+       *  {@link GrillProfile.findings}: a no-op returning undefined for every other area, so
+       *  their rounds are untouched. Landed at the END of the round so it sees the whole of it
+       *  (the read · the answers · the discussion), and AS ASSERTED, so an abort in a later
+       *  round can never lose what this one already found. */
+      const landFindings = async (): Promise<AdapterError | undefined> => {
+        const hook = this.profile.findings;
+        if (!hook) return undefined;
+        const c = await llmText(
+          [
+            `You are producing the FINDINGS of a ${title} (round ${round}).`,
+            '',
+            `## Current ${noun} draft\n${subject}`,
+            `## This round's reading of it\n${subjectLine}`,
+            `## Grounded context (cite ONLY these labels; never invent)\n${renderContext(context)}`,
+            `## Contract constraints\n${renderConstraints(constraints)}`,
+            ...(history.length ? [`## This round's discussion transcript\n${renderHistory(history)}`] : []),
+            '',
+            hook.instruction,
+            '',
+            '## Output — strict JSON, no commentary, no fence',
+            '{ "findings": [ … ] }',
+          ].join('\n'),
+        );
+        if (!c.ok) return c.error; // provider failure → fail CLOSED, nothing fabricated
+        const p = parseFindings(c.value);
+        if (!p.ok) return { code: 'bad-response', blocker: `${noun} session: ${p.blocker}` };
+        await opts.onFindings?.(p.value);
+        return undefined;
+      };
+
       if (needsReasoning) {
         // 2 — the synthesis turn: a PROSE reply (no JSON) reading the answers back.
         const answersSection =
@@ -528,6 +602,15 @@ export class GrillSession {
           }
         }
       }
+
+      // 3½ — THE FINDINGS TURN (leg 12/09), and ONLY for a profile that declares it — a
+      // no-op for every other area, whose rounds are therefore untouched. Landed HERE, at the
+      // end of the round's conversation and BEFORE the decision, for two reasons: the round is
+      // complete (read · answers · discussion), so the record is never further behind than the
+      // conversation that produced it; and a GO never pays for an extra model turn, so the
+      // human's decision is never held hostage to one.
+      const findingsErr = await landFindings();
+      if (findingsErr) return { ok: false, error: findingsErr };
 
       // 4 — DECISION (after each resolved discussion — GO is ONLY the human's call here).
       // The recommendation is the LLM's, grounded in the whole round — never a bare rule:

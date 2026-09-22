@@ -240,3 +240,75 @@ describe('the round READ render (roundRead) — show-me: crux first, only the ac
     expect(text).not.toContain('GOAL');
   });
 });
+
+/**
+ * (d) THE FINDINGS HOOK IS ADDITIVE (leg 12/09) — the ONLY area hook that adds a turn, and
+ * a NO-OP for every profile that does not declare it. This is the proof that the three
+ * existing areas (goal · specs · design) run the byte-identical loop: same model calls per
+ * round, no extra turn, nothing to land.
+ */
+describe('(d) the findings hook — inert unless the profile declares it', () => {
+  const PROFILE = (extra: Partial<GrillProfile>): GrillProfile => ({ ...STUB_PROFILE, ...extra });
+
+  /** A model that answers the grill cleanly and records what it was asked. */
+  const countingLlm = (): { llm: LlmAbility; prompts: string[] } => {
+    const prompts: string[] = [];
+    const llm: LlmAbility = {
+      async complete(req: { prompt: string }) {
+        prompts.push(req.prompt);
+        if (req.prompt.includes('producing the FINDINGS')) return JSON.stringify({ findings: [{ id: 'F1', severity: 'gap', where: 'a.ts:1', text: 'x', status: 'open' }] });
+        if (req.prompt.includes('DECISION advisor')) return JSON.stringify({ recommendation: 'GO', reason: 'complete' });
+        return JSON.stringify({ summary: 'A clean design.', validation: [{ verdict: 'ok', claim: 'scope is checkable' }], questions: [] });
+      },
+    };
+    return { llm, prompts };
+  };
+
+  const run = async (profile: GrillProfile) => {
+    const { llm, prompts } = countingLlm();
+    const landed: unknown[][] = [];
+    const r = await new GrillSession({ llm, interact: new ScriptedInteractor([], ['GO']) }, profile).run({
+      subject: 'An architecture.',
+      ...(profile.findings ? { onFindings: (items: unknown[]) => void landed.push(items) } : {}),
+    });
+    return { r, prompts, landed };
+  };
+
+  it('a profile WITHOUT the hook runs no extra turn and lands nothing', async () => {
+    const { r, prompts, landed } = await run(PROFILE({}));
+    expect(r.ok).toBe(true);
+    // exactly ONE model call for a clean round: the grill. No findings turn, no decision
+    // turn (no round produced reasoning to weigh), no synthesis.
+    expect(prompts).toHaveLength(1);
+    expect(landed).toEqual([]);
+  });
+
+  it('a profile WITH the hook adds exactly one strict-JSON turn per round and hands the RAW items on', async () => {
+    const { r, prompts, landed } = await run(PROFILE({ findings: { instruction: 'Produce the findings.' } }));
+    expect(r.ok).toBe(true);
+    expect(prompts).toHaveLength(2); // the grill + the findings turn
+    expect(prompts[1]).toContain('Produce the findings.');
+    expect(prompts[1]).toContain('{ "findings": [ … ] }');
+    // the core knows NOTHING about what a finding is — the raw items go straight through
+    expect(landed).toEqual([[{ id: 'F1', severity: 'gap', where: 'a.ts:1', text: 'x', status: 'open' }]]);
+  });
+
+  it('an unparseable findings turn FAILS CLOSED — the honesty layer extends to the record', async () => {
+    const llm: LlmAbility = {
+      async complete(req: { prompt: string }) {
+        if (req.prompt.includes('producing the FINDINGS')) return 'here are my findings: F1 — the thing is broken';
+        return JSON.stringify({ summary: 'A clean design.', validation: [{ verdict: 'ok', claim: 'checkable' }], questions: [] });
+      },
+    };
+    const landed: unknown[][] = [];
+    const r = await new GrillSession({ llm, interact: new ScriptedInteractor([], ['GO']) }, PROFILE({ findings: { instruction: 'Produce the findings.' } })).run({
+      subject: 'An architecture.',
+      onFindings: (items: unknown[]) => void landed.push(items),
+    });
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.error.code).toBe('bad-response');
+    expect(r.error.blocker).toContain('findings turn returned unparseable output');
+    expect(landed).toEqual([]); // nothing fabricated, nothing landed
+  });
+});

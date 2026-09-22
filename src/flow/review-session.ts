@@ -1,0 +1,459 @@
+import { execFileSync } from 'node:child_process';
+import { assemblePacket } from './materialize.js';
+import { GrillProfile, GrillSession } from './grill-session.js';
+import { GroundingInput, SourceType } from './steps/shared.js';
+import { Abilities } from './types.js';
+import { Commands, type CommandError, type ReviewFindingsView } from '../commands/index.js';
+import type { ReviewFindingInput, ReviewFindingView } from '../store/store.js';
+
+/**
+ * L2 · THE REVIEW AREA of the grilling engine — the session a human runs AT A GATE, whose
+ * output is a RECORD rather than a conversation.
+ *
+ * The problem this exists for is measured, not imagined. `12-operate-loop/08` was rejected
+ * with a 3241-char prose DIGEST stored as gate `feedback`; its per-finding list (F1–F11 ·
+ * G1–G6) was unreachable through the journey — `ann --json confirm` could not produce it —
+ * and survived only in a reviewer's session transcript. So the rework's claim that
+ * "everything found was fixed" had nothing to be checked against, and it was FALSE: of the
+ * eleven findings routed to one cleanup pass, one was fixed, two were no-action-by-design,
+ * and EIGHT were still open. A digest is not a record. A record is per-finding, localized,
+ * and re-checkable.
+ *
+ * THE SESSION is the portable one — the same loop as the goal, specs and design grills
+ * (`src/flow/grill-session.ts`: bounded rounds, anti-runaway ceiling, dedupe/never-re-ask,
+ * the synthesis turn, `InteractAbort`, provider fail-closed). REVIEW is the FOURTH
+ * `GrillProfile` (goal · specs · design · this). It is NOT `reviewRunner`
+ * (`src/flow/runner-review.ts`), which is a deterministic "could the runner execute without
+ * guessing?" simulation at the same gate — a different question, asked without a model.
+ *
+ * WHAT MAKES IT A REVIEW, and what it must never become:
+ *   - it reviews a DELIVERY — this task's bytes against this task's contract — and never
+ *     re-plans the task, re-grills the contract, or decides the gate;
+ *   - every finding is LOCALIZED (`file:line`) or explicitly `uncertain`; an unlocalized
+ *     assertion is the digest this replaces;
+ *   - it LANDS as it asserts (one landing per round), so a session that dies mid-way loses
+ *     nothing — AC-4's independence: the session writes NO gate event, so reviewing a task
+ *     can never accept, reject or close it.
+ *
+ * The findings themselves ride the ONE optional area hook on the core
+ * ({@link GrillProfile.findings} + {@link GrillOptions.onFindings}): the core parses the
+ * strict-JSON turn, hands the RAW items over, and knows nothing about severities, pointers
+ * or provenance. The area maps and stamps; the store's single writer validates.
+ */
+
+/** THE REVIEW grilling directive — what the shared grilling engine must do to review a
+ *  DELIVERY, and the boundary that keeps it off the plan and off the gate. */
+export const REVIEW_GRILL_MODE = `You are REVIEWING A DELIVERY: a task was implemented, and its own record says so. Your job is to establish, from the material provided, what is actually TRUE of the delivered bytes — not to re-plan the task, not to re-argue its contract, and not to decide whether the gate should be accepted.
+
+The 'idea' is the CURRENT READING of the delivery under review. Sharpen it as the review proceeds; build on every answer already given.
+
+## The boundary you review within (hard)
+- The CONTRACT is fixed: its intent and its acceptance criteria are given. You do not rewrite them, question their wisdom, or propose new ones. A criterion you believe is wrong is at most a finding about the delivery, never a licence to re-scope.
+- The PLAN is done. Implementation choices already made are reviewed FOR THE CONTRACT'S SAKE — "does this satisfy AC-3, and does it hold?" — never reopened as design preferences. A finding is a defect against the contract or the material, not a taste.
+- The GATE IS NOT YOURS. Whether to accept, reject or rework is the human's decision, made after your record exists. Never recommend a verdict, never phrase a finding as "reject this".
+
+## What you are reviewing, and where to look
+Read the material provided and review it in this order — it is the order the evidence is strong in:
+1. THE DIFF over the stated range — the bytes under review. This is the primary object: what changed, and what it actually does.
+2. THE CONTRACT (intent + the numbered acceptance criteria) — the standard each change is held to. Walk EVERY criterion: for each, what in the diff makes it true?
+3. THE CAPTURED CHECKS — a 'captured' check is a FACT (the engine ran it and read the real exit code); a 'reported' check is a CLAIM (someone typed it). Treat them differently, and say which you relied on.
+4. THE RESOLVED INPUTS — the defining documents, at their recorded sha. A change that contradicts one is a finding.
+5. ANY PRIOR FINDINGS — a review is often a RE-review. For each prior finding, say what the current bytes do about it.
+Locate EVERY finding you raise: a file and a line in the reviewed bytes. Cite the range's anchor sha when the line number depends on it.
+
+## Your 'summary' must be
+ONE line stating the delivery as it now reads against its contract — the verdict-free reading, e.g. "AC-1 and AC-4 are met by the noted hunks; AC-2's writer half is present but the read half is unverified; two localization gaps remain." Name what is established and what is not. No verdict, no recommendation, no second paragraph.
+
+## Hard rules
+- NEVER invent a line number, a sha, a file, or a check result. If the material does not show it, you do not know it — and saying so is a finding, not a failure.
+- NEVER re-ask what the material or an earlier answer already settles. Ask ONLY about what you genuinely cannot determine from what you were given, and say what you would need.
+- A concern you cannot localize is REAL and must be raised — as severity 'uncertain', with whatever pointer you do have. Never drop it, and never dress it as a located one.`;
+
+/** THE REVIEW reasoning directive — shared by the synthesis turn, the discussion turns and
+ *  the research follow-up turn. */
+export const REVIEW_DISCUSS_MODE = `You are reasoning about a DELIVERY under review: what the delivered bytes actually establish against the contract, and what remains unestablished. Ground every statement in the provided material labels — the diff, the criteria, the checks, the inputs, the prior findings — and never invent a fact, a line, or a result.
+
+- CONCLUSION-FIRST and SHORT: lead with what is established or what you cannot establish, then the tightest support. Cap the reply at a few short lines.
+- Keep the standard fixed: the CONTRACT is the standard. Never drift into re-planning the task, questioning the criteria, or proposing a gate verdict — the human decides, after your record exists.
+- Weigh the EVIDENCE and its SOURCE: a captured check is a fact; a reported one is a claim; a hunk you can read is stronger than an assertion about it.
+- Whether a criterion is MET is a claim to be shown from the bytes, never conceded because the record says so — the record is exactly what is under review.
+- Name the concrete gap: which criterion, which file, which line, what the material fails to show. Never a generic 'needs more verification'.`;
+
+/** THE FINDINGS turn — the strict-JSON instruction the core appends to its own prompt, and
+ *  the ONLY profile hook that adds a turn. The shape here is the shape the store validates;
+ *  a finding that violates it is refused BY NAME at the writer rather than stored as prose. */
+export const REVIEW_FINDINGS_MODE = `Produce the CURRENT FINDINGS of this review — the complete list as it stands at the end of this round, re-stating the findings that still hold, not only the new ones. This list is LANDED: it is the record a rework is checked against, so it must be checkable, not persuasive.
+
+Each finding is an object with EXACTLY these five fields:
+- "id": a short stable handle — 'F1', 'F2', … in order. A finding that a PRIOR list already recorded KEEPS ITS PRIOR ID; that is what lets a rework flip it.
+- "severity": one of exactly
+    "matches"    — the criterion IS met and the bytes show it (state it: that is how a reviewer's silence becomes wrong)
+    "gap"        — a contract requirement is not met, or a part of it is absent
+    "regression" — something that worked is now broken by these bytes
+    "quality"    — it works, but the delivered bytes are defective in a way that will cost someone later
+    "uncertain"  — a real concern you CANNOT localize to a file and line. Use this rather than inventing a pointer.
+- "where": the location in the reviewed bytes as 'path:line' (e.g. 'src/store/store.ts:1819'). For "uncertain", give the coarsest true pointer you have ('src/store/store.ts' or 'the diff, hunk 3'). NEVER a guess and NEVER blank.
+- "text": what was found, in one or two sentences a person can act on WITHOUT reading this conversation. Name the criterion it bears on. Not a restatement of the location.
+- "status": "open" or "resolved". "open" for anything you are raising now. "resolved" ONLY for a prior finding the current bytes demonstrably settle — and when you mark one resolved, say in its "text" what evidence settles it.
+
+Rules:
+- Report what the material SHOWS. A finding you cannot support from the provided material is not a finding — say in an "uncertain" entry what you would need instead.
+- Do NOT include a verdict, a recommendation, or whether the gate should be accepted: the human decides, after this record exists.
+- Do NOT editorialize about the process ("more testing recommended"). Every entry is either a located defect or an explicit 'uncertain'.
+- An honest short list beats a padded one. If the material shows the delivery meets its criteria, say so with "matches" entries naming what carries each one.`;
+
+/** THE REVIEW AREA — the boundary a review may work within, and what is explicitly out.
+ *  Everything the loop needs that is NOT area-specific lives in the core; this profile
+ *  supplies only what a review varies, plus the findings hook that makes it a RECORD. */
+export const REVIEW_PROFILE: GrillProfile = {
+  id: 'review',
+  title: 'Review session',
+  noun: 'review',
+  seedVerb: 'ann review!',
+  goAction: 'Land the findings',
+  focus:
+    "Review a task's DELIVERY against its own contract and the bytes it cites — every finding localized to a file:line, or explicitly 'uncertain'; never a re-plan of the task, never a re-grill of the contract, never a gate decision.",
+  grilling: REVIEW_GRILL_MODE,
+  reasoning: REVIEW_DISCUSS_MODE,
+  decisionWeighIn: {
+    exhausted:
+      "The round is EXHAUSTED — reviewing raised no new questions, so digging further is not an option: recommend GO if the findings list is a faithful, localized record of what the material shows, otherwise refine. GO here means THE FINDINGS ARE COMPLETE — it records them and decides nothing; the gate is the human's own, later gesture. Never weigh the delivery's quality as a reason to withhold GO: a review that found serious defects and recorded them faithfully is a COMPLETE review.",
+    open: "GO only if the findings list is a faithful, localized record of what the material shows — every criterion walked, every finding pointed at a file and line or honestly marked 'uncertain'. Dig more if a criterion is still unexamined or a concern is still unlocalized; refine if the reading of the delivery itself is wrong. GO means THE FINDINGS ARE COMPLETE and records them; it is NEVER a verdict on the delivery and NEVER a gate decision — a review that records eleven open findings is a complete review, and withholding GO over the defects would hide them.",
+  },
+  refineAsk:
+    'What should the review look at differently? Reshape its reading of the delivery in your own words — the next round reviews what you say here.',
+  findings: { instruction: REVIEW_FINDINGS_MODE },
+  defaultMaxRounds: 12,
+  defaultMaxDiscussTurns: 6,
+};
+
+/** Who asserted a finding. Stamped by the AREA, never taken from the model: a model must not
+ *  be able to claim a human authored a finding, and an author-less finding is
+ *  indistinguishable from one a human raised (the reason `provenance` is required at all). */
+export const REVIEW_PROVENANCE = 'review session (model)';
+
+/**
+ * The review's OUTPUT budget — the core already accepts one per session
+ * (`GrillSession`'s `{ model, maxTokens }`), and this area needs a bigger one than the
+ * shared default for a reason that is structural, not tuning: a review's material is the
+ * largest of any area BY CONSTRUCTION, because it carries the submission's diff.
+ *
+ * MEASURED, not guessed (the AC-5b oracle, 2026-09-22): on the first real run over
+ * 12/08's own range, the shared 2048-token default cut the grill turn's strict JSON at
+ * 8137 chars — mid-string — so the round failed closed at `bad-response` and the review
+ * recorded nothing. A budget within which the material can actually be read is part of
+ * this area's honesty; failing closed is the RIGHT behaviour when the budget is exceeded,
+ * and no budget is right for every material, so the number is stated here rather than
+ * left implicit in a default that was never chosen for a diff-carrying prompt.
+ */
+const REVIEW_MAX_TOKENS = 4096;
+
+/** How much of the reviewed patch the session may read. A review that cannot see the bytes
+ *  cannot produce a `file:line` — the diff IS an input — but an unbounded one buries the
+ *  contract under it. The cap follows `brief`'s idiom: cut, and WRITE THE CUT LENGTH INLINE,
+ *  so a partial view can never be mistaken for the whole submission.
+ *
+ *  MEASURED (AC-5b oracle, 2026-09-22). A real delivery's patch is not small: 12/08's own
+ *  range is 1,281 insertions / 272 deletions across 26 files — a patch of **137,547 chars**.
+ *  The first budget tried here was 12,000, which carried 8.7% of it: the oracle then came
+ *  back `uncertain` on EVERY criterion, because the patch was cut before the first source
+ *  body, and it reproduced none of the three code-visible findings AC-5 names as its stated
+ *  minimum. The number below carries a delivery of that size, which is what "the inputs are
+ *  sufficient" has to mean in practice; the oracle at this budget verified seven criteria
+ *  from the bytes (see the node's record). A LARGER delivery is still cut — and that is why
+ *  the cut length is written inline and why the change map above the patch is complete, so a
+ *  file whose hunks were cut is always NAMED rather than invisible. */
+const DIFF_CHARS = 60000;
+
+/** The change MAP gets its own (smaller) budget: `--stat` is one line per file, so this is
+ *  room for hundreds of them — and it is what makes the cap on the patch above survivable,
+ *  because a file whose patch was cut is still NAMED. */
+const STAT_CHARS = 4000;
+
+/** The one path the patch leaves out, and why. `.ann/journey` is the RECORD of the work —
+ *  the node's own `events.jsonl` churn — not the delivered artifact, and it is already carried
+ *  above as structure (the commits and their notes · the checks · the prior findings). It is
+ *  excluded because of a MEASURED failure, not tidiness: path order puts `.ann/` first, so on
+ *  a real task the log's hunks consumed the entire patch budget (the AC-5b oracle, 2026-09-22,
+ *  over 12/08's own range) and the reviewed CODE never reached the session — every finding came
+ *  back `uncertain` for want of bytes that were sitting in git. The log still appears in the
+ *  change MAP, so its exclusion is disclosed rather than hidden, and only the log is excluded:
+ *  `.ann/rules` and the rest of the tree stay, because a delivery may legitimately land there.
+ *  The pathspec is `:(top,exclude)` — REPO-ROOT-anchored, not cwd-relative — so the exclusion
+ *  names the same path whatever directory the store resolves from, and (a pathspec of pure
+ *  exclusions) it also keeps the diff REPO-WIDE rather than scoped to that directory. */
+const DIFF_EXCLUDES = ['.ann/journey'];
+
+const SHA = /^[0-9a-f]{7,40}$/;
+
+/** One git read, fail-closed to undefined (never a throw, never a fabricated result) — the
+ *  `capture.ts` helper's shape, and like it an argv array with no shell. */
+const git = (cwd: string, args: string[]): string | undefined => {
+  try {
+    return execFileSync('git', ['-C', cwd, ...args], { stdio: ['ignore', 'pipe', 'ignore'], encoding: 'utf8' }).trim();
+  } catch {
+    return undefined;
+  }
+};
+
+const cut = (s: string, n: number): string =>
+  n > 0 && s.length > n ? `${s.slice(0, n)}… (+${(s.length - n).toLocaleString()} chars cut — the full range is in git)` : s;
+
+const bullets = (xs: readonly string[]): string => xs.map((x) => `- ${x}`).join('\n');
+
+/** THE MATERIAL a review is run over (AC-5): the contract and its criteria, the submission's
+ *  commits AND the range they were made over, the captured checks at their sha, the resolved
+ *  defining docs, and any PRIOR findings — every one of them derived from the log, none of
+ *  them typed. */
+export interface ReviewMaterial {
+  /** The delivery as it reads — the seed the grill sharpens into its summary. */
+  subject: string;
+  context: GroundingInput[];
+  /** The numbered criteria — the standard, in the session's own constraints channel. */
+  constraints: string[];
+  /** The sha the citations are ANCHORED to (the reviewed head), or '' when the log records
+   *  no commit to anchor to. */
+  anchor: string;
+  /** `<base>..<head>` — the range the reviewed bytes were made over, or '' when it could not
+   *  be derived. The log records the commits but NEVER the base they were made over, so this
+   *  is derived, and the derivation is stated in the material rather than assumed. */
+  range: string;
+}
+
+/**
+ * Assemble the material for node `id` — pure, never writes. Built on the deterministic
+ * packet (`assemblePacket` supplies the contract and the resolved inputs) plus the half a
+ * packet does NOT carry: `ContextPacket` has no evidence at all, so the commits, their
+ * range, the diff and the captured checks are read from the log here.
+ */
+export function buildReviewMaterial(commands: Commands, id: string): ReviewMaterial {
+  const store = commands.store;
+  const packet = assemblePacket(store, id);
+  const c = packet.nodeContract;
+  const intent = (c.intent ?? '').trim();
+  const acs = (c.acceptanceCriteria ?? []).filter((a): a is string => typeof a === 'string' && !!a.trim());
+
+  // THE SUBMISSION. `citedCommits` is the UNION in first-cited order and it is what the RANGE
+  // is derived from; `currentCitedCommits` is the latest citation set (a re-recorded
+  // conclusion supersedes). The head is the last cited commit — the newest bytes under review.
+  const cited = store.citedCommits(id);
+  const current = store.currentCitedCommits(id);
+  const head = cited.length ? cited[cited.length - 1] : '';
+
+  // THE RANGE — derived, and named as derived. The base is the parent of the FIRST cited
+  // commit: the commit that INTRODUCED the work under review is part of the work, so
+  // `previousHead..head` would omit it. Measured on 12/08's own review, which read
+  // `a59bf00..b54b67a` while the naive rule yields `1dc9b92..b54b67a` — one commit short,
+  // and exactly the commit that introduced the changes being reviewed. When the parent
+  // cannot be resolved (the cited shas are not in this repo) the range is EMPTY and said to
+  // be underivable — never a fabricated expression.
+  const base = cited.length && SHA.test(cited[0]) ? git(store.root, ['rev-parse', `${cited[0]}^`]) : undefined;
+  const range = base && head ? `${base}..${head}` : '';
+
+  const context: GroundingInput[] = [];
+  const add = (label: string, text: string, sourceType: SourceType): void => {
+    if (text.trim()) context.push({ label, text, sourceType });
+  };
+
+  // 1 · THE SUBMISSION'S COMMITS, with the note each was recorded under.
+  const notes = new Map<string, string>();
+  for (const e of store.events(id)) {
+    if (e.type !== 'evidence' || !Array.isArray(e.commits)) continue;
+    for (const x of e.commits) {
+      const r = x as { sha?: unknown; note?: unknown };
+      const sha = typeof r.sha === 'string' ? r.sha.trim() : '';
+      if (sha) notes.set(sha, typeof r.note === 'string' ? r.note : '');
+    }
+  }
+  add(
+    'submission.commits',
+    bullets(cited.map((s) => (notes.get(s) ? `${s} — ${notes.get(s)}` : s))),
+    'repo metadata',
+  );
+
+  // 2 · THE RANGE, and the fact that the citations hang off it.
+  add(
+    'submission.range',
+    range
+      ? [
+          `The reviewed bytes are ${range} (${cited.length} cited commit${cited.length === 1 ? '' : 's'}). The log records only the commits, so the base is DERIVED as the parent of the first cited commit.`,
+          `Every line number you cite is anchored to ${head} — a later re-read at a different sha may MOVE it, so say which sha a pointer belongs to.`,
+          current.length && current[current.length - 1] !== head
+            ? `NOTE: the latest recorded citation set is ${current.join(', ')} — a re-record may have superseded part of the range above.`
+            : '',
+        ]
+          .filter(Boolean)
+          .join('\n')
+      : 'The range could not be derived from the log (no cited commit resolves in this repo) — review only what the other inputs establish, and raise the missing bytes as a finding.',
+    'repo metadata',
+  );
+
+  // 3 · THE DIFF — the bytes under review, the primary object. The MAP first (complete, one
+  //     line per file), then the patch (bounded, and never able to hide a file's existence).
+  if (range) {
+    const stat = git(store.root, ['diff', '--no-color', '--stat', range]);
+    if (stat) add('submission.changedFiles', cut(stat, STAT_CHARS), 'repo metadata');
+    const patch = git(store.root, ['diff', '--no-color', '--unified=3', range, '--', ...DIFF_EXCLUDES.map((p) => `:(top,exclude)${p}`)]);
+    add(
+      'submission.diff',
+      patch === undefined
+        ? `git could not produce a diff for ${range} — review only what the other inputs establish, and raise the unread bytes as a finding.`
+        : patch === ''
+          ? `The diff over ${range} is EMPTY — the cited commits changed nothing against their base.`
+          : `${cut(patch, DIFF_CHARS)}\n(The change map above is complete; this patch omits ${DIFF_EXCLUDES.join(', ')} — the record's own churn, not the artifact — and is otherwise cut only as its length states.)`,
+      'repo metadata',
+    );
+  }
+
+  // 4 · THE CAPTURED CHECKS — each at the sha its run saw, and marked FACT vs CLAIM.
+  const checks = store.checksOf(id);
+  add(
+    'checks',
+    bullets(
+      checks.map(
+        (k) =>
+          `${k.command}: ${k.result} — ${k.source === 'captured' ? 'CAPTURED FACT (the engine ran it)' : 'REPORTED CLAIM (someone typed it)'}${k.sha ? ` at ${k.sha}` : ' (no sha recorded)'}${k.detail ? ` — ${k.detail}` : ''}`,
+      ),
+    ),
+    'runtime/tool output',
+  );
+
+  // 5 · THE RESOLVED DEFINING INPUTS — at their recorded sha, with the packet's excerpt.
+  for (const d of packet.dependencies) {
+    add(
+      `input.${d.name}`,
+      d.status === 'resolved'
+        ? `${d.path ?? d.name} @ ${d.sha ?? '(no sha)'}\n${d.excerpt ?? ''}`
+        : `MISSING — '${d.name}' is a declared requiredInput with no resolved artifact.`,
+      'documentation',
+    );
+  }
+
+  // 6 · ANY PRIOR FINDINGS — a review is usually a RE-review, and this is the list it flips.
+  const prior = commands.reviewFindings(id);
+  if (prior.findings.length) {
+    add(
+      'prior.findings',
+      [
+        `Pass ${prior.reviews} (${prior.at}) recorded the findings below${prior.anchor ? `, cited at ${prior.anchor}` : ''}. Re-state each one at its status in the current bytes — keep its id.`,
+        bullets(
+          prior.findings.map(
+            (f) =>
+              `${f.id} [${f.severity}] ${f.where} — ${f.text} (${f.status}${f.stale ? '; NOT re-assessed by the latest pass' : ''})`,
+          ),
+        ),
+      ].join('\n'),
+      'repo metadata',
+    );
+  }
+
+  return {
+    subject: `${id} — ${intent || '(no intent declared)'}`,
+    context,
+    constraints: acs.map((a, i) => `AC-${i + 1}: ${a}`),
+    anchor: head,
+    range,
+  };
+}
+
+/**
+ * Map the core's RAW items into the record the writer validates. It PICKS the five fields
+ * and stamps `provenance` — it never spreads the item — so an unknown field the model
+ * invented cannot reach the log, and an author cannot be forged.
+ *
+ * The VOCABULARY is deliberately NOT re-checked here: the single writer is the one validator
+ * (`store.findingShapeProblem`), and its refusal names the offending field. A second check
+ * would be a second validator — the thing the two-tier write model exists to prevent.
+ */
+export const shapeFindings = (items: unknown[], provenance: string): ReviewFindingInput[] =>
+  items
+    .filter((i): i is Record<string, unknown> => !!i && typeof i === 'object' && !Array.isArray(i))
+    .map((r) => ({
+      id: String(r.id ?? '').trim(),
+      severity: r.severity as ReviewFindingInput['severity'],
+      where: String(r.where ?? '').trim(),
+      text: String(r.text ?? '').trim(),
+      // an unreadable status reads as OPEN — the conservative reading: a finding is resolved
+      // only when the word says so, and a later pass re-checks whatever claims it.
+      status: (r.status === 'resolved' ? 'resolved' : 'open') as ReviewFindingInput['status'],
+      provenance,
+    }));
+
+export interface ReviewSessionOptions {
+  /** The anti-runaway round ceiling — overrides the profile default so a caller (a test)
+   *  can pin it. Never the UX driver. */
+  maxRounds?: number;
+  maxDiscussTurns?: number;
+  /** The stamped author. Defaults to {@link REVIEW_PROVENANCE}. */
+  provenance?: string;
+}
+
+export type ReviewSessionResult =
+  | {
+      ok: true;
+      /** The human said GO: the findings list is as complete as this session will make it.
+       *  NOT a verdict — the session never decides the gate. */
+      outcome: 'recorded';
+      rounds: number;
+      /** The passes that actually LANDED (a pass that landed nothing is not one). */
+      passes: number;
+      /** The record AS READ BACK by the one derivation — each finding at its latest status,
+       *  with the pass that recorded it (`stale` marks one the latest pass did not re-state). */
+      findings: ReviewFindingsView['findings'];
+      anchor: string;
+    }
+  | {
+      ok: true;
+      outcome: 'aborted' | 'exhausted';
+      note: string;
+      rounds: number;
+      passes: number;
+      findings: ReviewFindingsView['findings'];
+      anchor: string;
+    }
+  | { ok: false; error: CommandError };
+
+/**
+ * The thin caller — the whole review session as a VALUE (guarded-write style, no
+ * throw-as-flow): assemble the material, run the portable session over `REVIEW_PROFILE`, and
+ * land each round's findings through `commands.landFindings` AS THEY ARE ASSERTED.
+ *
+ * That per-round landing is what makes AC-4 literal: an abort in round 4 loses nothing found
+ * in rounds 1–3. A landing that FAILS is the session's failure (the core awaits the hook),
+ * and a provider failure fails CLOSED with nothing fabricated.
+ *
+ * The session writes NO gate event — `landFindings` appends `evidence` and nothing else, and
+ * the gate kinds are composite-owned by `gate!` — so what a review can never do is accept,
+ * reject or close the task it reviewed.
+ */
+export const runReviewSession = async (
+  commands: Commands,
+  abilities: Abilities,
+  id: string,
+  opts: ReviewSessionOptions = {},
+): Promise<ReviewSessionResult> => {
+  const material = buildReviewMaterial(commands, id);
+  const provenance = opts.provenance ?? REVIEW_PROVENANCE;
+  const r = await new GrillSession(abilities, REVIEW_PROFILE, { maxTokens: REVIEW_MAX_TOKENS }).run({
+    subject: material.subject,
+    ...(material.context.length ? { context: material.context } : {}),
+    ...(material.constraints.length ? { constraints: material.constraints } : {}),
+    ...(opts.maxRounds !== undefined ? { maxRounds: opts.maxRounds } : {}),
+    ...(opts.maxDiscussTurns !== undefined ? { maxDiscussTurns: opts.maxDiscussTurns } : {}),
+    onFindings: (items) => {
+      const findings = shapeFindings(items, provenance);
+      // A pass that found NOTHING lands nothing: the writer refuses an empty landing (a
+      // review that found nothing is not a record), and the prior list stands with its own
+      // date rather than being silently re-stamped as current.
+      if (!findings.length) return;
+      const w = commands.landFindings(id, findings, { ...(material.anchor ? { anchorSha: material.anchor } : {}) });
+      if (!w.ok) throw new Error(`the findings could not be recorded: ${w.error.blocker}`);
+    },
+  });
+  if (!r.ok) return { ok: false, error: r.error };
+
+  const view = commands.reviewFindings(id);
+  const tail = { rounds: r.rounds, passes: view.reviews, findings: view.findings, anchor: material.anchor };
+  if (r.verdict === 'solid') return { ok: true, outcome: 'recorded', ...tail };
+  return { ok: true, outcome: r.verdict === 'reject' ? 'aborted' : 'exhausted', note: r.note, ...tail };
+};

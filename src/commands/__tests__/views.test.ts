@@ -360,6 +360,67 @@ describe('goal() — the goal-session read (goal-session-design §9)', () => {
   });
 });
 
+describe('reviewFindings — the ONE derivation of a review\'s record (leg 12/09 AC-3)', () => {
+  const F = (over: Record<string, unknown> = {}) => ({
+    id: 'F1',
+    severity: 'gap',
+    where: 'src/surface/approve.ts:212',
+    text: 'the rework affordance is unreachable',
+    status: 'open',
+    provenance: 'review session (model)',
+    ...over,
+  });
+  /** A findings landing at `at` — the log holds it as evidence, exactly as landFindings writes it. */
+  const landed = (at: string, findings: unknown[], anchorSha?: string) =>
+    ev('evidence', { at, note: 'review findings landed (test)', findings, ...(anchorSha ? { anchorSha } : {}) });
+
+  it('reads a single landing as it was landed — no staleness, the anchor carried', () => {
+    writeNode('01-leg/01-a', [ev('created'), landed('2026-09-19', [F(), F({ id: 'G1', severity: 'quality', where: 'ui-drill.test.ts:436' })], 'a1a5056')]);
+    const v = commands().reviewFindings('01-leg/01-a');
+    expect(v.reviews).toBe(1);
+    expect(v.at).toBe('2026-09-19');
+    expect(v.anchor).toBe('a1a5056');
+    expect(v.findings.map((f) => [f.id, f.status, f.stale])).toEqual([
+      ['F1', 'open', undefined],
+      ['G1', 'open', undefined],
+    ]);
+    expect(v.findings[0]).toMatchObject({ severity: 'gap', where: 'src/surface/approve.ts:212', provenance: 'review session (model)', at: '2026-09-19', pass: 1 });
+  });
+
+  it('THE FLIP: a second pass re-stating an id SUPERSEDES it — and it flips only when the record says so', () => {
+    writeNode('01-leg/01-a', [
+      ev('created'),
+      landed('2026-09-19', [F(), F({ id: 'F2', text: 'still open' })], 'a1a5056'),
+      // the rework's re-review: F1 is settled by evidence, F2 is NOT re-stated at all
+      landed('2026-09-25', [F({ status: 'resolved', text: 'settled by the captured pass at abc1234' })], 'b54b67a'),
+    ]);
+    const v = commands().reviewFindings('01-leg/01-a');
+    expect(v.reviews).toBe(2);
+    expect(v.at).toBe('2026-09-25');
+    expect(v.anchor).toBe('b54b67a');
+    const byId = new Map(v.findings.map((f) => [f.id, f]));
+    expect(byId.get('F1')).toMatchObject({ status: 'resolved', pass: 2, at: '2026-09-25' });
+    // AN OMISSION IS REPORTED AS AN OMISSION — silent disappearance is how 12/08's findings
+    // were lost (a rework that claimed "all fixed" over 8 open findings), so F2 stays listed
+    // at its own date, marked NOT re-assessed, rather than quietly dropped from the list.
+    expect(byId.get('F2')).toMatchObject({ status: 'open', pass: 1, at: '2026-09-19', stale: true });
+  });
+
+  it('a second pass that keeps a finding OPEN flips nothing — the status is the record\'s word, never the pass count', () => {
+    writeNode('01-leg/01-a', [ev('created'), landed('2026-09-19', [F()]), landed('2026-09-25', [F({ text: 're-checked: still unmet' })])]);
+    const v = commands().reviewFindings('01-leg/01-a');
+    expect(v.reviews).toBe(2);
+    expect(v.findings).toHaveLength(1);
+    expect(v.findings[0]).toMatchObject({ status: 'open', text: 're-checked: still unmet', pass: 2 });
+    expect(v.findings[0].stale).toBeUndefined();
+  });
+
+  it('a node with no review reads as no review (never a throw, never an invented finding)', () => {
+    writeNode('01-leg/01-a', [ev('created'), ev('evidence', { commits: [{ sha: 'abc1234' }] })]);
+    expect(commands().reviewFindings('01-leg/01-a')).toEqual({ findings: [], reviews: 0, at: '', anchor: '' });
+  });
+});
+
 /** Narrow a CommandResult to its value (a failure here means the view was refused). */
 function valueOf<T>(r: { ok: true; value: T } | { ok: false; error: { code: string } }): T {
   if (!r.ok) throw new Error(`expected success, got ${r.error.code}`);

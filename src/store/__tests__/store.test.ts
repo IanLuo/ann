@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Store, JourneyEvent } from '../store.js';
+import { Store, JourneyEvent, REVIEW_SEVERITIES } from '../store.js';
 import { Commands } from '../../commands/index.js';
 import { getVOCAB } from '../vocab.js';
 import { blobSha } from '../sha.js';
@@ -1294,6 +1294,42 @@ describe('Store — strict event schema (format v12 §3: unknown fields + shapes
     // the capture entry point refuses a set that is not captured (it is not a general writer)
     expect(() => s2.appendCaptured(s2.resolveNode('06-engine-build/20-k'), E([{ command: 'npm test', result: 'pass' }]))).toThrow(/engine-produced checks only/);
     expect(s2.events('06-engine-build/20-k').filter((e) => e.type === 'evidence')).toEqual([]);
+  });
+
+  // leg 12/09 — THE FINDINGS RECORD. The same discipline as claims/checks: a review's
+  // finding is structured, so what a review found is CHECKABLE (12/08 stored a 3241-char
+  // digest whose per-finding list was unreachable, and "everything found was fixed" was
+  // measured false). A malformed finding is refused BY NAME, never stored as prose.
+  it('rejects malformed findings (severity vocabulary, missing pointer, missing author, unknown key)', () => {
+    writeNode('06-engine-build/20-m', {}, [ev('created')]);
+    const F = (findings: unknown): JourneyEvent => ({ at: '2026-08-22', type: 'evidence', findings } as unknown as JourneyEvent);
+    const ok = { id: 'F1', severity: 'gap', where: 'src/a.ts:12', text: 'x', status: 'open', provenance: 'review session (model)' };
+    expectReject('06-engine-build/20-m', F([]), /findings must be a non-empty/);
+    expectReject('06-engine-build/20-m', F(['F1']), /each finding must be an object/);
+    expectReject('06-engine-build/20-m', F([{ ...ok, kind: 'x' }]), /unknown field\(s\) 'kind'/);
+    expectReject('06-engine-build/20-m', F([{ ...ok, id: '  ' }]), /needs an 'id'/);
+    expectReject('06-engine-build/20-m', F([{ ...ok, severity: 'major' }]), /severity must be one of matches\|gap\|regression\|quality\|uncertain/);
+    expectReject('06-engine-build/20-m', F([{ ...ok, where: '   ' }]), /needs 'where'/);
+    expectReject('06-engine-build/20-m', F([{ ...ok, text: '' }]), /needs 'text'/);
+    expectReject('06-engine-build/20-m', F([{ ...ok, status: 'fixed' }]), /status must be one of open\|resolved/);
+    // an AUTHOR-LESS finding is indistinguishable from a human's — the pre-grill amendment
+    expectReject('06-engine-build/20-m', F([{ ...ok, provenance: ' ' }]), /needs 'provenance'/);
+  });
+
+  it('accepts a well-formed findings landing, and refuses a bad anchorSha', () => {
+    writeNode('06-engine-build/20-n', {}, [ev('created')]);
+    const s2 = s();
+    // the five severities are ALL valid — 'uncertain' is a first-class answer, not a failure
+    for (const severity of REVIEW_SEVERITIES) {
+      const node = s2.resolveNode('06-engine-build/20-n');
+      expect(() =>
+        s2.appendEvent(node, { at: '2026-08-22', type: 'evidence', findings: [{ id: 'F1', severity, where: 'src/a.ts:12', text: 'x', status: 'open', provenance: 'review session (model)' }], anchorSha: 'a1a5056' } as unknown as JourneyEvent),
+      ).not.toThrow();
+    }
+    const node = s2.resolveNode('06-engine-build/20-n');
+    expect(() => s2.appendEvent(node, { at: '2026-08-22', type: 'evidence', findings: [{ id: 'F1', severity: 'gap', where: 'a:1', text: 'x', status: 'open', provenance: 'p' }], anchorSha: 'not-a-sha' } as unknown as JourneyEvent)).toThrow(/anchorSha must be a commit sha/);
+    // …and the citation-anchor is REAL: the events that landed are readable back with it
+    expect(s2.events('06-engine-build/20-n').filter((e) => e.type === 'evidence').length).toBe(REVIEW_SEVERITIES.length);
   });
 
   it('a captured check must be self-consistent: sha + exitCode + detail, result DERIVED from the exit code', () => {

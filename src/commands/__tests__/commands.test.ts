@@ -733,6 +733,71 @@ describe('evidence! + complete! — the close gesture commands (leg 08 task 02)'
   });
 });
 
+describe('landFindings — THE FINDINGS RECORD (leg 12/09 AC-2 · AC-4)', () => {
+  beforeEach(() => { makeStore(); writeNode('01-leg', CONTRACT); });
+  afterEach(() => { rmSync(root, { recursive: true, force: true }); });
+
+  const GATE = [ev('submitted', { gate: 'grill' }), ev('confirmed', { gate: 'grill' })];
+  /** A task standing at its CONFIRM gate, submitted and undecided — where a review runs. */
+  const atConfirm = () => writeNode('01-leg/01-a', CONTRACT, [ev('created'), ...GATE, ev('submitted', { gate: 'confirm' })]);
+
+  const F = (over: Record<string, unknown> = {}) => ({
+    id: 'F1',
+    severity: 'gap' as const,
+    where: 'src/surface/handlers.ts:433',
+    text: 'AC-4 is unmet: the findings are not exposed by the gate read',
+    status: 'open' as const,
+    provenance: 'review session (model)',
+    ...over,
+  });
+
+  it('lands on the ADDRESSED node — confinement is structural, not a check', () => {
+    atConfirm();
+    writeNode('01-leg/02-b', CONTRACT, [ev('created')]);
+    const c = cmds();
+    expect(valueOf(c.landFindings('01-leg/01-a', [F()], { anchorSha: 'a1a5056' }))).toEqual({ findings: 1 });
+    const e = c.events('01-leg/01-a').at(-1)!;
+    expect(e.type).toBe('evidence');
+    expect(e.findings).toEqual([F()]);
+    expect(e.anchorSha).toBe('a1a5056');
+    expect(String(e.note)).toContain('test');
+    // the sibling holds nothing, and the store never sees a write it did not mint
+    expect(c.events('01-leg/02-b').filter((x) => x.type === 'evidence')).toEqual([]);
+    expect(c.verify()).toEqual([]);
+  });
+
+  it('is DELIBERATELY NOT A CONCLUSION — no commits, no claims, no checks, so a review can never close a task', () => {
+    atConfirm();
+    const c = cmds();
+    valueOf(c.landFindings('01-leg/01-a', [F()]));
+    const e = c.events('01-leg/01-a').at(-1)!;
+    expect(e.commits).toBeUndefined();
+    expect(e.claims).toBeUndefined();
+    expect(e.checks).toBeUndefined();
+    // AC-4: the session writes NO gate event, and the task is exactly where it was
+    expect(c.status('01-leg/01-a')).toBe('blocked');
+    expect(c.events('01-leg/01-a').filter((x) => ['confirmed', 'rejected', 'completed'].includes(String(x.type)))).toHaveLength(1);
+    // …and the DERIVED gate in hand is unchanged: a review leaves the human's decision pending
+    expect(c.detail('01-leg/01-a').next).toEqual({ gate: 'confirm', verdict: 'waiting-on-decision' });
+  });
+
+  it('refuses a leg root, an unknown node, an empty list, and a malformed finding — BY NAME, writing nothing', () => {
+    atConfirm();
+    const c = cmds();
+    expect(errorOf(c.landFindings('01-leg', [F()])).code).toBe('leg-gate-write');
+    expect(errorOf(c.landFindings('01-leg/09-x', [F()])).code).toBe('no-node');
+    expect(errorOf(c.landFindings('01-leg/01-a', [])).code).toBe('no-findings');
+    // the deep shape is the SINGLE WRITER's: this front adds only the gesture's precondition
+    const bad = errorOf(c.landFindings('01-leg/01-a', [F({ where: '  ' })]));
+    expect(bad.code).toBe('store-refused');
+    expect(bad.blocker).toContain("needs 'where'");
+    const noAuthor = errorOf(c.landFindings('01-leg/01-a', [F({ provenance: '' })]));
+    expect(noAuthor.blocker).toContain("needs 'provenance'");
+    // nothing was written by any refusal
+    expect(c.events('01-leg/01-a').filter((x) => x.type === 'evidence')).toEqual([]);
+  });
+});
+
 describe('capture! — the CAPTURED check (leg 12 task 03: the record is a consequence, not a claim)', () => {
   beforeEach(() => { makeStore(); writeNode('01-leg', CONTRACT); });
   afterEach(() => { rmSync(root, { recursive: true, force: true }); });
