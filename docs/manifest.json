@@ -6,6 +6,7 @@
   "core-design": "docs/core-design.md",
   "flow-control-spec": "docs/flow-control-spec.md",
   "functional-spec": "docs/functional-spec.md",
+  "gate-cadence": "docs/gate-cadence.md",
   "goal": "docs/goal.md",
   "journey-format-spec": "docs/journey-format-spec.md",
   "requirements-change-protocol": "docs/requirements-change-protocol.md",
