@@ -5,3 +5,4 @@
 {"at":"2026-09-25","type":"submitted","gate":"grill","note":"submitted for the grill gate (agent)"}
 {"at":"2026-09-25","type":"confirmed","gate":"grill","note":"accepted (ianluo)"}
 {"at":"2026-09-25","type":"evidence","note":"captured 'npm run build' → pass (exit 0) against c81dfe50f2157451a1d618d80139e40a0728a4cb (agent)","checks":[{"command":"npm run build","result":"pass","exitCode":0,"detail":"sha1:41d15cbc4250 · > tsc","sha":"c81dfe50f2157451a1d618d80139e40a0728a4cb","source":"captured"}]}
+{"at":"2026-09-25","type":"evidence","note":"captured 'ann check' → pass (exit 0) against 882eb70cf1066bf85b305a5d7c4d9515debe3e50 (agent)","checks":[{"command":"ann check","result":"pass","exitCode":0,"detail":"sha1:cc3b87171d5f · State: 01-goal done · 02-archive-access done · 03-cli-json done · 04-grilling-architecture done · 05-specs-grill done · 06-operator-loop done · 07-operator-adva…","sha":"882eb70cf1066bf85b305a5d7c4d9515debe3e50","source":"captured"}]}
