@@ -1,0 +1,53 @@
+{
+  "id": "12-operate-loop/22-implementation-automatic-exit-gate",
+  "contract": {
+    "intent": "THE EXIT GATE IS DECIDED BY A REVIEW WORKER. Source and full design: `docs/gate-cadence.md` §7 (v2), whose four operator decisions are this node's PREMISE, not options — D-1 the worker ACCEPTS AUTOMATICALLY (the human leaves the exit gate; chosen against the spec's own recommendation), D-2 both the deterministic floor and the model auto-rework, D-3 the ESCALATION IS BUILT so the worker stops at the reject bound and a human decides for real, D-4 one spec extended rather than two. WHAT THIS BUILDS: a headless, single-pass reviewer that runs at the CONFIRM SUBMISSION as the door to the gate, and whose accept closes the task. THE CENTRAL DESIGN, and the one thing not to soften: the model is NEVER ASKED FOR A VERDICT. It lands findings in the EXISTING shape (`shapeFindings` + `findingShapeProblem`, severity from `REVIEW_SEVERITIES`), and ONE deterministic rule derives the decision — an open `gap`/`regression` REWORKS; an open `uncertain` with no defect sends the card to the HUMAN; only `matches` (and resolved others) ACCEPTS. The middle row is load-bearing: without it a vague reviewer accepts by default, and because `uncertain` burns no rejection it cannot deadlock. A model that hallucinates 'accept' in prose therefore changes nothing. THE FLOOR IS MECHANICAL and runs before the model: `closeEvidenceBlocker` clean, every AC claimed, every claim's check resolving and not failed — ONE predicate, read by `submit!` AND by the accept auto-close. That closes a divergence found while writing the spec: the `gate!` accept auto-close reads `closeEvidenceBlocker` ALONE while `complete!` also applies the v18 conclusion gate, so today a confirm accept can close a task `complete!` would refuse for an unclaimed AC. THE RECORD MUST SAY WHO DECIDED: D-1 removes the human from the gate, so the decision event gains ENGINE-STAMPED provenance (never caller-typed), or the journey cannot say how much of itself a machine accepted and an audit is impossible in principle. THE BOUND ENDS AT A HUMAN: at REJECT_BOUND the worker is OUT — its next action is not a rejection — and `force-approve` becomes a real gesture recording the human's override WITH the objection attached, while restructure and block route to the existing `spawn!`+`cancelled` and `deferred` (routing, not machinery). THE WORKER'S ABSENCE DEGRADES TO THE HUMAN, VISIBLY: no provider or a refusal leaves the submission standing and the card as it is today, with the absence NAMED — an outage must not silently convert automatic gates into human ones. IT IS NOT `ann review!`: that session is interactive, terminal-only and STRUCTURALLY BARRED from deciding (it appends `evidence` and nothing else, pinned by test), and that property is load-bearing, so the worker is a separate actor rather than a mode of it. REUSE THE SINGLE WRITER: a worker's rejection is the SAME `rejected` event a human's is — no new event type, no new state, no new write path (`flow-control-spec` 12/06's rule). SCOPE: the exit gate only; the grill stays the human's, and v1's items (a required rationale on accept, the contract on the advance card, the typed `kind`, the effective-accept comparison) are NOT in this node.",
+    "acceptanceCriteria": [
+      "AC-1 — THE FLOOR IS ONE PREDICATE ON EVERY PATH: `submit! confirm` refuses a submission whose conclusion does not satisfy the close predicate (closeEvidenceBlocker clean · every AC claimed · every claim's check resolving and not failed), and the `gate!` accept auto-close reads that SAME predicate. Pinned by test: a submission with an unclaimed AC is REFUSED — nothing written, no rejection burned — and a state `complete!` would refuse can no longer be auto-closed by a confirm accept. Both directions, because the divergence found in the spec was exactly that one path was weaker than the other.",
+      "AC-2 — THE VERDICT IS DERIVED, NEVER ASKED: the reviewer is never prompted for a decision; it lands findings in the existing shape, and ONE deterministic rule over severities derives the outcome. All three arms pinned by test: open gap/regression → rework · open uncertain with no defect → the HUMAN (not an accept, and NO rejection burned — so uncertainty can neither rubber-stamp nor deadlock) · only matches → accept.",
+      "AC-3 — RE-EXECUTION IS THE EXISTING LOOP: a worker rejection writes the same `rejected` event a human's does, carrying the findings as feedback, and the DERIVED `rework` state drives the frame's re-execute rung. Pinned by test: no new event type, no new state, no new write path, no new loop.",
+      "AC-4 — THE RECORD SAYS WHO DECIDED: the gate decision carries ENGINE-STAMPED provenance that distinguishes a worker's accept from a human's, never caller-typed, and it is readable through the CLI so the machine-accepted ratio can be audited after the fact. Pinned by test: the two are distinguishable in the record for the same gate.",
+      "AC-5 — THE BOUND ENDS AT A HUMAN, AND THE ESCALATION IS REAL: the worker stops at REJECT_BOUND's edge — its next action is not a rejection — and `force-approve` is implemented as a gesture recording the human's override WITH the reviewer's objection attached; restructure and block route to `spawn!`+`cancelled` and `deferred`. Pinned by test: the reject sequence terminates at the escalation instead of a refused 4th rejection that names an unimplemented string, and the override is recorded with the objection.",
+      "AC-6 — ABSENCE DEGRADES TO THE HUMAN, VISIBLY, ON ONE ASSEMBLY: no provider, an unreachable endpoint or a refusal leaves the submission standing and presents the card exactly as today, with the reviewer's absence and its reason NAMED on the card. The reviewer consumes `brief` — `buildReviewMaterial` stops building a second assembly from `assemblePacket` + the log, so the worker and the card cannot read different facts — and the reviewing run is recorded so an accept whose reviewing run equals the implementing one is checkable. Reviews are bounded by REJECT_BOUND per gate cycle.",
+      "AC-7 — NO REGRESSION: full `npm test` green, `npm run typecheck` clean, the captured checks (npm test · npm run typecheck · ann check · ann verify) recorded via capture!, `ann check` + `ann verify` clean on the live journey, committed with structured evidence (F-AC18)."
+    ],
+    "workType": "implementation",
+    "targetAreas": [
+      "src/flow",
+      "src/commands",
+      "src/store",
+      "src/surface",
+      "src/e2e"
+    ],
+    "requiredInputs": [
+      "gate-cadence",
+      "architecture",
+      "journey-format-spec",
+      "core-design"
+    ],
+    "expectedOutputs": [
+      "the headless reviewer and the severity→verdict rule as ONE new module (src/flow), reusing review-session's profile and `shapeFindings`",
+      "the floor as one predicate consumed by `submit!` and by the accept auto-close (src/commands, src/store)",
+      "the worker's decision written through the SAME writer as a human's, with engine-stamped provenance on the decision event (src/commands, src/store)",
+      "the escalation: force-approve as a gesture with the objection attached; restructure and block routed to spawn!+cancelled and deferred (src/commands)",
+      "the reviewer's absence named on the card (src/surface)",
+      "`buildReviewMaterial` consuming `brief` — one assembly for the worker and the human (src/flow)",
+      "tests: the floor's refusal and the two paths agreeing · each verdict arm · rework reuses the existing event · worker-vs-human provenance · the bound terminating at the escalation with the override recorded · absence degrading to the human · brief as the single assembly"
+    ]
+  },
+  "openQuestions": [
+    {
+      "id": "Q1",
+      "question": "Does the worker answer gates opened by the DRIVER — the semantic `run!` — or only gates a human opened? Three records say no: self-driving-design.md:49 ('RULES never decides a gate'), :79 ('worker-side gate decisions (never, by protocol)'), and gate-session-design.md:131, which scope-outs both 'the driver starting sessions by itself' and 'mandatory sessions (the gate stays a one-gesture decision)'.",
+      "blocking": false,
+      "defaultIfUnanswered": "YES — the worker answers every exit gate, and those three records are REVISED IN THE SAME CHANGE. The alternative gives one gate two behaviours that differ by CALLER, which is the 'one word, two facts' failure this codebase has fixed repeatedly; a silent divergence is not the honest form. Answering yes is consequential and must be stated where it lands: `run!` can then close a task with NO human in it at all, and the driver's own contract ('it hands the decision to the human — the run LANDS there') is rewritten rather than quietly contradicted. If the operator prefers the narrower scope, the worker runs only for human-opened gates and the driver's gates keep presenting to a person."
+    },
+    {
+      "id": "Q2",
+      "question": "Where does the reviewer's model call come from — the same provider seam the frame's steps resolve, or its own fixed model/profile?",
+      "blocking": false,
+      "defaultIfUnanswered": "The SAME provider seam the frame uses, with the review PROFILE and mode constants already in review-session.ts. One model-config path, no second provider story, and the worker's behaviour stays auditable beside the steps it reviews. A separate seam would need its own config, its own failure modes, and its own answer for what 'no provider' means — which AC-6 already settles for one seam."
+    }
+  ],
+  "createdAt": "2026-09-25"
+}
