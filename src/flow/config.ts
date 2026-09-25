@@ -1,6 +1,7 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { loadConfig } from '../abilities/llm/config.js';
+import { IDEA_STALE_DAYS } from '../store/ideas.js';
 
 /**
  * THE GENERAL CONFIG (core-design §6; owner decision 2026-08-26) — the end-user knobs.
@@ -50,10 +51,18 @@ export interface ServerBind {
   port: number;
 }
 
+/** The IDEA AREA's knobs (leg 12/10). One leaf: how long an unpromoted idea may sit
+ *  before `ann idea list --stale` names it (AC-4's "configured age"). A threshold that
+ *  selects what a READ names — it deletes, promotes and refuses nothing. */
+export interface IdeaKnobs {
+  staleDays: number;
+}
+
 export interface GeneralConfig {
   flow: FlowKnobs;
   preferences: Preferences;
   server: ServerBind;
+  ideas: IdeaKnobs;
 }
 
 /** Which layer a leaf key resolved from — derived, never stored. */
@@ -70,20 +79,24 @@ export interface ConfigResolution {
 /** The verify-fail ceiling — a CONSTANT (NFR-CST-1: bounded, never open). Not a key. */
 export const VERIFY_FAIL_CYCLES_CEILING = 3;
 
-/** The builtin defaults — a knowing duplicate of `rules/config/default.json`. */
+/** The builtin defaults — a knowing duplicate of `rules/config/default.json`, except
+ *  `ideas.staleDays`, which takes the L0 constant itself (no duplicate to drift). */
 export const BUILTIN_CONFIG: GeneralConfig = {
   flow: { conditionals: false, verifyFailCycles: 1 },
   preferences: { askVsAssume: 'ask', defaults: {} },
   server: { host: '127.0.0.1', port: 8787 },
+  ideas: { staleDays: IDEA_STALE_DAYS },
 };
 
 /** The leaf keys this config class owns. */
-const LEAVES = ['flow.conditionals', 'flow.verifyFailCycles', 'preferences.askVsAssume', 'preferences.defaults', 'server.host', 'server.port'] as const;
+const LEAVES = ['flow.conditionals', 'flow.verifyFailCycles', 'preferences.askVsAssume', 'preferences.defaults', 'server.host', 'server.port', 'ideas.staleDays'] as const;
 
 /** The leaf keys the USER overlay may override — everything else is project semantics.
  *  (`server.*` is a MACHINE preference — which address my own server listens on is not
- *  a property of the journey, so two people may differ without running it differently.) */
-const USER_OVERRIDABLE = new Set<string>(['flow.verifyFailCycles', 'preferences.askVsAssume', 'preferences.defaults', 'server.host', 'server.port']);
+ *  a property of the journey, so two people may differ without running it differently.
+ *  `ideas.staleDays` is the same kind of thing: WHEN my own nudge starts, not what the
+ *  project means — the threshold names ideas, it never deletes or promotes one.) */
+const USER_OVERRIDABLE = new Set<string>(['flow.verifyFailCycles', 'preferences.askVsAssume', 'preferences.defaults', 'server.host', 'server.port', 'ideas.staleDays']);
 
 const ENV_KEYS: Record<string, string> = {
   'flow.conditionals': 'ANN_FLOW_CONDITIONALS',
@@ -98,6 +111,7 @@ interface ProjectConfigFile {
   flow?: Record<string, unknown>;
   preferences?: Record<string, unknown>;
   server?: Record<string, unknown>;
+  ideas?: Record<string, unknown>;
 }
 
 /** Load the PROJECT config registry. Absent → undefined (builtin applies); present but
@@ -159,6 +173,11 @@ function checkLeaf(key: string, raw: unknown, layer: ConfigLayer): { value?: unk
       if (n < 0 || n > 65535) return named(`${n} is out of range 0..65535 (0 = the OS picks a free port)`);
       return { value: n };
     }
+    case 'ideas.staleDays': {
+      if (typeof raw !== 'number' || !Number.isInteger(raw)) return named(`expected an integer, got ${JSON.stringify(raw)}`);
+      if (raw < 1) return named(`${raw} is out of range — the stale age is a whole number of days, 1 or more`);
+      return { value: raw };
+    }
     default:
       return named('unknown leaf key');
   }
@@ -181,11 +200,12 @@ export function resolveConfig(root: string): ConfigResolution {
     flow: { ...BUILTIN_CONFIG.flow },
     preferences: { ...BUILTIN_CONFIG.preferences, defaults: { ...BUILTIN_CONFIG.preferences.defaults } },
     server: { ...BUILTIN_CONFIG.server },
+    ideas: { ...BUILTIN_CONFIG.ideas },
   };
 
   const set = (key: string, value: unknown, layer: ConfigLayer): void => {
     const [group, leaf] = key.split('.');
-    (config[group as 'flow' | 'preferences' | 'server'] as unknown as Record<string, unknown>)[leaf] = value;
+    (config[group as 'flow' | 'preferences' | 'server' | 'ideas'] as unknown as Record<string, unknown>)[leaf] = value;
     provenance[key] = layer;
   };
 

@@ -255,7 +255,7 @@ function resolveId(ctx: CliContext, raw: string | undefined): string {
 }
 
 /** The config! group leaves that are NUMBERS (everything else is a string). */
-const NUMERIC_CONFIG_LEAVES = new Set(['verifyFailCycles', 'port']);
+const NUMERIC_CONFIG_LEAVES = new Set(['verifyFailCycles', 'port', 'staleDays']);
 
 /** The command table (one source — text rows, JSON rows, markdown rows) */
 
@@ -697,7 +697,7 @@ export const HANDLERS: Record<string, Handler> = {
       const existing = (cfg[group] as Record<string, unknown> | undefined) ?? {};
       const v: unknown = NUMERIC_CONFIG_LEAVES.has(leaf) ? Number(value) : value;
       if (NUMERIC_CONFIG_LEAVES.has(leaf) && !Number.isInteger(v)) return boom('config-value', `config!: ${key} must be an integer`);
-      setConfig(group as 'flow' | 'preferences' | 'server', { ...existing, [leaf]: v } as never);
+      setConfig(group as 'flow' | 'preferences' | 'server' | 'ideas', { ...existing, [leaf]: v } as never);
       const after = resolveConfig(ctx.root).problems.filter((p) => p.startsWith(`config ${key}`));
       return { ok: true, value: { ok: true, value: { key, file: configPath(), leaf, value: v, problems: after } } };
     }
@@ -1084,7 +1084,18 @@ export const HANDLERS: Record<string, Handler> = {
     const known = new Set(['--all', '--stale']);
     const stray = rest.find((a) => a.startsWith('--') && !known.has(a));
     if (stray) return usage(`usage: ann idea list [--all | --stale] — unknown flag ${stray}`);
-    return { ok: true, value: ctx.commands.ideaList({ all: rest.includes('--all'), stale: rest.includes('--stale') }) };
+    // AC-4's "configured age" — L3 resolves the config (L1 stays config-blind) and hands
+    // the threshold down. A broken `ideas.staleDays` is NAMED in the read's own problem
+    // list rather than silently falling back to the builtin: the read still answers, and
+    // the fallback is visible where the threshold is used.
+    const cfg = resolveConfig(ctx.root);
+    const ideaProblems = cfg.problems.filter((p) => p.startsWith('config ideas.'));
+    const value = ctx.commands.ideaList({
+      all: rest.includes('--all'),
+      stale: rest.includes('--stale'),
+      staleDays: cfg.config.ideas.staleDays,
+    });
+    return { ok: true, value: { ...value, problems: [...ideaProblems, ...value.problems] } };
   },
 
   /* confirm / detail / results — detail-derived cards + results */

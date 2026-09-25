@@ -36,10 +36,16 @@ import { noteWrite } from './write-journal.js';
 export const IDEAS_DIRNAME = 'ideas';
 
 /** THE CONFIGURED AGE (AC-4) — how long an unpromoted idea may sit before `list --stale`
- *  names it. A CONSTANT owned here rather than a config leaf: the config class is
- *  journey semantics + end-user knobs (flow/preferences/server — see flow/config.ts and
- *  the resource registry), and this read is a prompt to the human, never a behaviour the
- *  engine branches on. Nothing ACTS on it — see listIdeas: the read IS the product. */
+ *  names it. This is the BUILTIN DEFAULT only: the project registry's `ideas.staleDays`
+ *  (and the per-user overlay) outrank it (flow/config.ts, the §8a config class).
+ *
+ *  READING TAKEN, REVISED: this started as a constant "owned here", on the argument that
+ *  the config class was journey semantics + end-user knobs. AC-4 says "the CONFIGURED
+ *  age", and the pre-grill amendment named the key (`ideas.staleDays`) — so the default
+ *  moved to the config class and the constant stayed as its builtin floor. What does NOT
+ *  change: nothing ACTS on the threshold. It selects what a read NAMES — no idea is ever
+ *  auto-deleted, promoted or refused because of its age (see listIdeas: the read IS the
+ *  product). */
 export const IDEA_STALE_DAYS = 14;
 
 /** ONE IDEA. The field set is closed and deliberately tiny: no hash, no lock, no gate,

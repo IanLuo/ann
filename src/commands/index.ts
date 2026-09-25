@@ -1160,17 +1160,19 @@ export class Commands {
   }
 
   /** `idea list` — the READ (no `!`): the open ideas with their age. `--all` adds the
-   *  promoted ones, `--stale` narrows to the open ones older than IDEA_STALE_DAYS. The
-   *  read IS the product — nothing is ever auto-deleted. */
-  ideaList(opts: { all?: boolean; stale?: boolean; now?: string } = {}): {
+   *  promoted ones, `--stale` narrows to the open ones at or past `staleDays` (AC-4's
+   *  CONFIGURED age — the caller resolves it, since L1 does not read config; absent
+   *  means the builtin). The read IS the product — nothing is ever auto-deleted. */
+  ideaList(opts: { all?: boolean; stale?: boolean; now?: string; staleDays?: number } = {}): {
     ideas: Array<Idea & { ageDays: number }>;
     problems: string[];
   } {
     const { ideas, problems } = listIdeas(this.store.root);
     const now = opts.now ?? new Date().toISOString();
+    const staleDays = opts.staleDays ?? IDEA_STALE_DAYS;
     const withAge = ideas
       .map((i) => ({ ...i, ageDays: ageInDays(i.created, now) }))
-      .filter((i) => (opts.stale ? i.status === 'open' && i.ageDays >= IDEA_STALE_DAYS : opts.all ? true : i.status === 'open'))
+      .filter((i) => (opts.stale ? i.status === 'open' && i.ageDays >= staleDays : opts.all ? true : i.status === 'open'))
       .sort((a, b) => a.id.localeCompare(b.id));
     return { ideas: withAge, problems };
   }

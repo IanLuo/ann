@@ -3,6 +3,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { resetConfigCache } from '../../abilities/llm/config.js';
+import { IDEA_STALE_DAYS } from '../../store/ideas.js';
 import { resolveConfig, BUILTIN_CONFIG, VERIFY_FAIL_CYCLES_CEILING } from '../config.js';
 
 /**
@@ -133,6 +134,42 @@ describe('server.* — the SERVE BIND group (the general config carries the bind
     expect(r.config.server).toEqual(BUILTIN_CONFIG.server); // refused, never clamped
     expect(r.problems.join('\n')).toContain('no scheme, port, or path');
     expect(r.problems.join('\n')).toContain('out of range 0..65535');
+  });
+});
+
+describe('ideas.staleDays — AC-4\'s "configured age" (leg 12/10)', () => {
+  it('the builtin floor is the L0 constant itself — one number, no duplicate to drift', () => {
+    const r = resolveConfig(root);
+    expect(r.config.ideas).toEqual({ staleDays: IDEA_STALE_DAYS });
+    expect(r.provenance['ideas.staleDays']).toBe('builtin');
+    expect(r.problems).toEqual([]);
+  });
+
+  it('the project registry sets it; the user overlay outranks it (my own nudge, my own threshold)', () => {
+    project({ ideas: { staleDays: 30 } });
+    let r = resolveConfig(root);
+    expect(r.config.ideas.staleDays).toBe(30);
+    expect(r.provenance['ideas.staleDays']).toBe('project');
+
+    user({ ideas: { staleDays: 7 } });
+    r = resolveConfig(root);
+    expect(r.config.ideas.staleDays).toBe(7);
+    expect(r.provenance['ideas.staleDays']).toBe('user');
+  });
+
+  it('an ill-typed or sub-1 value is NAMED and kept at the lower layer — never clamped', () => {
+    project({ ideas: { staleDays: 'soon' } });
+    let r = resolveConfig(root);
+    expect(r.config.ideas.staleDays).toBe(IDEA_STALE_DAYS);
+    expect(r.problems.join('\n')).toContain('expected an integer');
+
+    project({ ideas: { staleDays: 0 } });
+    r = resolveConfig(root);
+    expect(r.config.ideas.staleDays).toBe(IDEA_STALE_DAYS);
+    expect(r.problems.join('\n')).toContain('1 or more');
+
+    project({ ideas: { staleDays: 2.5 } });
+    expect(resolveConfig(root).config.ideas.staleDays).toBe(IDEA_STALE_DAYS);
   });
 });
 

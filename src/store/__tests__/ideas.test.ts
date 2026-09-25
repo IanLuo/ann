@@ -100,7 +100,7 @@ describe('the area', () => {
     expect(readIdea(root, '20260925-120000-b')).toBeDefined();
   });
 
-  it('the stale age is a CONSTANT owned here — a prompt to the human, never engine behaviour', () => {
+  it('the stale age here is only the BUILTIN floor — the configured leaf outranks it (AC-4)', () => {
     expect(IDEA_STALE_DAYS).toBe(14);
   });
 });

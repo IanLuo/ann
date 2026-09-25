@@ -29,14 +29,15 @@ export interface UserConfig {
   currentProject?: string;
   /**
    * The GENERAL-CONFIG overlay (core-design §6; resource-registry v3 — ONE CONFIG
-   * CLASS, TWO INSTANCES; v5 adds `server.*`). This overlay may override
-   * `flow.verifyFailCycles` (a cost knob), `preferences.*` and the `server.*` bind —
-   * `flow.conditionals` is PROJECT SEMANTICS and is refused here, named (see
-   * flow/config.ts).
+   * CLASS, TWO INSTANCES; v5 adds `server.*`, leg 12/10 adds `ideas.staleDays`). This
+   * overlay may override `flow.verifyFailCycles` (a cost knob), `preferences.*`, the
+   * `server.*` bind and `ideas.staleDays` — `flow.conditionals` is PROJECT SEMANTICS
+   * and is refused here, named (see flow/config.ts).
    */
   flow?: { verifyFailCycles?: number };
   preferences?: { askVsAssume?: string; defaults?: Record<string, unknown> };
   server?: { host?: string; port?: number };
+  ideas?: { staleDays?: number };
 }
 
 export const configPath = (): string => process.env.ANN_CONFIG || join(homedir(), '.ann', 'config.json');

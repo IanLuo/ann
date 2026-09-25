@@ -3,7 +3,7 @@
   "version": 2,
   "category": "config",
   "kind": "registry",
-  "definition": "the general user-facing configuration — DATA, never code (F17; owner decision 2026-08-26). ONE CONFIG CLASS, TWO INSTANCES (resource-registry v3; v5 ADDS the server bind group): this PROJECT file holds flow.*, preferences.* and server.*; the USER overlay (~/.ann/config.json) overrides preferences.*, server.* and flow.verifyFailCycles only. PRECEDENCE per leaf key: env > user > project > builtin (the server.* env layer is ANN_HOST/ANN_PORT — the bind's deployment channel, shared with `ann serve`). flow.conditionals is PROJECT SEMANTICS and is NOT user-overridable (two people must not run the same journey as different chains — the product IS the journey); server.* IS overridable (which address my own machine's server listens on is a machine preference, not journey semantics). The GATE REJECT BOUND (3) and the gate set/positions are LOCKED constants, not knobs.",
+  "definition": "the general user-facing configuration — DATA, never code (F17; owner decision 2026-08-26). ONE CONFIG CLASS, TWO INSTANCES (resource-registry v3; v5 ADDS the server bind group; leg 12/10 ADDS the ideas group): this PROJECT file holds flow.*, preferences.*, server.* and ideas.*; the USER overlay (~/.ann/config.json) overrides preferences.*, server.*, ideas.staleDays and flow.verifyFailCycles only. PRECEDENCE per leaf key: env > user > project > builtin (the server.* env layer is ANN_HOST/ANN_PORT — the bind's deployment channel, shared with `ann serve`). flow.conditionals is PROJECT SEMANTICS and is NOT user-overridable (two people must not run the same journey as different chains — the product IS the journey); server.* and ideas.staleDays ARE overridable (which address my own machine's server listens on, and when my own staleness nudge starts, are machine/person preferences, not journey semantics — the threshold names ideas, it deletes and promotes nothing). The GATE REJECT BOUND (3) and the gate set/positions are LOCKED constants, not knobs.",
   "flow": {
     "conditionals": true,
     "verifyFailCycles": 1
@@ -15,5 +15,8 @@
   "server": {
     "host": "127.0.0.1",
     "port": 8787
+  },
+  "ideas": {
+    "staleDays": 14
   }
 }

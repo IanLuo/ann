@@ -227,6 +227,68 @@ describe('drop', () => {
   });
 });
 
+describe('AC-4 — the CONFIGURED age comes from the config class', () => {
+  /** Re-date the only idea N days back, and commit the edit like a human's own change. */
+  const ageIdea = (days: number): string => {
+    const id = onlyIdeaId(root);
+    const p = join(ideasDir(root), `${id}.json`);
+    const rec = JSON.parse(readFileSync(p, 'utf8'));
+    writeFileSync(p, JSON.stringify({ ...rec, created: new Date(Date.now() - days * 86_400_000).toISOString() }) + '\n');
+    commit(root, 're-date the idea');
+    return p;
+  };
+  const registry = (ideas: unknown): void => {
+    mkdirSync(join(root, '.ann', 'rules', 'config'), { recursive: true });
+    writeFileSync(join(root, '.ann', 'rules', 'config', 'default.json'), JSON.stringify({ registry: 'config', ideas }));
+  };
+
+  it('the project registry sets the threshold --stale reads — and nothing is deleted either way', () => {
+    cli(root, ['idea!', 'add', 'two days old']);
+    const p = ageIdea(2);
+
+    // builtin floor (14) → not stale
+    expect(cli(root, ['idea', 'list', '--stale']).stdout).not.toContain('two-days-old');
+
+    registry({ staleDays: 1 });
+    expect(cli(root, ['idea', 'list', '--stale']).stdout).toContain('two-days-old');
+    expect(existsSync(p)).toBe(true); // the read IS the product — still on disk
+  });
+
+  it('a broken threshold is NAMED in the read, which still answers (fail-closed, never silent)', () => {
+    cli(root, ['idea!', 'add', 'anything']);
+    registry({ staleDays: 'soon' });
+
+    const r = cli(root, ['idea', 'list']);
+    expect(r.code).toBe(0);
+    expect(r.stdout).toContain('config ideas.staleDays');
+    expect(r.stdout).toContain('expected an integer');
+  });
+});
+
+describe('the CROSS-FOLDER rule — the area is refused under a non-active store', () => {
+  it('idea! refuses rather than writing the ACTIVE project while reading an archive', () => {
+    const other = mkdtempSync(join(tmpdir(), 'ann-e2e-other-'));
+    try {
+      mkdirSync(join(other, '.ann', 'journey', 'legs'), { recursive: true });
+      cpSync(join(REPO, '.ann', 'rules'), join(other, '.ann', 'rules'), { recursive: true });
+      writeFileSync(join(other, '.e2e-config.json'), '{}');
+      cli(other, ['spawn!', LEG, CONTRACT('the other leg')]);
+
+      const r = cli(root, ['idea!', 'add', 'must not land'], { ANN_STORE: other });
+      expect(r.code).toBe(1);
+      expect(r.stderr).toContain('ANN_STORE points at a READ-ONLY journey');
+      expect(r.stderr).toContain('idea!');
+      expect(existsSync(ideasDir(root))).toBe(false);
+      expect(existsSync(join(other, '.ann', 'ideas'))).toBe(false);
+
+      // the READ is unaffected — it names the active project's ideas, as it always did
+      expect(cli(root, ['idea', 'list'], { ANN_STORE: other }).code).toBe(0);
+    } finally {
+      rmSync(other, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('THE HARD RULE — nothing in the journey reads the area', () => {
   it('a MALFORMED ideas file leaves every journey read BYTE-IDENTICAL', () => {
     const reads: string[][] = [
