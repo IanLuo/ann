@@ -1,3 +1,4 @@
 {"at":"2026-09-25","type":"created","note":"spawned by bookkeeper (agent)"}
 {"at":"2026-09-25","type":"submitted","gate":"grill","note":"submitted for the grill gate (agent)"}
 {"at":"2026-09-25","type":"confirmed","gate":"grill","note":"accepted (ianluo)"}
+{"at":"2026-09-25","type":"evidence","note":"captured 'npm test' → pass (exit 0) against 9692bbb83ace9f7b36472d4d0fd2a7b282845b2c (agent)","checks":[{"command":"npm test","result":"pass","exitCode":0,"detail":"sha1:7022a43f8c71 · Duration 31.81s (transform 2.64s, setup 0ms, import 5.08s, tests 97.82s, environment 4ms)","sha":"9692bbb83ace9f7b36472d4d0fd2a7b282845b2c","source":"captured"}]}
