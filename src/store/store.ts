@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync, appendFileSync, existsSync, statSync, lstatSync, mkdirSync, writeFileSync, renameSync, rmSync, realpathSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join, basename, resolve, sep } from 'node:path';
+import { noteWrite, type WriteRecord } from './write-journal.js';
 import { getVOCAB } from './vocab.js';
 import { blobSha, stripMarkers } from './sha.js';
 import { loadDocsManifest, scanDocsDir, writeDocsManifest } from './docs.js';
@@ -1436,6 +1437,8 @@ export class Store {
     ];
     writeFileSync(join(dir, 'events.jsonl'), seed.map((e) => JSON.stringify(e)).join('\n') + '\n');
     this.nodes.set(id, { id, events: seed });
+    this.noteWrite({ path: join(dir, 'node.json'), node: id, type: 'node.json' });
+    for (const e of seed) this.noteWrite({ path: join(dir, 'events.jsonl'), node: id, type: e.type });
     this.recordWrite(id, nodeJson); // events come from the in-memory log → bytes match the file
     return { id, contract: parsed };
   }
@@ -1469,6 +1472,8 @@ export class Store {
     ];
     writeFileSync(join(dir, 'events.jsonl'), seed.map((e) => JSON.stringify(e)).join('\n') + '\n');
     this.nodes.set(goalId, { id: goalId, events: seed });
+    this.noteWrite({ path: join(dir, 'node.json'), node: goalId, type: 'node.json' });
+    for (const e of seed) this.noteWrite({ path: join(dir, 'events.jsonl'), node: goalId, type: e.type });
     this.recordWrite(goalId, nodeJson); // events come from the in-memory log → bytes match the file
     return { id: goalId, contract: parsed };
   }
@@ -1607,7 +1612,11 @@ export class Store {
     const prospective = [...entry.events, event];
     const gaps = this.gateProblems(node.id, prospective);
     if (gaps.length) throw new Error(gaps.join('\n'));
-    appendFileSync(join(node.dir, 'events.jsonl'), JSON.stringify(event) + '\n');
+    const evPath = join(node.dir, 'events.jsonl');
+    appendFileSync(evPath, JSON.stringify(event) + '\n');
+    // the write journal (12/20): this exact file, and the event's own shape — the surface
+    // commits it and derives its message from what landed, never from a tree scan.
+    this.noteWrite({ path: evPath, node: node.id, type: event.type, ...(typeof event.gate === 'string' ? { gate: event.gate } : {}) });
     entry.events = prospective;
     this.recordWrite(node.id);
     // THE L0 LINE — the store's reach of the stack: what landed, and the rev the write-rev
@@ -1661,6 +1670,14 @@ export class Store {
       return `node.json differs from the ledger (ann wrote rev ${entry.lastRev} at ${entry.lastEventAt})`;
     }
     return undefined;
+  }
+
+  /** Note ONE tracked file the writer just put on disk (leg 12/20) — at the write site,
+   *  where the path is already computed, never by scanning. The journal is process-scoped
+   *  (see write-journal.ts): a binding may build several stores per gesture, and the
+   *  surface commits per ROOT, not per instance. */
+  private noteWrite(rec: WriteRecord): void {
+    noteWrite(this.root, rec);
   }
 
   /** Record ann's last-known state for a node (post-write). Events come from the
@@ -1921,6 +1938,9 @@ export class Store {
       ) + '\n';
     writeFileSync(join(dir, 'node.json'), nodeJson);
     this.nodes.set(id, { id, events: [] });
+    // the write journal (12/20) — the contract write; the `created` event below notes
+    // itself through the single writer, so spawn's whole footprint is journaled.
+    this.noteWrite({ path: join(dir, 'node.json'), node: id, type: 'node.json' });
     if (id.includes('/')) {
       this.appendEvent(new NodeDirImpl(id, dir), { at: new Date().toISOString().slice(0, 10), type: 'created', note: `spawned by bookkeeper (${who})` });
     }

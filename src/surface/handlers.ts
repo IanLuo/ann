@@ -38,6 +38,7 @@ import { runValidators, derivedRegistry } from '../flow/validators/index.js';
 import { buildStepRegistry } from '../flow/steps/index.js';
 import { loadProjectFlow, resolveChain, validateChain } from '../flow/chain.js';
 import { Frame } from '../flow/frame.js';
+import { commitJourneyWrites } from './commit-journey.js';
 import { runGoalSeed } from '../flow/goal-seed.js';
 import { runSpecSession, docsSpecsTarget, DEFAULT_SPEC_NAME } from '../flow/spec-doc.js';
 import { runReviewSession } from '../flow/review-session.js';
@@ -1422,6 +1423,24 @@ const isProjectRoot = (dir: string): boolean => existsSync(join(dir, '.ann')) ||
 
 /* ── runMain — flag strip → root resolve → ctx → dispatch → the ONE emit ────── */
 
+/** THE JOURNEY COMMIT STEP (leg 12/20) — after a WRITE command, commit exactly what the
+ *  store journaled, so the engine's own record never sits dirty. Called from runMain's
+ *  FINALLY, which is what makes it cover every exit: the interactive carve-outs
+ *  (`goal! seed`, `review!`) return early and never reach the dispatch, and a command
+ *  that threw halfway still committed bytes that landed. Reads and refused writes journal
+ *  nothing, so the common case is a no-op by construction. Fail-open in every direction:
+ *  the gesture has already succeeded and a commit defect must never become its failure. */
+function commitAfterWrite(ctx: CliContext, canonical: string): void {
+  if (!JOURNEY_REFUSED_WRITES.has(canonical)) return;
+  try {
+    if (ctx.target().readOnly) return; // a read-only target refused the write before it began
+    const journeyDir = storeJourneyDir(ctx.target().loc);
+    commitJourneyWrites({ root: ctx.root, journeyDir, who: ctx.who });
+  } catch {
+    /* the commit step never fails the gesture it records */
+  }
+}
+
 export async function runMain(rawArgv: string[] = process.argv.slice(2)): Promise<void> {
   const startedAt = Date.now();
   const args = rawArgv.slice();
@@ -1522,6 +1541,11 @@ export async function runMain(rawArgv: string[] = process.argv.slice(2)): Promis
     emitCmd(await handler(ctx), renderKey);
   } catch (e) {
     emitCmd(outcomeOf(e));
+  } finally {
+    // THE COMMIT STEP (leg 12/20) — every exit path, including the early-returning
+    // interactive carve-outs and a command that threw: whatever the store journaled is
+    // committed. No-op for a read, a refusal, or a read-only target.
+    commitAfterWrite(ctx, canonical);
   }
 }
 

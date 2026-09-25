@@ -566,6 +566,7 @@ describe('the readers AGREE (AC-2) — one fixture set, all four gate states', (
       'src/surface/command-renderers.ts': 'renders the DERIVED state word — one glyph per lifecycle value',
       'src/surface/handlers.ts': 'the event-drill label reads gateView (12/16 AC-1) + the derived state comparisons',
       'src/surface/ui.ts': 'the page compares the DERIVED state to decide the in-hand gate',
+      'src/surface/commit-journey.ts': 'the commit SUBJECT spells a word for an event that already landed (the write journal\'s own fact) — it derives no state and reads no tail',
       'src/evals/fixtures.ts': 'fixture TAILS (built data for the eval harness), not a reader',
     };
     const unregistered: string[] = [];

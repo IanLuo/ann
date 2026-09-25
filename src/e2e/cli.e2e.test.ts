@@ -425,6 +425,39 @@ describe('e2e — the CLI binary', () => {
     expect(out(v)).toContain('class=append');
     expect(out(v)).toContain('ann wrote rev');
   });
+
+  it('every write gesture COMMITS ITSELF — the journey, by name, and nothing else (leg 12/20)', () => {
+    prep(root, LEG, TASK);
+    const journeyRel = '.ann/journey';
+    const gitOut = (...args: string[]) => execFileSync('git', ['-C', root, ...args], { encoding: 'utf8' });
+    const committed = (subject: string) => gitOut('log', '-1', '--format=%s').trim() === subject;
+    const baseline = gitOut('rev-parse', 'HEAD').trim();
+
+    // an unrelated dirty file AND an unrelated STAGED file are in the tree throughout —
+    // the engine stages by name from its own write journal, so neither is ever swept in
+    writeFileSync(join(root, 'someone-elses.txt'), 'mid-edit by another agent\n');
+    writeFileSync(join(root, 'staged-elsewhere.txt'), 'staged by someone else\n');
+    git(root, ['add', 'staged-elsewhere.txt']);
+
+    expect(out(cli(root, ['spawn!', LEG, CONTRACT('the leg')]))).toContain('spawned');
+    expect(committed('journey: 01-leg spawn (e2e)')).toBe(true);
+
+    expect(out(cli(root, ['spawn!', TASK, CONTRACT('do the thing')]))).toContain('spawned');
+    expect(committed('journey: 01-leg/01-a spawn (e2e)')).toBe(true);
+
+    expect(out(cli(root, ['submit!', TASK, 'grill']))).toContain('submitted grill');
+    expect(out(cli(root, ['gate!', TASK, 'grill', 'accept', 'looks right']))).toContain('gate grill: accept');
+    expect(committed('journey: 01-leg/01-a grill ACCEPTED (e2e)')).toBe(true);
+
+    // the discipline held: every commit touched the journey only, and the operator's
+    // in-flight file is untouched — still dirty, still theirs
+    const touched = gitOut('log', '--name-only', '--format=', `${baseline}..HEAD`)
+      .split('\n').map((l) => l.trim()).filter(Boolean);
+    expect([...new Set(touched)]).toEqual(['.ann/journey/legs/01-leg/01-a/events.jsonl', '.ann/journey/legs/01-leg/01-a/node.json', '.ann/journey/legs/01-leg/node.json']);
+    expect(touched.some((p) => !p.startsWith(journeyRel))).toBe(false); // NEVER code
+    expect(gitOut('diff', '--cached', '--name-only').trim()).toBe('staged-elsewhere.txt');
+    expect(existsSync(join(root, 'someone-elses.txt'))).toBe(true);
+  });
 });
 
 describe('e2e — the goal-session lifecycle (v6: seed → docs/goal.md → work → met → archive)', () => {
@@ -528,7 +561,8 @@ describe('e2e — the goal-session lifecycle (v6: seed → docs/goal.md → work
     expect(seeded).toContain('docs/goal.md');
     expect(out(cli(root, ['next']))).toContain('session open'); // a seeded goal alone is not exhausted
 
-    // commit the seeded session so the dirty-guard below has TRACKED changes to see
+    // commit the seeded session: seedGoalLeg writes node.json + two events BY HAND (not
+    // through the CLI), so nothing has journaled them and no gesture will commit them.
     git(root, ['add', '-A']);
     git(root, ['commit', '-qm', 'seed the goal']);
 
@@ -545,15 +579,29 @@ describe('e2e — the goal-session lifecycle (v6: seed → docs/goal.md → work
     expect(metView).toContain('met — session sealed');
     expect(metView).toContain('feedback: criteria confirmed');
 
-    // a post-met spawn is sealed off, and a DIRTY (uncommitted tracked) archive refuses
+    // a post-met spawn is sealed off
     expect(cli(root, ['spawn!', '02-work/02-b', CONTRACT('too late')]).code).toBe(1);
+
+    // THE ENGINE COMMITS ITS OWN WRITES. `goal! met` is a human gesture, and the gesture
+    // now commits the event it wrote — the tracked journey tree is clean right after, with
+    // NO hand-commit. This is the defect found live: the verdict left events.jsonl dirty,
+    // so the next command refused `uncommitted` and blocked the structural reset.
+    expect(execFileSync('git', ['-C', root, 'log', '--oneline', '-1'], { encoding: 'utf8' })).toContain('goal MET');
+    // (--untracked-files=no for the same reason `uncommittedJourneyChanges()` filters `??`:
+    // the write-rev ledger is local derived state, in the real project gitignored outright)
+    expect(execFileSync('git', ['-C', root, 'status', '--porcelain', '--untracked-files=no', '--', '.ann/journey'], { encoding: 'utf8' }).trim()).toBe('');
+
+    // the uncommitted guard ITSELF still bites, and it is proved against a change the
+    // ENGINE did not make — a hand-added file, STAGED so it is tracked rather than `??`
+    writeFileSync(join(root, '.ann', 'journey', 'HANDWRITTEN.md'), 'a person put this here\n');
+    git(root, ['add', '.ann/journey/HANDWRITTEN.md']);
     const dirty = cli(root, ['goal!', 'archive']);
     expect(dirty.code).toBe(1);
     expect(out(dirty)).toContain('uncommitted');
 
-    // commit the seal → the archive succeeds
-    git(root, ['add', '-A']);
-    git(root, ['commit', '-qm', 'seal the session']);
+    // drop the stray file → the archive succeeds, still with NO hand-commit of any write
+    git(root, ['rm', '-q', '--cached', '.ann/journey/HANDWRITTEN.md']);
+    rmSync(join(root, '.ann', 'journey', 'HANDWRITTEN.md'));
     const arch = cli(root, ['goal!', 'archive']);
     expect(arch.code).toBe(0);
     expect(out(arch)).toContain('session archived');

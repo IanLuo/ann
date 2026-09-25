@@ -1,5 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { createContext, resolveDispatch, jsonDoc, outcomeOf, type Outcome } from './handlers.js';
+import { commitJourneyWrites } from './commit-journey.js';
+import { storeJourneyDir, resolveStoreLocation } from '../store/store.js';
 import { APPROVE_BUSY, Approver, integritySnapshot, whatsNext, type ApproveProposal } from './approve.js';
 import { DRIVE_BUSY, driveJourney, type DriveOptions } from './drive.js';
 import { newRunId, newTrace, type OpLog } from '../abilities/obs/log.js';
@@ -107,15 +109,29 @@ export async function startService(opts: ServiceOptions): Promise<ServiceHandle>
         sendJson(res, 500, jsonDoc({ ok: false, error: { code: 'service', message: (e as Error).message } }));
       })
       // ONE line per request — the route, the status and the duration. Never throws.
-      .finally(() =>
+      .finally(() => {
         reqLog.line({
           event: 'command',
           command: `${req.method ?? 'GET'} ${req.url ?? '/'}`,
           outcome: `http-${res.statusCode}`,
           level: res.statusCode >= 400 ? 'warn' : 'info',
           durationMs: Date.now() - started,
-        }),
-      );
+        });
+        // THE COMMIT STEP (leg 12/20) — ONE call site covers every write route. The gate
+        // write dispatches through the CLI path, while the approve and the drive build
+        // their own contexts: all three journal into the same process-scoped journal, so
+        // committing HERE is what keeps the UI's gestures from leaving the tree dirty. A
+        // GET journals nothing, so the common route is a no-op. Fail-open by construction.
+        try {
+          commitJourneyWrites({
+            root,
+            journeyDir: storeJourneyDir(resolveStoreLocation(root)),
+            who: process.env.RECORDED_BY || 'agent',
+          });
+        } catch {
+          /* the commit step never fails the request it records */
+        }
+      });
   });
   await new Promise<void>((resolve, reject) => {
     const onError = (e: Error): void => reject(e);

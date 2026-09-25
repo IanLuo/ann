@@ -7,6 +7,7 @@ import { Store, JourneyEvent, REVIEW_SEVERITIES } from '../store.js';
 import { Commands } from '../../commands/index.js';
 import { getVOCAB } from '../vocab.js';
 import { blobSha } from '../sha.js';
+import { takeWritten, clearWritten } from '../write-journal.js';
 
 // Fixture helper: a disposable journey store in a temp dir.
 let root: string;
@@ -1716,5 +1717,48 @@ describe('Store — v6 goal session (goal-session-design §2/§4 + seed/archive)
     expect(loaded.goalLegId()).toBe('01-goal');
     expect(loaded.events('01-goal').some((e) => e.type === 'goal-met')).toBe(true);
     rmSync(mount, { recursive: true, force: true });
+  });
+});
+
+/**
+ * 12/20 — THE WRITE JOURNAL AT THE WRITER. `appendEvent` is the single writer, so it is
+ * the one place that can say what was written; the surface takes the journal and commits
+ * exactly that. Fail-closed on the write is why the note lands AFTER `appendFileSync`: a
+ * refusal has nothing on disk, so it must have nothing to commit either.
+ */
+describe('Store — the write journal (12/20)', () => {
+  beforeEach(() => { makeStore(); });
+  afterEach(() => { clearWritten(root); rmSync(root, { recursive: true, force: true }); });
+
+  it('notes the EXACT file the writer appended to, with the event\'s own shape', () => {
+    writeNode('01-goal', {}, [ev('created')]);
+    writeNode('01-goal/01-a', { intent: 'x' }, [ev('created'), ev('confirmed', { gate: 'grill' })]);
+    const s = new Store(root);
+    clearWritten(root);
+    s.appendEvent(s.resolveNode('01-goal/01-a'), ev('submitted', { gate: 'confirm' }));
+    expect(takeWritten(root)).toEqual([
+      { path: join(nodeDir('01-goal/01-a'), 'events.jsonl'), node: '01-goal/01-a', type: 'submitted', gate: 'confirm' },
+    ]);
+  });
+
+  it('a REFUSED write journals NOTHING — the gesture that never happened has nothing to commit', () => {
+    // no confirmed(grill) ever → a confirm submission is GATE-SEQ refused
+    writeNode('01-goal', {}, [ev('created')]);
+    writeNode('01-goal/01-a', { intent: 'x' }, [ev('created')]);
+    const s = new Store(root);
+    clearWritten(root);
+    const before = readFileSync(join(nodeDir('01-goal/01-a'), 'events.jsonl'), 'utf8');
+    expect(() => s.appendEvent(s.resolveNode('01-goal/01-a'), ev('submitted', { gate: 'confirm' })))
+      .toThrow(/GATE-SEQ GAP/);
+    expect(takeWritten(root)).toEqual([]);                                          // nothing to commit
+    expect(readFileSync(join(nodeDir('01-goal/01-a'), 'events.jsonl'), 'utf8')).toBe(before); // nothing on disk
+  });
+
+  it('spawn and seed journal their own files, so a spawn is committed like any other write', () => {
+    prepDir('02-work/01-a');
+    const s = new Store(root);
+    clearWritten(root);
+    s.spawn('02-work/01-a', { intent: 'a task', acceptanceCriteria: ['AC-1: it works'] });
+    expect(takeWritten(root).map((w) => w.type).sort()).toEqual(['created', 'node.json']);
   });
 });
