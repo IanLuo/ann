@@ -6,7 +6,13 @@ import { blobSha, stripMarkers } from '../store/sha.js';
 import { getVOCAB } from '../store/vocab.js';
 import { GATE_DECISION_EVENTS, READY_STATUSES, gateView, workflowState, type GateLifecycle } from '../store/workflow.js';
 import { ALLOWLIST, ALLOWLIST_NAMES, outputDetail, defaultCaptureEnv, type CaptureEnv } from './capture.js';
+import { IDEA_STALE_DAYS, ideasDir, isIdeaId, listIdeas, newIdeaId, readIdea, writeIdea, deleteIdea, type Idea } from '../store/ideas.js';
 import type { OpLog } from '../abilities/obs/log.js';
+
+/** An idea's age in whole days — the number `idea list` shows and `--stale` compares.
+ *  Negative (a clock skew, a hand-written future date) reads as 0: never stale. */
+const ageInDays = (created: string, now: string): number =>
+  Math.max(0, Math.floor((Date.parse(now) - Date.parse(created)) / 86_400_000));
 
 /** A producer artifact's LOGICAL NAME from its file — the stem (last extension
  *  stripped): the thin model names an artifact by the file that carries it
@@ -1100,6 +1106,148 @@ export class Commands {
       return fail('store-refused', (e as Error).message);
     }
     return ok(undefined);
+  }
+
+  /* ══ THE IDEA AREA (leg 12/10) — the gestures over `.ann/ideas/` ═════════════
+   *
+   * ONE family, four gestures, and ONE bridge. An idea is material that is not decided
+   * AT ALL — no question yet, no node, no shape — so it is NOT a journey event: it lives
+   * beside the journey (store/ideas.ts), mutable and hashless, and NOTHING in the
+   * journey reads it. `list` is a READ (no `!`); add · promote · drop are writes.
+   *
+   * THE BRIDGE IS HALF A DOOR, DELIBERATELY: `promote` DRAFTS a task contract for the
+   * human's GO and never calls spawn! — a machine authors no contract (the authored-work
+   * boundary). It records the bridge ONCE, on the idea's own file, and the journey never
+   * names the idea back: an idea's status is its own field, never derived from the
+   * journey, so the scratch area can never become a journey dependency.
+   */
+
+  /** `idea! add` — a new idea. Provenance is RECORDED_BY; an empty text refuses. */
+  ideaAdd(text: string, opts: { refs?: string[]; now?: string } = {}): CommandResult<Idea> {
+    return this.loggedWrite('idea', ['add', text], () => this.ideaAddImpl(text, opts));
+  }
+
+  private ideaAddImpl(text: string, opts: { refs?: string[]; now?: string }): CommandResult<Idea> {
+    const t = (text ?? '').trim();
+    if (!t) {
+      return fail('idea-empty-text', "idea! add: the text is empty — an idea is one line saying what it is");
+    }
+    const now = opts.now ?? new Date().toISOString();
+    const dir = ideasDir(this.store.root);
+    // the id is the filename and the identity, so a same-second, same-slug collision gets
+    // a suffix rather than overwriting somebody's idea
+    let id = newIdeaId(t, now);
+    if (existsSync(join(dir, `${id}.json`))) {
+      let n = 2;
+      while (existsSync(join(dir, `${id}-${n}.json`))) n++;
+      id = `${id}-${n}`;
+    }
+    const refs = (opts.refs ?? []).map((r) => r.trim()).filter(Boolean);
+    const idea: Idea = {
+      id,
+      text: t,
+      created: now,
+      by: this.who,
+      status: 'open',
+      ...(refs.length ? { refs } : {}),
+    };
+    try {
+      writeIdea(this.store.root, idea, 'added');
+    } catch (e) {
+      return fail('idea-write', `idea! add: could not write ${id} — ${(e as Error).message}`);
+    }
+    return ok(idea);
+  }
+
+  /** `idea list` — the READ (no `!`): the open ideas with their age. `--all` adds the
+   *  promoted ones, `--stale` narrows to the open ones older than IDEA_STALE_DAYS. The
+   *  read IS the product — nothing is ever auto-deleted. */
+  ideaList(opts: { all?: boolean; stale?: boolean; now?: string } = {}): {
+    ideas: Array<Idea & { ageDays: number }>;
+    problems: string[];
+  } {
+    const { ideas, problems } = listIdeas(this.store.root);
+    const now = opts.now ?? new Date().toISOString();
+    const withAge = ideas
+      .map((i) => ({ ...i, ageDays: ageInDays(i.created, now) }))
+      .filter((i) => (opts.stale ? i.status === 'open' && i.ageDays >= IDEA_STALE_DAYS : opts.all ? true : i.status === 'open'))
+      .sort((a, b) => a.id.localeCompare(b.id));
+    return { ideas: withAge, problems };
+  }
+
+  /** `idea! promote` — THE BRIDGE. Records `promoted → <node id>` on the idea and DRAFTS
+   *  a contract for the human's GO. It never calls spawn! and never writes the journey. */
+  ideaPromote(id: string, nodeId: string): CommandResult<{ idea: Idea; draft: string }> {
+    return this.loggedWrite('idea', ['promote', id], () => this.ideaPromoteImpl(id, nodeId));
+  }
+
+  private ideaPromoteImpl(id: string, nodeId: string): CommandResult<{ idea: Idea; draft: string }> {
+    const idea = this.ideaOf(id, 'promote');
+    if ('error' in idea) return idea;
+    if (idea.value.status === 'promoted') {
+      return fail(
+        'idea-already-promoted',
+        `idea! promote: ${id} is already promoted → ${idea.value.promotedTo} — the bridge is recorded once (a second promotion would erase where the idea went; git holds the file)`,
+      );
+    }
+    const target = (nodeId ?? '').trim();
+    if (!target) {
+      return fail(
+        'idea-no-node',
+        `idea! promote: ${id} needs the node it becomes — 'ann idea! promote ${id} <leg>/<NN>-<workType>-<slug>'. The bridge records the target, and the journey never names the idea back`,
+      );
+    }
+    const refs = idea.value.refs?.length ? `\nrefs: ${idea.value.refs.join(' · ')}` : '';
+    const draft = {
+      id: target,
+      contract: {
+        // the intent NAMES THE IDEA ID — the one direction of the bridge that lives in
+        // the contract. The machine drafts; the human authors the rest.
+        intent: `[from idea ${id}] ${idea.value.text}${refs}`,
+        acceptanceCriteria: ['TODO — write one acceptance criterion per deliverable; the draft is a starting point, not a contract'],
+      },
+    };
+    const promoted: Idea = { ...idea.value, status: 'promoted', promotedTo: target };
+    try {
+      writeIdea(this.store.root, promoted, 'promoted');
+    } catch (e) {
+      return fail('idea-write', `idea! promote: could not record the bridge on ${id} — ${(e as Error).message}`);
+    }
+    return ok({ idea: promoted, draft: JSON.stringify(draft, null, 2) });
+  }
+
+  /** `idea! drop` — delete the idea's file. Git is the history. An ALREADY-PROMOTED idea
+   *  refuses: the bridge is the record of where it went, and erasing it loses that. */
+  ideaDrop(id: string): CommandResult<{ id: string }> {
+    return this.loggedWrite('idea', ['drop', id], () => this.ideaDropImpl(id));
+  }
+
+  private ideaDropImpl(id: string): CommandResult<{ id: string }> {
+    const idea = this.ideaOf(id, 'drop');
+    if ('error' in idea) return idea;
+    if (idea.value.status === 'promoted') {
+      return fail(
+        'idea-promoted',
+        `idea! drop: ${id} is already promoted → ${idea.value.promotedTo} — the bridge is the record of where it went, so it is not dropped (git holds the file's history)`,
+      );
+    }
+    try {
+      deleteIdea(this.store.root, idea.value.id);
+    } catch (e) {
+      return fail('idea-delete', `idea! drop: could not delete ${id} — ${(e as Error).message}`);
+    }
+    return ok({ id: idea.value.id });
+  }
+
+  /** Resolve an addressed idea for a gesture — the NAMED failures every write shares:
+   *  an id that is not an idea id, and an id no idea carries. */
+  private ideaOf(id: string, verb: string): CommandResult<Idea> {
+    if (!isIdeaId(id ?? '')) {
+      return fail('idea-no-id', `idea! ${verb}: '${id ?? ''}' is not an idea id — read them: ann idea list`);
+    }
+    const idea = readIdea(this.store.root, id);
+    if (!idea) return fail('idea-not-found', `idea! ${verb}: no idea ${id} — read them: ann idea list`);
+    return ok(idea);
   }
 
   /**

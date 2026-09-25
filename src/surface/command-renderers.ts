@@ -6,6 +6,10 @@ import type { Brief } from '../commands/index.js';
 import { renderStatusTree, renderGateCard, renderPlan, renderDrift, renderLedger, renderGoal, deferredLines, reworkLines, execVerdict, PlanLeg, PlanAhead } from './renderers.js';
 import type { DeferredTask, ReworkTask } from '../commands/index.js';
 import { MANIFEST_FILE } from '../store/docs.js';
+import type { Idea } from '../store/ideas.js';
+
+/** An idea as the `ann idea` read renders it — the record plus the age the read derives. */
+type IdeaRow = Idea & { ageDays: number };
 
 /**
  * THE PER-COMMAND TEXT RENDERERS (value-canonical CLI).
@@ -860,6 +864,44 @@ export const RENDERS: Record<string, Renderer> = {
       return bits.join(' ');
     });
     return block(lines);
+  },
+
+  /* the idea area (leg 12/10) — the READ (value = {ideas, problems}) and the writes
+   *  (value = the serialized CommandResult {ok:true,value}) */
+  idea: (value) => {
+    const v = value as { ideas: IdeaRow[]; problems: string[] };
+    const lines: string[] = [];
+    for (const p of v.problems) lines.push(`  PROBLEM: ${p}`);
+    if (!v.ideas.length) {
+      lines.push('no ideas — write one: ann idea! add \'<text>\'');
+    }
+    for (const i of v.ideas) {
+      const refs = i.refs?.length ? ` · refs: ${i.refs.join(',')}` : '';
+      const where = i.status === 'promoted' ? ` → ${i.promotedTo}` : '';
+      lines.push(`${i.id}  [${i.status}${where}]  ${i.ageDays}d  ${i.by}`);
+      lines.push(`    ${i.text}${refs}`);
+    }
+    return block(lines);
+  },
+  'idea!': (value) => {
+    const v = (value as { ok: true; value: unknown }).value;
+    if ('draft' in (v as object)) {
+      const p = v as { idea: IdeaRow; draft: string };
+      return block([
+        `promoted ${p.idea.id} → ${p.idea.promotedTo} (the bridge is recorded on the idea; the journey never names it back)`,
+        '',
+        'DRAFT — a starting point, not a contract (a machine authors no contract). Complete it and spawn it yourself:',
+        '',
+        p.draft,
+        '',
+        `  ann spawn! ${p.idea.promotedTo} '<the contract you authored>'`,
+      ]);
+    }
+    if ('text' in (v as object)) {
+      const i = v as IdeaRow;
+      return `added ${i.id}\n  ${i.text}\n  read them: ann idea list\n`;
+    }
+    return `dropped ${(v as { id: string }).id}\n`;
   },
 
   /* the writes — value = the serialized CommandResult ({ok:true,value}) */

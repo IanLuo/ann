@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { createContext, resolveDispatch, jsonDoc, outcomeOf, type Outcome } from './handlers.js';
-import { commitJourneyWrites } from './commit-journey.js';
+import { commitJourneyWrites, engineWriteDirs } from './commit-journey.js';
 import { storeJourneyDir, resolveStoreLocation } from '../store/store.js';
 import { APPROVE_BUSY, Approver, integritySnapshot, whatsNext, type ApproveProposal } from './approve.js';
 import { DRIVE_BUSY, driveJourney, type DriveOptions } from './drive.js';
@@ -126,6 +126,7 @@ export async function startService(opts: ServiceOptions): Promise<ServiceHandle>
           commitJourneyWrites({
             root,
             journeyDir: storeJourneyDir(resolveStoreLocation(root)),
+            extraDirs: engineWriteDirs(root),
             who: process.env.RECORDED_BY || 'agent',
           });
         } catch {

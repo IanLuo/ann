@@ -27,6 +27,10 @@ export interface WriteRecord {
   node: string;   // the node it belongs to ('' for a whole-journey write)
   type: string;   // the event type that landed, or 'node.json' for the contract write
   gate?: string;  // the gate, when the event carried one
+  /** The tracked tree the write belongs to — the commit SUBJECT's noun (leg 12/10:
+   *  the ideas area is engine-written, tracked and committed, but it is not the
+   *  journey). Absent means `journey`, which is every write the store makes. */
+  scope?: string;
 }
 
 /** root → what it has written since the last take. */

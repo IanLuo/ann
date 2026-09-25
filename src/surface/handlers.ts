@@ -38,7 +38,7 @@ import { runValidators, derivedRegistry } from '../flow/validators/index.js';
 import { buildStepRegistry } from '../flow/steps/index.js';
 import { loadProjectFlow, resolveChain, validateChain } from '../flow/chain.js';
 import { Frame } from '../flow/frame.js';
-import { commitJourneyWrites } from './commit-journey.js';
+import { commitJourneyWrites, engineWriteDirs } from './commit-journey.js';
 import { runGoalSeed } from '../flow/goal-seed.js';
 import { runSpecSession, docsSpecsTarget, DEFAULT_SPEC_NAME } from '../flow/spec-doc.js';
 import { runReviewSession } from '../flow/review-session.js';
@@ -300,6 +300,8 @@ const COMMANDS: Array<{ name: string; args: string; desc: string }> = [
   { name: 'commands', args: '', desc: 'this table as markdown (the derived doc) · alias --commands' },
   { name: 'help', args: '', desc: 'usage · alias --help / -h' },
   { name: 'read', args: '<name>', desc: 'the L1 CONTENT read view — marker-stripped content + path + sha; resolves via the docs manifest (the forward path), with a legacy current-artifact fallback for history · alias --read' },
+  { name: 'idea', args: '[list] [--all | --stale]', desc: 'THE IDEA AREA (leg 12/10) — material that is not decided AT ALL (no question, no node, no shape) gets a home BESIDE the journey: the OPEN ideas with their age · `--all` adds the promoted ones · `--stale` narrows to the open ones older than the configured age (the read IS the product — nothing is ever auto-deleted). Nothing in the journey reads it: check/verify/next/advance/packet and the gate reads are independent of `.ann/ideas/` by construction · alias --idea' },
+  { name: 'idea!', args: '\'<text>\' [--refs a,b] | promote <idea-id> <node-id> | drop <idea-id>', desc: 'WRITE — the idea gestures. `add` writes one idea (id · text · created · by · refs? · status), provenance from RECORDED_BY · `promote` is THE BRIDGE: it records `promoted → <node id>` on the idea and DRAFTS a contract (intent naming the idea id + ACs) on stdout for the human\'s GO — it NEVER calls spawn! and never writes the journey (a machine authors no contract) · `drop` deletes the file (git is the history). Named refusals, zero writes: an unknown id · an empty text · dropping an already-promoted idea' },
   { name: 'append!', args: '<id> \'<json>\'', desc: 'WRITE — single-writer append; REFUSES the composite-owned kinds (created/submitted/confirmed/rejected/goal-met) and the RETIRED doc-artifact vocab (artifact-locked/superseded). `cancelled` (a task no longer needed — the counterpart of the submit!/gate! close) is recordable here with a REQUIRED reason' },
   { name: 'spawn!', args: '<id> \'<contract-json>\'', desc: 'WRITE — create a node; enforces the v14 contract schema + F-AC19 + id naming + the conclusion (commit-evidence)/leg gates' },
   { name: 'submit!', args: '<id> grill|confirm [confirmedSha]', desc: 'WRITE — submit finished work at a gate for the human decision (the SUCCESS half of the task close; the counterpart is cancel — no longer needed): records `submitted` — the task blocks and waits for `gate! accept|reject`; an interrupted gate stays blocked (resumable), never looks un-started. `[confirmedSha]` (confirm gate only) binds the decision to the exact bytes under review' },
@@ -1072,6 +1074,19 @@ export const HANDLERS: Record<string, Handler> = {
     return { ok: true, value: { host: handle.host, port: handle.port, url: handle.url, journey: ctx.root } };
   },
 
+  /* idea — the idea area's READ (leg 12/10): the open ideas with their age. The `!`
+   *  family below is its write half; this one follows the convention (reads have no
+   *  marker) so `ann idea list` and `ann idea` are the same read. */
+  idea: (ctx) => {
+    // `ann idea` and `ann idea list` are the same read; the two flags are KNOWN, anything
+    // else is a stray flag and fails closed (never a silently ignored typo).
+    const rest = ctx.args.slice(1).filter((a) => a !== 'list');
+    const known = new Set(['--all', '--stale']);
+    const stray = rest.find((a) => a.startsWith('--') && !known.has(a));
+    if (stray) return usage(`usage: ann idea list [--all | --stale] — unknown flag ${stray}`);
+    return { ok: true, value: ctx.commands.ideaList({ all: rest.includes('--all'), stale: rest.includes('--stale') }) };
+  },
+
   /* confirm / detail / results — detail-derived cards + results */
   confirm: (ctx) => {
     const id = resolveId(ctx, ctx.args[1]);
@@ -1136,6 +1151,31 @@ export const HANDLERS: Record<string, Handler> = {
         break;
     }
     return { ok: true, value: body };
+  },
+
+  /* the idea writes (leg 12/10) — one family, three gestures. `list` is the read above. */
+  'idea!': (ctx) => {
+    const [verb, ...rest] = ctx.args.slice(1);
+    if (verb === 'add') {
+      const refs = takeFlag(rest, '--refs');
+      const stray = strayFlag(refs.rest);
+      if (stray) return usage(`usage: ann idea! add '<text>' [--refs a,b] — unknown flag ${stray}`);
+      const text = refs.rest.join(' ');
+      if (!text) return usage("usage: ann idea! add '<text>' [--refs a,b]");
+      const list = (refs.value ?? '').split(',').map((r) => r.trim()).filter(Boolean);
+      return writeResult(ctx.commands.ideaAdd(text, { ...(list.length ? { refs: list } : {}) }));
+    }
+    if (verb === 'promote') {
+      if (!rest[0] || !rest[1]) {
+        return usage("usage: ann idea! promote <idea-id> <node-id>  — DRAFTS a contract for the human's GO; it never spawns the node");
+      }
+      return writeResult(ctx.commands.ideaPromote(rest[0], rest[1]));
+    }
+    if (verb === 'drop') {
+      if (!rest[0]) return usage('usage: ann idea! drop <idea-id>');
+      return writeResult(ctx.commands.ideaDrop(rest[0]));
+    }
+    return usage(`usage: ann idea! add '<text>' [--refs a,b] | promote <idea-id> <node-id> | drop <idea-id>  (read them: ann idea list)${verb ? ` — unknown gesture '${verb}'` : ''}`);
   },
 
   /* the gate writes */
@@ -1408,6 +1448,7 @@ const ALIAS: Record<string, string> = {
   '--goal': 'goal',
   '--flow': 'flow',
   '--read': 'read',
+  '--idea': 'idea',
   '--help': 'help',
   '-h': 'help',
   '--commands': 'commands',
@@ -1415,8 +1456,10 @@ const ALIAS: Record<string, string> = {
 
 /** The journey-addressing WRITES a read-only target refuses (config!/cred!/project!
  *  never touch the store, so they stay available). docs/rules --write refuse too. */
-const JOURNEY_REFUSED_WRITES = new Set(['append!', 'spawn!', 'submit!', 'gate!', 'evidence!', 'capture!', 'complete!', 'review!', 'goal!', 'run!', 'spec!', 'advance!']);
-/** Bare write names (no `!`) — a named hint, never silent. */
+const JOURNEY_REFUSED_WRITES = new Set(['append!', 'spawn!', 'submit!', 'gate!', 'evidence!', 'capture!', 'complete!', 'review!', 'goal!', 'run!', 'spec!', 'advance!', 'idea!']);
+/** Bare write names (no `!`) — a named hint, never silent. `idea` is deliberately NOT
+ *  here: unlike `spawn`, it is a READ too (`ann idea list`), so a bare `idea` is a
+ *  command, not a missing marker. Its write gestures live under `idea!`. */
 const WRITES = ['append', 'spawn', 'submit', 'gate', 'evidence', 'capture', 'complete', 'cred'];
 
 const isProjectRoot = (dir: string): boolean => existsSync(join(dir, '.ann')) || existsSync(join(dir, 'journey'));
@@ -1435,7 +1478,7 @@ function commitAfterWrite(ctx: CliContext, canonical: string): void {
   try {
     if (ctx.target().readOnly) return; // a read-only target refused the write before it began
     const journeyDir = storeJourneyDir(ctx.target().loc);
-    commitJourneyWrites({ root: ctx.root, journeyDir, who: ctx.who });
+    commitJourneyWrites({ root: ctx.root, journeyDir, extraDirs: engineWriteDirs(ctx.root), who: ctx.who });
   } catch {
     /* the commit step never fails the gesture it records */
   }

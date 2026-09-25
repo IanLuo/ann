@@ -13,13 +13,16 @@
  * stayed invisible until archive time.
  *
  * THE TWO LINES THAT MUST HOLD:
- *  · ONLY `.ann/journey/**`, NEVER CODE. Concluding a deliverable stays the OPERATOR's
- *    move (frame.ts: "concluding is the OPERATOR's move"). A path outside the journey dir
- *    is dropped here even if the journal somehow carried one — INCLUDING the archive
- *    snapshot `goal! archive` writes to `.ann/archive/sessions/**`, which is a deliverable
- *    of the session (the operator commits it) and, being outside `.ann/journey`, is
+ *  · THE ENGINE'S OWN TRACKED TREES, NEVER CODE. Concluding a deliverable stays the
+ *    OPERATOR's move (frame.ts: "concluding is the OPERATOR's move"). The trees in scope
+ *    are NAMED — the journey, plus `engineWriteDirs()` (leg 12/10: `.ann/ideas/**`, the
+ *    idea area — engine-written, tracked, project material the engine owns) — and a path
+ *    outside them is dropped here even if the journal somehow carried one, INCLUDING the
+ *    archive snapshot `goal! archive` writes to `.ann/archive/sessions/**`, which is a
+ *    deliverable of the session (the operator commits it) and, being out of scope, is
  *    invisible to the archive's own uncommitted guard. STATED, not accidental: the filter
- *    is what draws the line, and a snapshot left dirty blocks nothing anywhere.
+ *    is what draws the line, and a snapshot left dirty blocks nothing anywhere. A source
+ *    file edited alongside a tooling write is out of scope by the same filter.
  *  · STAGED BY NAME, FROM THE JOURNAL. The store notes the exact file at the write site,
  *    so the commit is a fact about what was written — never `git status`'s tree, which
  *    would sweep an unrelated change (another agent's in-flight work in the same
@@ -38,8 +41,9 @@
  * identity, a lock) is the case the warning exists for.
  */
 import { execFileSync } from 'node:child_process';
-import { isAbsolute, relative } from 'node:path';
+import { isAbsolute, join, relative } from 'node:path';
 import { takeWritten, type WriteRecord } from '../store/write-journal.js';
+import { IDEAS_DIRNAME } from '../store/ideas.js';
 
 /** The git seam — injectable so a unit test exercises a refusing git without one, and so
  *  no test ever commits into the repository it runs in. */
@@ -86,9 +90,23 @@ const WHAT: Record<string, string> = {
   'goal-met': 'goal MET',
   extended: 'note',
   failed: 'failed',
+  // the idea area's verbs (leg 12/10) — the same derived-subject rule, a different noun
+  'idea-added': 'added',
+  'idea-promoted': 'promoted',
+  'idea-dropped': 'dropped',
 };
 
-/** The commit subject, derived from what LANDED — one clause per node, in write order. */
+/** THE TRACKED TREES OUTSIDE THE JOURNEY THAT THE ENGINE'S OWN WRITES OWN. One list,
+ *  consumed by every commit call site, so "what does the engine commit" is answerable in
+ *  one place: the journey (always) plus the idea area. Adding a tree here is a decision
+ *  about ownership, never a side effect of where a filter happened to be written. */
+export function engineWriteDirs(root: string): string[] {
+  return [join(root, '.ann', IDEAS_DIRNAME)];
+}
+
+/** The commit subject, derived from what LANDED — one clause per node, in write order.
+ *  The noun is the record's SCOPE (`journey` when absent — every store write), so an
+ *  idea gesture reads `ideas: <id> added (…)` and never claims to be the journey. */
 export function commitMessage(records: WriteRecord[], who: string): string {
   const byNode = new Map<string, WriteRecord[]>();
   for (const r of records) {
@@ -110,12 +128,12 @@ export function commitMessage(records: WriteRecord[], who: string): string {
     }
     parts.push(`${node} ${[...new Set(words)].join(' · ')}`);
   }
-  return `journey: ${parts.join('; ')} (${who})`;
+  return `${records[0]?.scope ?? 'journey'}: ${parts.join('; ')} (${who})`;
 }
 
-/** Is `p` inside `dir`? The AC-2 hard line — the engine commits the journey and nothing
- *  else, checked rather than assumed (the store journals journey paths only, so this can
- *  only ever drop a path, never a legitimate one). */
+/** Is `p` inside `dir`? The AC-2 hard line — the engine commits the trees it OWNS and
+ *  nothing else, checked rather than assumed (the store journals those paths only, so
+ *  this can only ever drop a path, never a legitimate one). */
 function under(p: string, dir: string): boolean {
   const rel = relative(dir, p);
   return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel);
@@ -123,7 +141,10 @@ function under(p: string, dir: string): boolean {
 
 export interface CommitOptions {
   root: string;          // the project root git runs in
-  journeyDir: string;    // <root>/.ann/journey — the ONLY tree this may commit
+  journeyDir: string;    // <root>/.ann/journey — always in scope
+  /** The other trees in scope (engineWriteDirs). Defaults to NONE, so a caller that
+   *  names only the journey commits only the journey. */
+  extraDirs?: string[];
   who: string;           // RECORDED_BY — the provenance the message carries
   /** The journal to commit. Defaults to TAKING this root's live journal (the binding's
    *  normal call); a test passes an explicit list to commit a known set. */
@@ -147,7 +168,8 @@ export function commitJourneyWrites(opts: CommitOptions): CommitOutcome {
 function attemptCommit(opts: CommitOptions, env: CommitEnv): CommitOutcome {
   try {
     const records = opts.records ?? takeWritten(opts.root);
-    const paths = [...new Set(records.map((r) => r.path))].filter((p) => under(p, opts.journeyDir));
+    const inScope = [opts.journeyDir, ...(opts.extraDirs ?? [])];
+    const paths = [...new Set(records.map((r) => r.path))].filter((p) => inScope.some((d) => under(p, d)));
     if (!paths.length) return { committed: false, paths: [] };
     // a hermetic run (the e2e harness) opts out: the engine must not write history into
     // the fixture's repository while the assertion under test is still running
