@@ -239,7 +239,7 @@ export const UI_HTML = `<!doctype html>
     <h2 id="card-results-h">Results</h2>
     <ul id="card-results"></ul>
     <div id="card-decide" hidden>
-      <textarea id="feedback" placeholder="feedback for the decision (the rejection's why)"></textarea>
+      <textarea id="feedback" placeholder="feedback for the decision (the rejection's why; a confirm ACCEPT requires one — it is the decision's rationale)"></textarea>
       <div class="actions">
         <button class="accept" id="accept">Accept</button>
         <button class="reject" id="reject">Reject</button>
@@ -708,7 +708,19 @@ export const UI_HTML = `<!doctype html>
   function decide(decision) {
     if (!selected.id || !selected.gate) { message('select a gate from WAITING ON YOU first', true); return; }
     var id = selected.id, gate = selected.gate;
-    var body = { id: id, gate: gate, decision: decision, feedback: byId('feedback').value };
+    var why = byId('feedback').value;
+    // AC-1 (leg 12/11) — a CONFIRM accept must carry a WHY, so the form ASKS before it
+    // writes rather than letting the write refuse. The rule itself lives in gate! (one
+    // chokepoint: the CLI and the frame meet it too); this is the same ask, on the page.
+    // Cancelling (or an empty answer) writes NOTHING — the refusal stays a named error,
+    // never a silent accept.
+    if (decision === 'accept' && gate === 'confirm' && !why.trim()) {
+      var asked = window.prompt('Why is the confirm gate accepted for ' + id + '? (the rationale is recorded on the decision)', '');
+      if (asked === null || !asked.trim()) { message('not recorded — a confirm accept needs a why (the rationale is the decision)', true); return; }
+      byId('feedback').value = asked;
+      why = asked;
+    }
+    var body = { id: id, gate: gate, decision: decision, feedback: why };
     message('recording ' + decision + '…');
     // RE-CHECK the node immediately before writing: a submission decided elsewhere in the
     // meantime must not be re-decided (gate! would auto-submit + accept, recording a

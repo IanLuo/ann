@@ -1,5 +1,6 @@
 import { RuleFinding, ValidatorContext } from './types.js';
 import { CLOSED_TASK_STATUSES } from '../../store/store.js';
+import { decisionPoints } from '../../store/decisions.js';
 
 /** The nodes a rule should check: one node (ann validate <id>) or all tasks. */
 const targetsOf = (ctx: ValidatorContext): string[] =>
@@ -228,34 +229,43 @@ export const redaction = {
   },
 };
 
-/** high-impact-defaulted — a blocking open question resolved on a completed node must carry answer provenance. */
+/** high-impact-defaulted — a blocking open question resolved at a DECISION POINT must
+ *  carry discussion provenance. */
 export const highImpactDefaulted = {
   id: 'high-impact-defaulted',
-  definition: 'a blocking (high-impact) openQuestion resolved on a completed node must carry resolution provenance (discussed|defaulted|inferred); defaulted/inferred without explicit user decision = flagged (the tech-stack lesson)',
+  definition: 'a blocking (high-impact) openQuestion whose decision point has passed — the node was completed OR a gate was ACCEPTED — must carry resolution provenance (discussed|defaulted|inferred); defaulted/inferred without explicit user decision = flagged (the tech-stack lesson)',
   severity: 'warning' as const,
   enabled: true,
   params: {},
   run(ctx: ValidatorContext): RuleFinding[] {
     const out: RuleFinding[] = [];
     for (const id of targetsOf(ctx)) {
-      const evs = ctx.store.events(id);
-      if (!evs.some((e) => e.type === 'completed')) continue;
       // THE FIELD PATH (fixed, leg 12 task 11): openQuestions is a TOP-LEVEL sibling of the
       // contract since format v14 §2, read through the ONE accessor (store.openQuestions).
       // The rule previously read `contract.openQuestions` — a path no v14 node populates —
       // so it could never fire on a real node; its test hand-wrote the pre-v14 nested shape.
-      const blocking = ctx.store.openQuestions(id).filter((q) => q.blocking);
+      const questions = ctx.store.openQuestions(id);
+      const blocking = questions.filter((q) => q.blocking);
       if (!blocking.length) continue;
-      // PER QUESTION, not "any answers anywhere": the answer-recording primitive
-      // (evidence.answers[] {id, answer, provenance}) keys on the question's id.
-      const answers = evs.flatMap((e) =>
-        e.type === 'evidence' && Array.isArray(e.answers) ? (e.answers as Array<{ id?: string; provenance?: string }>) : [],
-      );
+
+      // THE DECISION POINT HAS PASSED (leg 12/11 — THE GENERALIZATION, AC-3). The rule used
+      // to require a `completed` event, so a high-impact fork DECIDED at a gate accept —
+      // and never delivered — was invisible: the accept IS the decision. "Has a decision
+      // point passed?" is answered by the ONE derivation (AC-2), never by a second scan of
+      // the tail here: a completion, or an ACCEPT at either gate.
+      const evs = ctx.store.events(id);
+      const points = decisionPoints(evs, questions);
+      const decided = evs.some((e) => e.type === 'completed')
+        || points.some((p) => p.kind === 'gate' && p.decision === 'accepted');
+      if (!decided) continue;
+
+      // PER QUESTION, by the question's ID — and read from the SAME derivation the record
+      // reads, so the rule and `ann decisions` can never disagree about what was resolved.
       const problems = blocking
         .map((q) => {
-          const a = q.id ? answers.find((x) => x.id === q.id) : undefined;
-          if (!a) return `${q.id ?? '?'} carries no answer record`;
-          const how = String(a.provenance ?? '').toLowerCase();
+          const p = q.id ? points.find((x) => x.kind === 'open-question' && x.subject === q.id) : undefined;
+          if (!p) return `${q.id ?? '?'} carries no answer record`;
+          const how = String(p.how ?? '').toLowerCase();
           // the tech-stack lesson: a high-impact resolution is only honest when it was
           // DISCUSSED — a defaulted/inferred one without an explicit user decision is the
           // thing this rule exists to catch.
@@ -263,10 +273,13 @@ export const highImpactDefaulted = {
         })
         .filter((x): x is string => x !== undefined);
       if (problems.length) {
+        // the detail names the DECISION POINT that passed, not a fixed 'completed' — the
+        // message must stay true now that a gate accept can be the trigger.
+        const at = evs.some((e) => e.type === 'completed') ? 'completed' : 'gate-accepted';
         out.push({
           severity: 'warning',
           code: 'high-impact-defaulted',
-          detail: `${id}: completed with ${blocking.length} blocking open question(s) — ${problems.join(' · ')}`,
+          detail: `${id}: ${at} with ${blocking.length} blocking open question(s) — ${problems.join(' · ')}`,
           nodeId: id,
         });
       }

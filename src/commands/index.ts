@@ -7,6 +7,7 @@ import { getVOCAB } from '../store/vocab.js';
 import { GATE_DECISION_EVENTS, READY_STATUSES, gateView, workflowState, type GateLifecycle } from '../store/workflow.js';
 import { ALLOWLIST, ALLOWLIST_NAMES, outputDetail, defaultCaptureEnv, type CaptureEnv } from './capture.js';
 import { IDEA_STALE_DAYS, ideasDir, isIdeaId, listIdeas, newIdeaId, readIdea, writeIdea, deleteIdea, type Idea } from '../store/ideas.js';
+import { decisionPoints, type DecisionPoint } from '../store/decisions.js';
 import type { OpLog } from '../abilities/obs/log.js';
 
 /** An idea's age in whole days — the number `idea list` shows and `--stale` compares.
@@ -176,7 +177,7 @@ export interface Brief {
   inputs: Array<{ name: string; detail: string; status: string }>;
   dependsOn: NodeDep[];
   referencedBy: Array<{ id: string; status: string; how: string }>;
-  decisions: Array<{ at: string; type: string; gate: string; note: string; why?: string }>;
+  decisions: DecisionPoint[];
   conclusion: ConclusionView;
   /** THE REVIEW RECORD (leg 12/09) — what a review of this task found, per finding, as the
    *  gate read exposes it. A gate that shows the conclusions but not the findings is the
@@ -657,6 +658,25 @@ export class Commands {
     if (!this.store.ids().includes(id)) return fail('no-node', `no node ${id}`);
     if (!id.includes('/')) return fail('leg-gate-write', 'leg roots carry no gates — gates live on tasks (flow-control v6 §3)');
 
+    // AC-1 (leg 12/11) — THE WHY IS REQUIRED WHERE IT IS LOST. A CONFIRM ACCEPT must carry
+    // a non-empty rationale. The channel already exists and was never filled: 18 of the
+    // journey's 49 accepts recorded nothing, because a REJECTION's why is forced by the
+    // rework loop and an ACCEPT's was not. This is the write-path rule shape of
+    // `cancelled.reason` — refuse, NAMED, with ZERO writes — and it rides the EXISTING
+    // `feedback` field, never a new one (a task is the wrong granularity for a stored why:
+    // a decision happens at a gate, and an immutable node.json could never be corrected).
+    //
+    // ONE CHOKEPOINT: the CLI, the served card's confirm form and the frame all reach the
+    // log through this method, so the rule is stated once. GRILL accepts stay optional
+    // (Q1's default): an entry gate is cheap to re-obtain, and its contract is the thing
+    // being accepted, not a choice made.
+    if (gate === 'confirm' && decision === 'accept' && !feedback.trim()) {
+      return fail(
+        'why-required',
+        `gate! ${id} confirm accept needs a why — it is a task's TERMINAL decision and the exact place the journey's reasons were lost. Re-run with the rationale: ann gate! ${id} confirm accept '<why>'`,
+      );
+    }
+
     const rejects = this.rejections(id, gate);
     if (decision === 'reject' && rejects >= REJECT_BOUND) {
       return fail(
@@ -1016,26 +1036,12 @@ export class Commands {
     // decision's substance); 0 = uncapped.
     const cap = opts.noteChars ?? 700;
     const cut = (s: string, n: number): string => (n > 0 && s.length > n ? `${s.slice(0, n)}… (+${(s.length - n).toLocaleString()} chars — ann detail ${id})` : s);
-    // THE ONE DERIVATION, CONSUMED (12/08's AC-2): a node's decisions come from
-    // `gateView`, never from a second scan of the submitted|confirmed|rejected triple —
-    // the guard test in workflow.test.ts fails on the scan idiom, which is how this
-    // helper was caught re-deriving what the engine already derives.
-    const decisions = (['grill', 'confirm'] as const)
-      .flatMap((gate) => {
-        const v = gateView(evs, gate);
-        return [...v.accepted, ...v.rejected].map((i) => ({ i, gate }));
-      })
-      .sort((a, b) => a.i - b.i)
-      .map(({ i, gate }) => {
-        const e = evs[i];
-        return {
-          at: String(e.at ?? ''),
-          type: e.type,
-          gate,
-          note: String(e.note ?? ''),
-          ...(typeof e.feedback === 'string' && e.feedback.trim() ? { why: e.feedback } : {}),
-        };
-      });
+    // THE ONE DERIVATION, CONSUMED (12/08's AC-2, extended by 12/11's AC-2): a node's
+    // decisions come from `decisionPoints` — the ONE choice-point derivation — never from
+    // a scan of the tail here. The brief used to read the gate triple through `gateView`
+    // and miss every other KIND of choice (a resolved openQuestion, revised gate terms, a
+    // superseded artifact); now the card and `ann decisions` are the same list.
+    const decisions = decisionPoints(evs, this.store.openQuestions(id));
     const notes = evs.filter((e) => e.type === 'extended' && typeof e.note === 'string');
     const lastNote = notes[notes.length - 1];
     const noteText = lastNote ? String(lastNote.note) : undefined;
@@ -1760,6 +1766,21 @@ export class Commands {
 
   detail(id: string): TaskDetail {
     return this.store.detail(id);
+  }
+
+  /** `ann decisions <id>` — THE CHOICE POINTS (leg 12/11, AC-2). ONE read over the ONE
+   *  derivation (`store/decisions.ts`): what was decided · when · by whom · WHY, and the
+   *  event each choice lives in. The legs are the timeline of WORK; this is the timeline
+   *  of CHOICES beside it.
+   *
+   *  AC-4 — HONEST ABSENCE: a choice point whose reason was never recorded carries no
+   *  `why`, and `missingWhy` NAMES each one. The gap is the answer; it is never inferred
+   *  from the surrounding prose and never fabricated to make the record look complete. */
+  decisions(id: string): { id: string; decisions: DecisionPoint[]; missingWhy: string[] } {
+    if (!this.store.ids().includes(id)) throw new Error(`no node ${id}`);
+    const decisions = decisionPoints(this.store.events(id), this.store.openQuestions(id));
+    const missingWhy = decisions.filter((d) => !d.why).map((d) => `${d.at} ${d.what} — NO WHY RECORDED`);
+    return { id, decisions, missingWhy };
   }
 
   results(id: string): ResultItem[] {

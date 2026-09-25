@@ -25,6 +25,8 @@ class FakeEl {
   /** A button's own state — the drive affordance's honest enablement is `disabled` plus the
    *  reason beside it, so the fake DOM models the property the page writes. */
   disabled = false;
+  /** A form control's value — the page writes the ask's answer here before it POSTs. */
+  value = '';
   href = '';
   target = '';
   rel = '';
@@ -81,12 +83,17 @@ interface Stub {
   fetched: string[];
   href: string;
   title: string;
+  /** Every question the page ASKED with window.prompt, in order (AC-1's form ask). */
+  asked: string[];
+  /** Every JSON body the page POSTed, in order — the write's own payload. */
+  posted: Array<Record<string, unknown>>;
 }
 
 /** Boot the served page — optionally AT a drill URL (that is what a new tab does), and
  *  optionally with a path whose reply NEVER arrives (the lazy integrity snapshot in flight —
- *  the pending state cannot be observed any other way). */
-function boot(reads: Record<string, unknown>, hash = '', pending: string[] = []): Stub {
+ *  the pending state cannot be observed any other way). `promptReply` is what the human
+ *  answers the page's OWN ask with (null = cancelled). */
+function boot(reads: Record<string, unknown>, hash = '', pending: string[] = [], promptReply: string | null = 'a reason (stub)'): Stub {
   const ids = [...SCRIPT.matchAll(/byId\('([^']+)'\)/g)].map((m) => m[1]);
   const nodes = new Map<string, FakeEl>();
   for (const id of ids) nodes.set(id, new FakeEl('div'));
@@ -99,7 +106,11 @@ function boot(reads: Record<string, unknown>, hash = '', pending: string[] = [])
     hidden: false,
   };
   const fetched: string[] = [];
-  const fetchStub = (path: string): Promise<{ status: number; json: () => Promise<unknown> }> => {
+  const posted: Array<Record<string, unknown>> = [];
+  const fetchStub = (path: string, init?: { body?: string }): Promise<{ status: number; json: () => Promise<unknown> }> => {
+    if (init?.body) {
+      try { posted.push(JSON.parse(init.body) as Record<string, unknown>); } catch { /* not JSON */ }
+    }
     // the page ENCODES ids into the query (`?id=01-leg%2F01-a`) — the stub keys on the
     // decoded path, so the assertions read like the routes do
     const decoded = path.replace(/id=([^&]*)/, (_, v: string) => `id=${decodeURIComponent(v)}`);
@@ -111,7 +122,12 @@ function boot(reads: Record<string, unknown>, hash = '', pending: string[] = [])
       json: async () => (body === undefined ? { error: { code: 'not-found', message: path } } : body),
     });
   };
-  new Function('document', 'window', 'fetch', 'location', SCRIPT)(document, { addEventListener: (): void => {} }, fetchStub, { hash });
+  const asked: string[] = [];
+  const windowStub = {
+    addEventListener: (): void => {},
+    prompt: (q: string): string | null => { asked.push(q); return promptReply; },
+  };
+  new Function('document', 'window', 'fetch', 'location', SCRIPT)(document, windowStub, fetchStub, { hash });
   return {
     get: (id) => {
       const n = nodes.get(id);
@@ -121,6 +137,8 @@ function boot(reads: Record<string, unknown>, hash = '', pending: string[] = [])
     fetched,
     href: hash,
     title: document.title,
+    asked,
+    posted,
   };
 }
 
@@ -344,6 +362,56 @@ describe('the served page — a submitted gate is never an unlock claim (leg 12/
     expect(tab.get('card-next').textContent).toContain('accepting confirm lets it land');
     // the exit gate's `what` is about the CLOSE in both states — readiness never rewrites it
     expect(tab.get('card-what').textContent).toContain('approving it closes the task when the conclusion evidence is recorded');
+  });
+
+  /* AC-1 (leg 12/11) — THE FORM ASKS BEFORE IT WRITES. A confirm accept with no rationale
+   * is refused by `gate!`; the page does not let the human reach that refusal by accident,
+   * it asks for the why first. Cancelling writes NOTHING. */
+  const bootConfirm = (promptReply: string | null, feedback = '') => {
+    const tab = boot({ ...reads(card()), [`/api/confirm?id=${TASK}`]: gateCard() }, '#drill=gate&id=' + encodeURIComponent(TASK) + '&gate=confirm', [], promptReply);
+    tab.get('feedback').value = feedback;
+    return tab;
+  };
+
+  it('AC-1 — the confirm accept ASKS for the why, and the answer rides the write', async () => {
+    const tab = bootConfirm('the ACs are met and the commit is recorded');
+    await flush();
+    tab.get('accept').click();
+    await flush();
+    expect(tab.asked).toHaveLength(1);
+    expect(tab.asked[0]).toContain('Why is the confirm gate accepted for ' + TASK);
+    // the ask's answer is what the POST carries — the SAME L1 gate! write the CLI performs
+    expect(tab.posted).toEqual([{ id: TASK, gate: 'confirm', decision: 'accept', feedback: 'the ACs are met and the commit is recorded' }]);
+    // …and the box shows what was recorded
+    expect(tab.get('feedback').value).toBe('the ACs are met and the commit is recorded');
+  });
+
+  it('AC-1 — a CANCELLED ask writes NOTHING (never a silent accept)', async () => {
+    const tab = bootConfirm(null);
+    await flush();
+    const before = tab.fetched.filter((f) => f === '/api/gate').length;
+    tab.get('accept').click();
+    await flush();
+    expect(tab.asked).toHaveLength(1);
+    expect(tab.fetched.filter((f) => f === '/api/gate')).toHaveLength(before);
+    expect(tab.get('card-message').textContent).toContain('not recorded');
+    expect(tab.get('card-message').textContent).toContain('needs a why');
+  });
+
+  it('AC-1 — a why TYPED in the box is not asked for again (the ask is a gap-filler, not a toll)', async () => {
+    const tab = bootConfirm('unused', 'the rationale is already written here');
+    await flush();
+    tab.get('accept').click();
+    await flush();
+    expect(tab.asked).toEqual([]);
+  });
+
+  it('AC-1 — the ENTRY gate is never asked: a grill accept needs no why', async () => {
+    const tab = boot({ ...reads(card()), [`/api/confirm?id=${TASK}`]: submittedGrill() }, '#drill=gate&id=' + encodeURIComponent(TASK) + '&gate=grill', [], null);
+    await flush();
+    tab.get('accept').click();
+    await flush();
+    expect(tab.asked).toEqual([]);
   });
 
   it('AC-4 — an EXIT gate whose run is refused still makes no run claim', async () => {

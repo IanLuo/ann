@@ -350,7 +350,18 @@ export class Frame {
       `GATE ${gate} — ${taskId}\n  intent: ${String(contract.intent ?? '')}\n  ACs: ${(contract.acceptanceCriteria as string[] | undefined)?.join(' · ') ?? '(none)'}\n  inputs: ${packet.dependencies.map((d) => `${d.name}(${d.status})`).join(', ') || '(none)'}`,
     );
     const answer = await this.abilities.interact.decide(`decide gate '${gate}' for ${taskId}`, ['accept', 'reject']);
-    if (answer === 'accept') return { decision: 'accept' };
+    if (answer === 'accept') {
+      // AC-1 (leg 12/11): a CONFIRM accept must carry WHY. The RULE lives in the write
+      // path (`commands.gate` — one chokepoint for the CLI, the served card and this
+      // frame); the frame's job is to ASK, here at the ONE source that talks to a human.
+      // A CHAIN-ROUTED accept is deliberately NOT asked: §6 says a routed verdict never
+      // consults the human, so that route must carry its rationale in the verdict map's
+      // `feedback` — and if it does not, the write refuses rather than the frame inventing
+      // one.
+      if (gate !== 'confirm') return { decision: 'accept' };
+      const why = await this.abilities.interact.ask(`why is '${gate}' accepted for ${taskId}? (the rationale is recorded on the decision)`);
+      return { decision: 'accept', feedback: why };
+    }
     const why = await this.abilities.interact.ask(`why is '${gate}' rejected? (the feedback routes the rework)`);
     return { decision: 'reject', feedback: why };
   }

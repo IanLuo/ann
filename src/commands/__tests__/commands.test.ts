@@ -147,7 +147,11 @@ describe('brief — the gate decision material in ONE read (leg 12/15)', () => {
     expect(b.latestNote?.index).toBe(4); // the event's number, for the drill
     // the decision material a human needs, in order
     expect(b.openQuestions).toEqual([{ id: 'Q1', question: 'which way?', blocking: true, defaultIfUnanswered: 'this way' }]);
-    expect(b.decisions).toEqual([{ at: '2026-08-27', type: 'confirmed', gate: 'grill', note: 'accepted (test)', why: 'the approach is right, start here' }]);
+    expect(b.decisions).toEqual([{
+      kind: 'gate', gate: 'grill', subject: 'grill', decision: 'accepted', type: 'confirmed',
+      event: 3, at: '2026-08-27', what: 'accepted at the grill gate',
+      why: 'the approach is right, start here', by: 'test',
+    }]);
     // an uncapped read is available, and 0 means UNCAPPED
     expect(cmds().brief('01-leg/01-a', { noteChars: 0 }).latestNote?.text.length).toBe(1200);
   });
@@ -282,10 +286,11 @@ describe('submit! + gate! — the two-write gate sequence (core-design §4)', ()
     valueOf(c.gate('01-leg/01-a', 'grill', 'accept', 'looks right — the contract mirrors the plan'));
     const confirmed = c.events('01-leg/01-a').find((e) => e.type === 'confirmed' && e.gate === 'grill');
     expect(confirmed!.feedback).toBe('looks right — the contract mirrors the plan');
-    // an accept with no rationale records no feedback field
-    valueOf(c.gate('01-leg/01-a', 'confirm', 'accept'));
+    // an accept with no rationale records no feedback field — still legal at the ENTRY gate
+    // (AC-1 bounds the why-requirement to `confirm`, a task's terminal decision)
+    valueOf(c.gate('01-leg/01-a', 'confirm', 'accept', 'the evidence closes it'));
     const confirm2 = c.events('01-leg/01-a').find((e) => e.type === 'confirmed' && e.gate === 'confirm');
-    expect(confirm2!.feedback).toBeUndefined();
+    expect(confirm2!.feedback).toBe('the evidence closes it');
   });
 
   it('owns the 3-reject bound as a CONSTANT and surfaces only {escalated}', () => {
@@ -297,7 +302,44 @@ describe('submit! + gate! — the two-write gate sequence (core-design §4)', ()
   });
 
   it('the store refuses a confirm gate with no confirmed grill (the sequence is L0-enforced)', () => {
-    expect(errorOf(cmds().gate('01-leg/01-a', 'confirm', 'accept')).code).toBe('store-refused');
+    // the why is supplied so the refusal under test is the STORE's, not AC-1's
+    expect(errorOf(cmds().gate('01-leg/01-a', 'confirm', 'accept', 'the sequence is the point')).code).toBe('store-refused');
+  });
+
+  /* AC-1 (leg 12 task 11) — THE WHY IS REQUIRED WHERE IT IS LOST. The channel existed on
+   * the accept path and was never filled: 18 of the journey's 49 accepts recorded NOTHING.
+   * A rejection's why is forced by the rework loop; this is the write-path rule that makes
+   * the accept's not optional either. The rule is at the ONE chokepoint (gate!), so the
+   * CLI, the served card and the frame all meet it. */
+  it('AC-1: a confirm accept with NO why is REFUSED by name, with ZERO writes', () => {
+    const c = cmds();
+    valueOf(c.gate('01-leg/01-a', 'grill', 'accept'));
+    const before = c.events('01-leg/01-a').length;
+    const err = errorOf(c.gate('01-leg/01-a', 'confirm', 'accept'));
+    expect(err.code).toBe('why-required');
+    expect(err.blocker).toContain('confirm accept needs a why');
+    // the refusal names the exact gesture that would work
+    expect(err.blocker).toContain('ann gate! 01-leg/01-a confirm accept');
+    // ZERO WRITES — not even the submitted(confirm) that a decided gate would leave behind
+    expect(c.events('01-leg/01-a')).toHaveLength(before);
+    expect(c.gateState('01-leg/01-a', 'confirm')).toBe('none');
+    // whitespace is not a why either
+    expect(errorOf(c.gate('01-leg/01-a', 'confirm', 'accept', '   ')).code).toBe('why-required');
+    expect(c.events('01-leg/01-a')).toHaveLength(before);
+    // ...and a non-empty why writes it onto the decision
+    const ok = valueOf(c.gate('01-leg/01-a', 'confirm', 'accept', 'the work is done and the evidence is in'));
+    expect(ok.completed).toBeUndefined(); // no evidence yet — the honest intermediate state
+    expect(c.events('01-leg/01-a').find((e) => e.type === 'confirmed' && e.gate === 'confirm')!.feedback)
+      .toBe('the work is done and the evidence is in');
+  });
+
+  it('AC-1 is bounded to the TERMINAL gate: a bare GRILL accept and a bare reject are untouched', () => {
+    // the entry gate still accepts on a bare "yes" — it opens work, it does not close it
+    expect(cmds().gate('01-leg/01-a', 'grill', 'accept').ok).toBe(true);
+    // a reject's why is forced by the rework loop and is a SEPARATE concern; the AC-1 rule
+    // never fires on the reject direction (its code appears nowhere in that refusal)
+    const rej = cmds().gate('01-leg/01-a', 'grill', 'reject');
+    expect(rej.ok || rej.error.code !== 'why-required').toBe(true);
   });
 
   /* The ONE close rule (leg 08 task 02, CORRECTIVE): the accept auto-completes on evidence,
@@ -370,7 +412,7 @@ describe('append! — refuses what the composites own (§8:289)', () => {
     const c = cmds();
     expect(errorOf(c.append('01-leg/01-a', ev('completed') as JourneyEvent)).blocker).toContain('GATE-2');
     valueOf(c.gate('01-leg/01-a', 'grill', 'accept'));
-    valueOf(c.gate('01-leg/01-a', 'confirm', 'accept'));
+    valueOf(c.gate('01-leg/01-a', 'confirm', 'accept', 'the contract held'));
     expect(c.append('01-leg/01-a', ev('completed') as JourneyEvent).ok).toBe(true);
   });
 
@@ -691,7 +733,7 @@ describe('evidence! + complete! — the close gesture commands (leg 08 task 02)'
     expect(c.check()).toEqual([]);
     // the done terminal is recorded ONCE: a re-accept never writes a second `completed`,
     // and the explicit gesture is the idempotent refusal (complete! stays exactly as today)
-    valueOf(c.gate('01-leg/01-a', 'confirm', 'accept'));
+    valueOf(c.gate('01-leg/01-a', 'confirm', 'accept', 'the same conclusion, restated'));
     expect(c.events('01-leg/01-a').filter((e) => e.type === 'completed')).toHaveLength(1);
     expect(errorOf(c.complete('01-leg/01-a')).code).toBe('already-completed');
     expect(c.status('01-leg/01-a')).toBe('done');
@@ -701,7 +743,7 @@ describe('evidence! + complete! — the close gesture commands (leg 08 task 02)'
     writeNode('01-leg/01-a', CONTRACT, [ev('created'), ev('submitted', { gate: 'grill' }), ev('confirmed', { gate: 'grill' })]);
     const c = cmds();
     valueOf(c.submit('01-leg/01-a', 'confirm'));
-    const out = valueOf(c.gate('01-leg/01-a', 'confirm', 'accept'));
+    const out = valueOf(c.gate('01-leg/01-a', 'confirm', 'accept', 'the work is done, the evidence still owed'));
     expect(out.completed).toBeUndefined();
     expect(String(out.pending)).toContain('complete! 01-leg/01-a');
     expect(String(out.pending)).toContain('no-evidence');

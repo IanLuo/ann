@@ -140,7 +140,7 @@
       "enabled": true,
       "severity": "warning",
       "params": {},
-      "definition": "a blocking (high-impact) openQuestion resolved on a completed node must carry resolution provenance (discussed|defaulted|inferred); defaulted/inferred without explicit user decision = flagged (the tech-stack lesson)"
+      "definition": "a blocking (high-impact) openQuestion whose decision point has passed — the node was completed OR a gate was ACCEPTED — must carry resolution provenance (discussed|defaulted|inferred); defaulted/inferred without explicit user decision = flagged (the tech-stack lesson)"
     }
   ]
 }

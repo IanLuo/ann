@@ -118,6 +118,12 @@ export const NAV_FIXTURES: EvalFixture[] = [
 
 /* ══ K5 flow fixtures ══════════════════════════════════════════════════════ */
 
+/** THE WHY (leg 12/11 AC-1): a CONFIRM accept must carry a rationale, so every scripted
+ *  confirm accept below ends with one. The eval stub's unscripted `ask` answer is `''`
+ *  (deliberate — silence is meaningful), so a fixture that means to accept a terminal
+ *  gate has to SAY WHY, exactly as the operator now must. */
+const ACCEPT_WHY = 'the ACs are met and the staged doc is the work (fixture)';
+
 /** A spec step: STAGES a doc to docs/<name>.md — the first-pass completion shape
  *  (docs-as-git: the deliverable is a staged doc; the operator's commit evidence
  *  concludes it — no artifact lock, no artifacts/ file). */
@@ -146,7 +152,7 @@ export const FLOW_FIXTURES: FlowFixture[] = [
     name: 'a spec chain first-passes — ACs met, doc staged + operator-committed (no rework)',
     chain: ['spec'],
     steps: [specStep('spec', 'spec-result')],
-    interactAnswers: ['accept', 'accept'],
+    interactAnswers: ['accept', 'accept', ACCEPT_WHY],
     expectedFirstPass: true,
   },
   {
@@ -154,7 +160,7 @@ export const FLOW_FIXTURES: FlowFixture[] = [
     name: 'a two-step chain first-passes — both docs staged + operator-committed',
     chain: ['step-a', 'step-b'],
     steps: [lockStep('step-a', 'artifact-a'), lockStep('step-b', 'artifact-b')],
-    interactAnswers: ['accept', 'accept'],
+    interactAnswers: ['accept', 'accept', ACCEPT_WHY],
     expectedFirstPass: true,
   },
   {
@@ -162,7 +168,7 @@ export const FLOW_FIXTURES: FlowFixture[] = [
     name: 'a grill rejection reworks — NOT a first pass (the rework is honest)',
     chain: ['spec'],
     steps: [specStep('spec', 'spec-result')],
-    interactAnswers: ['reject', 'the spec is wrong', 'accept', 'accept'],
+    interactAnswers: ['reject', 'the spec is wrong', 'accept', 'accept', ACCEPT_WHY],
     expectedFirstPass: false,
   },
   {

@@ -39,13 +39,17 @@ function setup(events = [ev('created')], contract: unknown = CONTRACT): Commands
 }
 afterEach(() => rmSync(root, { recursive: true, force: true }));
 
-/** A scripted human — every verb answers from a queue; `asked` records the questions. */
+/** A scripted human — every verb answers from a queue; `asked` records the questions.
+ *  The unscripted fallback for `ask` is a RATIONALE, not silence: AC-1 makes a CONFIRM
+ *  accept carry a why, so a scripted human who accepts a terminal gate says why (the
+ *  scripts below are written for the gate DECISIONS and must not have to spell it out at
+ *  every site). A scripted `reject` still supplies its own feedback from the queue. */
 class ScriptedInteract {
   readonly asked: string[] = [];
   readonly presented: string[] = [];
   constructor(private readonly answers: string[] = []) {}
   async present(text: string) { this.presented.push(text); }
-  async ask(q: string) { this.asked.push(q); return this.answers.shift() ?? ''; }
+  async ask(q: string) { this.asked.push(q); return this.answers.shift() ?? 'the work is complete (scripted)'; }
   async research(topics: string[]): Promise<ResearchFinding[]> { return topics.map((t) => ({ topic: t, findings: 'x' })); }
   async decide(q: string, options: string[]) { this.asked.push(q); return this.answers.shift() ?? options[0]; }
 }
@@ -241,6 +245,47 @@ describe('the gate source is the CHAIN (core-design §6)', () => {
     const r = await run(c, [grillStep('nonsense'), mkStep('envision')]);
     expect(r.stop).toBe('failed');
     expect(r.problems.join('\n')).toContain('unmapped-verdict');
+  });
+
+  /* AC-1 (leg 12/11) — THE WHY IS REQUIRED WHERE IT IS LOST, at the frame's own gate
+   * source. The frame ASKS before it writes, so the operator's form carries the rationale
+   * and the write-path refusal stays the last resort. A CHAIN-ROUTED accept is
+   * deliberately NOT asked (the test above: §6's routed verdict never consults the
+   * human) — that route must carry its own rationale, and if it does not, the WRITE
+   * refuses rather than the frame inventing one. */
+  it('AC-1: the frame ASKS for the confirm rationale and the answer lands on the decision', async () => {
+    const c = setup();
+    chainFile([{ id: 'envision' }]);
+    const human = new ScriptedInteract(['accept', 'accept', 'the ACs are met and the doc is staged']);
+    const r1 = await run(c, [mkStep('envision')], human);
+    expect(r1.stop).toBe('blocked-waiting');
+    const asked = human.asked.find((q) => q.includes("why is 'confirm' accepted"));
+    expect(asked).toBeDefined();
+    // the answer is ON the record — the whole point: the why lands on the DECISION
+    const confirmed = c.events(TASK).find((e) => e.type === 'confirmed' && e.gate === 'confirm');
+    expect(confirmed!.feedback).toBe('the ACs are met and the doc is staged');
+    // and it is what `ann decisions` reads back
+    expect(c.decisions(TASK).decisions.at(-1)).toMatchObject({ kind: 'gate', gate: 'confirm', decision: 'accepted', why: 'the ACs are met and the doc is staged' });
+    // AC-4 — the ENTRY accept was a bare "yes" (legal: the rule is bounded to the terminal
+    // gate), so it reads as a NAMED gap rather than a silent one
+    expect(c.decisions(TASK).missingWhy).toEqual(['2026-09-25 accepted at the grill gate — NO WHY RECORDED']);
+  });
+
+  it('AC-1: a routed confirm accept with NO rationale FAILS CLOSED — the frame never invents a why', async () => {
+    const c = setup();
+    // the confirm gate is decided by a STEP, and the route carries no feedback
+    chainFile([
+      { id: 'envision' },
+      { id: 'review', at: 'confirm', verdict: { ok: { gate: 'accept' }, rework: { gate: 'reject', feedback: 'do it again' } } },
+    ]);
+    const reviewer = mkStep('review', { decisions: ['ok', 'rework'], out: () => ({ ok: true, artifact: 'r', verdict: { decision: 'ok' } }) });
+    const human = new ScriptedInteract(['accept']);
+    const r = await run(c, [mkStep('envision'), reviewer], human);
+    expect(r.stop).toBe('failed');
+    expect(r.problems.join('\n')).toContain('why-required');
+    // the human was never asked — §6, a routed verdict is the source
+    expect(human.asked.some((q) => q.includes("why is 'confirm' accepted"))).toBe(false);
+    expect(c.events(TASK).some((e) => e.type === 'confirmed' && e.gate === 'confirm')).toBe(false);
   });
 
   it('a DECIDED gate still RUNS its bound step — the write is skipped, the step is not', async () => {

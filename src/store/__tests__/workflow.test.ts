@@ -556,6 +556,7 @@ describe('the readers AGREE (AC-2) — one fixture set, all four gate states', (
       'src/store/store.ts': 'the single writer: the per-type field whitelist + shape checks (WRITES and validates, never derives a state)',
       'src/commands/index.ts': 'the gate decision WRITE — GATE_DECISION_EVENTS, writing not reading',
       'src/flow/semantic-driver.ts': 'the closed set refuses a gate decision by NAME',
+      'src/store/decisions.ts': 'the decision DERIVATION (leg 12/11 AC-2) — reads a gate choice through gateView and only SPELLS the event type the choice lives in; it derives no gate STATE of its own (the lifecycle stays workflow.ts\'s)',
       'src/store/vocab.ts': 'the registry declaration of the decision mapping',
       'src/store/docs.ts': 'the retired doc vocab it refuses by name',
       'src/flow/types.ts': 'the step contract declares the gate event types a step may produce',

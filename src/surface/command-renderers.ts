@@ -7,9 +7,24 @@ import { renderStatusTree, renderGateCard, renderPlan, renderDrift, renderLedger
 import type { DeferredTask, ReworkTask } from '../commands/index.js';
 import { MANIFEST_FILE } from '../store/docs.js';
 import type { Idea } from '../store/ideas.js';
+import type { DecisionPoint } from '../store/decisions.js';
 
 /** An idea as the `ann idea` read renders it — the record plus the age the read derives. */
 type IdeaRow = Idea & { ageDays: number };
+
+/** ONE CHOICE POINT's lines — shared by the card's DECISIONS section and `ann decisions`,
+ *  so the two readers of the one derivation cannot drift (leg 12/11, AC-2). A why that was
+ *  never recorded prints as MISSING rather than being omitted: the gap IS the answer
+ *  (AC-4), and a silently shorter line would hide exactly what this record exists to show. */
+function decisionLines(d: DecisionPoint): string[] {
+  const who = d.by ? ` · by ${d.by}` : '';
+  const how = d.how ? ` · how: ${d.how}` : '';
+  const impact = d.highImpact ? ' · HIGH-IMPACT' : '';
+  return [
+    `  ${d.at} [${d.kind}] ${d.what}${who}${how}${impact}`,
+    `      why: ${d.why ?? '(MISSING — nothing was recorded)'}`,
+  ];
+}
 
 /**
  * THE PER-COMMAND TEXT RENDERERS (value-canonical CLI).
@@ -609,10 +624,7 @@ export const RENDERS: Record<string, Renderer> = {
     if (v.referencedBy.length) lines.push(`  referenced by: ${v.referencedBy.map((r) => `${r.id} (${r.status})`).join(' · ')}`);
     lines.push('---', `DECISIONS SO FAR (${v.decisions.length})`);
     if (!v.decisions.length) lines.push('  (none yet — this is a first-time gate)');
-    for (const d of v.decisions) {
-      lines.push(`  ${d.at} ${d.type}@${d.gate} — ${d.note}`);
-      lines.push(`      why: ${d.why ?? '(NOT RECORDED)'}`);
-    }
+    for (const d of v.decisions) lines.push(...decisionLines(d));
     const unclaimed = v.conclusion.unclaimed ?? [];
     lines.push('---', 'CONCLUSION');
     lines.push(`  claims: ${v.conclusion.claims.length}${unclaimed.length ? ` · UNCLAIMED: ${unclaimed.map((u) => u.ac).join(', ')}` : ' · every AC claimed'} · checks: ${v.conclusion.checks.length}`);
@@ -798,6 +810,23 @@ export const RENDERS: Record<string, Renderer> = {
     lines.push('---');
     const d = v.defaults as { maxTokens: number; temperature: number; retries: number; backoffMs: number; backoffMaxMs: number; timeoutMs: number };
     lines.push(`defaults: maxTokens=${d.maxTokens} · temperature=${d.temperature} · retries=${d.retries} · backoff=${d.backoffMs}ms→${d.backoffMaxMs}ms · timeout=${d.timeoutMs}ms`);
+    return block(lines);
+  },
+
+  /* decisions (leg 12/11) — THE CHOICE POINTS, the timeline of choices beside the timeline
+   *  of work. Value = {id, decisions, missingWhy} from the ONE derivation; the card's
+   *  DECISIONS section renders the SAME lines through `decisionLines`, so the two readers
+   *  cannot drift. */
+  decisions: (value) => {
+    const v = value as { id: string; decisions: DecisionPoint[]; missingWhy: string[] };
+    const lines = [`DECISIONS — ${v.id} (${v.decisions.length} choice point${v.decisions.length === 1 ? '' : 's'})`];
+    if (!v.decisions.length) lines.push('  (nothing decided yet — no gate decision, no resolved question, no revised terms, no superseded artifact)');
+    for (const d of v.decisions) lines.push(...decisionLines(d));
+    // AC-4 — HONEST ABSENCE, named at the end where it cannot be missed.
+    if (v.missingWhy.length) {
+      lines.push('', `WHY MISSING (${v.missingWhy.length}) — the reason was never recorded; it is not inferred here:`);
+      for (const m of v.missingWhy) lines.push(`  ${m}`);
+    }
     return block(lines);
   },
 

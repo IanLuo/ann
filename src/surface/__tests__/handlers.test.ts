@@ -507,6 +507,79 @@ describe('THE PER-TASK EXECUTABILITY READ — the card and the gate queue (leg 1
   });
 });
 
+describe('ann decisions — the choice-point read + the card (leg 12/11, AC-2/AC-4)', () => {
+  /** A node's openQuestions live at the TOP-LEVEL sibling (format v14 §2) — not nested
+   *  under `contract`, which is the path that made the old rule unfirable. */
+  function writeQNode(id: string, events: Array<Record<string, unknown>>, questions: unknown[]) {
+    mkdirSync(dir(id), { recursive: true });
+    writeFileSync(join(dir(id), 'node.json'), JSON.stringify({ id, contract: { intent: 'Build the thing', acceptanceCriteria: ['AC-1'] }, openQuestions: questions, createdAt: '2026-09-01' }));
+    writeFileSync(join(dir(id), 'events.jsonl'), events.map((e) => JSON.stringify(e)).join('\n') + '\n');
+  }
+
+  it('exposes the derived choice points as the SAME value --json emits, and names the gaps', () => {
+    writeQNode('01-leg/01-a', [
+      ev('created'),
+      ev('submitted', { gate: 'grill' }),
+      ev('confirmed', { gate: 'grill', feedback: 'the contract mirrors the plan', note: 'accepted (ianluo)' }),
+      ev('evidence', { answers: [{ id: 'Q1', answer: 'the store, not a cache', provenance: 'discussed' }] }),
+      ev('submitted', { gate: 'confirm' }),
+      ev('confirmed', { gate: 'confirm' }), // a LEGACY bare accept — the why was never recorded
+    ], [{ id: 'Q1', question: 'which way?', blocking: true }]);
+
+    const ctx = createContext(root, ['decisions', '01-leg/01-a']);
+    const out = HANDLERS.decisions(ctx) as { ok: boolean; value: { id: string; decisions: Array<Record<string, unknown>>; missingWhy: string[] } };
+    expect(out.ok).toBe(true);
+    expect(out.value.id).toBe('01-leg/01-a');
+    expect(out.value.decisions.map((d) => d.kind)).toEqual(['gate', 'open-question', 'gate']);
+
+    const text = RENDERS.decisions(out.value, ctx.renderEnv());
+    // the substance: what · when · by whom · why · the event it lives in
+    expect(text).toContain('DECISIONS — 01-leg/01-a (3 choice points)');
+    expect(text).toContain('accepted at the grill gate · by ianluo');
+    expect(text).toContain('why: the contract mirrors the plan');
+    expect(text).toContain('Q1 resolved: which way? · how: discussed · HIGH-IMPACT');
+    // AC-4 — the gap is NAMED, in its own block, never filled in from the surrounding prose
+    expect(text).toContain('why: (MISSING — nothing was recorded)');
+    expect(text).toContain('WHY MISSING (1)');
+    expect(text).toContain('accepted at the confirm gate — NO WHY RECORDED');
+  });
+
+  it('the CARD renders the same points through the same lines (the two readers cannot drift)', () => {
+    writeQNode('01-leg/01-b', [
+      ev('created'),
+      ev('activated'),
+      ev('submitted', { gate: 'confirm' }),
+      ev('confirmed', { gate: 'confirm', feedback: 'done' }),
+    ], []);
+    const briefCtx = createContext(root, ['brief', '01-leg/01-b']);
+    const brief = (HANDLERS.brief(briefCtx) as { value: { decisions: unknown[] } }).value;
+    const card = RENDERS.brief(brief as never, briefCtx.renderEnv()) as string;
+    const readCtx = createContext(root, ['decisions', '01-leg/01-b']);
+    const read = RENDERS.decisions((HANDLERS.decisions(readCtx) as { value: unknown }).value, readCtx.renderEnv()) as string;
+    // the shared `decisionLines` output appears verbatim in both readers
+    for (const line of read.split('\n').filter((l) => l.startsWith('  ') && l.includes('[gate]'))) {
+      expect(card).toContain(line);
+    }
+    expect(card).toContain('DECISIONS SO FAR (1)');
+  });
+
+  it('an empty tail reads as an HONEST nothing — never an invented decision', () => {
+    writeQNode('01-leg/01-c', [ev('created')], [{ id: 'Q1', question: 'unanswered', blocking: true }]);
+    const ctx = createContext(root, ['decisions', '01-leg/01-c']);
+    const out = (HANDLERS.decisions(ctx) as { value: { decisions: unknown[]; missingWhy: string[] } }).value;
+    expect(out.decisions).toEqual([]);
+    expect(out.missingWhy).toEqual([]);
+    expect(RENDERS.decisions(out, ctx.renderEnv())).toContain('nothing decided yet');
+  });
+
+  it('the alias --decisions resolves to the same handler', () => {
+    writeQNode('01-leg/01-d', [ev('created')], []);
+    const viaAlias = HANDLERS.decisions(createContext(root, ['--decisions', '01-leg/01-d']));
+    const viaName = HANDLERS.decisions(createContext(root, ['decisions', '01-leg/01-d']));
+    expect(viaAlias).toEqual(viaName);
+  });
+});
+
 describe('README command table — the copy stays aligned with `ann commands`', () => {
   it('is row-for-row identical to the rendered table (the derived doc is the source)', () => {
     const ctx = createContext(root, ['commands']);

@@ -286,6 +286,7 @@ const COMMANDS: Array<{ name: string; args: string; desc: string }> = [
   { name: 'results', args: '<id> [n]', desc: 'a task\'s results by kind (commit/ref/evidence/link); with n, drill into one (commit=git show, ref=file/dir, evidence=event) · alias --results' },
   { name: 'packet', args: '<id>', desc: 'the node\'s deterministic context packet (context-packet-spec; derived on demand, never saved) · alias --packet' },
   { name: 'brief', args: '<id>', desc: 'THE GATE BRIEF — the decision material for one node in one read: status/gates/next · intent + ACs · openQuestions WITH their defaults · inputs and dependency edges · the decisions so far WITH their whys · the conclusion (claims/checks/close readiness) · the latest extended note CAPPED (read by pointer, never in full) · alias --brief' },
+  { name: 'decisions', args: '<id>', desc: 'THE CHOICE POINTS (leg 12/11) — a node\'s timeline of CHOICES beside the legs\' timeline of work, from ONE derivation over the event tail: what was decided · when · by whom (the RECORDED initiator) · WHY, and the event each choice lives in. Four kinds: a gate decision (grill/confirm accept or reject) · a resolved openQuestion with its how: (discussed|defaulted|inferred) · revised gate terms · a superseded artifact. HONEST ABSENCE: a choice whose reason was never recorded reads as MISSING — named, never inferred, never fabricated (the journey lost 18 of 49 accept rationales exactly here) · alias --decisions' },
   { name: 'validate', args: '[id]', desc: 'run the enabled validator rules (all nodes, or one node) — rule-id\'d deterministic findings · alias --validate' },
   { name: 'rules', args: '[--write]', desc: 'the DERIVED check-rules registry (self-contained rule modules are the source) · alias --rules; --write regenerates rules/check/rules.json' },
   { name: 'docs', args: '[--write]', desc: 'the docs→git resolution index (docs/manifest.json — generated from docs/, never hand-maintained) · alias --docs; --write regenerates the manifest' },
@@ -1098,6 +1099,10 @@ export const HANDLERS: Record<string, Handler> = {
     return { ok: true, value: { ...value, problems: [...ideaProblems, ...value.problems] } };
   },
 
+  /* decisions — THE CHOICE POINTS (leg 12/11, AC-2): one read over the ONE derivation.
+   *  A pure read: no marker, no write, nothing to refuse. */
+  decisions: (ctx) => ({ ok: true, value: ctx.commands.decisions(resolveId(ctx, ctx.args[1])) }),
+
   /* confirm / detail / results — detail-derived cards + results */
   confirm: (ctx) => {
     const id = resolveId(ctx, ctx.args[1]);
@@ -1460,6 +1465,7 @@ const ALIAS: Record<string, string> = {
   '--flow': 'flow',
   '--read': 'read',
   '--idea': 'idea',
+  '--decisions': 'decisions',
   '--help': 'help',
   '-h': 'help',
   '--commands': 'commands',
