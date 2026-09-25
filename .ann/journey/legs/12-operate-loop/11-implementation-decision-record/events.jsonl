@@ -5,3 +5,4 @@
 {"at":"2026-09-21","type":"confirmed","gate":"grill","note":"accepted (ianluo)"}
 {"at":"2026-09-25","type":"submitted","gate":"grill","note":"submitted for the grill gate (agent)"}
 {"at":"2026-09-25","type":"confirmed","gate":"grill","note":"accepted (ianluo)"}
+{"at":"2026-09-25","type":"evidence","note":"captured 'npm test' → pass (exit 0) against 3fd163dab231b94bcaebf28fe56ce4ce0ac96460 (agent)","checks":[{"command":"npm test","result":"pass","exitCode":0,"detail":"sha1:384194a6cc91 · Duration 31.94s (transform 1.87s, setup 0ms, import 3.91s, tests 112.18s, environment 4ms)","sha":"3fd163dab231b94bcaebf28fe56ce4ce0ac96460","source":"captured"}]}
