@@ -1,0 +1,48 @@
+{
+  "id": "12-operate-loop/21-implementation-every-write-commits",
+  "contract": {
+    "intent": "EVERY TOOLING WRITE COMMITS ITSELF. Leg 12/20 built the write journal and hooked the commit to the STORE'S EVENT APPENDS — `noteWrite` is called at exactly six sites, three `node.json` and three `events.jsonl`, and nowhere else. So the commit sees EVENTS, not WRITES, and the tooling writes far more tracked files than it writes events. Two consequences, both found live. (1) A DELETION IS A CHANGE NOTHING OWNS: `archiveJourney` `renameSync`s every leg OUT of the live tree (tracked DELETIONS under `.ann/journey/**`) and INTO `.ann/archive/sessions/**` (tracked additions — that tree is tracked, 193 files from past sessions). The journal records neither, `git add -- <journaled paths>` can stage neither, and `uncommittedJourneyChanges()` filters only `??` so those ` D` entries COUNT — the engine's own archive leaves the tracked `.ann/journey` tree dirty, and a later archive is refused by its own leftovers. The gesture that MOTIVATED 12/20 is the one gesture 12/20 does not cover, and 12/20's AC-4 (\"after any gesture the tracked `.ann/journey` tree is clean\") is falsified by it — its test proved the archive GUARD clears after event gestures, which is narrower than the sentence. (2) THE EDITOR NEVER COMMITS ITS OWN EDIT: `writeGoalDoc` writes `docs/goal.md` plus the manifest, `spec-doc.ts` writes a spec session's doc, `design-brief.ts` a design brief, `intents.ts` intents, `handlers.ts` `rules/check/rules.json` — every one a tracked, REVIEWABLE deliverable left for a person to notice. Proven live: the gate-cadence v2 spec sat dirty and coupled to `docs/manifest.json`, and had to be hand-committed, which is the whole defect restated. The operator's standing rule is that a deliverable is reviewable BECAUSE it is committed. THE CONTRACT, in the operator's words: a write is a commit point — \"when an edit is done, the editor should commit it\", and \"if that's a human button tap omitted an event, that action should commit the change\". DELIVERABLE: the journal records WRITES, including DELETIONS (a removal is a change to a tracked file like any other), and the writers above commit what they wrote AT THE MOMENT they write it. THE EXCLUSIONS ARE DECISIONS, NAMED AND PINNED, never an accident of where a filter happened to be written: `.ann/journey/.ledger.json` (gitignored derived integrity state), `logs/**` (the provider op-log records prompts — its own ignore file says \"never the record\"), and the provider config (mode 0600, a secret) are NEVER staged. THE HARD LINE STANDS: never CODE — a source file edited alongside a tooling write stays dirty, and the delivery commit remains the operator's act. This node EXTENDS 12/20's journal; it does not replace its exact-path staging, its never-code confinement, or its fail-open-on-the-commit / fail-closed-on-the-write split, all of which carry over unchanged.",
+    "acceptanceCriteria": [
+      "AC-1 — THE JOURNAL RECORDS WRITES, NOT EVENTS: every tracked-file write a write-command performs is journaled, not only the event append. Pinned by test: a command that writes a file and lands NO event commits it — the case the current journal structurally cannot see, because it is noted at the event-write site rather than at the write site.",
+      "AC-2 — A DELETION IS A CHANGE: `goal! archive`'s move out of the live tree stages the `.ann/journey/**` deletions, so `uncommittedJourneyChanges()` is EMPTY after an archive and a SECOND archive is not refused by the engine's own leftovers. Pinned by test and verified on the live journey. The `.ann/archive/**` side moves in the SAME commit: half a rename is not a smaller commit, it is a dirty tree (see Q2 — this reverses 12/20's stated reading that the snapshot is the operator's deliverable, and it must be reversed NAMED rather than half-staged).",
+      "AC-3 — THE EDITOR COMMITS ITS OWN EDIT: the doc and generated-file writers commit what they wrote, at the moment of writing — `docs/goal.md` + the manifest (`writeGoalDoc`), a spec session's doc (`spec-doc.ts`), a design brief (`design-brief.ts`), intents (`intents.ts`), and `rules/check/rules.json` (`handlers.ts`). Pinned by test, one per writer, and a doc write leaves the tree clean.",
+      "AC-4 — THE EXCLUSIONS ARE NAMED AND PINNED: the write-rev ledger, `logs/**` (including the provider op-log), and the provider config are NEVER staged — asserted by test, so the exclusion set is a stated boundary rather than a side effect of a path filter. A reviewer can read the list and know what the engine will never commit.",
+      "AC-5 — THE HARD LINE STANDS, AND NO REGRESSION: never CODE — a source file edited alongside a tooling write commits the tooling path only and leaves the source dirty, pinned by test (12/20's AC-2, re-asserted under the widened journal). Full `npm test` green, `npm run typecheck` clean, the captured checks (npm test · npm run typecheck · ann check · ann verify) recorded via capture!, `ann check` + `ann verify` clean on the live journey, committed with structured evidence (F-AC18)."
+    ],
+    "workType": "implementation",
+    "targetAreas": [
+      "src/store",
+      "src/commands",
+      "src/surface",
+      "src/flow",
+      "src/e2e"
+    ],
+    "requiredInputs": [
+      "architecture",
+      "journey-format-spec",
+      "core-design"
+    ],
+    "expectedOutputs": [
+      "the journal widened from event-append to WRITE — writes AND deletions — noted at the write site in the store (src/store)",
+      "the commit step extended to the doc/generated writers: spec-doc, design-brief, intents (src/flow) and rules/check/rules.json (src/surface)",
+      "the exclusion list as an explicit named constant, with the ledger, logs/** and the provider config (src/store, src/surface)",
+      "tests: a no-event write commits · the archive's deletions stage and a second archive proceeds · each doc writer commits · the exclusions are never staged · never-code survives the widening",
+      "the same guards that SKIP rather than error: read-only/fixture target (ANN_STORE) · no git repo · ANN_NO_COMMIT for the e2e harness"
+    ]
+  },
+  "openQuestions": [
+    {
+      "id": "Q1",
+      "question": "Does an AGENT's SOURCE edit also self-commit — so the delivering agent commits `feat(...)` per edit — or does the delivery commit stay the operator's single act?",
+      "blocking": false,
+      "defaultIfUnanswered": "It stays the operator's act — 12/20's AC-2 hard line, unchanged. The frame reviews a DELIVERY as one unit and the gate's decision is about that unit; per-edit commits would fragment exactly what the gate is deciding about, and would put source history in the engine's hands, which is the boundary the operator reserved. This node commits the TOOLING'S OWN writes, not the source tree."
+    },
+    {
+      "id": "Q2",
+      "question": "Does the `.ann/archive/**` snapshot commit together with the archive's live-tree deletions? It is TRACKED today (193 files from past sessions), and a `renameSync` is ONE change spanning both trees.",
+      "blocking": false,
+      "defaultIfUnanswered": "YES, both sides in one commit. This REVERSES 12/20's stated reading — that the snapshot is a deliverable of the session and deliberately outside the engine's commit — and the reversal is the point: staging only the live-tree deletions leaves the snapshot's new files untracked, which is not a smaller commit but a dirty tree, and it makes the engine's archive a half-written change. If the snapshot should genuinely stay the operator's, then the archive's DELETIONS must stay with it too, and that pair is a deliberate exclusion that AC-4 must name."
+    }
+  ],
+  "createdAt": "2026-09-25"
+}
