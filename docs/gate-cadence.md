@@ -2,8 +2,10 @@
 - **upstream** (this doc relies on): docs/flow-control-spec.md,docs/journey-format-spec.md,docs/core-design.md,docs/goal.md
 - **referrers** (must cite this when they change): functional-spec,resource-registry,architecture,journey-format-spec
 
-# Gate Cadence (v1)
+# Gate Cadence (v2)
 *Type: spec. DIRECT-AUTHORED, not produced by a `spec!` session — the SPECS session's GO is a human decision and was not driven; recorded as a deviation per the v18 precedent (`10-server-ui/05-implementation-journey-format-v18`). Provenance: the operator's standing complaint, 2026-09-22 — "too many human gate, too much to watch". This spec fixes the shape; the producing task is spawned after its GO. Upstream: `flow-control-spec`, `journey-format-spec`, `core-design`, `goal`.*
+
+**Revision (v2), 2026-09-25 — §1-§6 stand; §7-§10 are added.** The operator's second reading of the same problem: *"on ending gate, now it ask human action, but that's too much to read"* — the burden he kept paying was the **exit card**, and the answer is not a cheaper card but a worker that reads it and decides. §1-§6 keep both gates and make the ENTRY gate worth having. §7 changes the **exit gate's decider**, not its existence: §5's scope-out of the gate *count* still holds, and both gates remain on every task. Four operator decisions are recorded in §7 as the design's premise, not as options — **including the one made against this spec's own recommendation**, so §7.5 and §9 carry its cost rather than burying it.
 
 ## 1. The problem, measured
 
@@ -77,7 +79,7 @@ contract, and 3.1 makes seeing it cost one screen.
 ### 3.3 A gate accept must record a rationale
 
 The measured defect. A gate accept carries `feedback` (the field exists —
-`store.ts:1742-1756`) and it is currently optional. It becomes **required on accept**, for both
+`store.ts:1735-1766`) and it is currently optional. It becomes **required on accept**, for both
 gates, validated in the same place as the other gate shape checks. Fail-closed: an accept with no
 rationale is refused by the writer.
 
@@ -161,10 +163,253 @@ fail-closed in the only direction that matters: an amendment can only ever *add*
 |---|---|---|
 | 3.1 | `src/flow/operator-action.ts:154-166`, `src/flow/frame.ts:347-362` | card/`present()` show intent + ACs |
 | 3.2 | `src/flow/frame.ts` grill phase | ack-shaped entry decision |
-| 3.3 | `src/store/store.ts:1742-1756` | `feedback` required on gate accept, fail-closed |
+| 3.3 | `src/store/store.ts:1735-1766` | `feedback` required on gate accept, fail-closed |
 | 3.4 | `src/store/store.ts:1710` (+ shape check) | `extended` gains optional `kind` |
 | 3.5 | `src/store/workflow.ts` (beside `gateView`), `src/store/store.ts` (`gateProblems`) | the effective-accept comparison, one place, both consumers |
 
 Reuse, do not rebuild: `resolveChain` (`src/flow/chain.ts:123-160`), `phaseOf` (`chain.ts:75`),
 the `docsIndexFresh` freshness pattern (`src/store/docs.ts:86-92`), and the existing gate
-shape-check neighbourhood (`store.ts:1742-1756`).
+shape-check neighbourhood (`store.ts:1735-1766`).
+
+---
+
+## 7. The exit gate becomes automatic (v2)
+
+### 7.0 The four decisions this design is built on
+
+Recorded as premise, because everything below is a consequence of them and three of the four
+have a defensible alternative:
+
+| # | The operator chose | The alternative, and why it was not taken |
+|---|---|---|
+| D-1 | **The worker accepts automatically** — the human leaves the exit gate | A human reading only the worker's verdict. Rejected by the operator; the cost is carried in §7.5 and §7.8. |
+| D-2 | **Both the floor and the model auto-rework** | Only the deterministic floor auto-reworking, the model advising. Rejected: it splits "who may reject" across two mechanisms. |
+| D-3 | **The escalation is built** — the worker stops at the bound and a human decides for real | Leaving it a string (§7.6). Rejected: an auto-rejecting worker reaches the dead end in three machine cycles with no human having seen any of them. |
+| D-4 | **One spec** — this one, extended | A second doc. Rejected: the exit gate and the entry gate are one cadence, and two docs would drift at exactly the boundary they share. |
+
+### 7.1 What the worker is, and what it is not
+
+**It is not `ann review!`.** The advisory session (`src/flow/review-session.ts`) is interactive,
+terminal-only (JSON mode refuses it; it is not a service route), multi-round, and
+**structurally barred from deciding**: it appends `evidence` and nothing else — the gate kinds
+are composite-owned by `gate!` (`src/flow/review-session.ts:425`) — and a test pins it, *"AC-4:
+the session writes NO gate event, and the task is exactly where it was"*
+(`src/commands/__tests__/commands.test.ts:777`). Its prompt forbids a verdict twice.
+
+The **review worker** is a distinct actor: headless, single-pass, no terminal, and permitted to
+write the gate decision. It must be a separate thing rather than a mode of the session, because
+the session's no-decision property is load-bearing and tested, and its interactive shape cannot
+run unattended.
+
+The worker is a **fresh invocation that receives only the gate material** — the brief and the
+diff of the cited commits — never the implementer's context. `AGENTS.md` forbids an implementing
+agent self-accepting its own gate; the worker must not become the way around that (§8).
+
+### 7.2 Where it runs, and what it is allowed to decide
+
+At the confirm **submission**, as the door to the gate. One review per submission; the loop
+between submissions is the EXISTING rework loop (a rejection derives `rework`,
+`src/store/workflow.ts:316-323`, and the frame re-executes, `src/flow/frame.ts:555-557`). **No new
+loop, no new state, no new event type** — 12/06's rule (`docs/flow-control-spec.md`) holds here
+too: a worker's rejection is the same `rejected` event a human's is.
+
+```text
+submit! <id> confirm
+  ├─ FLOOR — deterministic, in-process (§7.3)
+  │    fail → the submission is REFUSED. nothing written, no rejection burned
+  └─ pass → `submitted` is written
+       └─ the worker reviews — model (§7.4)
+            rework    → `rejected`, the findings as feedback → the derived `rework` state
+            accept    → `confirmed`, the verdict as the rationale → auto-close if F-AC18 holds
+            uncertain → nothing written; the card goes to the HUMAN
+            absent    → nothing written; the card goes to the HUMAN (§7.7)
+```
+
+**The exit gate only.** The grill stays the human's (§3.2), which bounds this change to one gate
+and leaves §1-§6's design untouched.
+
+### 7.3 The floor — deterministic, and it REFUSES rather than rejects
+
+`submit! confirm` today guards only: the gate is in the vocabulary, the node is not a leg root,
+the node exists, and there is no undecided submission
+(`src/commands/index.ts:606-611`). **It does not read the conclusion at all** — an exit gate can
+be opened with no evidence behind it, and the reviewer is handed an empty card. That is a real
+share of the reading burden: the material does not converge because it is not there.
+
+The floor closes it, and it must read the **same predicate the close reads**, or the gate and the
+close disagree:
+
+1. `closeEvidenceBlocker()` is clean (`src/commands/index.ts:894-924`) — the F-AC18 predicate:
+   commits cited, a captured pass bound to a cited commit, no captured failure on cited bytes.
+2. `conclusion().unclaimed` is empty — every AC in the contract carries a claim.
+3. every claim's check RESOLVES in the log (`!c.bound`) and none's latest run FAILED.
+
+**Gap found while writing this.** Items 2 and 3 are the v18 conclusion gate, and they run in
+`complete!` (`src/commands/index.ts:962-982`) but **not** in the `gate!` accept auto-close, which
+reads `closeEvidenceBlocker` alone (`:665-666`). So today a confirm accept can close a task that
+`complete!` would refuse for an unclaimed AC. The floor makes both paths read one predicate —
+the "one predicate, every path" rule this codebase already applies to the gate checks.
+
+**Fail-closed, and it costs nothing.** A floor failure burns no rejection, so the reject bound
+(§7.6) is untouched by it, and the repair is a write the implementer can make without a human.
+
+### 7.4 The judgement — the model FINDS, a rule DERIVES the verdict
+
+The model is never asked for a verdict. It produces **findings in the existing shape**: the five
+fields picked by `shapeFindings` (`src/flow/review-session.ts:368-380`), `REVIEW_SEVERITIES`
+(`src/store/store.ts:347`), and `findingShapeProblem`'s requirement of
+`id·severity·where·text·status·provenance` (`:364-385`) — the same mapper that picks the fields so
+an invented one cannot reach the log. Note what that mapper already does with the sixth field:
+`provenance` is **stamped by the engine, not taken from the model** — *"an author cannot be
+forged"* (`review-session.ts:361-362`). §7.5 is that same pattern one level up.
+
+The verdict is a **closed rule over severities**, in one place, deterministic:
+
+| The findings, at `status: open` | Verdict | Why |
+|---|---|---|
+| any `gap` or `regression` | **rework** | a defect the reviewer can name |
+| any `uncertain`, no defect | **human** | the reviewer's ignorance is exactly when a person should look |
+| only `matches` (and resolved others) | **accept** | nothing found against the ACs |
+
+**The middle row is the design.** Without it a reviewer that is vague accepts by default —
+`uncertain` would be a free pass, and leniency would be the cheapest output the model could
+produce. With it the worker cannot accept by not knowing, and it cannot stall either, because
+`uncertain` burns no rejection (only D-2's defects do).
+
+The model therefore cannot *say* accept. It can only **find**, and the engine decides from what
+was found. That keeps the decision auditable — the accept's rationale IS the finding set that
+produced it (§3.3) — and it means a model that hallucinates a verdict in prose changes nothing.
+
+### 7.5 The record must say who decided
+
+§3.3 requires a rationale on accept; with a worker the rationale is the verdict. But a `confirmed`
+the worker wrote would be **indistinguishable from one a person wrote**: `who` is self-declared
+from `RECORDED_BY` (`src/commands/index.ts:388`, `src/surface/handlers.ts:157`) and lands only in
+the note text. The codebase already has this pattern and its reason — the writer REQUIRES
+`provenance` on a finding because *"an author-less finding is indistinguishable from a human's"*
+(`src/store/store.ts:364-385`), and `shapeFindings` stamps it rather than trusting the model.
+
+So the decision event gains a **provenance field, engine-stamped, never caller-typed**: the
+engine knows whether it collected a human decision or ran the worker.
+
+This is not bookkeeping. **D-1 removes the human from the exit gate, so the record is the only
+place that fact survives.** Without it the journey cannot say how much of itself a machine
+accepted, `check`/`verify` cannot report the ratio, and a sample audit after the fact is
+impossible — the automatic gate would be unreviewable in principle, not merely unreviewed.
+
+### 7.6 The bound, and the escalation that must now exist
+
+`REJECT_BOUND = 3` (`src/commands/index.ts:88-90`), counted in `gate!` (`:655-660`). The 4th
+rejection writes nothing, and the escalation it names — force-approve / restructure / block — is
+**a string with no implementation** (`:658`; the only other occurrence is
+`docs/flow-control-spec.md:43`). A prior design review already flagged the asymmetry this leaves
+— *"gate exhaustion escalates to a human … That asymmetry may be intended; it is not argued"*
+(`.agents/artifacts/design-review-v12.md:180`). D-3 is that argument, forced.
+
+An auto-rejecting worker (D-2) makes that dead end reachable in three machine cycles. So D-3
+makes the escalation part of this work, not a follow-up:
+
+- **force-approve** — NEW. A human accepts over the worker's objection, and the override is
+  recorded with the objection attached. This is the one genuinely new gesture, and it is what
+  makes the bound a floor rather than a wall.
+- **restructure** — the contract is frozen (`node.json` is immutable), so replacing it is
+  `spawn!` a correct contract and `cancelled` the old one with a reason. Routing, not machinery.
+- **block** — `deferred`, which already means *"postponed, the obligation stands"*. Routing, not
+  machinery.
+
+And the rule that makes the loop safe: **at the bound the worker is out.** Its next action is not
+a rejection; the accumulated findings go to the human. A machine loop therefore always terminates
+at a person — which is the property that makes an automatic gate safe to have at all.
+
+### 7.7 The worker's absence degrades to the human, visibly
+
+No provider, an unreachable endpoint, a refusal: the worker cannot run. The submission stands and
+the card is presented exactly as today.
+
+**Fail-OPEN toward the human, not fail-closed.** The reviewer is an ADDITION, so its absence must
+degrade to the behaviour that existed before it; a journey must not stall because an endpoint is
+down. But it must be **VISIBLE**: the card says the reviewer did not run, and why. Otherwise an
+outage silently converts automatic gates into human gates and the policy change is invisible —
+the "one word, two facts" failure this codebase keeps fixing.
+
+### 7.8 The declared cost of D-1
+
+Stated here rather than only in §9, because it is a consequence of the operator's choice and not
+a defect of it:
+
+- **The journey can be completed with no human having read it.** Not merely the exit gate — a
+  task's ENTIRE record, contract included, may be machine-accepted. §7.5 is what keeps that
+  *legible*; nothing keeps it *reviewed*.
+- **The reviewer and the implementer are the same model.** A systematic blind spot is shared, not
+  caught: the worker will be confident about exactly the things the implementer was confident
+  about. The floor is the only part of this design that is not subject to that.
+- **What is actually bought** is that the human's attention moves from 38 acceptances to the ones
+  that matter — rejects, escalations, and whatever an audit surfaces. That is the trade, and it is
+  a real one; it is not free.
+
+### 7.9 The honest reading of §7.4's middle row
+
+`uncertain → human` is the safety valve, and it is also the escape hatch: a worker that marks
+everything `uncertain` returns every gate to the human, which is the status quo wearing the new
+machinery. That failure is detectable (§7.5 records the actor, so the ratio is visible) but not
+prevented. The implementation should make the ratio cheap to read rather than assume the worker
+is well-behaved.
+
+## 8. Hazards the implementation must carry
+
+- **The model's material and the human's material must be ONE assembly.** `brief` is documented
+  as what the advisory session consumes (`src/commands/index.ts:1003`), but `buildReviewMaterial`
+  (`src/flow/review-session.ts:229-348`) builds a SECOND assembly from `assemblePacket` + the log
+  and never calls `brief`. A worker reviewing different facts than the card shows can disagree
+  with the human about what happened. Fix the read, not the doc.
+- **`confirmedSha` is doc-only.** `journey-format-spec` §3 and `core-design` say the commit
+  refuses on mismatch; no code compares it (`src/commands/index.ts:617`, `src/store/store.ts:1770`
+  — the field is shape-checked, never bound). The reviewer's real binding is the CITED commits
+  (`conclusion().cited`), which `capturedPassBound` already enforces. Say which, and name the
+  doc-only field as a gap rather than relying on it.
+- **Self-accept must be detectable, not merely asserted.** The worker is a fresh call, but the
+  same RUN can implement and then submit. The acceptance should record the run that produced it,
+  so `check` can flag an accept whose reviewing run equals the implementing one. Without it, "a
+  separate worker" is a claim about a prompt, not a property of the record.
+- **Cost is bounded by the reject bound.** At most `REJECT_BOUND` reviews per gate per submission
+  cycle, one model call each over the brief + diff. State it, so an unattended `run!` cannot spend
+  without limit.
+- **The entry gate's own hazards (§4) are untouched** — and the escalation must not become a
+  second way to clear GATE-1.
+
+## 9. Open questions (with defaults, per the node-contract pattern)
+
+- **OQ-1 — does the worker run for a gate opened by the DRIVER?** Three recorded boundaries say
+  no: `.agents/plan/self-driving-design.md:49` — *"RULES never decides a gate"*; `:79` —
+  *"worker-side gate decisions (never, by protocol)"*; and
+  `.agents/plan/gate-session-design.md:131`, which scope-outs both *"the driver starting sessions
+  by itself"* and *"mandatory sessions (the gate stays a one-gesture decision; the session is
+  optional help)"* — a worker that decides makes it a ZERO-gesture decision. Answering YES makes
+  `run!` able to close a task with **no human in it at all**. **Default: YES, and revise those
+  three records in the same change** — the alternative gives one gate two behaviours that differ
+  by CALLER, which is the "one word, two facts" failure this codebase has fixed repeatedly. The
+  revision is the honest form; a silent divergence is not. This is the single most consequential
+  open question here, and it is why §8 requires the run to be recorded.
+- **OQ-2 — what happens to the advisory session?** `gate-session-design.md:131` designed it as
+  *"optional help"*, not a mandatory step. With the human out of the exit gate its original
+  purpose narrows. **Default: it survives unchanged, and its role sharpens** — it becomes the
+  instrument a human reaches for at an ESCALATION (§7.6), where they must decide for real and have
+  the least context. It is not obsoleted by the worker; it is repositioned.
+
+## 10. What §7 changes in code
+
+| § | File | Change |
+|---|---|---|
+| 7.3 | `src/commands/index.ts` (`submitImpl`), `src/store/store.ts` | the floor: ONE predicate, read by `submit!` and by the accept auto-close |
+| 7.4 | new `src/flow/gate-review.ts`; reuses `review-session.ts`'s profile + `shapeFindings` | the headless reviewer + the severity→verdict rule |
+| 7.4 | `src/commands/index.ts` (`gateImpl`) | the worker's decision writes `confirmed`/`rejected` through the SAME writer |
+| 7.5 | `src/store/store.ts` (gate shape check, beside `:1763-1766`) | the decision gains engine-stamped provenance |
+| 7.6 | `src/commands/index.ts:655-660` | force-approve as a gesture; restructure/block routed to `spawn!`+`cancelled` / `deferred` |
+| 7.7 | `src/surface/*` (card) | the reviewer's absence is named on the card |
+| 8 | `src/flow/review-session.ts:229` | `buildReviewMaterial` consumes `brief` — one assembly |
+| 8 | `src/store/store.ts` (acceptance record) | the reviewing run id, so self-accept is checkable |
+
+Reuse, do not rebuild: `review-session.ts`'s profile and `shapeFindings` mapper ·
+`REVIEW_SEVERITIES` / `findingShapeProblem` (`store.ts:347,364`) · the derived `rework` state
+(`workflow.ts:316-323`) · `closeEvidenceBlocker` (`commands/index.ts:894-924`) · `conclusion()` ·
+the frame's `escalated` stop (`frame.ts:334-338`), which already exists and becomes real.
