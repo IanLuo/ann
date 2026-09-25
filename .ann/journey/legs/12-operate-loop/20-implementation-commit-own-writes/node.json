@@ -1,0 +1,46 @@
+{
+  "id": "12-operate-loop/20-implementation-commit-own-writes",
+  "contract": {
+    "intent": "THE ENGINE COMMITS ITS OWN JOURNEY WRITES. The defect, found live while operating: `store.appendEvent` writes events.jsonl and STOPS (`src/store/store.ts:1610`) — the engine never commits. Code is committed at delivery and the journey records of deliveries are committed by hand, but a HUMAN GESTURE (gate! accept/reject · append! · spawn! · submit! · evidence!) writes events that NOTHING DOWNSTREAM OWNS, so every gesture leaves the tree dirty and only a person noticing will clear it. This session is the proof of the failure mode: the two dirty logs were misread as a problem, and a hand-commit of another operator's own accept nearly went through. THE CONSEQUENCE IS NOT COSMETIC: `goal! archive` refuses on uncommitted tracked .ann/journey changes (`src/commands/index.ts:1319`, via `uncommittedJourneyChanges()` at `:1531`) — so a dirty log blocks a STRUCTURAL RESET at the worst possible moment (sealing a goal). `capture!` is NOT affected: its clean-tree guard excludes the store by construction (`STORE_PATHS = ['.ann/','journey/']`, `src/commands/capture.ts:69`), which is exactly why this stayed invisible until archive. DELIVERABLE: an INVOCATION-SCOPED WRITE JOURNAL in the store — the exact paths it appended, which it ALREADY KNOWS at the write target `join(node.dir,'events.jsonl')` — plus a COMMIT STEP at the surface that stages and commits EXACTLY those paths after a successful write command, with a message derived from the gesture in the SHAPE THE HISTORY ALREADY USES (`journey: <node> <what happened>`). STAGED BY NAME, computed from the journal, NEVER `git add -A` — the house rule, and the same reason `logs/` ignores itself (`src/abilities/obs/log.ts:239`: a sweep picks up runtime noise and another agent's in-flight work in the same checkout). THE HARD LINE: the engine commits ONLY `.ann/journey/**` and NEVER CODE — concluding a deliverable stays the OPERATOR'S move (`src/flow/frame.ts:561`), untouched. FAIL-OPEN ON THE COMMIT, FAIL-CLOSED ON THE WRITE: the appended event is the truth, so a commit that cannot happen (no git · detached HEAD · unset identity · a fixture target) WARNS and never fails the gesture; a write the store refuses still refuses, and the commit step never runs.",
+    "acceptanceCriteria": [
+      "AC-1 — THE JOURNAL IS THE STORE'S OWN, AND IT IS EXACT: the store records the paths it actually appended during one invocation, and the commit stages THOSE PATHS AND NOTHING ELSE. Pinned by test: an unrelated modified file sitting in the same tree is NOT staged — the `git add -A` failure mode, asserted rather than assumed.",
+      "AC-2 — THE ENGINE NEVER COMMITS CODE: the commit is confined to `.ann/journey/**`. Pinned by test: a modified source file alongside a journey write commits ONLY the journey path and leaves the source dirty. The house rules hold in the commit itself — no agent author or co-author trailer, staged by name.",
+      "AC-3 — FAIL-OPEN ON THE COMMIT, FAIL-CLOSED ON THE WRITE: a gesture whose commit cannot happen still SUCCEEDS and reports the write (the event is on disk and is the truth), and the failure is a NAMED warning, never silence. A write the store refuses still refuses, and the commit step does not run. Both directions pinned by test.",
+      "AC-4 — `goal! archive` IS NO LONGER BLOCKED BY THE ENGINE'S OWN WRITES: after any gesture the tracked `.ann/journey` tree is clean, so `uncommittedJourneyChanges()` is empty and archive proceeds WITHOUT `--override`. Verified against the live journey (and on a fixture for the refusal direction). The `--override` escape and its guard stay INTACT — this removes the CAUSE, it does not weaken the check.",
+      "AC-5 — NO REGRESSION: full `npm test` green, `npm run typecheck` clean, the captured checks (npm test · npm run typecheck · ann check · ann verify) recorded via capture!, ann check + ann verify clean on the live journey, committed with structured evidence (F-AC18)."
+    ],
+    "workType": "implementation",
+    "targetAreas": [
+      "src/store",
+      "src/commands",
+      "src/surface",
+      "src/e2e"
+    ],
+    "requiredInputs": [
+      "architecture",
+      "journey-format-spec",
+      "core-design"
+    ],
+    "expectedOutputs": [
+      "the invocation-scoped write journal, in the store (src/store) — the paths the writer actually appended",
+      "the commit step at the surface, behind the existing write-command dispatch, with its guards and the message template (src/surface, src/commands)",
+      "tests: exact-path staging · the never-code line · fail-open on the commit · fail-closed on the write · the archive guard clearing",
+      "the guards that SKIP rather than error: read-only/fixture target (ANN_STORE) · no git repo · tests"
+    ]
+  },
+  "openQuestions": [
+    {
+      "id": "Q1",
+      "question": "Does the commit fire on EVERY event write, or only on the human operator's gestures — leaving an agent's or the driver's mid-flight writes dirty for a human to see first?",
+      "blocking": false,
+      "defaultIfUnanswered": "EVERY write command — a machine gesture dirties the tree exactly the same way and the journal makes which-paths exact either way, so the defect is not gesture-specific. If an automated write should stay uncommitted so the human reviews it before it enters the record, that is a DELIBERATE exclusion and must be named as one, not left as an accident of where the commit step was wired."
+    },
+    {
+      "id": "Q2",
+      "question": "Is the message DERIVED from the gesture (mirroring the history shape journey: <node> <what happened>) or generic per event type?",
+      "blocking": false,
+      "defaultIfUnanswered": "derived from the gesture, matching the shape the history already carries, so the engine's commits are indistinguishable in form from the hand ones they replace."
+    }
+  ],
+  "createdAt": "2026-09-25"
+}
