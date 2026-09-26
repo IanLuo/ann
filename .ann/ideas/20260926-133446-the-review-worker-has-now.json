@@ -1,0 +1,7 @@
+{
+  "id": "20260926-133446-the-review-worker-has-now",
+  "text": "THE REVIEW WORKER HAS NOW RUN AGAINST A REAL MODEL (2026-09-26) — the premise of the tool-loop idea is stale. The idea `ann-cannot-move-work-without` opens by claiming the registry default resolves to api.openai.com, region-blocked here, so every worker degrades to its named absence and no worker has ever run against a real model. That is measured false. Resolution is env > config > keychain/fallback, and ~/.ann/config.json carries baseUrl https://api.deepseek.com/v1, model deepseek-chat and a set apiKey; an unauthenticated probe of that endpoint answers 401, so it is reachable. Driving the worker on a CLONE of the journey ran it end to end: ONE call, 4.3 seconds, 8 findings landed, verdict human. So the ordering in that idea is now step (1) DONE and step (2) DONE — 22 landed the review worker and its tests — leaving step (3), the tool-using actor, as the only one still open. Read its no-worker-has-ever-run clause as retracted.",
+  "created": "2026-09-26T13:34:46.226Z",
+  "by": "agent",
+  "status": "open"
+}
