@@ -780,6 +780,7 @@ export const RENDERS: Record<string, Renderer> = {
       `  reads:  GET  ${v.url}/api/journey · /api/status · /api/next · /api/gates`,
       `          GET  ${v.url}/api/detail?id=<id> · /api/confirm?id=<id> · /api/results?id=<id> · /api/packet?id=<id>`,
       `  write:  POST ${v.url}/api/gate  {"id":…,"gate":"grill|confirm","decision":"accept|reject","feedback":…}`,
+      `          POST ${v.url}/api/transfer  {"id":…,"gate":"confirm","decision":"accept","why":…,"transfer":{"target":…,"scope":…}}  — the half accept`,
       '  Ctrl-C to stop.',
     ]);
   },

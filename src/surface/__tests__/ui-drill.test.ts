@@ -1240,3 +1240,197 @@ describe('the served page — the drive affordance (leg 12/04)', () => {
     expect(tab.get('drive-why').textContent).toBe('');
   });
 });
+
+/* ══ THE HALF ACCEPT ON THE PAGE (leg 12 task 13) ══════════════════════════════════════
+ *
+ * The engine gesture landed in 12/12; THIS is its door. The confirm card's third action
+ * collects exactly TWO things (the successor and the scope) and reuses the why box, the
+ * stale re-check and the re-read the Accept already goes through — so the tests below are
+ * about the three claims AC-1/AC-3/AC-4 make: it appears only where it can land, its picker
+ * holds REAL nodes (and nothing the engine would refuse), and its outcome reads as MOVED.
+ */
+describe('the served page — the half accept’s door (leg 12/13)', () => {
+  const SIBLING = '01-leg/02-b';
+  /** The exit gate's card with the AC-2 gap a transfer exists to close: one AC unclaimed. */
+  const halfCard = (over: Record<string, unknown> = {}) =>
+    gateCard({
+      brief: {
+        decisions: [],
+        conclusion: {
+          claims: [],
+          unclaimed: [{ ac: 'AC-2', acText: 'the second thing is done' }],
+          checks: [],
+          transferred: [],
+        },
+      },
+      ...over,
+    });
+  /** The packet of the task: the LEG's tasks — one open sibling and the task itself. */
+  const packet = {
+    siblingStatus: { siblings: [{ id: SIBLING, status: 'queued' }, { id: TASK, status: 'blocked' }], children: [] },
+  };
+  /** `pkt === null` means the packet read is NOT ANSWERED at all (a 404 from the stub) —
+   *  the leg is unreadable, which is a state the picker has to state honestly. */
+  const halfReads = (over: Record<string, unknown> = {}, pkt: unknown = packet): Record<string, unknown> => {
+    const map: Record<string, unknown> = { ...reads(card()), [`/api/confirm?id=${TASK}`]: halfCard(over) };
+    // `reads()` seeds this key with the default packet — clear it so an unanswered read really 404s
+    if (pkt === null) delete map[`/api/packet?id=${TASK}`];
+    else map[`/api/packet?id=${TASK}`] = pkt;
+    return map;
+  };
+  const atExit = '#drill=gate&id=' + encodeURIComponent(TASK) + '&gate=confirm';
+  const bootExit = async (over: Record<string, unknown> = {}, pkt: unknown = packet, promptReply: string | null = 'the first half landed') => {
+    const tab = boot(halfReads(over, pkt), atExit, [], promptReply);
+    await flush();
+    return tab;
+  };
+
+  it('AC-1 — the third action is offered on a LIVE confirm gate, and nowhere else', async () => {
+    // a submitted EXIT gate: the decision is in hand, so the move is too
+    const exit = await bootExit();
+    expect(exit.get('transfer').hidden).toBe(false);
+    expect(exit.get('accept-transfer').disabled).toBe(false);
+
+    // a submitted ENTRY gate: there is no delivered scope to move — the work has not run
+    const entry = boot(
+      { ...reads(card()), [`/api/confirm?id=${TASK}`]: halfCard({ gates: { grill: { state: 'submitted', at: '2026-09-21' }, confirm: { state: 'none' } }, next: { verdict: 'waiting-on-decision', gate: 'grill' } }) },
+      '#drill=gate&id=' + encodeURIComponent(TASK) + '&gate=grill',
+    );
+    await flush();
+    expect(entry.get('transfer').hidden).toBe(true);
+
+    // a DECIDED confirm gate: there is nothing to decide, so nothing to move either
+    const decided = boot(
+      { ...reads(card()), [`/api/confirm?id=${TASK}`]: halfCard({ gates: { grill: { state: 'accepted' }, confirm: { state: 'accepted', at: '2026-09-12' } } }) },
+      atExit,
+    );
+    await flush();
+    expect(decided.get('transfer').hidden).toBe(true);
+    expect(decided.fetched).not.toContain(`/api/packet?id=${TASK}`); // it does not even ask
+  });
+
+  it('AC-1 — it collects TWO things: the successor (real nodes) and the scope, PREFILLED verbatim', async () => {
+    const tab = await bootExit();
+    const picker = tab.get('successor');
+    // the target was written when the option was CREATED, so the label can carry the status
+    const targets = picker.children.map((c) => c.value);
+    expect(targets).toEqual([SIBLING]);
+    expect(picker.children[0].textContent).toContain('queued');
+    // …and never this node itself: the engine refuses a self-transfer, so the page cannot offer it
+    expect(targets).not.toContain(TASK);
+    // the scope is the ACs that carry NO claim, VERBATIM, one per line — editable above
+    expect(tab.get('scope').value).toBe('AC-2: the second thing is done');
+  });
+
+  it('AC-3 — no real successor: the button is DISABLED with the reason, never a click that cannot land', async () => {
+    const alone = await bootExit({}, { siblingStatus: { siblings: [{ id: TASK, status: 'blocked' }], children: [] } });
+    expect(alone.get('accept-transfer').disabled).toBe(true);
+    expect(alone.get('successor').textContent).toContain('no other task exists in this leg');
+    // the leg could not be read at all: the same honest state, the reason named
+    const unreadable = await bootExit({}, null);
+    expect(unreadable.get('accept-transfer').disabled).toBe(true);
+    expect(unreadable.get('successor').textContent).toContain('unavailable');
+  });
+
+  it('AC-1 — the picker lists the leg’s tasks open AND CLOSED alike (the target may already be done)', async () => {
+    // a CLOSED node is a legal successor — the scope moves ONTO it — so the picker cannot
+    // filter by status; the status is shown on the label, never used as a gate
+    const tab = await bootExit({}, {
+      siblingStatus: { siblings: [{ id: '01-leg/02-b', status: 'done' }, { id: TASK, status: 'blocked' }], children: [] },
+    });
+    expect(tab.get('successor').children.map((c) => c.value)).toEqual(['01-leg/02-b']);
+    expect(tab.get('successor').children[0].textContent).toContain('done');
+    expect(tab.get('accept-transfer').disabled).toBe(false);
+  });
+
+  it('AC-3 — the DRAFT path: a GENERATED contract the human runs, and NOTHING leaves the page', async () => {
+    const tab = await bootExit();
+    // the draft is not there until it is asked for — no GENERATED shell sitting on every card
+    expect(tab.get('draft-label').hidden).toBe(true);
+    expect(tab.get('draft-body').hidden).toBe(true);
+    const sent = tab.fetched.length;
+    tab.get('draft-contract').click();
+    await flush();
+
+    expect(tab.get('draft-label').hidden).toBe(false);
+    expect(tab.get('draft-label').textContent).toContain('GENERATED');
+    expect(tab.get('draft-body').hidden).toBe(false);
+    const body = tab.get('draft-body').textContent;
+    // THE COMMAND IS THE HUMAN'S: spawn! is not a route, so the card hands over the line to run
+    expect(body).toContain('ann spawn! 01-leg/<NN-slug> ');
+    // …and the contract is grounded in the SCOPE — the AC id prefix stripped, the text verbatim
+    expect(body).toContain(JSON.stringify({ intent: 'carry the scope ' + TASK + ' did not meet: the second thing is done', acceptanceCriteria: ['the second thing is done'] }));
+    expect(tab.get('card-message').textContent).toContain('nothing was written');
+    // THE BOUNDARY, PROVEN BY CONSTRUCTION: not one request left the card — no spawn, no write
+    expect(tab.fetched.length, 'the draft is text, never a call').toBe(sent);
+    expect(tab.posted).toEqual([]);
+
+    // the draft follows the human's LAST edit — the scope box is its only source
+    tab.get('scope').value = 'AC-2: the second thing is done\nAC-3: and the third one rides along';
+    tab.get('draft-contract').click();
+    await flush();
+    expect(tab.get('draft-body').textContent).toContain(JSON.stringify(['the second thing is done', 'and the third one rides along']));
+  });
+
+  it('AC-3 — an empty scope drafts NOTHING: the card says what is missing rather than invent a contract', async () => {
+    const tab = await bootExit();
+    tab.get('scope').value = '   \n  ';
+    tab.get('draft-contract').click();
+    await flush();
+    expect(tab.get('draft-body').hidden).toBe(true);
+    expect(tab.get('draft-label').hidden).toBe(true);
+    expect(tab.get('card-message').textContent).toContain('nothing to draft');
+  });
+
+  it('AC-2 — the click POSTs the ONE route with AC-2’s own body, and the why rides the same ask', async () => {
+    const tab = await bootExit();
+    tab.get('successor').value = SIBLING;
+    tab.get('scope').value = 'AC-2: the second thing is done\nhanding over to whoever takes it'; // edited by the human
+    tab.get('accept-transfer').click();
+    await flush();
+    // the same ask the Accept makes (AC-1, leg 12/11) — the half accept is not a way around it
+    expect(tab.asked).toHaveLength(1);
+    expect(tab.posted).toEqual([
+      {
+        id: TASK,
+        gate: 'confirm',
+        decision: 'accept',
+        why: 'the first half landed',
+        transfer: { target: SIBLING, scope: 'AC-2: the second thing is done\nhanding over to whoever takes it' },
+      },
+    ]);
+    expect(tab.fetched).toContain('/api/transfer');
+    expect(tab.fetched).not.toContain('/api/gate'); // ONE route, never the plain write as well
+  });
+
+  it('AC-1 — a CANCELLED why writes NOTHING through the transfer route either', async () => {
+    const tab = await bootExit({}, packet, null); // the human cancels the ask
+    tab.get('successor').value = SIBLING;
+    tab.get('accept-transfer').click();
+    await flush();
+    expect(tab.asked).toHaveLength(1);
+    expect(tab.fetched).not.toContain('/api/transfer');
+    expect(tab.get('card-message').textContent).toContain('needs a why');
+  });
+
+  it('AC-4 — the landed half accept reads as MOVED on the card it re-opens', async () => {
+    const tab = await bootExit({
+      brief: {
+        // the choice point, with the successor ON it (the transfer has no why of its own)
+        decisions: [{ at: '2026-09-26', type: 'accepted', gate: 'confirm', note: 'accepted at the confirm gate', why: 'the first half landed', successor: SIBLING }],
+        conclusion: { claims: [{ ac: 'AC-1' }], unclaimed: [], checks: [], transferred: [{ ac: 'AC-2', acText: 'the second thing is done', target: SIBLING }] },
+      },
+      status: 'done',
+    });
+    const node = tab.get('card-node').textContent;
+    expect(node).toContain('the rest is now ' + SIBLING); // the successor, NAMED
+    expect(node).toContain('AC-2 (the second thing is done)'); // and what moved
+    expect(node).toContain('moved, not claimed as met');
+    expect(node).toContain('scope moved to ' + SIBLING); // on the decision, with its why
+    expect(node).toContain('why: the first half landed');
+    // THE LINE THAT MUST NOT LIE: a moved AC is not a claimed one, so the close line counts it
+    // as TRANSFERRED — never the empty gap that reads as 'every AC claimed'
+    expect(node).toContain('TRANSFERRED: 1');
+    expect(node).not.toContain('every AC claimed');
+  });
+});

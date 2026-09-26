@@ -21,16 +21,19 @@ import { UI_HTML } from './ui.js';
  * optional DRILL INDEX (`?n=`, the item/event number the CLI addresses) — the whole-journey gate queue (`gates` —
  * the L1 read the UI's WAITING ON YOU view needs, `Commands.pendingGates`), the gate
  * WRITE (`POST /api/gate` → the same L1 `gate!` composite: accept|reject + feedback),
- * the OPERATE LOOP's read + writes (`GET /api/whatsnext` — the WHAT'S NEXT card's
- * operator view — `POST /api/approve` → `runOperatorAction` in-process, leg 11 — and
- * `POST /api/drive` → `runSemanticDriver` in-process, leg 12 task 02: the LLM loop whose
- * proposals are validated against a CLOSED SET and executed through the SAME command
+ * the HALF ACCEPT's write (`POST /api/transfer` → the same `gate!` gesture with the
+ * transfer flags, leg 12 task 13: the confirm accept and the move of its remaining scope
+ * to a named successor, in ONE act — the successor must already exist, so this route
+ * never spawns), the OPERATE LOOP's read + writes (`GET /api/whatsnext` — the WHAT'S NEXT
+ * card's operator view — `POST /api/approve` → `runOperatorAction` in-process, leg 11 —
+ * and `POST /api/drive` → `runSemanticDriver` in-process, leg 12 task 02: the LLM loop
+ * whose proposals are validated against a CLOSED SET and executed through the SAME command
  * layer), and the single UI page at `/`. Nothing else is exposed — `run!`/`spawn!`/
  * `submit!`/`goal!`/`spec!`/`archive`/`advance!` are NOT routes: the approve is ONE named
- * route over the operator action (a specific gesture) and the drive is ONE named route
- * over the semantic driver (which composes `submit!`/`run!` itself, so no route becomes a
- * command runner), and the refusal is a named error doc (`not-exposed`), never a silent
- * pass-through.
+ * route over the operator action (a specific gesture), the drive is ONE named route over
+ * the semantic driver (which composes `submit!`/`run!` itself, so no route becomes a
+ * command runner), and the transfer is ONE named route over ONE gate gesture — and the
+ * refusal is a named error doc (`not-exposed`), never a silent pass-through.
  *
  * `GET /api/integrity` is the ONE LAZY READ (leg 12/07): the card's full fail-closed
  * integrity pre-check, on demand. It is deliberately NOT part of `GET /api/whatsnext` —
@@ -184,7 +187,7 @@ const notExposed = (name: string): Outcome => ({
   ok: false,
   error: {
     code: 'not-exposed',
-    message: `serve: '${name}' is not exposed — the minimal slice is journey · status · next · detail · confirm · results · packet · events · log · gates · whatsnext · integrity (GET) and the gate / approve / drive writes (POST /api/gate, POST /api/approve, POST /api/drive). run!/spawn!/submit!/goal!/spec!/archive/advance! are deliberately absent as ROUTES (scope OUT): the approve and the drive are named routes over the operator action and the semantic driver, which compose those commands themselves.`,
+    message: `serve: '${name}' is not exposed — the minimal slice is journey · status · next · detail · confirm · results · packet · events · log · gates · whatsnext · integrity (GET) and the gate / transfer / approve / drive writes (POST /api/gate, POST /api/transfer, POST /api/approve, POST /api/drive). run!/spawn!/submit!/goal!/spec!/archive/advance! are deliberately absent as ROUTES (scope OUT): the approve and the drive are named routes over the operator action and the semantic driver, which compose those commands themselves, and the transfer is the gate! gesture with its flags.`,
   },
 });
 
@@ -298,6 +301,42 @@ async function route(root: string, approver: Approver, log: OpLog, req: Incoming
     return sendJson(res, httpStatus(out), jsonDoc(out));
   }
 
+  // ── the TRANSFER WRITE — THE HALF ACCEPT (leg 12 task 13) ──
+  // The engine gesture `gate! <id> confirm accept '<why>' --transfer <target> --scope '<ACs>'`
+  // (leg 12/12), executed server-side through the SAME `dispatch` the CLI uses — never a
+  // second write path, and never a spawn: the successor must already EXIST (the engine
+  // refuses an unknown target by name, F-AC16 at write time). The body names the whole act
+  // ({id, gate, decision, transfer{target, scope}, why}) because it IS the whole act: a
+  // transfer that is not a confirm accept is refused by the engine (`transfer-not-confirm`
+  // / `transfer-not-accept`), not silently narrowed into one here. The route checks SHAPE
+  // only, by name; every semantic refusal round-trips as the CLI's own error document with
+  // zero writes — exactly the /api/gate precedent.
+  if (name === 'transfer') {
+    if (req.method !== 'POST') {
+      return sendJson(res, 405, jsonDoc(usageError("POST /api/transfer {id, gate, decision, why, transfer: {target, scope}}")));
+    }
+    let payload: unknown;
+    try {
+      payload = JSON.parse((await readBody(req)) || '{}');
+    } catch {
+      return sendJson(res, 400, jsonDoc(usageError("POST /api/transfer expects a JSON body: {id, gate, decision, why, transfer: {target, scope}}")));
+    }
+    const bad = transferBodyProblem(payload);
+    if (bad) return sendJson(res, 400, jsonDoc(usageError(bad)));
+    const b = payload as { id: string; gate: string; decision: string; why?: string; transfer: { target: string; scope: string } };
+    // THE ONE STATE RULE THIS ROUTE OWNS (AC-5): the decision has to be IN HAND. Read
+    // through the SAME `confirm` read the card uses — one derivation, no second one — and
+    // refused as a CONFLICT (409, the same class the approve's busy slot uses) because the
+    // request is well-formed and the resource is in the wrong state, not because the body
+    // or the route is wrong.
+    const notLive = transferNotLive(root, b.id, b.gate, log);
+    if (notLive) return sendJson(res, 409, jsonDoc(notLive));
+    const why = typeof b.why === 'string' ? b.why : '';
+    const argv = ['gate!', b.id, b.gate, b.decision, ...(why ? [why] : []), '--transfer', b.transfer.target, '--scope', b.transfer.scope];
+    const out = dispatch(root, argv, log);
+    return sendJson(res, httpStatus(out), jsonDoc(out));
+  }
+
   // ── the READS ──
   if (req.method !== 'GET') return sendJson(res, 405, jsonDoc(usageError(`GET /api/${name}`)));
   if (name !== 'gates' && name !== 'whatsnext' && name !== 'integrity' && !READ_ROUTES.has(name)) return sendJson(res, 404, jsonDoc(notExposed(name)));
@@ -364,6 +403,78 @@ async function route(root: string, approver: Approver, log: OpLog, req: Incoming
   }
   const out = dispatch(root, argv, log);
   return sendJson(res, httpStatus(out), jsonDoc(out));
+}
+
+/** THE TRANSFER'S LIVE-DECISION RULE (leg 12/13 AC-5) — the ONE semantic check this route
+ *  owns, and the reason it is HERE rather than in the engine.
+ *
+ *  WHAT IT REFUSES: a transfer on a gate whose decision is not IN HAND. The card offers the
+ *  third action only on a live (submitted) confirm gate, so a route that took the gesture
+ *  from anywhere else would be a wider door than the one it serves — an API client could
+ *  move a task's remaining scope past a review that never happened.
+ *
+ *  WHY NOT THE ENGINE: `gate!` deliberately AUTO-SUBMITS an undecided gate ("submit +
+ *  decide" — the same behaviour a plain accept has always had), and that is delivered
+ *  behaviour under review (leg 12/12). This route therefore NARROWS nothing the CLI can do
+ *  that the CLI says it can do — it says so itself, in the refusal below, pointing at the
+ *  gesture that makes the same move legal. The READ is the card's own `confirm` value
+ *  (dispatched through the same handler), so this is a state rule, never a second
+ *  derivation: a state the page cannot show is a state this route will not write on. */
+function transferNotLive(root: string, id: string, gate: string, log?: OpLog): Outcome | undefined {
+  const read = dispatch(root, ['confirm', id], log);
+  // an unreadable node is the engine's refusal to name (no-node), not this rule's business
+  if (!read.ok) return undefined;
+  const gates = (read.value as { detail?: { gates?: Record<string, { state?: string }> } }).detail?.gates ?? {};
+  const state = gates[gate]?.state;
+  if (state === 'submitted') return undefined;
+  return {
+    ok: false,
+    error: {
+      code: 'transfer-not-live',
+      message: `POST /api/transfer: the ${gate} gate on ${id} is ${state ?? `not ${gate}`} — a transfer moves the scope of a decision that is IN HAND, and this one is not. Submit it first (ann submit! ${id} ${gate}), then move the scope. (The CLI's gate! would auto-submit and accept in one write; this route serves the card's third action, which appears only on a live submission — so it refuses rather than decide a review nobody made.)`,
+    },
+  };
+}
+
+/** THE TRANSFER BODY'S SHAPE (leg 12/13 AC-2), validated by NAME before anything reaches
+ *  the command layer — an unknown key is a usage refusal, never ignored, and the five keys
+ *  are exactly the ones the engine gesture takes. Returns the problem, or undefined.
+ *
+ *  WHAT THIS DELIBERATELY DOES NOT CHECK: whether the gate is `confirm`, whether the
+ *  decision is `accept`, whether the target exists, whether the scope maps to a real AC,
+ *  whether the why is there. Those are SEMANTIC refusals the engine owns, and they are
+ *  refused THERE, by name, with zero writes — a second, weaker copy of them here would be
+ *  a rule the CLI does not have, and the two could drift. This is a shape gate, not a rule
+ *  book. (The one non-empty rule is not a semantic one: it is what the CLI's own flag
+ *  parser does with `--transfer ''` — a usage refusal, exit 2 — so an empty value round-
+ *  trips as 400 here exactly as it does there. A WHITESPACE-ONLY scope is a non-empty
+ *  string and reaches the engine, which refuses it as `transfer-empty-scope`.) */
+function transferBodyProblem(payload: unknown): string | undefined {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return 'POST /api/transfer expects a JSON object: {id, gate, decision, why, transfer: {target, scope}}';
+  }
+  const p = payload as Record<string, unknown>;
+  const known = ['id', 'gate', 'decision', 'why', 'transfer'];
+  const unknown = Object.keys(p).filter((k) => !known.includes(k));
+  if (unknown.length) {
+    return `POST /api/transfer: unknown key(s) ${unknown.join(', ')} — the body is {id, gate, decision, why, transfer: {target, scope}}`;
+  }
+  for (const k of ['id', 'gate', 'decision']) {
+    if (typeof p[k] !== 'string' || !p[k]) return `POST /api/transfer: '${k}' must be a non-empty string`;
+  }
+  if (p.why !== undefined && typeof p.why !== 'string') return "POST /api/transfer: 'why' must be a string (the rationale the confirm accept records)";
+  const t = p.transfer as Record<string, unknown> | undefined;
+  if (!t || typeof t !== 'object' || Array.isArray(t)) {
+    return 'POST /api/transfer: \'transfer\' must be {target, scope} — the successor the scope moves to, and the scope itself';
+  }
+  const tUnknown = Object.keys(t).filter((k) => k !== 'target' && k !== 'scope');
+  if (tUnknown.length) return `POST /api/transfer: unknown key(s) transfer.${tUnknown.join(', transfer.')} — the shape is transfer: {target, scope}`;
+  for (const k of ['target', 'scope']) {
+    if (typeof t[k] !== 'string' || !t[k]) {
+      return `POST /api/transfer: 'transfer.${k}' must be a non-empty string`;
+    }
+  }
+  return undefined;
 }
 
 /** The drive body's shape, validated BEFORE the loop runs (an untrusted body never picks

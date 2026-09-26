@@ -48,6 +48,14 @@
  *                                  L1 `gate!` write the CLI performs; the page then
  *                                  RE-READS the journey + queue, so a landed decision is
  *                                  what the view shows (never an optimistic local edit)
+ *   POST /api/transfer           → THE HALF ACCEPT (leg 12/13): {id, gate, decision, why,
+ *                                  transfer:{target, scope}} → the SAME `gate!` write with
+ *                                  the transfer flags (leg 12/12), so the confirm card's
+ *                                  third action closes the task and moves the scope it
+ *                                  does not deliver to a successor the human PICKED from
+ *                                  this leg's real tasks. The successor must exist — the
+ *                                  route never spawns, and the card never types an id the
+ *                                  engine would refuse
  *   POST /api/approve            → the APPROVE: {proposal:{action,detail}} → the operator
  *                                  action's continue-leg path (the SAME machinery as the
  *                                  CLI's `advance!`), bound to the card the human saw; then
@@ -135,10 +143,25 @@ export const UI_HTML = `<!doctype html>
   .gates { display: flex; gap: .75rem; margin-bottom: .75rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .85rem; }
   .gates span { border: 1px solid var(--line); border-radius: 999px; padding: .1rem .6rem; }
   textarea { width: 100%; min-height: 4.5rem; margin: .35rem 0 .75rem; padding: .5rem; background: #121118; color: var(--fg); border: 1px solid var(--line); border-radius: 8px; font: inherit; }
+  /* THE HALF ACCEPT's form (leg 12/13): the third action lives UNDER the two, in its own
+     block — it is a different act (the scope moves), not a third vote on the same one. */
+  #transfer { margin-top: 1rem; padding-top: .85rem; border-top: 1px solid var(--line); }
+  #transfer label { display: block; margin-top: .6rem; font-size: .8rem; }
+  #transfer .transfer-head { margin: 0 0 .35rem; font-size: .85rem; }
+  select { width: 100%; margin: .35rem 0 0; padding: .45rem .5rem; background: #121118; color: var(--fg); border: 1px solid var(--line); border-radius: 8px; font: inherit; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .85rem; }
+  #transfer textarea { min-height: 4.5rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .82rem; }
+  /* THE DRAFT (leg 12/13 AC-3): the card cannot spawn a successor — spawn! is deliberately
+     not a route — so when there is no node to point at it DRAFTS the contract as text the
+     human edits and runs. Labelled GENERATED, and it writes nothing. */
+  #draft { margin-top: .85rem; }
+  #draft .transfer-head { margin: 0 0 .5rem; }
+  #draft .draft-label { margin: .6rem 0 .3rem; font-size: .74rem; letter-spacing: .08em; text-transform: uppercase; color: var(--warn); }
+  #draft pre { margin: 0; padding: .6rem .7rem; background: #121118; border: 1px solid var(--line); border-radius: 8px; color: var(--fg); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .78rem; white-space: pre-wrap; word-break: break-word; }
   .actions { display: flex; gap: .6rem; }
   .actions button { padding: .45rem 1.1rem; border-radius: 8px; border: 1px solid var(--line); background: #26242e; color: var(--fg); font: inherit; cursor: pointer; }
   .actions button.accept:hover { border-color: var(--ok); color: var(--ok); }
   .actions button.reject:hover { border-color: var(--warn); color: var(--warn); }
+  .actions button.transfer:hover { border-color: var(--accent); color: var(--accent); }
   .message { margin: .75rem 0 0; font-size: .85rem; color: var(--muted); white-space: pre-wrap; }
   .message.error { color: var(--warn); }
   .hrow { display: flex; justify-content: space-between; align-items: center; gap: 1rem; }
@@ -243,6 +266,24 @@ export const UI_HTML = `<!doctype html>
       <div class="actions">
         <button class="accept" id="accept">Accept</button>
         <button class="reject" id="reject">Reject</button>
+      </div>
+      <div id="transfer" hidden>
+        <p class="transfer-head muted">…or close it and move what is left — <strong>the half accept</strong>. The task lands done; the scope below is not claimed as met, it MOVES.</p>
+        <label class="muted" for="successor">successor — where the remaining scope moves (a real task of this leg; it must already exist)</label>
+        <select id="successor"></select>
+        <label class="muted" for="scope">scope that moves — verbatim, one AC per line, editable</label>
+        <textarea id="scope" placeholder="AC-2: &lt;the criterion, verbatim&gt;"></textarea>
+        <div class="actions">
+          <button class="transfer" id="accept-transfer">Accept + continue elsewhere</button>
+        </div>
+        <div id="draft">
+          <p class="transfer-head muted">Nothing to point at yet — or the successor is a FRESH node? The card cannot create one: <strong>spawn! is not a route</strong>, because a successor is authored work. Draft the contract instead and run it yourself.</p>
+          <div class="actions">
+            <button id="draft-contract">Draft the successor</button>
+          </div>
+          <p class="draft-label" id="draft-label" hidden></p>
+          <pre id="draft-body" hidden></pre>
+        </div>
       </div>
     </div>
     <h2 id="card-events-h">Events — the node’s log, in order</h2>
@@ -568,6 +609,49 @@ export const UI_HTML = `<!doctype html>
       byId('card-next').appendChild(el('span', nextLine(detail, gate)));
       byId('card-decide').hidden = !decidable; // ABSENT when there is nothing to decide
 
+      // THE HALF ACCEPT (leg 12/13 AC-1). The third action shows ONLY on a live CONFIRM
+      // gate: the entry gate has no scope to move (the work has not been done), and a
+      // decided gate has nothing to decide. It collects exactly two things — the successor
+      // and the scope — and the why is the SAME box Accept reads above it.
+      var briefFor = detail.brief || {};
+      var unclaimed = ((briefFor.conclusion || {}).unclaimed) || [];
+      byId('transfer').hidden = !(decidable && gate === 'confirm');
+      // a draft belongs to the card that made it — never let one outlive the card it was
+      // drafted on (the scope it was built from is replaced just below)
+      byId('draft-label').hidden = true;
+      byId('draft-body').hidden = true;
+      var picker = byId('successor');
+      picker.replaceChildren();
+      // THE HONEST ENABLEMENT (the same discipline the drive affordance follows): the button
+      // is disabled WITH the reason beside it whenever the picker holds no real successor,
+      // rather than offering a click the engine would refuse.
+      byId('accept-transfer').disabled = false;
+      function noSuccessor(why) {
+        picker.appendChild(el('option', why));
+        byId('accept-transfer').disabled = true;
+      }
+      byId('scope').value = unclaimed.map(function (u) { return u.ac + ': ' + u.acText; }).join('\\n');
+      if (decidable && gate === 'confirm') {
+        // THE SUCCESSOR IS THE HUMAN'S, AND THE PICKER CANNOT LIE (AC-3): it lists REAL
+        // nodes only — the task's own LEG's tasks, from the packet read, open and closed
+        // alike (Q1) — so the client cannot type an id the engine will reject, and it never
+        // offers this node itself (the engine refuses a self-transfer by name). The route
+        // refuses an unknown target regardless: the picker narrows, it does not guard.
+        api('/api/packet?id=' + encodeURIComponent(id))
+          .then(function (p) {
+            if (p.status !== 200) { noSuccessor('the tasks of this leg are unavailable — ' + JSON.stringify(p.doc.error)); return; }
+            var sibs = ((p.doc.siblingStatus || {}).siblings) || [];
+            var real = sibs.filter(function (s) { return s.id !== id; });
+            if (!real.length) { noSuccessor('no other task exists in this leg — spawn the successor first'); return; }
+            real.forEach(function (s) {
+              var o = el('option', s.id + '  (' + s.status + ')');
+              o.value = s.id; // the LABEL carries the status; the VALUE is the bare id
+              picker.appendChild(o);
+            });
+          })
+          .catch(function (e) { noSuccessor('the tasks of this leg are unavailable — ' + e.message); });
+      }
+
       // NODE — the contract as node.json holds it (the fields the CLI card prints)
       var node = byId('card-node');
       node.replaceChildren();
@@ -609,16 +693,28 @@ export const UI_HTML = `<!doctype html>
       // human reads INSTEAD of scrolling the contract + the event log.
       var brief = detail.brief || {};
       (brief.decisions || []).forEach(function (d) {
-        field(node, 'decision', d.at + '  ' + d.type + '@' + d.gate + ' — ' + (d.note || '') + '  · why: ' + (d.why ? d.why : '(NOT RECORDED)'));
+        // A HALF ACCEPT (leg 12/12) names the successor ON the decision: the transfer record
+        // carries no why of its own, so the accept is where the move reads — the same line
+        // 'ann decisions' prints, never a bare status.
+        field(node, 'decision', d.at + '  ' + d.type + '@' + d.gate + ' — ' + (d.note || '') + (d.successor ? '  · scope moved to ' + d.successor : '') + '  · why: ' + (d.why ? d.why : '(NOT RECORDED)'));
       });
       if (brief.conclusion) {
         var un = (brief.conclusion.unclaimed || []).length;
+        var moved = brief.conclusion.transferred || [];
+        // THE MOVED SCOPE, PER SUCCESSOR (leg 12/13 AC-4): the task landed, and what did not
+        // come with it is NAMED with where it went — 'the rest is now <target>'. A moved AC
+        // is not a met one, so it is never folded into the claim count.
+        moved.forEach(function (t) {
+          field(node, 'the rest', 'the rest is now ' + t.target + ' — ' + t.ac + ' (' + t.acText + ') · moved, not claimed as met');
+        });
         field(
           node,
           'close',
           brief.closeBlocker
             ? 'REFUSED now — ' + brief.closeBlocker.code
-            : 'a confirm accept would auto-close (claims: ' + (brief.conclusion.claims || []).length + (un ? ', UNCLAIMED: ' + un : ', every AC claimed') + ')',
+            // "every AC claimed" is said only when it is TRUE (12/12 AC-2): with ACs moved,
+            // the honest line names how many, never the empty gap that reads as a full one.
+            : 'a confirm accept would auto-close (claims: ' + (brief.conclusion.claims || []).length + (un ? ', UNCLAIMED: ' + un : '') + (moved.length ? ', TRANSFERRED: ' + moved.length : '') + (un || moved.length ? '' : ', every AC claimed') + ')',
         );
       }
 
@@ -705,7 +801,11 @@ export const UI_HTML = `<!doctype html>
   }
 
   // ── the decision: the SAME L1 gate! write the CLI performs, then a re-read ──
-  function decide(decision) {
+  // 'transfer' (leg 12/13 AC-1/AC-2) is the THIRD action: it does not change the decision —
+  // it is the same confirm ACCEPT — it adds the move of the remaining scope, so it takes the
+  // same why box, the same stale re-check and the same re-read. Only the route and the body
+  // differ: POST /api/transfer, whose shape is AC-2's own key list.
+  function decide(decision, transfer) {
     if (!selected.id || !selected.gate) { message('select a gate from WAITING ON YOU first', true); return; }
     var id = selected.id, gate = selected.gate;
     var why = byId('feedback').value;
@@ -720,8 +820,11 @@ export const UI_HTML = `<!doctype html>
       byId('feedback').value = asked;
       why = asked;
     }
-    var body = { id: id, gate: gate, decision: decision, feedback: why };
-    message('recording ' + decision + '…');
+    var body = transfer
+      ? { id: id, gate: gate, decision: decision, why: why, transfer: transfer }
+      : { id: id, gate: gate, decision: decision, feedback: why };
+    var route = transfer ? '/api/transfer' : '/api/gate';
+    message('recording ' + (transfer ? 'the half accept — ' + decision + ' + the move to ' + transfer.target : decision) + '…');
     // RE-CHECK the node immediately before writing: a submission decided elsewhere in the
     // meantime must not be re-decided (gate! would auto-submit + accept, recording a
     // redundant decision). The card's own read is the authority.
@@ -733,11 +836,13 @@ export const UI_HTML = `<!doctype html>
           message('stale — the ' + gate + ' gate on ' + id + ' is already ' + st + ' (decided elsewhere); nothing was written. Refreshing.', true);
           return refresh().then(function () { return openCard(id, undecidedGate(id)); });
         }
-        return fetch('/api/gate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+        return fetch(route, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
           .then(function (r) { return r.json().then(function (doc) { return { status: r.status, doc: doc }; }); })
           .then(function (r) {
             if (r.status !== 200) { message(decision + ' refused: ' + JSON.stringify(r.doc.error), true); return null; }
-            message(decision + ' recorded — ' + id + ' ' + gate + ' gate (the view re-reads the log)');
+            message(transfer
+              ? 'the half accept landed — ' + id + ' closed, the rest is now ' + transfer.target + ' (the view re-reads the log)'
+              : decision + ' recorded — ' + id + ' ' + gate + ' gate (the view re-reads the log)');
             byId('feedback').value = '';
             return refresh();
           })
@@ -747,6 +852,46 @@ export const UI_HTML = `<!doctype html>
   }
   byId('accept').addEventListener('click', function () { decide('accept'); });
   byId('reject').addEventListener('click', function () { decide('reject'); });
+  byId('accept-transfer').addEventListener('click', function () {
+    // THE TWO THINGS THE FORM COLLECTS, AND NOTHING MORE (AC-1): the successor the human
+    // picked and the scope as the human edited it. An empty pick is NOT sent — the engine
+    // would refuse it, so the page says what is missing instead of round-tripping a refusal
+    // it can see coming.
+    var target = byId('successor').value;
+    if (!target) { message('pick a successor first — the scope has to move somewhere (a real task of this leg; spawn it first if it does not exist)', true); return; }
+    decide('accept', { target: target, scope: byId('scope').value });
+  });
+
+  // THE DRAFT PATH (AC-3), AND WHY IT IS TEXT. The successor's contract is AUTHORED work:
+  // spawn! is deliberately not a route (service.ts), so the card's honest part is to draft
+  // the contract — GENERATED, labelled, editable — and hand the human the command. NOTHING
+  // HERE WRITES: no request leaves the page (the AC's never-auto-spawned boundary, enforced
+  // by construction rather than by a guard). The scope textarea is the source, so the draft
+  // follows the human's last edit; the AC ids are the OLD task's, which is why the draft is a
+  // draft. The leg is the current task's own, so the command is one line to copy and run.
+  function draftOf(scopeText, taskId) {
+    var leg = String(taskId).split('/')[0];
+    var acs = String(scopeText).split('\\n')
+      .map(function (l) { return l.trim(); })
+      .filter(function (l) { return l.length > 0; })
+      // strip the scope convention's id prefix (AC-2: / AC2 -) — the text is the criterion
+      .map(function (l) { return l.replace(/^ac[\\s-]?\\d+\\s*[:\\u2013-]?\\s*/i, '').trim(); })
+      .filter(function (t) { return t.length > 0; });
+    if (!acs.length) return null;
+    var contract = { intent: 'carry the scope ' + taskId + ' did not meet: ' + acs[0], acceptanceCriteria: acs };
+    return 'ann spawn! ' + leg + '/<NN-slug> ' + "'" + JSON.stringify(contract) + "'";
+  }
+  byId('draft-contract').addEventListener('click', function () {
+    var text = draftOf(byId('scope').value, selected.id || '');
+    if (!text) { message('nothing to draft — write the scope that moves first, one AC per line', true); return; }
+    byId('draft-body').textContent = text;
+    byId('draft-body').hidden = false;
+    // the label is written with the draft, the way the drive's own draft names its provenance:
+    // a GENERATED line above the bytes, so the box can never be mistaken for a made thing
+    byId('draft-label').textContent = 'GENERATED — a draft, nothing was written';
+    byId('draft-label').hidden = false;
+    message('a DRAFT, not a spawn — nothing was written. Edit the id, run the command, then reopen this card and pick the new task.');
+  });
 
   // ── the WHAT'S NEXT card: the derived proposal + the honest blocker surface (leg 11) ──
   var whatsNext = null; // the derivation the approve is bound to (the card the human saw)
