@@ -64,7 +64,14 @@ export type GateVerdict = 'accept' | 'rework' | 'human';
  */
 export const deriveGateVerdict = (findings: readonly Pick<ReviewFindingView, 'severity' | 'status'>[]): GateVerdict => {
   if (!findings.length) return 'human';
-  const open = findings.filter((f) => f.status === 'open');
+  // AN OPEN `matches` IS NOT A CONCERN, and this is the difference between a working
+  // automatic gate and a dead one. The findings contract makes the reviewer RAISE what it
+  // finds ('open' for anything you are raising now; 'resolved' is reserved for a PRIOR
+  // finding the current bytes settle), so a criterion the reviewer walked and asserted
+  // arrives as `matches` + `open` — which is the ordinary shape of a clean first review.
+  // Reading it as unsettled sends every such review to the human and makes `accept`
+  // unreachable for any spec-compliant reviewer: the three arms would be two.
+  const open = findings.filter((f) => f.status === 'open' && f.severity !== 'matches');
   if (open.some((f) => f.severity === 'gap' || f.severity === 'regression')) return 'rework';
   if (open.length) return 'human';
   return 'accept';
@@ -131,10 +138,11 @@ const openDefects = (findings: readonly ReviewFindingInput[]): string =>
 
 /** The open concerns that are NOT defects — what the human is handed when the rule declines
  *  to decide. Naming them is the point: an escalation that says only "unclear" is a card a
- *  person cannot act on. */
+ *  person cannot act on. A `matches` is neither: it is a criterion the reviewer asserted,
+ *  and listing it here would hand the human a "concern" that is the opposite of one. */
 const openConcerns = (findings: readonly ReviewFindingInput[]): string =>
   findings
-    .filter((f) => f.status === 'open' && f.severity !== 'gap' && f.severity !== 'regression')
+    .filter((f) => f.status === 'open' && f.severity !== 'matches' && f.severity !== 'gap' && f.severity !== 'regression')
     .map((f) => `${f.id} [${f.severity}] ${f.where} — ${f.text}`)
     .join(' · ');
 

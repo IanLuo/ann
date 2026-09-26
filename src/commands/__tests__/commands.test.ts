@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store, JourneyEvent } from '../../store/store.js';
-import { Commands, CommandResult } from '../index.js';
+import { Commands, CommandResult, REJECT_BOUND } from '../index.js';
 import type { CaptureEnv } from '../capture.js';
 import { scanDocsDir, writeDocsManifest } from '../../store/docs.js';
 import { runValidators } from '../../flow/validators/index.js';
@@ -309,6 +309,68 @@ describe('submit! + gate! — the two-write gate sequence (core-design §4)', ()
     expect(errorOf(cmds().gate('01-leg/01-a', 'grill', 'reject', 'no')).code).toBe('reject-bound');
     // the bound is PER GATE, and never blocks an accept
     expect(valueOf(cmds().gate('01-leg/01-a', 'grill', 'accept')).escalated).toBe(true);
+  });
+
+  /* AC-5 (leg 12 task 22) — THE ESCALATION'S REAL GESTURE. At the bound the worker is OUT,
+   * and a human who decides anyway records an OVERRIDE: the accept lands carrying the
+   * reviewer's objection, DERIVED from the review record rather than typed by the caller.
+   * An override that states its own objection could state one the log does not hold — which
+   * is the silent decision the field exists to prevent. */
+  function escalated(id: string, objection: 'open' | 'resolved' | 'none' = 'open'): Commands {
+    writeNode(id, CONTRACT, [
+      ev('created'),
+      ev('submitted', { gate: 'grill' }),
+      ev('confirmed', { gate: 'grill' }),
+      ev('submitted', { gate: 'confirm' }),
+      ...Array.from({ length: REJECT_BOUND }, () => ev('rejected', { gate: 'confirm', feedback: 'the gap is still open' })),
+    ]);
+    const c = cmds(); // the store SCANS at construction — the fixture is on disk first
+    if (objection !== 'none') {
+      valueOf(
+        c.landFindings(id, [
+          { id: 'F1', severity: 'gap', where: 'src/x.ts:1', text: 'the criterion is unmet', status: objection, provenance: 'gate review worker (model)' },
+        ]),
+      );
+    }
+    return c;
+  }
+
+  it('AC-5: --force lands the accept WITH the record’s own objection, and stamps the decider', () => {
+    const c = escalated('01-leg/01-a');
+    const objection = c.reviewObjection('01-leg/01-a');
+    expect(objection?.text).toContain('F1 [gap]');
+    expect(objection?.text).toContain('the criterion is unmet');
+    const v = valueOf(c.gate('01-leg/01-a', 'confirm', 'accept', 'I reread it myself and the criterion does hold', { force: true }));
+    expect(v.decision).toBe('accept');
+    const confirmed = c.events('01-leg/01-a').find((e) => e.type === 'confirmed' && e.gate === 'confirm');
+    // THE RECORD'S WORDS, not the caller's — the override is read back, never dictated
+    expect(confirmed?.override).toEqual({ objection: objection!.text });
+    // …and it rides the human's decision rather than replacing it: the why still stands
+    expect(confirmed?.feedback).toBe('I reread it myself and the criterion does hold');
+    expect(confirmed?.decider).toBe('human');
+    expect(c.brief('01-leg/01-a').gates.confirm).toBe('accepted');
+  });
+
+  it('AC-5: --force refuses by NAME in the three states where it is not the gesture, with ZERO writes', () => {
+    // one node per case: a fixture rewritten AFTER a write would trip the ledger's
+    // store-external guard instead of the refusal under test
+    const cases: Array<{ name: string; id: string; c: Commands; code: string; says: string }> = [
+      { name: 'an entry-gate accept', id: '01-leg/01-a', c: cmds(), code: 'force-not-accept', says: 'rides a CONFIRM accept' },
+      { name: 'below the bound (the worker is still the decider)', id: '01-leg/01-a', c: cmds(), code: 'force-not-escalated', says: 'still the decider' },
+      { name: 'nothing open to override', id: '01-leg/02-b', c: escalated('01-leg/02-b', 'none'), code: 'force-no-objection', says: 'no OPEN gap/regression' },
+      { name: 'the objection is already RESOLVED', id: '01-leg/03-c', c: escalated('01-leg/03-c', 'resolved'), code: 'force-no-objection', says: 'no OPEN gap/regression' },
+    ];
+    for (const k of cases) {
+      const before = k.c.events(k.id).length;
+      // the gesture it IS is spelled per case: only the first is not a confirm accept
+      const decision = k.code === 'force-not-accept' ? (['grill', 'accept'] as const) : (['confirm', 'accept'] as const);
+      const err = errorOf(cmds().gate(k.id, decision[0], decision[1], 'x', { force: true }));
+      expect(err.code, k.name).toBe(k.code);
+      expect(err.blocker, k.name).toContain(k.says);
+      expect(k.c.events(k.id), k.name).toHaveLength(before); // a refusal is not a write
+    }
+    // …and the escalation reads the OPEN defects only: a resolved one is not an objection
+    expect(escalated('01-leg/04-d', 'resolved').reviewObjection('01-leg/04-d')).toBeUndefined();
   });
 
   it('the store refuses a confirm gate with no confirmed grill (the sequence is L0-enforced)', () => {
