@@ -4,7 +4,6 @@ import {
   REVIEW_FINDINGS_MODE,
   REVIEW_GRILL_MODE,
   REVIEW_MAX_TOKENS,
-  REVIEW_PROVENANCE,
   buildReviewMaterial,
   renderReviewMaterial,
   shapeFindings,
@@ -222,7 +221,13 @@ export const runGateReview = async (
   }
   const landed = commands.landFindings(id, findings, {
     ...(material.anchor ? { anchorSha: material.anchor } : {}),
-    note: `gate review — ${findings.length} finding(s) (${REVIEW_PROVENANCE} worker)`,
+    // THE ACTOR, NAMED ONCE AND CORRECTLY. This read `(${REVIEW_PROVENANCE} worker)`, which
+    // composed into "review session (model) worker" — the SESSION's constant with the word
+    // appended, so the landing note named the interactive review as the author of the
+    // worker's findings. The provenance FIELD was always right (`shapeFindings` is stamped
+    // with GATE_REVIEW_PROVENANCE above); it was the note a human reads that lied, and only
+    // a real run shows it — no unit test asserts prose nobody thought to check.
+    note: `gate review — ${findings.length} finding(s) (${GATE_REVIEW_PROVENANCE})`,
   });
   if (!landed.ok) {
     return { ok: false, absent: `the review worker's findings could not be recorded (${landed.error.code}: ${landed.error.blocker}) — nothing was decided` };

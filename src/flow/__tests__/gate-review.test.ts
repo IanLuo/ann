@@ -8,7 +8,7 @@ import { Commands, REJECT_BOUND, type CommandResult } from '../../commands/index
 import type { CaptureEnv } from '../../commands/capture.js';
 import type { Abilities, InteractAbility, LlmAbility, ResearchFinding } from '../types.js';
 import { shapeFindings } from '../review-session.js';
-import { deriveGateVerdict, runGateReview } from '../gate-review.js';
+import { deriveGateVerdict, GATE_REVIEW_PROVENANCE, runGateReview } from '../gate-review.js';
 
 /**
  * THE REVIEW WORKER (leg 12/22) — the headless reviewer that DECIDES the exit gate.
@@ -223,6 +223,13 @@ describe('AC-3 · re-execution is the EXISTING loop — same event, same state, 
     // and the rejection carries the defect as feedback — what a rework is checked against
     const rej = worker.store.events(WORKER).find((e) => e.type === 'rejected');
     expect(String(rej?.feedback)).toContain('the gap finding');
+    // THE LANDING NOTE NAMES THE WORKER (found by running it, not by reading it): it read
+    // "review session (model) worker" — the interactive SESSION's constant with the word
+    // appended — so the record's own prose attributed the worker's findings to the actor
+    // this module exists to be separate FROM.
+    const landing = worker.store.events(WORKER).find((e) => e.type === 'evidence' && Array.isArray(e.findings));
+    expect(String(landing?.note)).toContain(GATE_REVIEW_PROVENANCE);
+    expect(String(landing?.note)).not.toContain('review session');
   });
 });
 
