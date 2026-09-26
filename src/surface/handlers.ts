@@ -39,6 +39,7 @@ import { buildStepRegistry } from '../flow/steps/index.js';
 import { loadProjectFlow, resolveChain, validateChain } from '../flow/chain.js';
 import { Frame } from '../flow/frame.js';
 import { commitJourneyWrites, engineWriteDirs } from './commit-journey.js';
+import { noteWrite } from '../store/write-journal.js';
 import { runGoalSeed } from '../flow/goal-seed.js';
 import { runSpecSession, docsSpecsTarget, DEFAULT_SPEC_NAME } from '../flow/spec-doc.js';
 import { runReviewSession } from '../flow/review-session.js';
@@ -795,6 +796,11 @@ export const HANDLERS: Record<string, Handler> = {
       const p = join(ctx.root, 'rules', 'check', 'rules.json');
       mkdirSync(dirname(p), { recursive: true });
       writeFileSync(p, out);
+      // JOURNALED (leg 12/21 AC-3): the registry is GENERATED but REVIEWABLE — it is
+      // tracked project content, so the regeneration commits itself. The path goes
+      // through the `rules → .ann/rules` symlink; the commit resolves it (git refuses a
+      // pathspec beyond a symlink), which is why the note carries the path as written.
+      noteWrite(ctx.root, { path: p, node: '', type: 'rules-registry', scope: 'rules' });
       return { ok: true, value: { ok: true, value: { path: p, rules: reg.rules.length } } };
     }
     return { ok: true, value: reg };
@@ -1487,6 +1493,16 @@ const ALIAS: Record<string, string> = {
 /** The journey-addressing WRITES a read-only target refuses (config!/cred!/project!
  *  never touch the store, so they stay available). docs/rules --write refuse too. */
 const JOURNEY_REFUSED_WRITES = new Set(['append!', 'spawn!', 'submit!', 'gate!', 'evidence!', 'capture!', 'complete!', 'review!', 'goal!', 'run!', 'spec!', 'advance!', 'idea!']);
+
+/** IS THIS INVOCATION AN ENGINE WRITE? ONE predicate, consumed by BOTH the read-only
+ *  chokepoint (which refuses such a write on an archived target) and the commit step
+ *  (which commits what the write journaled) — leg 12/21 AC-1: `docs --write` and
+ *  `rules --write` write tracked files and land NO event, so the commit step has to see
+ *  them; before this they were refused-by-read-only but never committed, and the exact
+ *  defect the operator named ("the spec doc sat dirty and had to be hand-committed") had
+ *  a second instance sitting in the generated registry. */
+const isEngineWrite = (ctx: CliContext, canonical: string): boolean =>
+  JOURNEY_REFUSED_WRITES.has(canonical) || ((canonical === 'docs' || canonical === 'rules') && ctx.args.includes('--write'));
 /** Bare write names (no `!`) — a named hint, never silent. `idea` is deliberately NOT
  *  here: unlike `spawn`, it is a READ too (`ann idea list`), so a bare `idea` is a
  *  command, not a missing marker. Its write gestures live under `idea!`. */
@@ -1504,7 +1520,7 @@ const isProjectRoot = (dir: string): boolean => existsSync(join(dir, '.ann')) ||
  *  nothing, so the common case is a no-op by construction. Fail-open in every direction:
  *  the gesture has already succeeded and a commit defect must never become its failure. */
 function commitAfterWrite(ctx: CliContext, canonical: string): void {
-  if (!JOURNEY_REFUSED_WRITES.has(canonical)) return;
+  if (!isEngineWrite(ctx, canonical)) return;
   try {
     if (ctx.target().readOnly) return; // a read-only target refused the write before it began
     const journeyDir = storeJourneyDir(ctx.target().loc);
@@ -1701,9 +1717,7 @@ export function outcomeOf(e: unknown): Outcome {
  *  Exported for the service binding: its approve IS the journey write the CLI's
  *  `advance!` performs, so it passes the SAME chokepoint (never a second rule). */
 export function readOnlyRefuse(ctx: CliContext, canonical: string): void {
-  const isJourneyWrite = JOURNEY_REFUSED_WRITES.has(canonical);
-  const isDocsOrRulesWrite = (canonical === 'docs' || canonical === 'rules') && ctx.args.includes('--write');
-  if (!isJourneyWrite && !isDocsOrRulesWrite) return;
+  if (!isEngineWrite(ctx, canonical)) return;
   const t = ctx.target();
   if (!t.readOnly) return;
   throw new CommandExit(

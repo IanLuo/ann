@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync, appendFileSync, existsSync, statSync, lstatSync, mkdirSync, writeFileSync, renameSync, rmSync, realpathSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { join, basename, resolve, sep } from 'node:path';
+import { join, basename, relative, resolve, sep } from 'node:path';
 import { noteWrite, type WriteRecord } from './write-journal.js';
 import { getVOCAB } from './vocab.js';
 import { blobSha, stripMarkers } from './sha.js';
@@ -1493,11 +1493,18 @@ export class Store {
 
   /** docs-as-git (D7): the authored goal doc lives at docs/goal.md (git content) —
    *  write it and regenerate the manifest so resolveDoc('goal') serves it. No
-   *  goal-root artifact-lock (the write path itself stays the node.json/events one). */
+   *  goal-root artifact-lock (the write path itself stays the node.json/events one).
+   *
+   *  JOURNALED (leg 12/21 AC-3): the doc is a REVIEWABLE deliverable — the operator's
+   *  rule is that a deliverable is reviewable BECAUSE it is committed — so the editor
+   *  notes its own write here rather than leaving it for a person to notice. The
+   *  manifest half is noted by writeDocsManifest itself. */
   private writeGoalDoc(doc: string): void {
     const dir = join(this.root, 'docs');
     mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, 'goal.md'), doc);
+    const p = join(dir, 'goal.md');
+    writeFileSync(p, doc);
+    this.noteWrite({ path: p, node: '', type: 'goal-doc', scope: 'docs' });
     writeDocsManifest(this.root, scanDocsDir(this.root));
   }
 
@@ -1519,11 +1526,23 @@ export class Store {
     const ledgerFile = join(this.journeyDir, '.ledger.json');
     if (existsSync(ledgerFile)) renameSync(ledgerFile, join(dir, '.ledger.json'));
     mkdirSync(this.legs, { recursive: true }); // an empty live legs root stays — Store() loads clean
+    // THE MOVE IS ONE CHANGE (leg 12/21 AC-2). The session's leg dirs LEAVE the live tree
+    // — tracked DELETIONS, and `uncommittedJourneyChanges()` counts ` D` (it drops only
+    // `??`), so without journaling them the engine's own archive leaves `.ann/journey`
+    // dirty and REFUSES the next archive over its own leftovers. Both halves of the
+    // rename are noted, so both ride in one commit; the live write-rev ledger is renamed
+    // too but is on the never-staged list (AC-4) — the snapshot's copy rides with the
+    // snapshot, which is that snapshot's own integrity baseline.
+    const destRel = relative(this.root, dir);
+    this.noteWrite({ path: this.legs, node: '', type: 'archived', kind: 'delete', detail: `the session moved to ${destRel}` });
+    this.noteWrite({ path: dir, node: '', type: 'archived' });
     // docs-as-git (D7): the archived session's goal doc leaves the LIVE docs/ home (git
     // history + the archive keep it) and the manifest is regenerated so the next seed
     // starts clean — resolveDoc('goal') resolves nothing until the next seed writes it.
     if (existsSync(join(this.root, 'docs', 'goal.md'))) {
-      rmSync(join(this.root, 'docs', 'goal.md'));
+      const goalDoc = join(this.root, 'docs', 'goal.md');
+      rmSync(goalDoc);
+      this.noteWrite({ path: goalDoc, node: '', type: 'archived', kind: 'delete' });
       writeDocsManifest(this.root, scanDocsDir(this.root));
     }
     // reset the live store: empty journey, no ledger baseline

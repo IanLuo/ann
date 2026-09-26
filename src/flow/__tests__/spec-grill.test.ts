@@ -9,7 +9,8 @@ import { GOAL_GRILL_MODE, GOAL_DISCUSS_MODE } from '../goal-grill.js';
 import { DESIGN_BRIEF_GRILL_MODE, DESIGN_BRIEF_DISCUSS_MODE } from '../design-grill.js';
 import { docsSpecsTarget, runSpecSession, specDocFrom } from '../spec-doc.js';
 import { Store } from '../../store/store.js';
-import { scanDocsDir, writeDocsManifest } from '../../store/docs.js';
+import { MANIFEST_FILE, scanDocsDir, writeDocsManifest } from '../../store/docs.js';
+import { clearWritten, takeWritten } from '../../store/write-journal.js';
 
 /**
  * THE SPECS AREA (flow/spec-grill + flow/spec-doc) — a SPECS GrillArea on the portable
@@ -404,5 +405,29 @@ describe('specDocFrom — the deterministic materialize (NO second model call)',
       'Amendable? → yes, in place',
     ]);
     expect(md).not.toContain('calm');
+  });
+});
+
+describe('(AC-3) the editor commits its own edit — a spec doc write is JOURNALED at the write site', () => {
+  afterEach(() => { if (root) { clearWritten(root); rmSync(root, { recursive: true, force: true }); } });
+
+  it('docs/<name>.md notes the doc AND the regenerated manifest — a doc is reviewable because it is COMMITTED', () => {
+    seeded();
+    clearWritten(root); // goal! seed journaled its own writes; this pin is about the SPEC session's
+    const w = docsSpecsTarget(root).write('gate-cadence', '# Gate cadence\n\nOne decision, not two.\n', 'produce');
+    expect(w.ok).toBe(true);
+    const written = takeWritten(root);
+    expect(written).toContainEqual({ path: specDoc('gate-cadence'), node: '', type: 'spec-doc', scope: 'docs', detail: 'docs/gate-cadence.md' });
+    // the manifest is DERIVED state beside the doc — the same write commits both halves
+    expect(written).toContainEqual({ path: join(root, 'docs', MANIFEST_FILE), node: '', type: 'docs-manifest', scope: 'docs' });
+  });
+
+  it('a REFUSED write journals NOTHING — the journal is a fact about what was written', () => {
+    seeded();
+    clearWritten(root);
+    const w = docsSpecsTarget(root).write('goal', '# not allowed\n', 'produce'); // the in-force doc
+    expect(w.ok).toBe(false);
+    if (!w.ok) expect(w.error.code).toBe('in-force'); // refused BEFORE any byte lands
+    expect(takeWritten(root)).toEqual([]);
   });
 });

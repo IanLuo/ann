@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, mkdirSync, cpSync, rmSync, writeFileSync, symlinkSync, existsSync, appendFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { spawnSync, execFileSync } from 'node:child_process';
 import { Store } from '../store/store.js';
 import { scanDocsDir, writeDocsManifest } from '../store/docs.js';
@@ -323,10 +323,16 @@ describe('e2e — the CLI binary', () => {
     cli(root, ['spawn!', TASK, CONTRACT('do the thing')]);
     cli(root, ['submit!', TASK, 'grill']);
     cli(root, ['gate!', TASK, 'grill', 'accept', 'looks right']);
-    const sha = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+    // THE DELIVERABLE lands in history BEFORE anything cites a commit. `docs --write` now
+    // commits the manifest itself (12/21 AC-3), so a sha read any earlier would predate the
+    // doc — and the capture's OWN sha (the bytes the run saw, = HEAD at capture time, 12/03)
+    // would no longer bind to the commit the evidence cites: `no-captured-pass`.
     mkdirSync(join(root, 'docs'), { recursive: true });
     writeFileSync(join(root, 'docs', 'thing.md'), '# Thing\n\nthe actual deliverable\n');
     cli(root, ['docs', '--write']);
+    git(root, ['add', '-A']);
+    git(root, ['commit', '-qm', 'stage the deliverable']);
+    const sha = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
 
     // complete! cannot precede the human's accept, and evidence! cannot precede a commit
     const early = cli(root, ['complete!', TASK]);
@@ -617,6 +623,28 @@ describe('e2e — the goal-session lifecycle (v6: seed → docs/goal.md → work
     expect(existsSync(join(root, 'docs', 'goal.md'))).toBe(false);
     expect(out(cli(root, ['goal']))).toContain('GOAL: (none)');
 
+    // ── 12/21 AC-2: the archive is ONE COMMIT, not half a rename ──────────────
+    // Half a rename is not a smaller commit, it is a DIRTY TREE: the live tree's removals
+    // and the snapshot's additions land together, so `uncommittedJourneyChanges()` (which
+    // counts ` D` and only drops `??`) no longer refuses the NEXT archive over this one's
+    // leftovers — the exact block the engine's own writes used to leave behind.
+    const subject = execFileSync('git', ['-C', root, 'show', '-s', '--format=%s', 'HEAD'], { encoding: 'utf8' }).trim();
+    expect(subject).toBe(`journey: archived · manifest — the session moved to ${relative(root, dest!)} (e2e)`);
+    // both halves in the SAME commit: a path under the live tree (the rename's source, or a
+    // plain `D`) and a path under the snapshot (its destination)
+    const touched = execFileSync('git', ['-C', root, 'show', '--name-status', '--format=', 'HEAD'], { encoding: 'utf8' })
+      .trim().split('\n').flatMap((l) => l.split('\t').slice(1));
+    expect(touched.filter((p) => p.startsWith('.ann/journey/legs/')).length).toBeGreaterThan(0);
+    expect(touched.filter((p) => p.startsWith('.ann/archive/')).length).toBeGreaterThan(0);
+    expect(touched).toContain('docs/goal.md'); // the live goal doc left with the session
+    // the guard's OWN predicate, at the same seam: nothing tracked is left dirty under the
+    // moved trees — `??` (the write-rev ledger, gitignored in the real project) is dropped
+    // by the guard itself, so it is dropped here too
+    expect(
+      execFileSync('git', ['-C', root, 'status', '--porcelain', '--', '.ann/journey', '.ann/archive'], { encoding: 'utf8' })
+        .split('\n').filter((l) => l && !l.startsWith('??')),
+    ).toEqual([]);
+
     // the archived snapshot round-trips through a read-only .ann/journey mount
     const mount = join(root, '_mnt');
     mkdirSync(join(mount, '.ann'), { recursive: true });
@@ -625,6 +653,60 @@ describe('e2e — the goal-session lifecycle (v6: seed → docs/goal.md → work
     expect(loaded.ids().sort()).toEqual([GOAL, WORK, TASK]);
     expect(loaded.goalLegId()).toBe(GOAL);
     expect(loaded.events(GOAL).some((e) => e.type === 'goal-met')).toBe(true);
+  });
+});
+
+describe('e2e — the engine commits the EDITOR\'s own writes (leg 12/21 AC-1/AC-3)', () => {
+  let root: string;
+  const subject = () => execFileSync('git', ['-C', root, 'show', '-s', '--format=%s', 'HEAD'], { encoding: 'utf8' }).trim();
+  /** The paths a commit touched — the rename's BOTH halves (git collapses a rename to its
+   *  destination under `--name-only`, which is why this reads `--name-status`). */
+  const touched = () => execFileSync('git', ['-C', root, 'show', '--name-status', '--format=', 'HEAD'], { encoding: 'utf8' })
+    .trim().split('\n').flatMap((l) => l.split('\t').slice(1));
+  /** The guard's own predicate: tracked changes only (`??` is local derived state). */
+  const trackedDirty = (...paths: string[]) =>
+    execFileSync('git', ['-C', root, 'status', '--porcelain', '--', ...paths], { encoding: 'utf8' })
+      .split('\n').filter((l) => l && !l.startsWith('??'));
+
+  beforeEach(() => {
+    root = newProject();
+    // The registry is generated-but-COMMITTED content: make the fixture's copy deliberately
+    // STALE, so `rules --write` has something to change (an identical regeneration is not a
+    // commit, and this suite is about the commit).
+    mkdirSync(join(root, '.ann', 'rules', 'check'), { recursive: true });
+    writeFileSync(join(root, '.ann', 'rules', 'check', 'rules.json'), '{"stale":true}\n');
+    git(root, ['add', '-A']);
+    git(root, ['commit', '-qm', 'stale the registry']);
+  });
+  afterEach(() => { rmSync(root, { recursive: true, force: true }); });
+
+  it('`docs --write` commits the manifest it regenerated — the doc write leaves the tree CLEAN', () => {
+    mkdirSync(join(root, 'docs'), { recursive: true });
+    const r = cli(root, ['docs', '--write']);
+    expect(r.code).toBe(0);
+    expect(out(r)).toContain('regenerated');
+    // the writer committed what it wrote, with no hand-commit and no event to hang it on
+    expect(subject()).toBe('docs: manifest (e2e)');
+    expect(touched()).toContain('docs/manifest.json');
+    expect(trackedDirty('docs', '.ann/journey')).toEqual([]);
+  });
+
+  it('`rules --write` commits the registry THROUGH the rules/ symlink — git refuses a pathspec beyond one, the writer resolves it', () => {
+    const r = cli(root, ['rules', '--write']);
+    expect(r.code).toBe(0);
+    expect(subject()).toBe('rules: rules registry (e2e)');
+    // the note carries the path AS WRITTEN (<root>/rules/check/rules.json, through the
+    // symlink); git records the resolved home it actually lives in
+    expect(touched()).toContain('.ann/rules/check/rules.json');
+    expect(trackedDirty('rules', '.ann/rules')).toEqual([]);
+  });
+
+  it('a READ of either view commits NOTHING — the commit is a fact about a WRITE', () => {
+    const before = subject();
+    cli(root, ['docs']);
+    cli(root, ['rules']);
+    expect(subject()).toBe(before); // no new commit…
+    expect(trackedDirty('docs', '.ann/rules')).toEqual([]); // …and the tree is still clean
   });
 });
 

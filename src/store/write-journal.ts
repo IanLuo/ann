@@ -20,10 +20,10 @@
  * the surface does the committing (L0 must not learn to run git).
  */
 
-/** ONE FILE THE SINGLE WRITER PUT ON DISK, IN THIS INVOCATION. `type`/`gate` carry the
+/** ONE TRACKED FILE THE WRITER TOUCHED, IN THIS INVOCATION. `type`/`gate` carry the
  *  EVENT's own shape so a commit message is derived, never guessed. */
 export interface WriteRecord {
-  path: string;   // absolute — the file the writer appended/wrote
+  path: string;   // absolute — the file the writer wrote (or removed)
   node: string;   // the node it belongs to ('' for a whole-journey write)
   type: string;   // the event type that landed, or 'node.json' for the contract write
   gate?: string;  // the gate, when the event carried one
@@ -31,6 +31,17 @@ export interface WriteRecord {
    *  the ideas area is engine-written, tracked and committed, but it is not the
    *  journey). Absent means `journey`, which is every write the store makes. */
   scope?: string;
+  /** A REMOVAL (leg 12/21). Absent means the writer put the file ON DISK — the only shape
+   *  12/20 journaled. A deletion is a change to a tracked file like any other (the archive
+   *  `renameSync`s the session OUT of the live tree), so it is journaled and staged the same
+   *  way; this field is what says which of the two happened, and what the path resolver
+   *  reads (a deleted path has no real path of its own — its PARENT is resolved instead). */
+  kind?: 'write' | 'delete';
+  /** A WRITER-DERIVED tail for the commit subject, when the gesture has a name of its own
+   *  (the archive's destination session, leg 12/21). NEVER human input: the writer puts in
+   *  what it computed, exactly as `type`/`gate` carry the event's own shape — so the subject
+   *  stays a derivation, and a reviewer reading the history can still see what happened. */
+  detail?: string;
 }
 
 /** root → what it has written since the last take. */

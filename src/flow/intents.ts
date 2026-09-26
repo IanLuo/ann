@@ -2,6 +2,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Commands, CommandError, CommandResult } from '../commands/index.js';
 import { JourneyEvent } from '../store/store.js';
+import { noteWrite } from '../store/write-journal.js';
 import { CloseIntent, Intent, ProposeSpawnIntent, StageDocIntent, Step } from './types.js';
 
 /**
@@ -109,6 +110,10 @@ export class IntentTranslator {
     mkdirSync(dir, { recursive: true });
     // idempotent by bytes: a replay re-writes the same content, a rework re-writes fresh
     writeFileSync(file, intent.content);
+    // JOURNALED (leg 12/21 AC-3): staged docs land in the tracked docs/ home, so the
+    // write is noted where it happens — the editor commits its own edit, and the
+    // delivery commit stays the operator's (an EVIDENCE gesture is a separate write).
+    noteWrite(this.commands.store.root, { path: file, node: '', type: 'stage-doc', scope: 'docs', detail: `docs/${intent.name}.md` });
     const already = this.deferred.docs.find((d) => d.name === intent.name);
     if (!already) this.deferred.docs.push({ name: intent.name, path: `docs/${intent.name}.md` });
     return ok(undefined);

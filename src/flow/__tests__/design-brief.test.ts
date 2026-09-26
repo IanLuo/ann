@@ -8,6 +8,8 @@ import { DESIGN_PROFILE, DESIGN_BRIEF_GRILL_MODE, DESIGN_BRIEF_DISCUSS_MODE } fr
 import { GOAL_GRILL_MODE, GOAL_DISCUSS_MODE } from '../goal-grill.js';
 import { docsDesignTarget, runDesignBrief, designBriefFrom } from '../design-brief.js';
 import { Store } from '../../store/store.js';
+import { MANIFEST_FILE } from '../../store/docs.js';
+import { clearWritten, takeWritten } from '../../store/write-journal.js';
 
 /**
  * THE DESIGN AREA (flow/design-grill + flow/design-brief) — AC-3/AC-4/AC-5:
@@ -345,5 +347,28 @@ describe('designBriefFrom — the deterministic materialize (NO second model cal
     ]);
     expect(md).not.toContain('warm');
     expect(md).not.toContain('(none)'); // a converged brief always carries the direction
+  });
+});
+
+describe('(AC-3) the editor commits its own edit — a design brief is JOURNALED at the write site', () => {
+  let root: string;
+  afterEach(() => { if (root) { clearWritten(root); rmSync(root, { recursive: true, force: true }); } });
+
+  it('docs/design/<slug>.md notes the brief AND the regenerated manifest — the writer commits what it wrote', () => {
+    root = mkdtempSync(join(tmpdir(), 'ann-designbrief-'));
+    const landed = docsDesignTarget(root).land('journey-ui', '# Design Brief\n\nBrief: a calm journey view.\n');
+    expect(landed.ok).toBe(true);
+    const written = takeWritten(root);
+    expect(written).toContainEqual({ path: join(root, 'docs', 'design', 'journey-ui.md'), node: '', type: 'design-brief', scope: 'docs', detail: 'docs/design/journey-ui.md' });
+    expect(written).toContainEqual({ path: join(root, 'docs', MANIFEST_FILE), node: '', type: 'docs-manifest', scope: 'docs' });
+  });
+
+  it('a REFUSED land journals NOTHING — a taken name never claims a write it did not make', () => {
+    root = mkdtempSync(join(tmpdir(), 'ann-designbrief-'));
+    const target = docsDesignTarget(root);
+    expect(target.land('journey-ui', '# one\n').ok).toBe(true);
+    clearWritten(root);
+    expect(target.land('journey-ui', '# two\n').ok).toBe(false); // name-taken, nothing overwritten
+    expect(takeWritten(root)).toEqual([]);
   });
 });

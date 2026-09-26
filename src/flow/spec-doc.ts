@@ -5,6 +5,7 @@ import { GroundingInput } from './steps/shared.js';
 import { SPECS_PROFILE } from './spec-grill.js';
 import { GrillSession, ResolvedQuestion } from './grill-session.js';
 import { docSha, loadDocsManifest, scanDocsDir, writeDocsManifest } from '../store/docs.js';
+import { noteWrite } from '../store/write-journal.js';
 import { Abilities } from './types.js';
 
 /**
@@ -132,6 +133,9 @@ export function docsSpecsTarget(root: string): SpecsTarget {
       const path = `docs/${name}.md`;
       mkdirSync(dir, { recursive: true });
       writeFileSync(join(root, path), content);
+      // JOURNALED (leg 12/21 AC-3): the spec doc is the session's deliverable, and a doc
+      // is REVIEWABLE BECAUSE IT IS COMMITTED — the writer commits what it wrote
+      noteWrite(root, { path: join(root, path), node: '', type: 'spec-doc', scope: 'docs', detail: path });
       writeDocsManifest(root, scanDocsDir(root)); // the manifest regenerates from the dir — never hand-maintained
       return { ok: true, doc: { name, path, sha: docSha(content) } };
     },

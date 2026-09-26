@@ -5,6 +5,7 @@ import { GroundingInput } from './steps/shared.js';
 import { DESIGN_PROFILE } from './design-grill.js';
 import { GrillSession, ResolvedQuestion } from './grill-session.js';
 import { DESIGN_HOME, scanDocsDir, writeDocsManifest } from '../store/docs.js';
+import { noteWrite } from '../store/write-journal.js';
 import { Abilities, InteractAbort } from './types.js';
 
 /**
@@ -50,6 +51,9 @@ export function docsDesignTarget(root: string): DesignBriefTarget {
       }
       mkdirSync(dir, { recursive: true });
       writeFileSync(join(root, path), content);
+      // JOURNALED (leg 12/21 AC-3): the brief is a deliverable — committed by the writer
+      // that produced it, at the moment of writing, not left for a person to notice
+      noteWrite(root, { path: join(root, path), node: '', type: 'design-brief', scope: 'docs', detail: path });
       writeDocsManifest(root, scanDocsDir(root)); // the manifest regenerates from the dir — never hand-maintained
       return { ok: true, path };
     },

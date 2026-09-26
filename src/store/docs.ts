@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync, writeFileSync, renameSync, existsSync, mkdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { blobSha, stripMarkers } from './sha.js';
+import { noteWrite } from './write-journal.js';
 
 /**
  * docs → git (the docs/ home + the manifest). In-force docs (specs + goal.md) are
@@ -68,7 +69,12 @@ export function loadDocsManifest(root: string): Record<string, string> {
 
 /** Atomic manifest write (tmp + rename — a reader never sees a partial manifest).
  *  Returns the written path. The regen path (`ann docs --write`) mirrors `ann rules
- *  --write`: the manifest is DERIVED from scanDocsDir — never hand-maintained. */
+ *  --write`: the manifest is DERIVED from scanDocsDir — never hand-maintained.
+ *
+ *  JOURNALED (leg 12/21 AC-1/AC-3): this is the chokepoint every doc producer goes
+ *  through — `docs --write`, `spec!`, a design brief, the goal doc, the archive — so one
+ *  note here is what makes the manifest commit itself without an EVENT to hang it on.
+ *  The note names the FINAL path, never the `.tmp` the atomic write lands first. */
 export function writeDocsManifest(root: string, manifest: Record<string, string>): string {
   const dir = join(root, 'docs');
   mkdirSync(dir, { recursive: true });
@@ -76,6 +82,7 @@ export function writeDocsManifest(root: string, manifest: Record<string, string>
   const tmp = p + '.tmp';
   writeFileSync(tmp, JSON.stringify(manifest, null, 2) + '\n');
   renameSync(tmp, p);
+  noteWrite(root, { path: p, node: '', type: 'docs-manifest', scope: 'docs' });
   return p;
 }
 

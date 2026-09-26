@@ -6,6 +6,7 @@ import { Store } from '../../store/store.js';
 import { Commands, CommandResult } from '../../commands/index.js';
 import { scanDocsDir, writeDocsManifest } from '../../store/docs.js';
 import { IntentTranslator } from '../intents.js';
+import { clearWritten, takeWritten } from '../../store/write-journal.js';
 import { Intent, ProposeSpawnIntent, StageDocIntent, Step, StepOutput } from '../types.js';
 
 /**
@@ -247,5 +248,22 @@ describe('commands.append refuses the retired + composite-owned kinds', () => {
       expect(e.code).toBe('composite-owned');
     }
     expect(c.events(TASK)).toHaveLength(1); // nothing landed
+  });
+});
+
+describe('(AC-3) the editor commits its own edit — a staged doc is JOURNALED at the write site', () => {
+  afterEach(() => { if (root) clearWritten(root); });
+
+  it('stage-doc notes docs/<name>.md as a git-content write — no event, and no person left to notice it', () => {
+    const c = setup();
+    must(new IntentTranslator(c, TASK).translate(step(['stage-doc']), [stageDoc('my-spec', '# body\n')]));
+    expect(takeWritten(root)).toContainEqual({ path: docFile('my-spec'), node: '', type: 'stage-doc', scope: 'docs', detail: 'docs/my-spec.md' });
+  });
+
+  it('a refused stage-doc name journals NOTHING — the refusal is already the answer', () => {
+    const c = setup();
+    const e = errorOf(new IntentTranslator(c, TASK).translate(step(['stage-doc']), [stageDoc('../escape', '# nope\n')]));
+    expect(e.code).toBe('stage-doc-name');
+    expect(takeWritten(root)).toEqual([]);
   });
 });

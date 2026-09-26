@@ -1762,3 +1762,40 @@ describe('Store — the write journal (12/20)', () => {
     expect(takeWritten(root).map((w) => w.type).sort()).toEqual(['created', 'node.json']);
   });
 });
+
+describe('Store — the editor commits its own edit (12/21 AC-3)', () => {
+  beforeEach(() => { makeStore(); });
+  afterEach(() => { clearWritten(root); rmSync(root, { recursive: true, force: true }); });
+  const CONTRACT = { intent: 'build the goal session', acceptanceCriteria: ['it archives faithfully'] };
+  const DOC = '# Goal\n\nGoal: Build the goal session\n\nSuccess criteria:\n- the seeded goal is realized: docs/goal.md named by the manifest\n- a met verdict seals exhaustion\n';
+
+  it('seedGoal journals the goal doc AND the manifest it regenerated — two tracked deliverables', () => {
+    clearWritten(root);
+    new Store(root).seedGoal(DOC);
+    const written = takeWritten(root);
+    expect(written).toContainEqual({ path: join(root, 'docs', 'goal.md'), node: '', type: 'goal-doc', scope: 'docs' });
+    expect(written).toContainEqual({ path: join(root, 'docs', 'manifest.json'), node: '', type: 'docs-manifest', scope: 'docs' });
+  });
+
+  it('archiveJourney journals BOTH halves of the move — the deletions and the snapshot, one gesture', () => {
+    const s = new Store(root);
+    s.seedGoal(DOC);
+    prepDir('02-work/01-a');
+    s.spawn('02-work/01-a', CONTRACT);
+    clearWritten(root);
+    const r = s.archiveJourney('goal');
+    const written = takeWritten(root);
+    // the live tree's removal — the ` D` entry `uncommittedJourneyChanges()` counts …
+    expect(written).toContainEqual({
+      path: join(root, '.ann', 'journey', 'legs'), node: '', type: 'archived', kind: 'delete',
+      detail: `the session moved to ${join('.ann', 'archive', 'sessions', r.at + '-goal', 'journey')}`,
+    });
+    // … and the destination it landed at, in the same gesture
+    expect(written).toContainEqual({ path: r.dest, node: '', type: 'archived' });
+    // the goal doc left the live docs/ home too, and the manifest regenerated
+    expect(written).toContainEqual({ path: join(root, 'docs', 'goal.md'), node: '', type: 'archived', kind: 'delete' });
+    expect(written.some((w) => w.type === 'docs-manifest')).toBe(true);
+    // the LIVE ledger is never journaled (AC-4): it is derived state, gitignored outright
+    expect(written.some((w) => w.path.endsWith('.ledger.json'))).toBe(false);
+  });
+});
