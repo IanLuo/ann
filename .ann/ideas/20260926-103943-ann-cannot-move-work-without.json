@@ -1,0 +1,12 @@
+{
+  "id": "20260926-103943-ann-cannot-move-work-without",
+  "text": "ANN CANNOT MOVE WORK WITHOUT THE AGENT — THE TOOL LOOP IS THE MISSING WORKER. Every model actor today is ONE `abilities.llm.complete({prompt})`: text in, prose or strict JSON out. There is no read file / edit / run a check / read the failure / iterate — which is the whole of what actually moves an implementation task forward. The hole is already NAMED in the architecture: `Abilities` declares shell and tool, and src/abilities/index.ts says they are UNBUILT in v1 (§8) — 'absent from the built set rather than stubbed'. So the review worker, the four grills, the step engines and the semantic driver can JUDGE and CONVERSE; none can DO. ORDERING (measured 2026-09-26): (1) a provider this machine can reach — the registry default openai-compatible resolves to api.openai.com, region-blocked here (403 unsupported_country_region_territory), so every worker currently degrades to its named absence and no worker has ever run against a real model; (2) prove the ONE worker that needs no tools — the review worker (12/22) reads a bounded text bundle and returns findings ONLY, its verdict derived by a deterministic rule, so its blast radius is capped — and give it the tests it never had; (3) only then the tool-using actor, which is the §2 shell/tool abilities plus an observe-iterate loop, NOT a prompt rewrite. THE BOUNDARY, from the review worker's own material: the diff is CUT at 60000 chars and the change map at 4000, so a delivery larger than that bundle is beyond a single completion by construction.",
+  "created": "2026-09-26T10:39:43.724Z",
+  "by": "agent",
+  "status": "open",
+  "refs": [
+    "docs/core-design.md",
+    "docs/gate-cadence.md",
+    "12-operate-loop/22-implementation-automatic-exit-gate"
+  ]
+}
