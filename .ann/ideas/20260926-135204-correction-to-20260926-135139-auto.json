@@ -1,0 +1,11 @@
+{
+  "id": "20260926-135204-correction-to-20260926-135139-auto",
+  "text": "CORRECTION TO 20260926-135139-auto-accept-is-inert-measured: THE QUALITY ROW IS NOT THE CAUSE. That idea, and the first version of .agents/artifacts/verdict-arm-calibration.md, blamed the quality arm by singling out F6 (the quality note on the comment) from the same output line that also carried F7 and F8. Computing what the rule actually does with the recorded sets refutes it: applying the proposed variant (quality no longer blocks) to both runs gives human and human — IDENTICAL to the current rule. Variant (a) changes nothing. BOTH RUNS ARE BLOCKED BY UNCERTAIN: run 1 by one, run 2 by two. And that is structural, not a miscalibration — the accept arm requires every finding to be matches or resolved, and uncertain is produced by two things no rule change can reach: (1) the material is a DIFF, so unchanged context is absent by construction and a criterion depending on how the change meets existing code is unverifiable at any budget (run 2 F7: transferNotLive and whether gate! refuses it by name first, which lives in code the diff never shows); (2) some criteria want evidence no text carries (run 2 F8 asked for a real-browser check because the tests are jsdom-style). The rule is doing its job: it refuses to auto-accept a criterion it could not verify, and F7 is a real finding — tuning the middle row to reach an accept here would be tuning it to swallow a real one. THE LESSON WORTH KEEPING: I diagnosed from a finding prose instead of computing the rule over the set, which is the same failure mode as asserting a test count before reading it. The quality row remains a LATENT issue worth its own look — AC-2 literal wording names only uncertain for the human row, and the rule comment calls quality real, not a defect while the vocabulary calls it a defective in a way that will cost someone later — but it must not be changed to chase an accept. The corrected draft adds a cheaper intermediate: let an accept fire when the only open findings are uncertain WHOSE OWN TEXT NAMES WHAT IT NEEDED, handing those to the human as material requests rather than gate blockers.",
+  "created": "2026-09-26T13:52:04.675Z",
+  "by": "agent",
+  "status": "open",
+  "refs": [
+    ".agents/artifacts/verdict-arm-calibration.md",
+    "src/flow/gate-review.ts"
+  ]
+}
