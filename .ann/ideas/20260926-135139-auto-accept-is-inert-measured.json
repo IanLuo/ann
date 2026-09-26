@@ -1,0 +1,12 @@
+{
+  "id": "20260926-135139-auto-accept-is-inert-measured",
+  "text": "AUTO ACCEPT IS INERT — MEASURED 0 FOR 2 (2026-09-26), and the middle row is where it dies. The review worker was driven against the configured provider on a CLONE, on two deliveries the floor had already certified closeable: 12/11 (diff cut, 30,370 chars dropped) returned 7 matches + 1 uncertain; 12/13 (diff COMPLETE) returned 5 matches + 1 quality + 2 uncertain. Both verdicts: human. Zero accepts. So D-1 — the operator premise that the human leaves the exit gate — currently delivers no burden reduction at all. It is SAFE (nothing wrong is waved through, no rejection is burned) but inert, and the auto review alone makes every gate MORE to read, not less. RUN 2 IS THE DIAGNOSTIC: the diff was complete and it still declined. The deciding finding was F6, which in its own words is a quality note on the comment, NOT a gap — and deriveGateVerdict sends quality down the same arm as uncertain, so a non-defect nit parks the gate. THREE CANDIDATE DIAGNOSES, not yet distinguished: (a) the rule WIDENED the AC, since AC-2 literal wording names only uncertain for the human row and the implementation added quality by interpretation; (b) the rule comment contradicts the vocabulary, which defines quality as the bytes being defective in a way that will cost someone later, i.e. a real defect; (c) the model mislabelled F6, whose real content (I cannot determine whether the comment claim is enforced elsewhere) is an uncertain. Each implies a different fix — (a) is a rule change and the cheapest, (b) is a prompt change, (c) is nothing. DECISIVE NEXT EXPERIMENT, one call: a delivery whose only open findings are uncertain, with no quality, to see whether accept fires at all. FULL DRAFT with the candidate diff, the test that must move and the risks: .agents/artifacts/verdict-arm-calibration.md. Two causes of the 0-for-2 are NOT this: the material is a diff so unchanged context is absent by construction, and some criteria want evidence no text can carry.",
+  "created": "2026-09-26T13:51:39.235Z",
+  "by": "agent",
+  "status": "open",
+  "refs": [
+    ".agents/artifacts/verdict-arm-calibration.md",
+    "src/flow/gate-review.ts",
+    "12-operate-loop/22-implementation-automatic-exit-gate"
+  ]
+}
