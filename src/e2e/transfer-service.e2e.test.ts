@@ -69,8 +69,14 @@ function newProject(): string {
 const EVENTS = (root: string, id: string) => join(root, '.ann', 'journey', 'legs', id, 'events.jsonl');
 const CONTRACT = (intent: string, acs: string[]) => JSON.stringify({ intent, acceptanceCriteria: acs });
 
-/** The journey the route is exercised against: one leg, a task whose confirm gate is LIVE
- *  with an AC it did not meet, a spawned successor, and a task with no submission at all. */
+/** The journey the route is exercised against: one leg, a task whose confirm gate is LIVE,
+ *  a spawned successor, and a task with no submission at all.
+ *
+ *  THE LIVE EXIT GATE PRESUPPOSES A CLOSEABLE RECORD (12/22 AC-1). `submit! confirm` refuses
+ *  a submission whose conclusion does not satisfy the close predicate, so the only gate in
+ *  hand is one whose ACs are already claimed and whose check was CAPTURED against the cited
+ *  commit. That is what makes the card's third action reachable at all — and it is why the
+ *  moved AC below is also a claimed one (the two facts the route's own reads then show). */
 function driveJourney(root: string): void {
   cli(root, ['spawn!', LEG, CONTRACT('the leg', ['the leg is done'])]);
   cli(root, ['spawn!', TASK, CONTRACT('do two things', ['the first thing is done', 'the second thing is done'])]);
@@ -78,13 +84,22 @@ function driveJourney(root: string): void {
   cli(root, ['spawn!', IDLE, CONTRACT('nothing submitted here', ['it is done'])]);
   git(root, ['add', '-A']);
   git(root, ['commit', '-qm', 'the fixture journey']);
-  // the LIVE exit gate on TASK: the entry gate is settled, the result gate is in hand
+  // the entry gates are settled on both tasks (each write commits itself)
   cli(root, ['submit!', TASK, 'grill']);
   cli(root, ['gate!', TASK, 'grill', 'accept', 'the contract is right']);
-  cli(root, ['submit!', TASK, 'confirm']);
-  // …and IDLE's entry gate is settled too, so its confirm gate is genuinely UNDECIDED
   cli(root, ['submit!', IDLE, 'grill']);
   cli(root, ['gate!', IDLE, 'grill', 'accept', 'the contract is right']);
+  // …and TASK's record is complete — the captured pass, the cited commit, the claims
+  const sha = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  cli(root, ['capture!', TASK, 'ann verify']);
+  cli(root, [
+    'evidence!',
+    TASK,
+    sha,
+    '--claims',
+    JSON.stringify([{ ac: 'AC-1', check: 'ann verify' }, { ac: 'AC-2', check: 'ann verify' }]),
+  ]);
+  cli(root, ['submit!', TASK, 'confirm']); // the result gate is in hand
 }
 
 interface Server { url: string; child: ChildProcess; kill(): void }
@@ -203,33 +218,38 @@ describe('e2e — the half accept’s route over real HTTP (AC-2/AC-5)', () => {
   it('AC-4 — the happy path: ONE call lands the accept AND the move, and every read shows the successor', { timeout: 30_000 }, async () => {
     const res = await transfer(server, { id: TASK, gate: 'confirm', decision: 'accept', why: 'the first half landed; the rest moves with it', transfer: { target: NEXT, scope: SCOPE } });
     expect(res.status, res.body).toBe(200);
-    const value = JSON.parse(res.body) as { value: { gate: string; decision: string; transferred?: { target: string; scope: string }; pending?: string } };
+    const value = JSON.parse(res.body) as { value: { gate: string; decision: string; transferred?: { target: string; scope: string }; completed?: boolean; pending?: string } };
     expect(value.value.gate).toBe('confirm');
     expect(value.value.decision).toBe('accept');
     expect(value.value.transferred).toEqual({ target: NEXT, scope: SCOPE });
     // the accept and the move are ONE write: the gate lands AND the scope moves in the same call
-    expect(value.value.pending).toContain('no-evidence'); // …and the close is still its own honest gesture
+    // …and the close rides it, because the record that opened this gate had to satisfy the
+    // close predicate already (12/22 AC-1) — the transfer did NOT manufacture the proof; the
+    // floor is what a live submission means now.
+    expect(value.value.completed).toBe(true);
+    expect(value.value.pending).toBeUndefined();
 
-    // THE FILE: the accept and the move, in the one order that reads as one act
+    // THE FILE: the accept and the move, in the one order that reads as one act — the transfer
+    // BEFORE the close it is credited by (12/12 AC-1)
     const log = readFileSync(EVENTS(root, TASK), 'utf8').trim().split('\n').map((l) => JSON.parse(l) as { type: string; target?: string; scope?: string });
     const tail = log.slice(-3).map((e) => e.type);
-    // NO `completed`: this fixture records no evidence, so the close is refused by name
-    // (`no-evidence`) rather than faked by the transfer — a transfer moves scope, it does not
-    // manufacture proof. The close stays the separate explicit gesture it has always been.
-    expect(tail).toEqual(['submitted', 'confirmed', 'transferred']);
-    const moved = log[log.length - 1];
+    expect(tail).toEqual(['confirmed', 'transferred', 'completed']);
+    const moved = log[log.length - 2];
     expect(moved.target).toBe(NEXT);
     expect(moved.scope).toBe(SCOPE); // VERBATIM, exactly as the human wrote it
   });
 
-  it('AC-4 — the reads after it: the moved AC is no longer an owed gap, and the successor is NAMED', { timeout: 30_000 }, async () => {
-    const brief = cli(root, ['brief', TASK]).stdout;
-    expect(brief).toContain('TRANSFERRED (moved to a successor — not claimed as met): AC-2 → 01-leg/02-b'); // the conclusion credits the move
-    // the ONE gap left is the AC nobody claimed and nobody moved — the moved one is NOT a gap
-    expect(brief).toContain('UNCLAIMED: AC-1');
-    expect(brief).not.toContain('AC-1, AC-2');
-    // the choice point carries the successor, so the decision reads as a move, not a bare status
+  it('AC-4 — the reads after it: the move is on the record, and the successor is NAMED', { timeout: 30_000 }, async () => {
+    // WHAT THE FLOOR COSTS HERE (12/22 AC-1), stated rather than hidden: a live submission now
+    // presupposes a record that could close, so the AC that moves is ALSO claimed — and a
+    // claim is the stronger record (12/12 AC-2), so the brief's TRANSFERRED line (which reads
+    // only ACs that are neither claimed nor transferred) does not fire. The MOVE is still
+    // recorded and still NAMED — by the log and by the decision list, which is where it lives.
+    expect(cli(root, ['journey', TASK]).stdout).toContain('scope moved to 01-leg/02-b'); // the event, verbatim
     expect(cli(root, ['decisions', TASK]).stdout).toContain('scope moved to 01-leg/02-b');
+    // the task is CLOSED and no AC is left owed: nothing on the card reads as a gap
+    expect(cli(root, ['brief', TASK]).stdout).toContain('every AC claimed');
+    expect(cli(root, ['brief', TASK]).stdout).not.toContain('UNCLAIMED');
     // and the journey's own integrity check is silent: the transfer is a legal record
     expect(cli(root, ['check']).stdout).not.toContain('F-AC16');
   });

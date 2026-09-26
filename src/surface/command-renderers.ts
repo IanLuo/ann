@@ -4,6 +4,11 @@ import type { TaskDetail, ResultItem, CheckView, LegGate } from '../store/store.
 import type { GoalView } from '../commands/index.js';
 import type { Brief } from '../commands/index.js';
 import { renderStatusTree, renderGateCard, renderPlan, renderDrift, renderLedger, renderGoal, deferredLines, reworkLines, execVerdict, PlanLeg, PlanAhead } from './renderers.js';
+import type { GateReviewResult } from '../flow/gate-review.js';
+
+/** What the `submit!` renderer reads of the worker's outcome — the same value the handler
+ *  returned, typed where it is rendered rather than guessed from prose. */
+type GateReviewOutcome = GateReviewResult;
 import type { DeferredTask, ReworkTask } from '../commands/index.js';
 import { MANIFEST_FILE } from '../store/docs.js';
 import type { Idea } from '../store/ideas.js';
@@ -18,13 +23,17 @@ type IdeaRow = Idea & { ageDays: number };
  *  (AC-4), and a silently shorter line would hide exactly what this record exists to show. */
 function decisionLines(d: DecisionPoint): string[] {
   const who = d.by ? ` · by ${d.by}` : '';
+  // WHO DECIDED (leg 12/22 AC-4): a machine's accept must never read like a person's. An
+  // ABSENT `decider` is a record written before the review worker existed — a human's, by
+  // construction — and it prints as such rather than as an unknown.
+  const decider = d.kind === 'gate' ? ` · decided by ${d.decider ?? 'human'}` : '';
   const how = d.how ? ` · how: ${d.how}` : '';
   const impact = d.highImpact ? ' · HIGH-IMPACT' : '';
   // A half accept (leg 12/12): the scope this decision moved, named on the decision itself
   // — the transfer records no why of its own, so the accept is where it reads.
   const successor = d.successor ? ` · scope moved to ${d.successor}` : '';
   return [
-    `  ${d.at} [${d.kind}] ${d.what}${who}${how}${impact}${successor}`,
+    `  ${d.at} [${d.kind}] ${d.what}${who}${decider}${how}${impact}${successor}`,
     `      why: ${d.why ?? '(MISSING — nothing was recorded)'}`,
   ];
 }
@@ -954,8 +963,30 @@ export const RENDERS: Record<string, Renderer> = {
   },
   'append!': (_value, env) => `appended → ${env.args[1]}\n`,
   'submit!': (value, env) => {
-    const v = (value as { ok: true; value: { gate: string; confirmedSha?: string } }).value;
-    return `submitted ${v.gate} → ${env.args[1]}${v.confirmedSha ? ` (confirmedSha ${v.confirmedSha})` : ''}\n`;
+    const v = (value as { ok: true; value: { gate: string; confirmedSha?: string; review?: GateReviewOutcome } }).value;
+    const lines = [`submitted ${v.gate} → ${env.args[1]}${v.confirmedSha ? ` (confirmedSha ${v.confirmedSha})` : ''}`];
+    // THE EXIT GATE'S WORKER (leg 12/22), named in every one of its four outcomes — a
+    // decision it made, a rework it routed, a question it declined to settle, or an
+    // ABSENCE. The absence line is the load-bearing one: without it an outage would be
+    // indistinguishable from the human gate this used to be (AC-6).
+    const r = v.review;
+    if (r) {
+      const gate = `ann gate! ${env.args[1]} confirm`;
+      if (!r.ok) {
+        lines.push(`  NO REVIEW — ${r.absent}`);
+        lines.push(`  the submission stands and the gate is YOURS: ${gate} accept|reject '<why>'`);
+      } else if (r.verdict === 'accept') {
+        lines.push(`  review ✓ accepted (${r.findings} finding(s)): ${r.why}`);
+        lines.push('  (a confirm accept auto-closes when the conclusion evidence is present; otherwise the task reads \'accepted\' and `complete!` is owed)');
+      } else if (r.verdict === 'rework') {
+        lines.push(`  review ✗ rework (${r.findings} finding(s)) — the rejection routes the re-execution:`);
+        lines.push(`    ${r.feedback}`);
+      } else {
+        lines.push(`  review … YOURS (${r.findings} finding(s)) — ${r.reason}`);
+        lines.push(`  the submission stands, no rejection is burned: ${gate} accept|reject '<why>'`);
+      }
+    }
+    return block(lines);
   },
   'gate!': (value, env) => {
     const v = (value as { ok: true; value: { gate: string; decision: string; escalated: boolean; completed?: boolean; pending?: string } }).value;

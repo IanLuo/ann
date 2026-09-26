@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store } from '../../store/store.js';
 import { Commands } from '../../commands/index.js';
+import type { CaptureEnv } from '../../commands/capture.js';
 import { Frame, FrameResult } from '../frame.js';
 import { ChainEntry, StepLookup } from '../chain.js';
 import { Abilities, Intent, ResearchFinding, Step, StepContext, StepOutput } from '../types.js';
@@ -13,9 +14,16 @@ import { logPath, newTrace, readOpLog } from '../../abilities/obs/log.js';
  * THE FRAME (core-design §4) — the RESUMABLE COORDINATOR. These tests pin the four
  * resume tail states, frame-write idempotence, the verify-fail cycle (with its empty-
  * chain inertness), and the TWO-PHASE conclusion (F-AC18): a chain that STAGES A DOC
- * ends run 1 in `blocked-waiting` once its confirm gate is decided — `completed` is the
- * RE-RUN that follows the operator's `evidence.commits[]` (commit is where deferred
- * propose-spawn children record). An empty chain concludes on its own run as before.
+ * ends run 1 in `blocked-waiting` — `completed` is the RE-RUN that follows the operator's
+ * commit, its captured check and its claims (commit is where deferred propose-spawn
+ * children record).
+ *
+ * WHY RUN 1 CANNOT EVEN OPEN THE EXIT GATE (leg 12/22 AC-1): the confirm SUBMISSION reads
+ * the CLOSE PREDICATE — commit evidence · a captured pass bound to a cited commit · every
+ * AC claimed — so a submission whose record could not close is REFUSED, and the frame does
+ * not make one. Run 1 names what is owed and waits; the release above completes the record;
+ * the re-run submits, decides and closes. An empty chain concludes on its own run as before,
+ * once the same record exists.
  */
 
 let root: string;
@@ -30,12 +38,24 @@ const node = (id: string, contract: unknown, events: Array<Record<string, unknow
 };
 const ev = (type: string, extra: Record<string, unknown> = {}) => ({ at: '2026-08-27', type, ...extra });
 
+/** The sha the STUBBED capture runs against and the conclusion cites — one constant, so the
+ *  captured pass is BOUND to the cited commit (F-AC18's predicate compares the two). */
+const CLOSE_SHA = 'abc1234';
+
+/** The engine's ONE exec seam, stubbed (leg 12/03): the allowlist, the guards, the write and
+ *  the binding are the engine's — only the process is not really run. */
+const captureEnv = (): CaptureEnv => ({
+  head: () => CLOSE_SHA,
+  dirty: () => [],
+  run: () => ({ exitCode: 0, stdout: 'Tests  3 passed (3)\n', stderr: '' }),
+});
+
 function setup(events = [ev('created')], contract: unknown = CONTRACT): Commands {
   root = mkdtempSync(join(tmpdir(), 'ann-frame-'));
   mkdirSync(join(root, '.ann', 'journey', 'legs'), { recursive: true });
   node('01-leg', {});
   node(TASK, contract, events);
-  return new Commands(new Store(root), 'test');
+  return new Commands(new Store(root), 'test', captureEnv());
 }
 afterEach(() => rmSync(root, { recursive: true, force: true }));
 
@@ -90,12 +110,25 @@ const run = (c: Commands, steps: Step[], interact = new ScriptedInteract()): Pro
 /** The git-home file a staged doc lives at — <store root>/docs/<name>.md. */
 const docFile = (name: string) => join(root, 'docs', `${name}.md`);
 
-/** The TWO-PHASE release (F-AC18): append the operator's commit evidence, then re-run.
- *  Both gates were decided on run 1, so the re-run asks the human nothing (the
- *  decided-gate path) and concludes: commit runs → `completed` is appended. */
-async function conclude(c: Commands, steps: Step[], sha = 'abc1234'): Promise<FrameResult> {
-  const a = c.evidence(TASK, [{ sha }], { note: 'committed the staged doc (test)' });
+/** The TWO-PHASE release (F-AC18): the operator commits, CAPTURES the verification, records
+ *  the conclusion — and only then re-runs.
+ *
+ *  WHY THE CAPTURE AND THE CLAIM ARE HERE (leg 12/22 AC-1): the confirm submission reads
+ *  the CLOSE PREDICATE, so a conclusion the record cannot close is a submission the engine
+ *  refuses. Run 1 therefore ends at `blocked-waiting` with the record INCOMPLETE (a staged
+ *  doc is not a conclusion), and this is the gesture that completes it: the doc is committed,
+ *  the check is CAPTURED against that commit, and every AC is CLAIMED. The re-run then opens
+ *  the exit gate for real — the submission, the review and the close happen on the run that
+ *  has something to review. */
+function release(c: Commands, sha = CLOSE_SHA): void {
+  const cap = c.capture(TASK, 'npm test');
+  if (!cap.ok) throw new Error(`capture! refused: ${cap.error.code}: ${cap.error.blocker}`);
+  const a = c.evidence(TASK, [{ sha }], { claims: [{ ac: 'AC-1', check: 'npm test' }], note: 'committed the staged doc (test)' });
   if (!a.ok) throw new Error(`evidence! refused: ${a.error.code}: ${a.error.blocker}`);
+}
+
+async function conclude(c: Commands, steps: Step[], sha = CLOSE_SHA): Promise<FrameResult> {
+  release(c, sha);
   return run(c, steps);
 }
 
@@ -118,22 +151,26 @@ describe('the frame runs the fixed frame end to end', () => {
     const human = new ScriptedInteract(['accept', 'accept']);
     const r1 = await run(c, [envision], human);
 
-    // RUN 1: the doc is STAGED (git content on disk) and both gates are DECIDED, but with
-    // no commit evidence the frame WAITS — concluding is the operator's `git commit`.
+    // RUN 1: the doc is STAGED (git content on disk) and the ENTRY gate is decided, but the
+    // EXIT gate is never opened — the record cannot close yet, so the frame names what is
+    // owed and WAITS. Concluding is the operator's `git commit` plus the captured check.
     expect(r1.stop).toBe('blocked-waiting');
     expect(c.status(TASK)).toBe('blocked');
     expect(readFileSync(docFile('envision'), 'utf8')).toContain('# envision'); // the working file existed BEFORE the event
     expect(c.ids()).not.toContain('01-leg/02-a'); // the spawn is DEFERRED — nothing records before commit
+    expect(c.gateState(TASK, 'confirm')).toBe('none'); // NO SUBMISSION: the floor refused to even open it
 
-    // the operator commits the docs/ change and records structured evidence — the release.
+    // the operator commits the docs/ change and records the conclusion — the release.
     // (store.spawn writes node.json into an EXISTING node folder — the caller pre-creates
     // the child's folder; it is not a node until node.json lands — same idiom as intents.test.)
     mkdirSync(join(root, '.ann', 'journey', 'legs', '01-leg', '02-a'), { recursive: true });
     const r2 = await conclude(c, [envision]);
     expect(r2.stop).toBe('completed');
     expect(c.status(TASK)).toBe('done');
+    // the ORDER is the design's: the wait names the gap, the record lands, and only THEN is
+    // the exit gate opened, decided and closed.
     const types = c.events(TASK).map((e) => e.type);
-    expect(types).toEqual(['created', 'submitted', 'confirmed', 'activated', 'submitted', 'confirmed', 'waiting', 'evidence', 'completed']);
+    expect(types).toEqual(['created', 'submitted', 'confirmed', 'activated', 'waiting', 'evidence', 'evidence', 'submitted', 'confirmed', 'completed']);
     expect(r2.committed?.spawned).toEqual(['01-leg/02-a']); // the deferred spawn recorded HERE, at commit
     expect(c.ids()).toContain('01-leg/02-a');
     // look-back is a DERIVED READ at L1 (§1) — the frame reads it, never assumes it
@@ -208,7 +245,10 @@ describe('the four resume tail states (core-design §1)', () => {
     const c = setup();
     chainFile([]);
     expect((await run(c, [], new ScriptedInteract(['accept']))).stop).toBe('blocked-waiting');
-    c.evidence(TASK, [{ sha: 'abc1234' }], { note: 'the runner committed' });
+    // the runner's release: the commit, the CAPTURED check against it, and the claims —
+    // the close predicate (12/22 AC-1), which is what the emptied wait is discharged BY.
+    c.capture(TASK, 'npm test');
+    c.evidence(TASK, [{ sha: CLOSE_SHA }], { claims: [{ ac: 'AC-1', check: 'npm test' }], note: 'the runner committed' });
     const r = await run(c, [], new ScriptedInteract(['accept']));
     expect(r.stop).toBe('completed');
     expect(c.status(TASK)).toBe('done');
@@ -259,6 +299,13 @@ describe('the gate source is the CHAIN (core-design §6)', () => {
     const human = new ScriptedInteract(['accept', 'accept', 'the ACs are met and the doc is staged']);
     const r1 = await run(c, [mkStep('envision')], human);
     expect(r1.stop).toBe('blocked-waiting');
+    // NOT ASKED YET, and that is the floor (12/22 AC-1): a rationale for a gate that cannot
+    // be opened would be a form filled in for a submission the engine would refuse.
+    expect(human.asked.some((q) => q.includes("why is 'confirm' accepted"))).toBe(false);
+    // the operator's release — commit · the CAPTURED check · the claims — then the re-run
+    release(c);
+    const r2 = await run(c, [mkStep('envision')], human);
+    expect(r2.stop).toBe('completed');
     const asked = human.asked.find((q) => q.includes("why is 'confirm' accepted"));
     expect(asked).toBeDefined();
     // the answer is ON the record — the whole point: the why lands on the DECISION
@@ -283,6 +330,10 @@ describe('the gate source is the CHAIN (core-design §6)', () => {
     ]);
     const reviewer = mkStep('review', { decisions: ['ok', 'rework'], out: () => ({ ok: true, artifact: 'r', verdict: { decision: 'ok' } }) });
     const human = new ScriptedInteract(['accept']);
+    // run 1 stops at the floor, so the release comes first — the routed accept is refused
+    // by the WRITE that follows it, not by the frame, and the frame still invents nothing.
+    expect((await run(c, [mkStep('envision'), reviewer], human)).stop).toBe('blocked-waiting');
+    release(c);
     const r = await run(c, [mkStep('envision'), reviewer], human);
     expect(r.stop).toBe('failed');
     expect(r.problems.join('\n')).toContain('why-required');

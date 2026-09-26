@@ -256,6 +256,15 @@ describe('submit! + gate! — the two-write gate sequence (core-design §4)', ()
   it('submit!(confirm) records the gate② content binding, and the sha must be a sha', () => {
     const c = cmds();
     valueOf(c.gate('01-leg/01-a', 'grill', 'accept'));
+    // THE FLOOR COMES FIRST (12/22 AC-1): with no evidence the CONFIRM submission cannot
+    // close, so it is refused outright — nothing written (not even a malformed sha reaches
+    // the store's own guard), and no rejection burned on a submission the engine refused.
+    expect(errorOf(c.submit('01-leg/01-a', 'confirm', { confirmedSha: 'not-a-sha' })).code).toBe('submission-not-ready');
+    expect(c.events('01-leg/01-a').some((e) => e.type === 'submitted' && e.gate === 'confirm')).toBe(false);
+    expect(c.events('01-leg/01-a').some((e) => e.type === 'rejected')).toBe(false);
+    // …now a conclusion the predicate holds — then the sha's own shape is the store's to check
+    valueOf(c.capture('01-leg/01-a', 'npm test'));
+    valueOf(c.evidence('01-leg/01-a', [{ sha: realSha() }], { claims: [{ ac: 'AC-1', check: 'npm test' }] }));
     expect(errorOf(c.submit('01-leg/01-a', 'confirm', { confirmedSha: 'not-a-sha' })).code).toBe('store-refused');
     valueOf(c.submit('01-leg/01-a', 'confirm', { confirmedSha: 'abc1234' }));
     const submitted = c.events('01-leg/01-a').filter((e) => e.type === 'submitted' && e.gate === 'confirm');
@@ -360,7 +369,10 @@ describe('submit! + gate! — the two-write gate sequence (core-design §4)', ()
   it('a REJECT never completes — even with the conclusion evidence already present', () => {
     writeNode('01-leg/03-reject', CONTRACT, [ev('created'), ev('submitted', { gate: 'grill' }), ev('confirmed', { gate: 'grill' })]);
     const c = cmds();
-    valueOf(c.evidence('01-leg/03-reject', [{ sha: realSha() }]));
+    // a conclusion that HOLDS (12/22 AC-1) — otherwise the submission below never lands and
+    // this would be testing the floor instead of the reject
+    valueOf(c.capture('01-leg/03-reject', 'npm test'));
+    valueOf(c.evidence('01-leg/03-reject', [{ sha: realSha() }], { claims: [{ ac: 'AC-1', check: 'npm test' }] }));
     valueOf(c.submit('01-leg/03-reject', 'confirm'));
     const out = valueOf(c.gate('01-leg/03-reject', 'confirm', 'reject', 'not this time'));
     expect(out.completed).toBeUndefined();
@@ -742,10 +754,20 @@ describe('evidence! + complete! — the close gesture commands (leg 08 task 02)'
     expect(c.status('01-leg/01-a')).toBe('done');
   });
 
-  it('the honest EXCEPTION stands: a confirm accept WITHOUT conclusion evidence leaves `accepted`, and names the gesture owed', () => {
+  it('the honest EXCEPTION stands: a confirm accept WITHOUT a closeable conclusion leaves `accepted`, and names the gesture owed', () => {
     writeNode('01-leg/01-a', CONTRACT, [ev('created'), ev('submitted', { gate: 'grill' }), ev('confirmed', { gate: 'grill' })]);
     const c = cmds();
-    valueOf(c.submit('01-leg/01-a', 'confirm'));
+    // THE FLOOR AT THE SUBMISSION (12/22 AC-1): the confirm submission is REFUSED — nothing
+    // written, no rejection burned. `submit!` will not stage a question whose answer could
+    // not close the record.
+    const refused = errorOf(c.submit('01-leg/01-a', 'confirm'));
+    expect(refused.code).toBe('submission-not-ready');
+    expect(refused.blocker).toContain('no-evidence');
+    expect(c.events('01-leg/01-a').some((e) => e.type === 'submitted' && e.gate === 'confirm')).toBe(false);
+    expect(c.events('01-leg/01-a').some((e) => e.type === 'rejected')).toBe(false);
+    // …but `gate!`'s own implicit submission does NOT pre-read the floor (the ONE path the
+    // floor does not own), so the accept can still land on a conclusion that cannot close.
+    // THAT is the honest intermediate state, and it is still reachable and still named.
     const out = valueOf(c.gate('01-leg/01-a', 'confirm', 'accept', 'the work is done, the evidence still owed'));
     expect(out.completed).toBeUndefined();
     expect(String(out.pending)).toContain('complete! 01-leg/01-a');
@@ -1663,6 +1685,11 @@ describe('the HALF ACCEPT — one gesture, a bounded successor (leg 12/12)', () 
     // The strongest form of "nothing else moves": run the SAME task to the same end twice —
     // once by half accept, once by a plain confirm accept — and compare the WHOLE derived
     // surface. Anything the transfer moved beyond its own event would show up here.
+    //
+    // Both sides CLOSE, and that is the precondition of the comparison, not a detail of it:
+    // the ordinary close this is measured against is one whose predicate HOLDS (12/22 AC-1)
+    // — the same three criteria, all claimed by the same captured pass, no transfer needed.
+    // The half accept reaches the same DONE terminal by MOVING two of them instead.
     const reads = (kind: 'half' | 'plain') => {
       makeStore();
       writeNode('01-leg', C3);
@@ -1670,9 +1697,21 @@ describe('the HALF ACCEPT — one gesture, a bounded successor (leg 12/12)', () 
       writeNode(NEXT, C3, [ev('created')]);
       const c = cmds(stubCapture());
       valueOf(c.capture(ID, 'npm test'));
-      valueOf(c.evidence(ID, [{ sha: realSha() }], { claims: [{ ac: 'AC-1', check: 'npm test' }] }));
-      if (kind === 'half') valueOf(half(c));
-      else valueOf(c.gate(ID, 'confirm', 'accept', 'the first half landed; only AC-1 is claimed'));
+      if (kind === 'half') {
+        valueOf(c.evidence(ID, [{ sha: realSha() }], { claims: [{ ac: 'AC-1', check: 'npm test' }] }));
+        valueOf(half(c));
+      } else {
+        valueOf(
+          c.evidence(ID, [{ sha: realSha() }], {
+            claims: [
+              { ac: 'AC-1', check: 'npm test' },
+              { ac: 'AC-2', check: 'npm test' },
+              { ac: 'AC-3', check: 'npm test' },
+            ],
+          }),
+        );
+        valueOf(c.gate(ID, 'confirm', 'accept', 'the whole thing landed; every criterion is claimed'));
+      }
       return {
         status: c.status(ID),
         leg: c.status('01-leg'),

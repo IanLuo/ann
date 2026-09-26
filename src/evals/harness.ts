@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { Store } from '../store/store.js';
 import { getVOCAB } from '../store/vocab.js';
 import { Commands } from '../commands/index.js';
+import type { CaptureEnv } from '../commands/capture.js';
 import { Frame } from '../flow/frame.js';
 import { workflowState } from '../store/workflow.js';
 import { Step, StepContext, StepOutput, Abilities, ResearchFinding, Intent, INTENT_KINDS } from '../flow/types.js';
@@ -191,12 +192,23 @@ function stagedDocsUnder(root: string): Array<{ name: string; path: string; nonE
     .map((f) => ({ name: f.replace(/\.md$/, ''), path: `docs/${f}`, nonEmpty: readFileSync(join(docsDir, f), 'utf8').trim().length > 0 }));
 }
 
+/** The operator's CAPTURE gesture, stubbed at the ONE exec seam (leg 12/03): the eval's
+ *  simulated operator runs the verification the CLI would run, but the engine must not
+ *  spawn a real suite inside a temp fixture (there is nothing to run there). The sha is the
+ *  one the conclusion CITES, so the captured pass is BOUND to the cited commit — which is
+ *  what the close predicate asks for. */
+const captureEnv = (): CaptureEnv => ({
+  head: () => headSha(),
+  dirty: () => [],
+  run: () => ({ exitCode: 0, stdout: 'Tests  3 passed (3)\n', stderr: '' }),
+});
+
 /** Run one flow fixture through the FRAME and decide first-pass honestly. */
 async function runFlowFixture(fixture: FlowFixture): Promise<{ firstPass: boolean; verified: boolean; stop: string; detail: string }> {
   const root = tempJourney();
   try {
     flowConfig(root, fixture.chain);
-    const commands = new Commands(new Store(root), 'test');
+    const commands = new Commands(new Store(root), 'test', captureEnv());
     const steps = fixture.steps.map(toStep);
     const registry: StepLookup = { has: (id) => steps.some((s) => s.id === id), get: (id) => steps.find((s) => s.id === id)! };
     const interact = new ScriptedInteract(fixture.interactAnswers);
@@ -205,14 +217,25 @@ async function runFlowFixture(fixture: FlowFixture): Promise<{ firstPass: boolea
     let r = await frame.run(taskId);
 
     // TWO-PHASE CONCLUSION (F-AC18): a chain that STAGED a doc stops `blocked-waiting`
-    // after its confirm gate — concluding is the OPERATOR's move (`git commit` the
-    // docs/ change + record evidence.commits[]). Simulate that commit, then re-run so
-    // the frame concludes `completed`. A chain that staged NO doc (the empty chain) is
-    // left waiting — the frame never fabricates the runner's work for a fake pass.
+    // once its exit gate is decided — concluding is the OPERATOR's move. Simulate the
+    // operator's gestures, then re-run so the frame concludes `completed`. A chain that
+    // staged NO doc (the empty chain) is left waiting — the frame never fabricates the
+    // runner's work for a fake pass.
+    //
+    // THE GESTURES ARE THE WHOLE CLOSE PREDICATE (12/22 AC-1), and the frame now reads it
+    // at the SUBMISSION: with any part missing the record could not close, so the frame
+    // would never open the exit gate at all and the fixture would wait forever. The check
+    // is CAPTURED against the commit, the commit is CITED, and the contract's AC is CLAIMED.
     const staged = stagedDocsUnder(root);
     if (r.stop === 'blocked-waiting' && staged.some((d) => d.nonEmpty)) {
-      // the operator's commit gesture — the same command a human runs (leg 08 task 02)
-      const commit = commands.evidence(taskId, [{ sha: headSha(), note: 'eval commit' }], { note: 'eval: operator committed the staged doc' });
+      const cap = commands.capture(taskId, 'npm test');
+      if (!cap.ok) {
+        return { firstPass: false, verified: false, stop: r.stop, detail: `operator-capture refused: ${cap.error.code}: ${cap.error.blocker}` };
+      }
+      const commit = commands.evidence(taskId, [{ sha: headSha(), note: 'eval commit' }], {
+        claims: [{ ac: 'AC-1', check: 'npm test' }],
+        note: 'eval: operator committed the staged doc',
+      });
       if (!commit.ok) {
         return { firstPass: false, verified: false, stop: r.stop, detail: `operator-commit refused: ${commit.error.code}: ${commit.error.blocker}` };
       }

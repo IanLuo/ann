@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store } from '../../../store/store.js';
 import { Commands } from '../../../commands/index.js';
+import type { CaptureEnv } from '../../../commands/capture.js';
 import { Frame } from '../../frame.js';
 import { Abilities, InteractAbility, ResearchFinding } from '../../types.js';
 import { buildStepRegistry } from '../index.js';
@@ -58,8 +59,17 @@ function setup(): Commands {
   // the conditional chain needs flow.conditionals enabled (project registry)
   mkdirSync(join(root, '.ann', 'rules', 'config'), { recursive: true });
   writeFileSync(join(root, '.ann', 'rules', 'config', 'default.json'), JSON.stringify({ flow: { conditionals: true } }));
-  return new Commands(new Store(root), 'test');
+  return new Commands(new Store(root), 'test', captureEnv());
 }
+
+/** The sha the STUBBED capture runs against and the conclusion cites — one constant, so the
+ *  captured pass is BOUND to the cited commit (F-AC18's predicate compares the two). */
+const CLOSE_SHA = 'abc1234';
+const captureEnv = (): CaptureEnv => ({
+  head: () => CLOSE_SHA,
+  dirty: () => [],
+  run: () => ({ exitCode: 0, stdout: 'Tests  3 passed (3)\n', stderr: '' }),
+});
 afterEach(() => rmSync(root, { recursive: true, force: true }));
 
 /** A fake human. The frame's OWN gate question is answered `accept`; the validation
@@ -115,11 +125,19 @@ const runFrame = (c: Commands, human: Human) => {
 const docPath = (name: string) => join(root, 'docs', `${name}.md`);
 const doc = (name: string) => readFileSync(docPath(name), 'utf8');
 
-/** The OPERATOR's half of the two-phase conclusion: the staged doc is `git commit`ed and
- *  the commit is recorded as structured evidence (evidence.commits[]). The sha is a
- *  placeholder — only store.check() resolves shas in git, and these tests never call it. */
+/** The OPERATOR's half of the two-phase conclusion — and it is the WHOLE close predicate
+ *  (12/22 AC-1): the staged doc is committed, the check is CAPTURED against that commit, and
+ *  the contract's AC is CLAIMED. A conclusion the record could not close is a confirm
+ *  submission the engine refuses, so this is what the re-run's conclusion is built on. The
+ *  sha is a placeholder — only store.check() resolves shas in git, and these tests never
+ *  call it. */
 function recordCommitEvidence(c: Commands): void {
-  const r = c.evidence(TASK, [{ sha: 'abc1234', note: 'spec staged' }], { note: 'the staged doc is committed' });
+  const cap = c.capture(TASK, 'npm test');
+  expect(cap.ok).toBe(true);
+  const r = c.evidence(TASK, [{ sha: CLOSE_SHA, note: 'spec staged' }], {
+    claims: [{ ac: 'AC-1', check: 'npm test' }],
+    note: 'the staged doc is committed',
+  });
   expect(r.ok).toBe(true);
 }
 
@@ -227,14 +245,24 @@ describe('replay — the transcript, not the feedback, decides', () => {
     // release the wait — the operator commits the staged doc (structured commit evidence)
     recordCommitEvidence(c);
 
-    // re-run the SAME task: every gate is decided, so the frame replays the steps and
-    // every recordable call is served from the transcript
+    // the SECOND run is where the exit gate is opened at all (12/22 AC-1: run 1 could not
+    // submit), so its decision is a genuinely NEW one — the review worker is stubbed absent
+    // here and the gate falls to the human, which is the degradation AC-6 names.
     const second = new Human('solid');
-    const { r, prompts } = await runFrame(c, second);
+    const { r: r2 } = await runFrame(c, second);
+    expect(r2.stop).toBe('completed');
+    expect(r2.notices.join('\n')).toContain('NO REVIEW'); // the absence is NAMED, not silent
+    expect(second.decided.length).toBeGreaterThan(0); // the exit gate's decision is new
+
+    // the THIRD run: every gate is decided, so the frame replays the steps and every
+    // recordable call is served from the transcript
+    const third = new Human('solid');
+    const { r, prompts } = await runFrame(c, third);
     expect(r.problems).toEqual([]);
+    expect(r.notices).toEqual([]); // the decided gate is skipped whole — the worker is not re-run
     expect(r.stop).toBe('completed');
-    expect(second.asked).toEqual([]); // no re-interview
-    expect(second.decided).toEqual([]); // no re-decision
+    expect(third.asked).toEqual([]); // no re-interview
+    expect(third.decided).toEqual([]); // no re-decision
     expect(prompts).toEqual([]); // no re-completion — the llm was replayed too
     expect(askedFirst.length + decidedFirst.length).toBeGreaterThan(0);
   });

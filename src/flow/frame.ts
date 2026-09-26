@@ -12,6 +12,8 @@ import { CommitRecord, IntentTranslator } from './intents.js';
 import { Transcript } from './transcript.js';
 import { reviewRunner, RunnerReview } from './runner-review.js';
 import { Abilities, ReadView, Step, StepContext, StepOutput, StepVerdict } from './types.js';
+import { runGateReview } from './gate-review.js';
+import type { GateActor } from '../commands/index.js';
 import { gateLifecycle, gateView, undischargedWait } from '../store/workflow.js';
 
 /**
@@ -44,6 +46,10 @@ function stopOutcome(stop: FrameStop): string {
   return 'blocked';
 }
 
+/** A gate decision the frame obtained, and WHO obtained it (12/22 AC-4): the routing map
+ *  and `present` leave `actor` unset (a human's), the review worker stamps itself. */
+type FrameDecision = { decision: 'accept' | 'reject'; feedback?: string; actor?: GateActor };
+
 export type FrameStop =
   | 'not-ready'
   | 'blocked-at-gate'
@@ -69,6 +75,13 @@ export interface FrameResult {
   /** The phase the frame stopped in — never assumed, always named. */
   phase: string;
   problems: string[];
+  /** WHAT THE RUN WANTS SAID WITHOUT SAYING `failed` (12/22 AC-6) — the review worker's
+   *  narration: its ABSENCE (no provider · a refusal · an unparseable reply) and the
+   *  `uncertain` hand-off that leaves the gate to the human. Both leave a run that may
+   *  COMPLETE perfectly well, so neither is a problem; both are facts the operator must be
+   *  able to see, so neither is silent. The card prints them (`interact.present`) and they
+   *  ride here so a headless reader does not have to scroll. */
+  notices: string[];
   chain: ChainEntry[];
   outcomes: StepOutcome[];
   verifyCycles: number;
@@ -128,7 +141,7 @@ export class Frame {
 
   async run(taskId: string): Promise<FrameResult> {
     this.gateResults = new Map();
-    const base: FrameResult = { taskId, stop: 'not-ready', phase: 'materialize', problems: [], chain: [], outcomes: [], verifyCycles: 0 };
+    const base: FrameResult = { taskId, stop: 'not-ready', phase: 'materialize', problems: [], notices: [], chain: [], outcomes: [], verifyCycles: 0 };
     const startedAt = Date.now();
     // THE PHASE SPINE (AC-2): the FRAME opens its own span (`L2` · `flow/frame`) inside
     // whatever trace called it, every transition closes the open phase (with its outcome +
@@ -312,8 +325,40 @@ export class Frame {
       }
       if (state === 'submitted') return { ...result, stop: 'blocked-at-gate' }; // tail state 2
 
+      // THE FLOOR BEFORE ANY CONFIRM SUBMISSION (12/22 AC-1). The exit gate's floor is ONE
+      // predicate and `submit!` reads it, so the frame does not fight it — it takes the
+      // route the missing commit evidence already takes: `waiting`, written once, NAMING
+      // what is still owed, and stopped. Writing a submission the floor refuses would burn
+      // the task to `failed` over a record that is merely not finished yet, and the
+      // operator's move is exactly the one the note names: finish the record (commit · the
+      // captured check · the claims), then re-run — the submission is opened on the run that
+      // has something to review, and the exit gate's decider (the review worker, or the
+      // human it degrades to) sees it then.
+      //
+      // NOT A PROBLEM, and that is deliberate: `problems` is the FAILURE channel, and an
+      // unfinished record is not a failure. The `waiting` note is the honest channel for it
+      // — the same one the two-phase conclusion has always used — and a run that merely
+      // waits must not read as a run that broke.
+      //
+      // It sits AFTER the tail-state reads above on purpose: an undecided submission still
+      // blocks and waits for its decision (tail state 2), and an accepted gate still skips
+      // its write (tail state 1) — the floor decides only whether a NEW submission may be
+      // made.
+      if (gate === 'confirm') {
+        const blocker = this.commands.closeBlocker(taskId);
+        if (blocker) {
+          const reason = `no confirm submission yet — the close predicate is not satisfied: ${blocker.code} — ${blocker.blocker}`;
+          if (!undischargedWait(this.commands.events(taskId))) {
+            const w = this.commands.append(taskId, { at: today(), type: 'waiting', note: reason.slice(0, 500) } as unknown as JourneyEvent);
+            if (!w.ok) return this.stopFailed(taskId, result, w.error);
+          }
+          return { ...result, stop: 'blocked-waiting' };
+        }
+      }
+
       // tail state 3 (`rejected`) and the first pass both land here: obtain the decision
-      let decision: { decision: 'accept' | 'reject'; feedback?: string };
+      let decision: FrameDecision;
+      let submitted = false;
       if (source && translator) {
         const outcome = await this.runStep(taskId, source, current, transcript, translator, this.latestRejection(taskId, gate));
         result.outcomes.push(outcome);
@@ -322,13 +367,27 @@ export class Frame {
         const routed = this.route(source, outcome.result?.ok ? outcome.result.verdict : undefined);
         if ('code' in routed) return this.stopFailed(taskId, result, routed);
         decision = routed;
+      } else if (gate === 'confirm') {
+        // THE EXIT GATE'S WORKER (12/22), and the ORDER is the design's: the SUBMISSION is
+        // written FIRST — the floor refuses one that could never close, so the worker is
+        // never spent on it — and the review is the door to the gate rather than a step
+        // beside it. Three outcomes come back: an ACCEPT, a REWORK (the same `rejected`
+        // event a human's rejection is), or the HUMAN (`undefined`: an open question the
+        // worker will not settle, the reject bound where it is OUT, or its own ABSENCE,
+        // which is named rather than silent).
+        const s = this.commands.submit(taskId, gate, { ...this.runStamp() });
+        if (!s.ok && s.error.code !== 'already-submitted') return this.stopFailed(taskId, result, s.error);
+        submitted = true;
+        decision = (await this.reviewGate(taskId, result)) ?? (await this.present(taskId, gate, current));
       } else {
         decision = await this.present(taskId, gate, current);
       }
 
-      const s = this.commands.submit(taskId, gate);
-      if (!s.ok && s.error.code !== 'already-submitted') return this.stopFailed(taskId, result, s.error);
-      const g = this.commands.gate(taskId, gate, decision.decision, decision.feedback ?? '');
+      if (!submitted) {
+        const s = this.commands.submit(taskId, gate, { ...this.runStamp() });
+        if (!s.ok && s.error.code !== 'already-submitted') return this.stopFailed(taskId, result, s.error);
+      }
+      const g = this.commands.gate(taskId, gate, decision.decision, decision.feedback ?? '', decision.actor ? { actor: decision.actor } : {});
       if (!g.ok) {
         // the reject bound is a CONSTANT owned by gate! — L2 reads only {escalated}
         if (g.error.code === 'reject-bound') return { ...result, stop: 'escalated', problems: [g.error.blocker] };
@@ -341,6 +400,54 @@ export class Frame {
       // rework rung runs and the gate IS re-obtained, bounded by gate!'s constant
       current = assemblePacket(this.commands.store, taskId);
     }
+  }
+
+  /** The run this frame is executing in, for the ONE thing that needs it: the provenance
+   *  the gate record carries (12/22 AC-4/AC-6), so an accept by the run that implemented
+   *  the task is checkable. Absent when the frame runs without an op-log. */
+  private runStamp(): { run?: string } {
+    const run = this.log?.runId;
+    return run ? { run } : {};
+  }
+
+  /**
+   * THE EXIT GATE'S WORKER (leg 12/22), as a decision or as `undefined`.
+   *
+   * `undefined` means THE HUMAN DECIDES, and it covers three different facts that must not
+   * be conflated in the record — but all three leave the submission standing and the card
+   * exactly as it reads today:
+   *   · the rule declined (an open `uncertain` with no defect): no rejection is burned;
+   *   · the reject bound is reached: the worker is OUT and a human decides for real;
+   *   · the worker is ABSENT (no provider, a refusal, an unparseable reply): NAMED on the
+   *     console and on the frame's result, so an outage can never quietly look like the
+   *     human gate this used to be (AC-6).
+   *
+   * A decision it DOES make is stamped as the worker's, with the reviewing run, and goes
+   * through `commands.gate` — the same writer a human's decision goes through, so there is
+   * no second write path and no new event kind (AC-3).
+   */
+  private async reviewGate(taskId: string, result: FrameResult): Promise<FrameDecision | undefined> {
+    const run = this.runStamp();
+    const r = await runGateReview(this.commands, this.abilities, taskId, run);
+    if (!r.ok) {
+      const note = `EXIT GATE ${taskId}: NO REVIEW — ${r.absent}. The submission stands and the gate is the human's: decide it with \`ann gate! ${taskId} confirm accept|reject '<why>'\`.`;
+      result.notices.push(note);
+      await this.abilities.interact.present(note);
+      return undefined;
+    }
+    if (r.verdict === 'human') {
+      const note = `EXIT GATE ${taskId}: the review left the decision to you (${r.findings} finding(s)) — ${r.reason}`;
+      result.notices.push(note);
+      await this.abilities.interact.present(note);
+      return undefined;
+    }
+    const actor = { kind: 'worker' as const, ...(r.run ? { run: r.run } : {}) };
+    if (r.verdict === 'accept') {
+      await this.abilities.interact.present(`EXIT GATE ${taskId}: review accepted (${r.findings} finding(s)) — ${r.why}`);
+      return { decision: 'accept', feedback: r.why, actor };
+    }
+    await this.abilities.interact.present(`EXIT GATE ${taskId}: review REWORK (${r.findings} finding(s)) — ${r.feedback}`);
+    return { decision: 'reject', feedback: r.feedback, actor };
   }
 
   /** The frame's own gate source — present, then collect a decision (§4). */
@@ -567,11 +674,19 @@ export class Frame {
     }
 
     /* ── the TWO-PHASE conclusion (F-AC18): a task completes only on commit evidence ─ */
-    if (!this.commitEvidence(taskId).length) {
-      // A chain that STAGED a doc has real bytes for the confirm gate to review, but
-      // concluding is the OPERATOR's move: `git commit` the docs/ change + record
-      // `evidence.commits[]`. Until then — `waiting` (tail state 4, written once); the
-      // release is the evidence, and a re-run then concludes. Docs are git content.
+    // A chain that STAGED a doc has real bytes for the confirm gate to review, but
+    // concluding is the OPERATOR's move: `git commit` the docs/ change, CAPTURE the check
+    // against it, claim every AC — and the re-run then concludes. Until then — `waiting`
+    // (tail state 4, written once). Docs are git content.
+    //
+    // THE PREDICATE IS THE FLOOR'S (12/22 AC-1), not a second reading of commit evidence:
+    // this is the last place a task can close, and it reads the SAME predicate `complete!`,
+    // `submit!` and the accept's auto-close read. A narrower test here would let an
+    // `accepted` gate on a record `complete!` refuses be closed by the frame — the identical
+    // divergence one path down. (An accept only reaches this point through the floor, so on
+    // a record the current engine wrote this can only fire for an older one.)
+    const blocker = this.commands.closeBlocker(taskId);
+    if (blocker) {
       this.enterPhase(result, 'verify');
       if (!undischargedWait(this.commands.events(taskId))) {
         const w = this.commands.append(
@@ -579,7 +694,7 @@ export class Frame {
           {
             at: today(),
             type: 'waiting',
-            note: 'the staged doc is confirmed but uncommitted — `git commit` the docs/ change and `evidence! <id> <sha>` to conclude (two-phase)',
+            note: `the confirm gate is accepted but the task cannot close yet: ${blocker.code} — ${blocker.blocker}`.slice(0, 500),
           } as unknown as JourneyEvent,
         );
         if (!w.ok) return this.stopFailed(taskId, result, w.error);

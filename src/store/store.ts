@@ -1763,9 +1763,9 @@ export class Store {
       failed: ['at', 'type', 'note'],
       waiting: ['at', 'type', 'note'],
       superseded: ['at', 'type', 'note', 'successor'],
-      submitted: ['at', 'type', 'note', 'gate', 'confirmedSha'],
-      confirmed: ['at', 'type', 'note', 'gate', 'feedback'],
-      rejected: ['at', 'type', 'note', 'gate', 'feedback'],
+      submitted: ['at', 'type', 'note', 'gate', 'confirmedSha', 'run'],
+      confirmed: ['at', 'type', 'note', 'gate', 'feedback', 'decider', 'run', 'override'],
+      rejected: ['at', 'type', 'note', 'gate', 'feedback', 'decider', 'run'],
       'gate-revised': ['at', 'type', 'note', 'gate'],
       transferred: ['at', 'type', 'note', 'target', 'scope'],
       deferred: ['at', 'type', 'note', 'reason'],
@@ -1801,6 +1801,29 @@ export class Store {
       // working artifact's blob sha over MARKER-STRIPPED content; commit refuses on mismatch.
       if (e.type === 'submitted' && e.confirmedSha !== undefined && (typeof e.confirmedSha !== 'string' || !/^[0-9a-f]{7,40}$/.test(e.confirmedSha))) {
         throw new Error('append rejected: submitted.confirmedSha must be a blob sha (7-40 hex, v14 §3)');
+      }
+      // WHO DECIDED (leg 12/22 AC-4). D-1 removes the human from the exit gate, so the
+      // record is the only place that fact survives: a `confirmed` the review worker wrote
+      // must not read like one a person wrote. The field is ENGINE-STAMPED — the gate kinds
+      // are composite-owned (the general append refuses them by name), so no CLI gesture can
+      // type it, and the writer only has to keep the VOCABULARY closed.
+      if (e.decider !== undefined && e.decider !== 'human' && e.decider !== 'worker') {
+        throw new Error(`append rejected: ${e.type}.decider must be 'human'|'worker' (engine-stamped — who decided the gate)`);
+      }
+      // THE RUN that produced the decision (`submitted` carries the run that OPENED the gate,
+      // so an accept whose reviewing run equals the submitting one is checkable).
+      if (e.run !== undefined && (typeof e.run !== 'string' || !e.run.trim())) {
+        throw new Error(`append rejected: ${e.type}.run must be a non-blank run id`);
+      }
+      // THE OVERRIDE (leg 12/22 AC-5): force-approve accepts OVER the reviewer's objection,
+      // and the objection is attached — an override that hides what it overrode is a silent
+      // decision, which is the failure mode this whole node exists to prevent.
+      if (e.override !== undefined) {
+        const o = e.override as { objection?: unknown; run?: unknown };
+        if (!o || typeof o !== 'object' || Array.isArray(o) || typeof o.objection !== 'string' || !o.objection.trim()) {
+          throw new Error('append rejected: confirmed.override must be {objection: <non-blank text>, run?} — the objection a human accepted over');
+        }
+        if (o.run !== undefined && (typeof o.run !== 'string' || !o.run.trim())) throw new Error('append rejected: confirmed.override.run must be a non-blank run id');
       }
     }
     if (e.type === 'gate-revised') {

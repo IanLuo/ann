@@ -102,7 +102,10 @@ describe('e2e — the CLI binary', () => {
   beforeEach(() => { root = newProject(); });
   afterEach(() => { rmSync(root, { recursive: true, force: true }); });
 
-  it('drives a task through the full lifecycle and check stays clean', () => {
+  // Spawn-bound budget (the same one uniform-json.e2e documents): the test runs the real
+  // binary ~20×, and the confirm submission now calls the review provider — unreachable in
+  // this hermetic env, so its bounded retry costs seconds before the NAMED absence lands.
+  it('drives a task through the full lifecycle and check stays clean', { timeout: 30_000 }, () => {
     prep(root, LEG, TASK);
     expect(out(cli(root, ['spawn!', LEG, CONTRACT('the first leg')]))).toContain('spawned 01-leg (leg)');
     expect(out(cli(root, ['spawn!', TASK, CONTRACT('do the thing')]))).toContain('spawned 01-leg/01-a (task)');
@@ -317,7 +320,7 @@ describe('e2e — the CLI binary', () => {
     expect(n).not.toContain('REWORK');
   });
 
-  it('evidence! + complete! — the close gestures, with named refusals and no hand-written JSON', () => {
+  it('evidence! + complete! — the close gestures, with named refusals and no hand-written JSON', { timeout: 30_000 }, () => {
     prep(root, LEG, TASK);
     cli(root, ['spawn!', LEG, CONTRACT('the first leg')]);
     cli(root, ['spawn!', TASK, CONTRACT('do the thing')]);
@@ -496,7 +499,12 @@ describe('e2e — the goal-session lifecycle (v6: seed → docs/goal.md → work
     cli(r, ['spawn!', TASK, CONTRACT('do the work')]);
     expect(out(cli(r, ['submit!', TASK, 'grill']))).toContain('submitted grill');
     expect(out(cli(r, ['gate!', TASK, 'grill', 'accept', 'grilled']))).toContain('gate grill: accept');
-    expect(out(cli(r, ['submit!', TASK, 'confirm']))).toContain('submitted confirm');
+    // THE FLOOR AT THE SUBMISSION (12/22 AC-1), end to end: with no conclusion recorded the
+    // CONFIRM submission could never close, so it is REFUSED — nothing written. Then the
+    // gate gesture itself (which does not pre-read the floor) lands the honest exception.
+    const refused = cli(r, ['submit!', TASK, 'confirm']);
+    expect(refused.code).toBe(1);
+    expect(out(refused)).toContain('submission-not-ready');
     const earlyAccept = out(cli(r, ['gate!', TASK, 'confirm', 'accept', 'done']));
     expect(earlyAccept).toContain('gate confirm: accept');
     // accepted with NO evidence yet: the honest exception — the result names the gesture owed
@@ -550,7 +558,7 @@ describe('e2e — the goal-session lifecycle (v6: seed → docs/goal.md → work
     expect(out(cli(root, ['goal']))).toContain('GOAL: (none)');
   });
 
-  it('seeds, writes docs/goal.md, works to exhaustion, records the HUMAN verdict, refuses a dirty archive, then archives & reloads', () => {
+  it('seeds, writes docs/goal.md, works to exhaustion, records the HUMAN verdict, refuses a dirty archive, then archives & reloads', { timeout: 30_000 }, () => {
     // empty journey: the goal consult names grill & seed — never a blind task
     expect(out(cli(root, ['goal']))).toContain('GOAL: (none)');
     expect(out(cli(root, ['next']))).toContain('no goal');
@@ -742,7 +750,7 @@ describe('e2e — the OPERATOR ACTION advance! (F5 approve→execute, leg 07 tas
     git(root, ['commit', '-qm', 'spawn the empty front leg']);
   }
 
-  it('advance-leg is NOT machine-executable: the authored-work boundary + stop, zero writes (exit 0)', () => {
+  it('advance-leg is NOT machine-executable: the authored-work boundary + stop, zero writes (exit 0)', { timeout: 30_000 }, () => {
     driveDoneThenEmptyFront();
     const boundary = cli(root, ['advance!']);
     expect(boundary.code).toBe(0);
@@ -754,7 +762,7 @@ describe('e2e — the OPERATOR ACTION advance! (F5 approve→execute, leg 07 tas
     expect(out(cli(root, ['status', '02-leg']))).not.toContain('02-leg/02');
   });
 
-  it('a dirty tree refuses FAIL-CLOSED before anything — the uncommitted docs change is the named blocker (exit 1)', () => {
+  it('a dirty tree refuses FAIL-CLOSED before anything — the uncommitted docs change is the named blocker (exit 1)', { timeout: 30_000 }, () => {
     driveDoneThenEmptyFront();
     appendFileSync(join(root, 'docs', 'thing.md'), '\nhand edit\n'); // TRACKED + uncommitted
     const dirty = cli(root, ['advance!']);

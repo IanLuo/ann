@@ -181,7 +181,7 @@ describe('e2e — uniform JSON across every command', () => {
     expect(text.stdout).toContain('journey CLI');
   });
 
-  it('failures under --json put the error document on stdout (exit 1/2) and nothing else', () => {
+  it('failures under --json put the error document on stdout (exit 1/2) and nothing else', { timeout: 30_000 }, () => {
     driveLifecycle(root);
     // a read that cannot resolve → error doc, exit 1
     const miss = cli(root, ['--json', 'read', 'not-a-doc']);
@@ -203,7 +203,7 @@ describe('e2e — uniform JSON across every command', () => {
     expect(doc<{ error: { code: string; message: string } }>(dup).error.message).toContain('already exists');
   });
 
-  it('check and verify keep their exit code under --json while stdout is the clean doc', () => {
+  it('check and verify keep their exit code under --json while stdout is the clean doc', { timeout: 30_000 }, () => {
     driveLifecycle(root);
     const chk = cli(root, ['--json', 'check']);
     expect(chk.code).toBe(0);

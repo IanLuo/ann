@@ -94,8 +94,20 @@ const ok = <T>(value: T): CommandResult<T> => ({ ok: true, value });
 const fail = (code: string, blocker: string): CommandResult<never> => ({ ok: false, error: { code, blocker } });
 
 /** The reject bound (core-design §4): a CONSTANT owned by `gate!` — never adjustable,
- *  never bypassable, never moved into the general config. L2 reads `{escalated}` only. */
-const REJECT_BOUND = 3;
+ *  never bypassable, never moved into the general config. L2 reads `{escalated}` only.
+ *
+ *  EXPORTED (leg 12/22 AC-5) for exactly one reader beyond `gate!`: the review worker,
+ *  which must know it is OUT *before* it spends a model call — at the bound its next
+ *  action is not a rejection, so it does not act at all and the human decides. Reading
+ *  the constant is not adjusting it: nothing can set it, and the bound itself stays
+ *  enforced in `gateImpl` on every path (a raw `gate! … reject` at the bound still
+ *  refuses by name). */
+export const REJECT_BOUND = 3;
+
+/** How much of a defining doc a brief's `inputs[].excerpt` carries (12/22 AC-6). The same
+ *  fact the step packet hands a running step, carried on the ONE assembly a review and the
+ *  card share; bounded so a brief stays decision material rather than a transcript. */
+const INPUT_EXCERPT_CHARS = 2000;
 
 /** The event kinds a COMPOSITE command owns — `append!` refuses them, so the
  *  invariants those composites encode cannot be bypassed by an append (§8:289). */
@@ -164,6 +176,29 @@ export interface GateOutcome {
   /** THE HALF ACCEPT (leg 12/12): the successor the scope moved to, echoed back so the
    *  caller sees the act it composed (accept + transferred) as one thing. */
   transferred?: { target: string; scope: string };
+  /** Whether the decision was a human's or the review worker's (12/22 AC-4), read back
+   *  from what was WRITTEN — a caller never has to remember which actor it passed. */
+  decider?: 'human' | 'worker';
+}
+
+/** WHO DECIDED (leg 12/22 AC-4). ENGINE-STAMPED: the caller names the ACTOR, and the
+ *  command writes `decider`; no CLI flag reaches either field, and the store's shape check
+ *  keeps the vocabulary closed. A `worker` actor must name the run that reviewed, so a
+ *  machine decision is never anonymous. */
+export interface GateActor {
+  kind: 'human' | 'worker';
+  run?: string;
+}
+
+/** The optional halves of a `gate!` decision — each one a gesture of its own. */
+export interface GateOptions {
+  /** THE HALF ACCEPT (leg 12/12): move the remaining scope to a named successor. */
+  transfer?: { target?: string; scope?: string };
+  /** WHO DECIDED (12/22 AC-4). Absent means a human: the operator's own gesture. */
+  actor?: GateActor;
+  /** FORCE-APPROVE (12/22 AC-5): the human's OVERRIDE of the reviewer's objection at the
+   *  reject bound, recorded WITH the objection attached. */
+  force?: boolean;
 }
 
 /** THE GATE BRIEF (leg 12/15) — the decision material, in the order a decision needs it.
@@ -178,7 +213,15 @@ export interface Brief {
   intent: string;
   acceptanceCriteria: string[];
   openQuestions: Array<{ id?: string; question?: string; blocking: boolean; defaultIfUnanswered?: string }>;
-  inputs: Array<{ name: string; detail: string; status: string }>;
+  /** The resolved defining documents. `detail` is `path @ sha`; `excerpt` is the bounded
+   *  head of the doc AT that sha (12/22 AC-6) — the same fact the step packet hands a
+   *  running step, carried here so the review worker and the card read it from ONE
+   *  assembly instead of two. Absent when the doc could not be read. */
+  inputs: Array<{ name: string; detail: string; status: string; sha?: string; excerpt?: string }>;
+  /** THE SUBMISSION'S COMMITS (12/22 AC-6) — the cited shas with the note each was
+   *  recorded under, in first-cited order. The same list `conclusion.cited` derives, with
+   *  the note the record put beside it: what a confirm gate is deciding ABOUT. */
+  commits: Array<{ sha: string; note?: string }>;
   dependsOn: NodeDep[];
   referencedBy: Array<{ id: string; status: string; how: string }>;
   decisions: DecisionPoint[];
@@ -620,16 +663,32 @@ export class Commands {
    * working artifact (v14 §3). Commit compares against it and REFUSES on mismatch, so
    * the bytes a human confirmed are the bytes that land.
    */
-  submit(id: string, gate: string, opts: { note?: string; confirmedSha?: string } = {}): CommandResult<{ gate: string; confirmedSha?: string }> {
+  submit(id: string, gate: string, opts: { note?: string; confirmedSha?: string; run?: string } = {}): CommandResult<{ gate: string; confirmedSha?: string }> {
     return this.loggedWrite('submit', [id, gate, opts], () => this.submitImpl(id, gate, opts));
   }
 
-  private submitImpl(id: string, gate: string, opts: { note?: string; confirmedSha?: string }): CommandResult<{ gate: string; confirmedSha?: string }> {
+  private submitImpl(id: string, gate: string, opts: { note?: string; confirmedSha?: string; run?: string }): CommandResult<{ gate: string; confirmedSha?: string }> {
     if (!getVOCAB().gates.includes(gate)) return fail('unknown-gate', `gate must be one of ${getVOCAB().gates.join('|')}`);
     if (!id.includes('/')) return fail('leg-gate-write', 'leg roots carry no gates — gates live on tasks (flow-control v6 §3)');
     if (!this.store.ids().includes(id)) return fail('no-node', `no node ${id}`);
     if (this.undecidedSubmission(id, gate)) {
       return fail('already-submitted', `${id} already has an UNDECIDED submission at gate '${gate}' — decide it before re-submitting`);
+    }
+    // THE FLOOR AT THE SUBMISSION (leg 12/22 AC-1): a CONFIRM submission whose conclusion
+    // does not satisfy the close predicate is REFUSED, by name, with ZERO writes — no
+    // `submitted` event lands and NO REJECTION IS BURNED. The floor is mechanical and it
+    // runs BEFORE the review worker, which is the point of putting it here rather than at
+    // the accept: a submission that could never close is not a question to spend a review
+    // on, and it is not a question a human should be asked either. The GRILL is untouched:
+    // an entry gate accepts a contract, and no contract is "closeable".
+    if (gate === 'confirm') {
+      const blocker = this.closeBlocker(id);
+      if (blocker) {
+        return fail(
+          'submission-not-ready',
+          `${id}: the CONFIRM submission is REFUSED — the close predicate does not hold (${blocker.code}), so this submission could not close and nothing was written (no rejection is burned by a refused submission). ${blocker.blocker}`,
+        );
+      }
     }
     const event: JourneyEvent = {
       at: this.today,
@@ -637,6 +696,11 @@ export class Commands {
       gate,
       note: opts.note ?? `submitted for the ${gate} gate (${this.who})`,
       ...(opts.confirmedSha ? { confirmedSha: opts.confirmedSha } : {}),
+      // THE SUBMITTING RUN (12/22 AC-6): the run that finished the work and opened the
+      // gate. With `confirmed.run` — the run that REVIEWED — the record can say whether a
+      // task was accepted by the same run that produced it, which is exactly the check an
+      // automatic gate needs to stay auditable.
+      ...(opts.run ? { run: opts.run } : {}),
     };
     try {
       this.store.appendEvent(this.node(id), event);
@@ -674,11 +738,11 @@ export class Commands {
    * and NOT a new state (no status word: the task is `done`, and the partiality lives in
    * the checked link).
    */
-  gate(id: string, gate: string, decision: string, feedback = '', opts: { transfer?: { target?: string; scope?: string } } = {}): CommandResult<GateOutcome> {
+  gate(id: string, gate: string, decision: string, feedback = '', opts: GateOptions = {}): CommandResult<GateOutcome> {
     return this.loggedWrite('gate', [id, gate, decision, feedback, opts], () => this.gateImpl(id, gate, decision, feedback, opts));
   }
 
-  private gateImpl(id: string, gate: string, decision: string, feedback: string, opts: { transfer?: { target?: string; scope?: string } } = {}): CommandResult<GateOutcome> {
+  private gateImpl(id: string, gate: string, decision: string, feedback: string, opts: GateOptions = {}): CommandResult<GateOutcome> {
     if (!getVOCAB().gates.includes(gate)) return fail('unknown-gate', `gate must be one of ${getVOCAB().gates.join('|')}`);
     if (decision !== 'accept' && decision !== 'reject') return fail('bad-decision', "decision must be 'accept' or 'reject'");
     if (!this.store.ids().includes(id)) return fail('no-node', `no node ${id}`);
@@ -755,16 +819,39 @@ export class Commands {
     if (decision === 'reject' && rejects >= REJECT_BOUND) {
       return fail(
         'reject-bound',
-        `${REJECT_BOUND} rejection cycles exhausted at gate '${gate}' — escalate to a human design decision (force-approve / restructure / block)`,
+        `${REJECT_BOUND} rejection cycles exhausted at gate '${gate}' — the review worker is OUT and a human decides for real: override the objection with a recorded force-approve (ann gate! ${id} ${gate} accept '<why>' --force), restructure the work (ann spawn! <new-task> '<contract>' then ann append! ${id} '{"at":"<date>","type":"cancelled","reason":"…"}'), or block it (ann append! ${id} '{"at":"<date>","type":"deferred","reason":"…"}')`,
       );
     }
-    // The ONE closing rule: a confirm ACCEPT with the conclusion evidence present is the
-    // only continuation there is (leg 08 task 02, corrective — the single-branch argument).
-    // leg 12/03: "present" means the TIGHTENED predicate — commit evidence AND a captured
-    // pass bound to a cited commit (the SAME predicate complete! reads, one place).
-    const closeBlocker = this.closeEvidenceBlocker(id);
-    const autoClose = decision === 'accept' && gate === 'confirm' && closeBlocker === undefined
-      && !this.store.events(id).some((e) => e.type === 'completed');
+    // FORCE-APPROVE (12/22 AC-5) — the escalation's REAL gesture, validated here with the
+    // others so a refused override writes nothing. The objection is DERIVED from the record
+    // (`reviewObjection`), never typed by the caller: an override that states its own
+    // objection could state one the log does not hold, which is the silent decision this
+    // field exists to prevent. Three refusals, each by name: it rides a confirm accept, it
+    // is the gesture AT the bound (below it the worker is still the decider — the override
+    // would be premature rather than escalated), and there must be something to override.
+    const objection = opts.force ? this.reviewObjection(id) : undefined;
+    if (opts.force) {
+      if (gate !== 'confirm' || decision !== 'accept') {
+        return fail('force-not-accept', `--force records a human's OVERRIDE of the review worker's objection, so it rides a CONFIRM accept — this is a ${gate} ${decision}.`);
+      }
+      if (rejects < REJECT_BOUND) {
+        return fail('force-not-escalated', `--force is the gesture AT the escalation: ${id} holds ${rejects} of ${REJECT_BOUND} rejections at '${gate}', so the review worker is still the decider. Decide the gate normally — reject until the bound escalates, or accept on its merits.`);
+      }
+      if (!objection) {
+        return fail('force-no-objection', `--force: the review record holds no OPEN gap/regression finding at ${id} — there is nothing to override, so there is no override to record. Accept the gate plainly: ann gate! ${id} ${gate} accept '<why>'`);
+      }
+    }
+    // WHO DECIDED (12/22 AC-4), stamped at the ONE writer. The NOTE carries the actor as
+    // prose (so `ann decisions` reads "accepted (review worker <run>)" and the reader never
+    // has to join a second field), and `decider` carries it as DATA (so the ratio of
+    // machine-accepted tasks is countable rather than greppable).
+    const decider: 'human' | 'worker' = opts.actor?.kind === 'worker' ? 'worker' : 'human';
+    const run = opts.actor?.run?.trim() || undefined;
+    const actor = decider === 'worker' ? `review worker${run ? ` ${run}` : ''}` : this.who;
+    // The close predicate is READ INSIDE the act (below, after the transfer it writes) and
+    // its outcome is returned here, so the declaration is hoisted past the try.
+    let blocker: { code: string; blocker: string } | undefined;
+    let autoClose = false;
     try {
       // THE COMPOSITE'S ORDER (12/12 AC-1/AC-3), and it is not arbitrary: submitted →
       // confirmed → transferred → completed. The TRANSFER precedes the CLOSE because the
@@ -781,8 +868,17 @@ export class Commands {
       this.store.appendEvent(
         this.node(id),
         decision === 'accept'
-          ? { at: this.today, type: GATE_DECISION_EVENTS.accept, gate, ...(feedback ? { feedback } : {}), note: `accepted (${this.who})` }
-          : { at: this.today, type: GATE_DECISION_EVENTS.reject, gate, feedback, note: `rejected (${this.who})` },
+          ? {
+              at: this.today,
+              type: GATE_DECISION_EVENTS.accept,
+              gate,
+              ...(feedback ? { feedback } : {}),
+              note: `accepted (${actor})`,
+              decider,
+              ...(run ? { run } : {}),
+              ...(objection ? { override: { objection: objection.text } } : {}),
+            }
+          : { at: this.today, type: GATE_DECISION_EVENTS.reject, gate, feedback, note: `rejected (${actor})`, decider, ...(run ? { run } : {}) },
       );
       // THE REVISION, in the same act. NOT `gate-revised`: the gate's NAME does not change
       // (confirm → confirm) and the format gives that event only a `{old,new}` gate pair —
@@ -802,6 +898,18 @@ export class Commands {
       }
       // The auto-close rides the SAME gesture — the event names itself, so the log never
       // reads like a separate `complete!`. Never on a re-accept of an already-closed task.
+      //
+      // THE ONE CLOSING RULE, and the floor it reads (leg 08 task 02, corrective — the
+      // single-branch argument; leg 12/22 AC-1 — the SAME predicate `complete!` and
+      // `submit!` read, where it used to be `closeEvidenceBlocker` ALONE, so this accept
+      // could close a task `complete!` would refuse for an unclaimed AC). Read HERE, after
+      // the transfer above, and that placement is the half accept's (12/12): the ACs this
+      // same act is moving are credited exactly as `complete!` credits them, because the
+      // predicate is asked of the record the act has already written, never of a projection
+      // of it. A HALF ACCEPT therefore still closes — one predicate, one path, no exception.
+      blocker = this.closeBlocker(id);
+      autoClose = decision === 'accept' && gate === 'confirm' && blocker === undefined
+        && !this.store.events(id).some((e) => e.type === 'completed');
       if (autoClose) {
         this.store.appendEvent(this.node(id), {
           at: this.today,
@@ -817,10 +925,11 @@ export class Commands {
       gate,
       decision,
       escalated: after >= REJECT_BOUND,
+      decider,
       ...(autoClose ? { completed: true } : {}),
       ...(opts.transfer ? { transferred: { target: String(opts.transfer.target).trim(), scope: String(opts.transfer.scope) } } : {}),
       ...(decision === 'accept' && gate === 'confirm' && !autoClose
-        ? { pending: `${id}: the confirm gate is ACCEPTED but the task cannot close (${closeBlocker?.code ?? 'already-completed'}) — the task honestly reads 'accepted'; close it with the explicit gesture \`complete! ${id}\` once the evidence is recorded (it refuses with '${closeBlocker?.code ?? 'no-evidence'}' until then)` }
+        ? { pending: `${id}: the confirm gate is ACCEPTED but the task cannot close (${blocker?.code ?? 'already-completed'}) — the task honestly reads 'accepted'; close it with the explicit gesture \`complete! ${id}\` once the evidence is recorded (it refuses with '${blocker?.code ?? 'no-evidence'}' until then)` }
         : {}),
     });
   }
@@ -1050,6 +1159,64 @@ export class Commands {
   }
 
   /**
+   * THE FLOOR (leg 12/22 AC-1) — the close predicate as ONE VALUE, and the only thing
+   * that decides whether a task may close. It is `closeEvidenceBlocker` PLUS the v18
+   * conclusion gate `complete!` applies: every AC claimed (or transferred), every claim's
+   * named check RESOLVING to a recorded act, and no claim resting on a FAILED run.
+   *
+   * WHY IT EXISTS AS A SECOND NAME. The two halves lived apart, and the divergence is
+   * what this closes: `complete!` read both, the confirm-accept auto-close read only
+   * `closeEvidenceBlocker` — so a confirm accept could CLOSE a task that `complete!`
+   * would REFUSE for an unclaimed AC. It is one predicate now, and all THREE readers
+   * take it from here: `submit!` (the submission itself is refused — nothing written, no
+   * rejection burned), `gateImpl`'s accept auto-close, and `brief` (so the card, the
+   * human and the review worker read the same fact). A refusal that lived in two places
+   * would drift again; this is the same argument `closeEvidenceBlocker` was built on,
+   * one level up.
+   *
+   * THE ORDER IS THE MESSAGES' ORDER, not a severity ranking: the evidence chain speaks
+   * first (a close with no committed evidence has nothing to be structured ABOUT), then
+   * the conclusion gate. `complete!` reads it exactly as it always read its two halves.
+   */
+  closeBlocker(id: string): { code: string; blocker: string } | undefined {
+    const evidence = this.closeEvidenceBlocker(id);
+    if (evidence) return evidence;
+    const conclusion = this.conclusion(id);
+    if (conclusion.unclaimed.length) {
+      return {
+        code: 'no-structured-conclusion',
+        blocker: `${id}: ${conclusion.unclaimed.length} acceptance criterion(s) are neither claimed NOR transferred — ${conclusion.unclaimed.map((u) => `'${u.ac}' (${u.acText})`).join(' · ')}. Record how each is met: ann evidence! ${id} <sha> --claims '[{"ac":"AC-1","check":"npm test"}]' (the ac→check mapping; prose is optional), or move it to a successor: ann gate! ${id} confirm accept '<why>' --transfer <target> --scope 'AC-2: <the criterion, verbatim>'`,
+      };
+    }
+    const unbound = conclusion.claims.filter((c) => c.check && !c.bound);
+    if (unbound.length) {
+      return {
+        code: 'claim-unsubstantiated',
+        blocker: `${id}: ${unbound.map((c) => `'${c.ac}' → '${c.check}'`).join(' · ')} — the claim names a check the log does NOT hold: an ac→check mapping states which act covers the AC, so the act has to exist. Record the run: ann capture! ${id} '<command>'`,
+      };
+    }
+    const failedClaim = conclusion.claims.find((c) => c.bound?.result === 'fail');
+    if (failedClaim) {
+      return {
+        code: 'claim-failed',
+        blocker: `${id}: '${failedClaim.ac}' is mapped to '${failedClaim.check}', whose LATEST run FAILED (${failedClaim.bound?.source} · ${failedClaim.bound?.detail ?? 'no detail'}) — a claim cannot rest on a failing act; fix the work and re-run: ann capture! ${id} '${failedClaim.check}'`,
+      };
+    }
+    return undefined;
+  }
+
+  /** THE REVIEW WORKER'S ONE READ (leg 12/22 AC-2) — the OPEN DEFECTS in the review record:
+   *  findings the record holds at `gap` or `regression` and that no later pass resolved.
+   *  It is the OBJECTION a force-approve overrides, and it is derived here rather than
+   *  taken from the caller so an override cannot be recorded with a typed-in objection
+   *  that the log does not hold. */
+  reviewObjection(id: string): { text: string; run?: string } | undefined {
+    const open = this.reviewFindings(id).findings.filter((f) => f.status === 'open' && (f.severity === 'gap' || f.severity === 'regression'));
+    if (!open.length) return undefined;
+    return { text: open.map((f) => `${f.id} [${f.severity}] ${f.where} — ${f.text}`).join(' · ') };
+  }
+
+  /**
    * `complete!` — the EXPLICIT DONE terminal (leg 08 task 02 AC-2, CORRECTED: a confirm
    * accept auto-completes when the conclusion evidence is present — see `gate!`; this
    * gesture stays for the honest exception, an ACCEPTED task whose evidence is missing,
@@ -1080,35 +1247,12 @@ export class Commands {
         `${id}: the confirm-result gate is not accepted (last decision: ${state}) — complete! records a delivery the HUMAN accepted: submit! ${id} confirm, then gate! ${id} confirm accept`,
       );
     }
-    const evidenceBlocker = this.closeEvidenceBlocker(id);
-    if (evidenceBlocker) return fail(evidenceBlocker.code, evidenceBlocker.blocker);
-    // v18 (the conclusion GATE): a close is a REVIEW — the log must be able to say how
-    // every AC is met and what was actually run. The SAME `conclusion()` the card renders
-    // decides it here, so "the card shows NO CLAIM RECORDED" and "the close succeeded"
-    // cannot both be true for one state. The claim→check MAPPING has teeth too (leg 12/03):
-    // a claim naming an act the log does not hold, or one whose latest run FAILED, is a
-    // record that does not state a fact.
-    const conclusion = this.conclusion(id);
-    if (conclusion.unclaimed.length) {
-      return fail(
-        'no-structured-conclusion',
-        `${id}: ${conclusion.unclaimed.length} acceptance criterion(s) are neither claimed NOR transferred — ${conclusion.unclaimed.map((u) => `'${u.ac}' (${u.acText})`).join(' · ')}. Record how each is met: ann evidence! ${id} <sha> --claims '[{"ac":"AC-1","check":"npm test"}]' (the ac→check mapping; prose is optional), or move it to a successor: ann gate! ${id} confirm accept '<why>' --transfer <target> --scope 'AC-2: <the criterion, verbatim>'`,
-      );
-    }
-    const unbound = conclusion.claims.filter((c) => c.check && !c.bound);
-    if (unbound.length) {
-      return fail(
-        'claim-unsubstantiated',
-        `${id}: ${unbound.map((c) => `'${c.ac}' → '${c.check}'`).join(' · ')} — the claim names a check the log does NOT hold: an ac→check mapping states which act covers the AC, so the act has to exist. Record the run: ann capture! ${id} '<command>'`,
-      );
-    }
-    const failedClaim = conclusion.claims.find((c) => c.bound?.result === 'fail');
-    if (failedClaim) {
-      return fail(
-        'claim-failed',
-        `${id}: '${failedClaim.ac}' is mapped to '${failedClaim.check}', whose LATEST run FAILED (${failedClaim.bound?.source} · ${failedClaim.bound?.detail ?? 'no detail'}) — a claim cannot rest on a failing act; fix the work and re-run: ann capture! ${id} '${failedClaim.check}'`,
-      );
-    }
+    // THE FLOOR, in one read (12/22 AC-1): the F-AC18 evidence chain AND the v18 conclusion
+    // gate — every AC claimed, every claim's check resolving, none resting on a failed run.
+    // `submit!` and the confirm-accept auto-close take the SAME predicate, so none of the
+    // three can disagree about whether this task may close.
+    const blocker = this.closeBlocker(id);
+    if (blocker) return fail(blocker.code, blocker.blocker);
     try {
       this.store.appendEvent(this.node(id), {
         at: this.today,
@@ -1126,15 +1270,18 @@ export class Commands {
    *  event log to decide a gate. Deterministic — no LLM, no new state: everything here is
    *  already in the record, put in the order a decision needs it. The `latestNote` is
    *  CAPPED — the whole point: a big `extended` note is read by pointer, never in full.
-   *  The advisory SESSION (12/09) consumes this; so does the human at the terminal. */
-  brief(id: string, opts: { noteChars?: number } = {}): Brief {
+   *  The advisory SESSION (12/09) consumes this; so does the human at the terminal; so
+   *  does the review worker (12/22 AC-6), which reads it `full` — a CAPPED criterion is
+   *  not the criterion, and the reviewer is held to every one of them. */
+  brief(id: string, opts: { noteChars?: number; full?: boolean } = {}): Brief {
     const d = this.detail(id);
     const contract = (d.contract ?? {}) as Record<string, unknown>;
     const evs = d.events;
     // THE CAPS: a brief is DECISION MATERIAL, not a transcript. The intent and each AC are
     // cut with the CUT LENGTH written inline (a silent truncation would hide the
-    // decision's substance); 0 = uncapped.
-    const cap = opts.noteChars ?? 700;
+    // decision's substance); 0 = uncapped — which is what `full` selects, for the one
+    // consumer that must hold every word (the review worker).
+    const cap = opts.full ? 0 : opts.noteChars ?? 700;
     const cut = (s: string, n: number): string => (n > 0 && s.length > n ? `${s.slice(0, n)}… (+${(s.length - n).toLocaleString()} chars — ann detail ${id})` : s);
     // THE ONE DERIVATION, CONSUMED (12/08's AC-2, extended by 12/11's AC-2): a node's
     // decisions come from `decisionPoints` — the ONE choice-point derivation — never from
@@ -1145,26 +1292,35 @@ export class Commands {
     const notes = evs.filter((e) => e.type === 'extended' && typeof e.note === 'string');
     const lastNote = notes[notes.length - 1];
     const noteText = lastNote ? String(lastNote.note) : undefined;
+    // THE FLOOR (12/22 AC-1/AC-6), read ONCE: the brief is the ONE decision material, so
+    // the card, the human and the review worker all read the same predicate the close
+    // enforces — never the evidence half alone.
+    const closeBlocker = this.closeBlocker(id);
     return {
       id,
       isLeg: d.isLeg,      status: d.status,
       gates: { grill: d.gates.grill.state, confirm: d.gates.confirm.state },
       next: d.next,
-      intent: cut(String(contract.intent ?? ''), 600),
-      acceptanceCriteria: Array.isArray(contract.acceptanceCriteria) ? (contract.acceptanceCriteria as string[]).map((a) => cut(a, 300)) : [],
+      intent: cut(String(contract.intent ?? ''), opts.full ? 0 : 600),
+      acceptanceCriteria: Array.isArray(contract.acceptanceCriteria) ? (contract.acceptanceCriteria as string[]).map((a) => cut(a, opts.full ? 0 : 300)) : [],
       openQuestions: this.store.openQuestions(id).map((q) => ({
         ...(q.id ? { id: q.id } : {}),
         ...(q.question ? { question: q.question } : {}),
         blocking: q.blocking === true,
         ...(q.defaultIfUnanswered ? { defaultIfUnanswered: q.defaultIfUnanswered } : {}),
       })),
-      inputs: d.deps.dependsOn.filter((x) => x.kind === 'input').map((x) => ({ name: x.ref, detail: x.detail, status: x.status })),
+      inputs: d.deps.dependsOn.filter((x) => x.kind === 'input').map((x) => {
+        const doc = this.store.resolveDoc(x.ref);
+        const excerpt = doc ? this.docExcerpt(doc.path) : undefined;
+        return { name: x.ref, detail: x.detail, status: x.status, ...(doc?.sha ? { sha: doc.sha } : {}), ...(excerpt ? { excerpt } : {}) };
+      }),
+      commits: this.citedCommitsWithNotes(id),
       dependsOn: d.deps.dependsOn.filter((x) => x.kind === 'task'),
       referencedBy: d.deps.referencedBy,
       decisions,
       conclusion: this.conclusion(id),
       findings: this.reviewFindings(id),
-      ...(this.closeEvidenceBlocker(id) ? { closeBlocker: this.closeEvidenceBlocker(id) } : {}),
+      ...(closeBlocker ? { closeBlocker } : {}),
       ...(noteText
         ? {
             latestNote: {
@@ -1179,6 +1335,35 @@ export class Commands {
         : {}),
       blockers: d.blockers,
     };
+  }
+
+  /** The cited commits with the note each was recorded under, in first-cited order: the ONE
+   *  derivation (`store.citedCommits`) plus the evidence events that cite them (12/22 AC-6). */
+  private citedCommitsWithNotes(id: string): Array<{ sha: string; note?: string }> {
+    const notes = new Map<string, string>();
+    for (const e of this.store.events(id)) {
+      if (e.type !== 'evidence' || !Array.isArray(e.commits)) continue;
+      for (const raw of e.commits) {
+        const r = raw as { sha?: unknown; note?: unknown };
+        const sha = typeof r.sha === 'string' ? r.sha.trim() : '';
+        if (sha) notes.set(sha, typeof r.note === 'string' ? r.note : '');
+      }
+    }
+    return this.store.citedCommits(id).map((sha) => ({ sha, ...(notes.get(sha) ? { note: notes.get(sha)! } : {}) }));
+  }
+
+  /** The bounded HEAD of a defining doc, read at the sha the brief reports (12/22 AC-6).
+   *  Never throws: a brief is a READ, so an unreadable doc contributes nothing rather than
+   *  failing the whole card — the `detail` still names the path and sha it should be read at. */
+  private docExcerpt(path: string): string | undefined {
+    try {
+      const body = readFileSync(join(this.store.root, path), 'utf8').replace(/^<!--[^\n]*-->\n?/, '');
+      return body.length > INPUT_EXCERPT_CHARS
+        ? `${body.slice(0, INPUT_EXCERPT_CHARS)}… (+${(body.length - INPUT_EXCERPT_CHARS).toLocaleString()} chars — read the doc at its recorded sha)`
+        : body;
+    } catch {
+      return undefined;
+    }
   }
 
   /**
@@ -1718,9 +1903,10 @@ export class Commands {
         },
         readiness: this.store.readiness(id),
         // AN EXIT GATE'S QUESTION IS THE CLOSE, NOT READINESS (12/18): the work is done by
-        // then. The predicate is the auto-close's own (`closeEvidenceBlocker`) — asked here,
-        // never restated, so the row and the gesture can never disagree.
-        ...(gate === 'confirm' ? { closesOnAccept: this.closeEvidenceBlocker(id) === undefined } : {}),
+        // then. The predicate is the auto-close's own (`closeBlocker`, 12/22 AC-1) — asked
+        // here, never restated, so the row and the gesture can never disagree: a card that
+        // promised a close over an unclaimed AC would be promising what the accept refuses.
+        ...(gate === 'confirm' ? { closesOnAccept: this.closeBlocker(id) === undefined } : {}),
       });
     }
     return out;

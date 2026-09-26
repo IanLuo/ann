@@ -382,7 +382,9 @@ describe('e2e — the minimal service + UI (AC-1: the thin binding over the comm
     const posted = await post(server.url + '/api/gate', { id: T2, gate: 'grill', decision: 'accept', feedback: 'ui card decision' });
     expect(posted.status).toBe(200);
     expect(posted.body).toBe(cliWrite.stdout); // the SAME write document the CLI printed
-    expect(JSON.parse(posted.body)).toEqual({ ok: true, value: { gate: 'grill', decision: 'accept', escalated: false } });
+    // `decider` is engine-stamped (12/22 AC-4): the page's card and the CLI's own gesture
+    // write the SAME doc, and both say a HUMAN decided this gate.
+    expect(JSON.parse(posted.body)).toEqual({ ok: true, value: { gate: 'grill', decision: 'accept', escalated: false, decider: 'human' } });
 
     // the DECISION LANDED AS THE GATE EVENT (read back through the CLI's own walk of the log)
     const walk = JSON.parse(cli(root, ['--json', 'journey', T2]).stdout) as { events: Array<{ type: string; gate?: string; feedback?: string }> };

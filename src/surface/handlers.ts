@@ -43,6 +43,7 @@ import { noteWrite } from '../store/write-journal.js';
 import { runGoalSeed } from '../flow/goal-seed.js';
 import { runSpecSession, docsSpecsTarget, DEFAULT_SPEC_NAME } from '../flow/spec-doc.js';
 import { runReviewSession } from '../flow/review-session.js';
+import { runGateReview, type GateReviewResult } from '../flow/gate-review.js';
 import { runOperatorAction, OperatorStop } from '../flow/operator-action.js';
 import { buildAbilities } from '../abilities/index.js';
 import { resolveConfig } from '../flow/config.js';
@@ -126,6 +127,22 @@ function writeResult<T>(r: CommandResult<T>): Outcome {
 function viewResult<T>(r: CommandResult<T>): Outcome {
   if (!r.ok) return boom(r.error.code, r.error.blocker, { text: `${r.error.code}: ${r.error.blocker}` });
   return { ok: true, value: r.value };
+}
+
+/**
+ * RUN THE EXIT GATE'S WORKER (leg 12/22 AC-6), and turn EVERY failure into a NAMED
+ * ABSENCE. The provider seam itself can throw — `getAdapter` is fail-closed on an
+ * unregistered provider, and a machine with no provider at all is the common case — so the
+ * guard wraps the seam AND the call. An absence is never an error the operator has to
+ * handle: the submission stands, the gate is theirs, and the reason is on the screen.
+ */
+async function attemptGateReview(ctx: CliContext, id: string): Promise<GateReviewResult> {
+  try {
+    const abilities = buildAbilities(getAdapter(undefined, ctx.root, { runId: ctx.log.runId, traceId: ctx.log.traceId }));
+    return await runGateReview(ctx.commands, abilities, id, { run: ctx.log.runId });
+  } catch (e) {
+    return { ok: false, absent: `the review worker is unavailable — ${(e as Error).message}` };
+  }
 }
 
 /* ── the ctx ────────────────────────────────────────────────────────────────── */
@@ -306,8 +323,8 @@ const COMMANDS: Array<{ name: string; args: string; desc: string }> = [
   { name: 'idea!', args: '\'<text>\' [--refs a,b] | promote <idea-id> <node-id> | drop <idea-id>', desc: 'WRITE — the idea gestures. `add` writes one idea (id · text · created · by · refs? · status), provenance from RECORDED_BY · `promote` is THE BRIDGE: it records `promoted → <node id>` on the idea and DRAFTS a contract (intent naming the idea id + ACs) on stdout for the human\'s GO — it NEVER calls spawn! and never writes the journey (a machine authors no contract) · `drop` deletes the file (git is the history). Named refusals, zero writes: an unknown id · an empty text · dropping an already-promoted idea' },
   { name: 'append!', args: '<id> \'<json>\'', desc: 'WRITE — single-writer append; REFUSES the composite-owned kinds (created/submitted/confirmed/rejected/goal-met) and the RETIRED doc-artifact vocab (artifact-locked/superseded). `cancelled` (a task no longer needed — the counterpart of the submit!/gate! close) is recordable here with a REQUIRED reason' },
   { name: 'spawn!', args: '<id> \'<contract-json>\'', desc: 'WRITE — create a node; enforces the v14 contract schema + F-AC19 + id naming + the conclusion (commit-evidence)/leg gates' },
-  { name: 'submit!', args: '<id> grill|confirm [confirmedSha]', desc: 'WRITE — submit finished work at a gate for the human decision (the SUCCESS half of the task close; the counterpart is cancel — no longer needed): records `submitted` — the task blocks and waits for `gate! accept|reject`; an interrupted gate stays blocked (resumable), never looks un-started. `[confirmedSha]` (confirm gate only) binds the decision to the exact bytes under review' },
-  { name: 'gate!', args: "<id> grill|confirm accept|reject [feedback] [--transfer <target> --scope '<ACs>']", desc: "WRITE — human gate decision (submit + decide; the 3-reject bound is a CONSTANT owned here); a CONFIRM accept AUTO-CLOSES the task when the conclusion evidence is already present (the same rule the frame runs) — with the evidence missing the task stays `accepted` and the result names the `complete!` still owed. A CONFIRM accept MUST carry a why. --transfer makes it THE HALF ACCEPT (leg 12/12): the remaining scope moves to a named successor in the SAME validated act — `--scope` names the ACs that move, one per line as '<AC-id>: <the criterion, verbatim>' (the id is what the close credits). Refused NAMED with ZERO writes: the target does not exist (F-AC16 at write time, not later in check()) · the scope is empty · the gate is not confirm · the decision is not accept · the why is empty · the target is this node · an AC id the contract does not have · the identical transfer is already recorded. The task still lands `done`: the partiality lives in the checked link, never in a new status" },
+  { name: 'submit!', args: '<id> grill|confirm [confirmedSha]', desc: "WRITE — submit finished work at a gate (the SUCCESS half of the task close; the counterpart is cancel — no longer needed): records `submitted` — the task blocks and waits for `gate! accept|reject`; an interrupted gate stays blocked (resumable), never looks un-started. `[confirmedSha]` (confirm gate only) binds the decision to the exact bytes under review. A CONFIRM submission is REFUSED (nothing written, no rejection burned) unless the CLOSE PREDICATE holds — commit evidence · every AC claimed · every claim's check resolving and not failed — because a submission that could never close is not a question to spend a review on. A confirm submission is the DOOR TO THE EXIT GATE: the REVIEW WORKER runs on it (headless, one pass, findings landed), and it accepts, routes a rework, leaves the decision to you, or is ABSENT — which is NAMED, with the gate left to the human as it reads today" },
+  { name: 'gate!', args: "<id> grill|confirm accept|reject [feedback] [--transfer <target> --scope '<ACs>'] [--force]", desc: "WRITE — gate decision (submit + decide; the 3-reject bound is a CONSTANT owned here); a CONFIRM accept AUTO-CLOSES the task when the CLOSE PREDICATE holds (the same one `submit!` and `complete!` read) — otherwise the task stays `accepted` and the result names the `complete!` still owed. A CONFIRM accept MUST carry a why. Every decision records WHO DECIDED (engine-stamped: `human` or the review `worker`), so the machine-accepted share of the journey is auditable. --transfer makes it THE HALF ACCEPT (leg 12/12): the remaining scope moves to a named successor in the SAME validated act — `--scope` names the ACs that move, one per line as '<AC-id>: <the criterion, verbatim>' (the id is what the close credits). --force is FORCE-APPROVE (leg 12/22): at the reject bound the review worker is OUT, and this records a human's override WITH the reviewer's objection attached — the objection is read from the review record, never typed. Refused NAMED with ZERO writes: the target does not exist (F-AC16 at write time, not later in check()) · the scope is empty · the gate is not confirm · the decision is not accept · the why is empty · the target is this node · an AC id the contract does not have · the identical transfer is already recorded · --force below the bound or with nothing to override. The task still lands `done`: the partiality lives in the checked link, never in a new status" },
   { name: 'evidence!', args: "<id> <sha>[,<sha>…] [--refs a.md,b.md] [--note '<text>'] [--claims '<json>'] [--checks '<json>']", desc: "WRITE — the CONCLUSION record (F-AC18): structured commit evidence naming the committed doc/code that carries the deliverable (commits[] non-empty, a sha per entry) plus the OPTIONAL structured conclusion (format v18, MECHANICAL since leg 12/03): --claims = one {ac, check?, statement?, evidence?} per acceptance criterion — `check` is the ac→CHECK MAPPING (the recorded run that covers the AC; `statement` is optional prose, derived from the mapping when absent) and evidence entries are POINTERS (commit sha · ref path · doc name) resolved at READ time; --checks = {command, result: pass|fail, detail?, sha?, source?} (what was RUN) — a check without a `source` is LABELLED `reported` by the writer, and `source:'captured'` is REFUSED here (engine-produced: run capture!); the shape stays the store's — a validated front over the same L1 write, provenance from RECORDED_BY, and a bad JSON argument writes nothing" },
   { name: 'capture!', args: "<id> '<command>'", desc: CAPTURE_COMMAND_DESC },
   { name: 'complete!', args: '<id> [--note \'<text>\']', desc: 'WRITE — the EXPLICIT DONE terminal (a confirm accept auto-closes on evidence, so this gesture is the accepted-without-evidence exception; an already-completed task gets an idempotent refusal): refuses without the confirm gate\'s LAST decision being an ACCEPT and without the conclusion evidence — the F-AC18 predicate (TIGHTENED, leg 12/03: a REPORTED check is refused by name; leg 12/02: so is a CAPTURED FAILURE recorded on a CITED commit — `cited-check-failed`): evidence.commits[] AND the structured conclusion (a claim per acceptance criterion, each mapped to a check the log holds) AND at least one CAPTURED pass bound to a cited commit AND no captured failure on one' },
@@ -1217,27 +1234,50 @@ export const HANDLERS: Record<string, Handler> = {
     }
     return writeResult(ctx.commands.spawn(ctx.args[1], contract));
   },
-  'submit!': (ctx) => {
+  'submit!': async (ctx) => {
     if (!getVOCAB().gates.includes(ctx.args[2])) return usage('usage: ann submit! <id> grill|confirm [confirmedSha]');
-    return writeResult(ctx.commands.submit(ctx.args[1], ctx.args[2], ctx.args[3] ? { confirmedSha: ctx.args[3] } : {}));
+    const id = ctx.args[1];
+    const r = ctx.commands.submit(id, ctx.args[2], {
+      ...(ctx.args[3] ? { confirmedSha: ctx.args[3] } : {}),
+      run: ctx.log.runId,
+    });
+    if (!r.ok) return writeResult(r);
+    // THE EXIT GATE'S WORKER (leg 12/22). A CONFIRM submission is the DOOR to the gate, so
+    // the review runs HERE — headless, one pass — and the operator's single gesture carries
+    // it. It runs AFTER the write for a reason that is the design's: the floor refuses a
+    // submission that could never close (nothing written, no rejection burned), so the
+    // worker is never spent on one. The GRILL is untouched: the entry gate stays the
+    // human's. Every failure below is a NAMED ABSENCE (AC-6) — the submission stands, the
+    // card reads exactly as it does today, and an outage can never quietly turn an
+    // automatic gate into a human one without saying so.
+    if (ctx.args[2] !== 'confirm') return writeResult(r);
+    const review = await attemptGateReview(ctx, id);
+    return { ok: true, value: { ok: true, value: { ...r.value, review } } };
   },
   'gate!': (ctx) => {
-    const USAGE = "usage: ann gate! <id> grill|confirm accept|reject [feedback] [--transfer <target> --scope '<ACs>']";
+    const USAGE = "usage: ann gate! <id> grill|confirm accept|reject [feedback] [--transfer <target> --scope '<ACs>'] [--force]";
     // THE HALF ACCEPT's two flags (leg 12/12). They are taken BEFORE the positional args
     // are read, so the why is whatever is left — and a lone flag, an unknown flag or an
     // empty value FAILS CLOSED here rather than reaching the command as a weird feedback
     // string (the same discipline `evidence!`'s flags follow).
-    const t = takeFlag(ctx.args.slice(1), '--transfer');
+    //
+    // `--force` is a BOOLEAN and is stripped first, so the why after it is read normally
+    // (12/22 AC-5). It carries NO argument on purpose: the objection it overrides is read
+    // OFF THE RECORD by the command, so a caller cannot type an objection the log does not
+    // hold — and the flag reaches no `decider` field: who decided is engine-stamped.
+    const force = ctx.args.includes('--force');
+    const argv = ctx.args.slice(1).filter((a) => a !== '--force');
+    const t = takeFlag(argv, '--transfer');
     const s = takeFlag(t.rest, '--scope');
     const stray = strayFlag(s.rest);
     if (stray) return usage(`${USAGE} — unknown flag ${stray}`);
-    const hasTransfer = ctx.args.includes('--transfer');
-    const hasScope = ctx.args.includes('--scope');
+    const hasTransfer = argv.includes('--transfer');
+    const hasScope = argv.includes('--scope');
     if (hasTransfer !== hasScope) return usage(`${USAGE} — --transfer and --scope go together`);
     if ((hasTransfer && !t.value) || (hasScope && !s.value)) return usage(`${USAGE} — --transfer needs a target and --scope needs the ACs`);
     const [id, gate, decision, ...feedback] = s.rest;
     if (!id || !getVOCAB().gates.includes(gate) || !['accept', 'reject'].includes(decision ?? '')) return usage(USAGE);
-    const opts = hasTransfer ? { transfer: { target: t.value, scope: s.value } } : {};
+    const opts = { ...(hasTransfer ? { transfer: { target: t.value, scope: s.value } } : {}), ...(force ? { force: true } : {}) };
     return writeResult(ctx.commands.gate(id, gate, decision, feedback.join(' '), opts));
   },
   'evidence!': (ctx) => {

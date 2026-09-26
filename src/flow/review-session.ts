@@ -1,5 +1,4 @@
 import { execFileSync } from 'node:child_process';
-import { assemblePacket } from './materialize.js';
 import { GrillProfile, GrillSession } from './grill-session.js';
 import { GroundingInput, SourceType } from './steps/shared.js';
 import { Abilities } from './types.js';
@@ -146,7 +145,7 @@ export const REVIEW_PROVENANCE = 'review session (model)';
  * and no budget is right for every material, so the number is stated here rather than
  * left implicit in a default that was never chosen for a diff-carrying prompt.
  */
-const REVIEW_MAX_TOKENS = 4096;
+export const REVIEW_MAX_TOKENS = 4096;
 
 /** How much of the reviewed patch the session may read. A review that cannot see the bytes
  *  cannot produce a `file:line` — the diff IS an input — but an unbounded one buries the
@@ -221,22 +220,30 @@ export interface ReviewMaterial {
 }
 
 /**
- * Assemble the material for node `id` — pure, never writes. Built on the deterministic
- * packet (`assemblePacket` supplies the contract and the resolved inputs) plus the half a
- * packet does NOT carry: `ContextPacket` has no evidence at all, so the commits, their
- * range, the diff and the captured checks are read from the log here.
+ * Assemble the material for node `id` — pure, never writes.
+ *
+ * ONE ASSEMBLY (leg 12/22 AC-6). Everything the RECORD can say — the contract and its
+ * criteria, the submission's commits and the note each was recorded under, the checks, the
+ * resolved inputs at their sha, any prior findings — comes from `commands.brief(id)`, which
+ * is the same read the card and the human take. Before this, a review assembled its own from
+ * `assemblePacket` plus four scans of the log, so the worker and the card could disagree
+ * about one task's facts. Only the RANGE and the PATCH are derived here, and legitimately
+ * so: they are GIT's facts, and `brief` runs no subprocess by design.
+ *
+ * `brief` is read `full`: a card cuts a criterion for display, but a reviewer is held to
+ * every word of it, and a criterion cut at 300 chars is not the criterion.
  */
 export function buildReviewMaterial(commands: Commands, id: string): ReviewMaterial {
   const store = commands.store;
-  const packet = assemblePacket(store, id);
-  const c = packet.nodeContract;
-  const intent = (c.intent ?? '').trim();
-  const acs = (c.acceptanceCriteria ?? []).filter((a): a is string => typeof a === 'string' && !!a.trim());
+  const b = commands.brief(id, { full: true });
+  const intent = b.intent.trim();
+  const acs = b.acceptanceCriteria.filter((a) => !!a.trim());
 
-  // THE SUBMISSION. `citedCommits` is the UNION in first-cited order and it is what the RANGE
-  // is derived from; `currentCitedCommits` is the latest citation set (a re-recorded
-  // conclusion supersedes). The head is the last cited commit — the newest bytes under review.
-  const cited = store.citedCommits(id);
+  // THE SUBMISSION. `cited` is the UNION in first-cited order (brief's `conclusion.cited`)
+  // and it is what the RANGE is derived from; the latest citation set tells us whether a
+  // re-recorded conclusion superseded part of it. The head is the last cited commit — the
+  // newest bytes under review.
+  const cited = b.conclusion.cited;
   const current = store.currentCitedCommits(id);
   const head = cited.length ? cited[cited.length - 1] : '';
 
@@ -256,18 +263,9 @@ export function buildReviewMaterial(commands: Commands, id: string): ReviewMater
   };
 
   // 1 · THE SUBMISSION'S COMMITS, with the note each was recorded under.
-  const notes = new Map<string, string>();
-  for (const e of store.events(id)) {
-    if (e.type !== 'evidence' || !Array.isArray(e.commits)) continue;
-    for (const x of e.commits) {
-      const r = x as { sha?: unknown; note?: unknown };
-      const sha = typeof r.sha === 'string' ? r.sha.trim() : '';
-      if (sha) notes.set(sha, typeof r.note === 'string' ? r.note : '');
-    }
-  }
   add(
     'submission.commits',
-    bullets(cited.map((s) => (notes.get(s) ? `${s} — ${notes.get(s)}` : s))),
+    bullets(b.commits.map((c) => (c.note ? `${c.sha} — ${c.note}` : c.sha))),
     'repo metadata',
   );
 
@@ -306,11 +304,10 @@ export function buildReviewMaterial(commands: Commands, id: string): ReviewMater
   }
 
   // 4 · THE CAPTURED CHECKS — each at the sha its run saw, and marked FACT vs CLAIM.
-  const checks = store.checksOf(id);
   add(
     'checks',
     bullets(
-      checks.map(
+      b.conclusion.checks.map(
         (k) =>
           `${k.command}: ${k.result} — ${k.source === 'captured' ? 'CAPTURED FACT (the engine ran it)' : 'REPORTED CLAIM (someone typed it)'}${k.sha ? ` at ${k.sha}` : ' (no sha recorded)'}${k.detail ? ` — ${k.detail}` : ''}`,
       ),
@@ -318,19 +315,19 @@ export function buildReviewMaterial(commands: Commands, id: string): ReviewMater
     'runtime/tool output',
   );
 
-  // 5 · THE RESOLVED DEFINING INPUTS — at their recorded sha, with the packet's excerpt.
-  for (const d of packet.dependencies) {
+  // 5 · THE RESOLVED DEFINING INPUTS — at their recorded sha, with the doc's own head. The
+  //     excerpt rides the brief (12/22 AC-6), so the reviewer reads the same excerpt the
+  //     card would and neither can be reading a different revision of it.
+  for (const d of b.inputs) {
     add(
       `input.${d.name}`,
-      d.status === 'resolved'
-        ? `${d.path ?? d.name} @ ${d.sha ?? '(no sha)'}\n${d.excerpt ?? ''}`
-        : `MISSING — '${d.name}' is a declared requiredInput with no resolved artifact.`,
+      d.status === 'resolved' ? `${d.detail}\n${d.excerpt ?? ''}` : `MISSING — '${d.name}' is a declared requiredInput with no resolved artifact.`,
       'documentation',
     );
   }
 
   // 6 · ANY PRIOR FINDINGS — a review is usually a RE-review, and this is the list it flips.
-  const prior = commands.reviewFindings(id);
+  const prior = b.findings;
   if (prior.findings.length) {
     add(
       'prior.findings',
@@ -378,6 +375,23 @@ export const shapeFindings = (items: unknown[], provenance: string): ReviewFindi
       status: (r.status === 'resolved' ? 'resolved' : 'open') as ReviewFindingInput['status'],
       provenance,
     }));
+
+/**
+ * RENDER the assembled material as the one text block a SINGLE-PASS review is run over
+ * (12/22 AC-6). The interactive session hands the core its material as structured channels;
+ * the headless worker has one turn and one prompt, so it needs the same facts as text —
+ * and it renders them from the SAME assembly, which is what keeps the two reviews from
+ * ever reading different material.
+ */
+export const renderReviewMaterial = (m: ReviewMaterial): string =>
+  [
+    `SUBJECT\n${m.subject}`,
+    m.constraints.length ? `THE CONTRACT'S ACCEPTANCE CRITERIA (the standard)\n${bullets(m.constraints)}` : '',
+    m.anchor ? `ANCHOR — every line number you cite belongs to ${m.anchor}${m.range ? `, over ${m.range}` : ''}` : '',
+    ...m.context.map((c) => `${c.label.toUpperCase()} (${c.sourceType})\n${c.text}`),
+  ]
+    .filter(Boolean)
+    .join('\n\n');
 
 export interface ReviewSessionOptions {
   /** The anti-runaway round ceiling — overrides the profile default so a caller (a test)

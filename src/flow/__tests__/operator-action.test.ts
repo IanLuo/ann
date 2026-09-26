@@ -8,6 +8,7 @@ import { Commands } from '../../commands/index.js';
 import { runOperatorAction, operatorIntegrityBlockers, OperatorActionResult } from '../operator-action.js';
 import { StepLookup } from '../chain.js';
 import { Abilities, ResearchFinding } from '../types.js';
+import type { CaptureEnv } from '../../commands/capture.js';
 
 /**
  * THE OPERATOR ACTION `advance!` (functional-spec v2 F5 — flow-control-spec v7 §2/§5).
@@ -35,8 +36,22 @@ function writeNode(id: string, events: Array<Record<string, unknown>>, contract:
   writeFileSync(join(dir(id), 'node.json'), JSON.stringify({ id, contract, createdAt }));
   if (events.length) writeFileSync(join(dir(id), 'events.jsonl'), events.map((e) => JSON.stringify(e)).join('\n') + '\n');
 }
-const commands = () => new Commands(new Store(root), 'test');
+const commands = (capture: CaptureEnv = realSpawn) => new Commands(new Store(root), 'test', capture);
 const TASK = '01-leg/01-a';
+
+/** The sha the stubbed capture runs against and the conclusion cites — one constant, so the
+ *  captured pass is BOUND to the cited commit (F-AC18's predicate compares the two). */
+const CLOSE_SHA = 'abc1234';
+/** A capture seam that never really spawns — the allowlist, the guards, the sha read and the
+ *  write stay the engine's (leg 12/03). */
+const stubCapture: CaptureEnv = {
+  head: () => CLOSE_SHA,
+  dirty: () => [],
+  run: () => ({ exitCode: 0, stdout: 'Tests  3 passed (3)\n', stderr: '' }),
+};
+/** The DEFAULT seam for this suite: nothing here captures, so an accidental capture must not
+ *  really spawn a suite — it is the stub, and the one test that captures asks for it by name. */
+const realSpawn = stubCapture;
 
 /** A grill-accepted queued task — the frontmost-ready this suite's continue-legs run. */
 function readyTask(over: string[] = []) {
@@ -201,10 +216,14 @@ describe('rule 3 + 4 — continue-leg executes through the frame and lands at a 
 describe('rule 2 — the advance is RE-DERIVED at execution (AC-2)', () => {
   it('a proposal the logs no longer match executes NOTHING (stale)', async () => {
     readyTask();
-    const c = commands();
-    // the human approves — but by the time the approve lands, the store changed (a
-    // concurrent submission blocks the approved task): the re-derivation contradicts it
+    const c = commands(stubCapture);
+    // the human approves — but by the time the approve lands, the store changed: a
+    // concurrent actor COMPLETED the conclusion (commit evidence · the captured pass · the
+    // claims — the close predicate, 12/22 AC-1) and opened the exit gate, so the approved
+    // task is no longer ready and the re-derivation contradicts the proposal
     const human = new ScriptedInteract(['approve'], () => {
+      c.capture(TASK, 'npm test');
+      c.evidence(TASK, [{ sha: CLOSE_SHA }], { claims: [{ ac: 'AC-1', check: 'npm test' }] });
       c.submit(TASK, 'confirm');
     });
     const r = await act(c, human);
@@ -212,8 +231,10 @@ describe('rule 2 — the advance is RE-DERIVED at execution (AC-2)', () => {
     expect(r.phase).toBe('re-derive');
     expect(r.derivation.action).toBe('continue-leg'); // the APPROVED proposal
     expect(r.reDerivation?.action).toBe('closure-needed'); // the logs no longer match it
-    // the approved task was NOT run — no activated, no waiting; only the injected submit
-    expect(frameWrites(c)).toEqual(['created', 'submitted', 'confirmed', 'submitted']);
+    // the approved task was NOT run — no activated, no waiting, no gate decision; only the
+    // concurrent actor's own writes (its captured check · its conclusion · its submission)
+    expect(frameWrites(c)).toEqual(['created', 'submitted', 'confirmed', 'evidence', 'evidence', 'submitted']);
+    expect(c.gateState(TASK, 'confirm')).toBe('submitted'); // the human never decided it
   });
 });
 

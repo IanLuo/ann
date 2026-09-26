@@ -57,6 +57,11 @@ export interface DecisionPoint {
   /** WHO — the RECORDED initiator. Absent when the record does not carry one; never
    *  guessed from the reader's own identity. */
   by?: string;
+  /** WHETHER A PERSON OR THE REVIEW WORKER DECIDED (leg 12/22 AC-4), read off the
+   *  decision event's ENGINE-STAMPED `decider`. Absent on a record written before the
+   *  worker existed, which is a human's by construction — the reader prints the absence
+   *  as a human rather than guessing here, so the field stays exactly what was written. */
+  decider?: 'human' | 'worker';
   /** THE WHY — the recorded reason. ABSENT MEANS MISSING (AC-4). */
   why?: string;
   /** An openQuestion resolution's `how:` — discussed|defaulted|inferred, verbatim. */
@@ -162,6 +167,9 @@ export function decisionPoints(events: JourneyEvent[], questions: readonly Decla
           event: i + 1,
           at: String(e.at ?? ''),
           what: `${decision} at the ${gate} gate`,
+          // WHO DECIDED (12/22 AC-4) — the engine-stamped provenance, carried through the
+          // ONE choice-point derivation so `ann decisions` can count machine accepts.
+          ...(e.decider === 'worker' || e.decider === 'human' ? { decider: e.decider } : {}),
           ...(str(e.feedback) ? { why: str(e.feedback)! } : {}),
           ...(initiator(e.note) ? { by: initiator(e.note)! } : {}),
           ...(successor ? { successor } : {}),
