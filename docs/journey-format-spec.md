@@ -66,6 +66,7 @@
 - **Closure events (v6) — the close-by-transfer record (flow-control v4):**
   - `gate-revised` — the gate re-scope: `{"at","type":"gate-revised","gate":{"old":"…","new":"…"},"note":""}`.
   - `transferred` — scope moved to a new task/leg: `{"at","type":"transferred","target":"06-engine-build","scope":"<the transferred ACs, verbatim>","note":""}`.
+  - **The `scope` convention (12/12).** `scope` stays VERBATIM free text — nothing may paraphrase what moved — and carries ONE AC PER LINE, the id first: `AC-2: <the criterion, verbatim>`. The TEXT is the record; the ID is what a CLOSE credits, so a criterion the task moved reads as satisfied-by-transfer (`AC-n` is positional, 1-based, the same address the conclusion already uses). A line naming no AC is legal and credits nothing: residual scope that maps to no criterion is a real transfer that simply cannot satisfy one — and the close then names the criteria that are neither claimed NOR transferred.
   - `deferred` — scope parked (no target yet): `{"at","type":"deferred","reason":"…","note":""}`.
   - **Closure rule (F-AC16):** a node whose `completed` follows a `gate-revised` must have a `transferred` or `deferred` event before completion; a `transferred` target must exist as a leg/task id. Closure is never prose-only.
   - **Closure lives on TASKS (v7):** `gate-revised` / `transferred` / `deferred` are recorded on the **closure task** — a sibling at the same level with a higher prefix (sibling-correction), or the task that surfaced the gate-unmet — never on the leg root (§12).

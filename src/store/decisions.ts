@@ -72,6 +72,17 @@ export interface DecisionPoint {
   type: string;
   /** The gate, for a gate decision. */
   gate?: string;
+  /** THE BOUND SUCCESSOR (leg 12/12): the node a CONFIRM ACCEPT moved the remaining scope
+   *  to — the target of the `transferred` event the half-accept writes in the same act.
+   *
+   *  WHY IT RIDES THE ACCEPT rather than being a choice point of its own: a `transferred`
+   *  event has NO why channel (its allowed keys are `at`/`type`/`note`/`target`/`scope`),
+   *  so a decision point of its own kind would read `NO WHY RECORDED` on every half accept
+   *  — while the reason is right there, one event earlier, on the accept this transfer
+   *  belongs to. The decision was ONE ("accept, with the rest going to X"), so it reads as
+   *  one: the accept, its why, and the successor it named. Nothing is inferred — the target
+   *  is read off the record, and the why is the accept's own `feedback`, unchanged. */
+  successor?: string;
 }
 
 /** The open questions the derivation is given — the shape `Store.openQuestions` returns,
@@ -123,6 +134,15 @@ export function decisionPoints(events: JourneyEvent[], questions: readonly Decla
 
   // 1. GATE DECISIONS — through `gateView`, the ONE gate lifecycle, so a decision here and
   //    a gate state there can never be read off two different scans.
+  //
+  //    A CONFIRM ACCEPT also reads its BOUND SUCCESSOR (12/12): the target of the LAST
+  //    `transferred` event that follows it. Purely positional over the record — the
+  //    half-accept writes the transfer immediately after the accept, and an accept with no
+  //    transfer after it carries no successor. Nothing is attributed across an unrelated
+  //    transfer: a transfer recorded BEFORE the accept belongs to whatever preceded it.
+  const moves = events
+    .map((e, i) => ({ i, target: e.type === 'transferred' ? str((e as { target?: unknown }).target) : undefined }))
+    .filter((m): m is { i: number; target: string } => m.target !== undefined);
   for (const gate of GATE_ORDER) {
     const v = gateView(events, gate);
     for (const [indexes, decision] of [
@@ -131,6 +151,8 @@ export function decisionPoints(events: JourneyEvent[], questions: readonly Decla
     ] as const) {
       for (const i of indexes) {
         const e = events[i];
+        const after = gate === 'confirm' && decision === 'accepted' ? moves.filter((m) => m.i > i) : [];
+        const successor = after.length ? after[after.length - 1].target : undefined;
         push({
           kind: 'gate',
           gate,
@@ -142,6 +164,7 @@ export function decisionPoints(events: JourneyEvent[], questions: readonly Decla
           what: `${decision} at the ${gate} gate`,
           ...(str(e.feedback) ? { why: str(e.feedback)! } : {}),
           ...(initiator(e.note) ? { by: initiator(e.note)! } : {}),
+          ...(successor ? { successor } : {}),
         });
       }
     }

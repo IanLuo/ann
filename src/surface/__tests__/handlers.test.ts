@@ -129,6 +129,86 @@ describe('evidence! — the gesture flags parse CLOSED', () => {
   });
 });
 
+describe('gate! — the half accept\'s flags parse CLOSED (leg 12/12)', () => {
+  /** A ctx stub: the refusal must happen BEFORE any command is reached. */
+  const stubCtx = (args: string[], gate: (...a: unknown[]) => unknown = () => ({ ok: true, value: {} })) =>
+    ({ args, commands: { gate } } as unknown as CliContext);
+
+  it('passes --transfer/--scope through as ONE option, with the why still the positional feedback', () => {
+    const calls: unknown[][] = [];
+    const ctx = stubCtx(['gate!', '01-leg/01-a', 'confirm', 'accept', 'the rest moves', '--transfer', '01-leg/02-b', '--scope', 'AC-2: the second is done'], (...a) => {
+      calls.push(a);
+      return { ok: true, value: {} };
+    });
+    HANDLERS['gate!'](ctx);
+    expect(calls).toEqual([['01-leg/01-a', 'confirm', 'accept', 'the rest moves', { transfer: { target: '01-leg/02-b', scope: 'AC-2: the second is done' } }]]);
+  });
+
+  it('a bare accept still carries no transfer — the option is absent, not empty', () => {
+    const calls: unknown[][] = [];
+    HANDLERS['gate!'](stubCtx(['gate!', '01-leg/01-a', 'grill', 'accept'], (...a) => { calls.push(a); return { ok: true, value: {} }; }));
+    expect(calls).toEqual([['01-leg/01-a', 'grill', 'accept', '', {}]]);
+  });
+
+  it('refuses a LONE flag, a missing value and an unknown flag — nothing reaches the command', () => {
+    const calls: unknown[][] = [];
+    const run = (args: string[]) => {
+      let thrown: { code?: string; message?: string } | undefined;
+      try { HANDLERS['gate!'](stubCtx(args, (...a) => { calls.push(a); return { ok: true, value: {} }; })); } catch (e) { thrown = e as { code?: string; message?: string }; }
+      return thrown;
+    };
+    expect(run(['gate!', '01-leg/01-a', 'confirm', 'accept', 'why', '--transfer', '01-leg/02-b'])?.message).toContain('go together');
+    expect(run(['gate!', '01-leg/01-a', 'confirm', 'accept', 'why', '--scope', 'x'])?.message).toContain('go together');
+    expect(run(['gate!', '01-leg/01-a', 'confirm', 'accept', 'why', '--transfer', '--scope', 'x'])?.message).toContain('needs a target');
+    expect(run(['gate!', '01-leg/01-a', 'confirm', 'accept', 'why', '--bogus', 'x'])?.message).toContain('unknown flag --bogus');
+    expect(calls).toEqual([]); // not one write was reached
+  });
+});
+
+describe('the brief renders a MOVED AC as moved (leg 12/12 AC-2)', () => {
+  const T = '07-leg/01-implementation-thing';
+  const C3 = { intent: 'three things', acceptanceCriteria: ['the first is done', 'the second is done', 'the third is done'] };
+  const dir = (id: string) => join(root, '.ann', 'journey', 'legs', id);
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'ann-hd-'));
+    mkdirSync(join(root, '.ann', 'journey', 'legs', '07-leg'), { recursive: true });
+    writeFileSync(join(root, '.ann', 'journey', 'legs', '07-leg', 'node.json'), JSON.stringify({ id: '07-leg', contract: C3, createdAt: '2026-09-01' }));
+    mkdirSync(dir(T), { recursive: true });
+    writeFileSync(join(dir(T), 'node.json'), JSON.stringify({ id: T, contract: C3, createdAt: '2026-09-01' }));
+    writeFileSync(
+      join(dir(T), 'events.jsonl'),
+      [
+        ev('created'),
+        ev('submitted', { gate: 'grill' }),
+        ev('confirmed', { gate: 'grill' }),
+        ev('evidence', { commits: [{ sha: 'abc1234' }], claims: [{ ac: 'AC-1', check: 'npm test' }] }),
+        ev('submitted', { gate: 'confirm' }),
+        ev('confirmed', { gate: 'confirm', feedback: 'the first half landed', note: 'accepted (ianluo)' }),
+        ev('transferred', { target: '07-leg/02-implementation-rest', scope: 'AC-2: the second is done\nAC-3: the third is done', note: 'scope moved (ianluo)' }),
+      ].map((e) => JSON.stringify(e)).join('\n') + '\n',
+    );
+  });
+
+  it('names the successor and the moved ACs, and never says "every AC claimed"', () => {
+    const ctx = createContext(root, ['brief', T]);
+    const out = HANDLERS.brief(ctx) as { value: { conclusion: { transferred: Array<{ ac: string; target: string }>; unclaimed: unknown[]; claims: unknown[] }; decisions: Array<{ successor?: string }> } };
+    expect(out.value.conclusion.transferred).toEqual([
+      { ac: 'AC-2', acText: 'the second is done', target: '07-leg/02-implementation-rest' },
+      { ac: 'AC-3', acText: 'the third is done', target: '07-leg/02-implementation-rest' },
+    ]);
+    expect(out.value.conclusion.unclaimed).toEqual([]);
+    // the accept decision reads the successor it moved the scope to (the why is its own)
+    expect(out.value.decisions.find((d) => d.successor)?.successor).toBe('07-leg/02-implementation-rest');
+    const text = RENDERS.brief(out.value, ctx.renderEnv());
+    expect(text).toContain('TRANSFERRED (moved to a successor — not claimed as met)');
+    expect(text).toContain('AC-2 → 07-leg/02-implementation-rest');
+    expect(text).not.toContain('every AC claimed');
+    expect(text).not.toContain('UNCLAIMED');
+    expect(text).toContain('scope moved to 07-leg/02-implementation-rest');
+  });
+});
+
 describe('the NODE VIEW — the complete task card + the event drill (leg 10 task 04)', () => {
   // A node with a real contract, a resolved input, open questions and a rich event log:
   // the fields the thin gate card used to hide.

@@ -92,6 +92,41 @@ describe('decisionPoints — the ONE derivation over the tail (AC-2)', () => {
     expect([...points].map((p) => p.event)).toEqual([...points].sort((a, b) => a.event - b.event).map((p) => p.event));
   });
 
+  it('a CONFIRM ACCEPT reads its BOUND SUCCESSOR (leg 12/12) — the half accept is ONE decision', () => {
+    const tail = asEvents([
+      ev('created'),                                                                        // 1
+      ev('submitted', { gate: 'grill' }),                                                   // 2
+      ev('confirmed', { gate: 'grill' }),                                                   // 3
+      ev('submitted', { gate: 'confirm' }),                                                 // 4
+      ev('confirmed', { gate: 'confirm', feedback: 'the first half landed', note: 'accepted (ianluo)' }), // 5
+      ev('transferred', { target: '01-leg/02-b', scope: 'AC-2: the second is done', note: 'scope moved to 01-leg/02-b (ianluo)' }), // 6
+      ev('completed'),                                                                      // 7
+    ]);
+    const points = decisionPoints(tail);
+    expect(points.map((p) => p.kind)).toEqual(['gate', 'gate']); // a transfer is not a third
+    // the transfer is NOT a choice point of its own: it has no why channel, so a kind of
+    // its own would read NO WHY RECORDED on every half accept — while the reason is right
+    // there, on the accept it belongs to. ONE decision, read as one.
+    expect(points[1]).toMatchObject({
+      kind: 'gate', gate: 'confirm', decision: 'accepted',
+      why: 'the first half landed', by: 'ianluo', successor: '01-leg/02-b',
+    });
+    // the entry gate carries no successor: a transfer rides the EXIT gate
+    expect(points[0].successor).toBeUndefined();
+    // …and it is the transfer that FOLLOWS the accept: a transfer recorded before it
+    // belongs to whatever preceded it, never attributed forward
+    const earlier = decisionPoints(asEvents([
+      ev('created'),
+      ev('submitted', { gate: 'grill' }),
+      ev('confirmed', { gate: 'grill' }),
+      ev('submitted', { gate: 'confirm' }),
+      ev('transferred', { target: '01-leg/02-b', scope: 'AC-2: the second is done' }), // written BEFORE the accept
+      ev('confirmed', { gate: 'confirm', feedback: 'accepted after the fact', note: 'accepted (ianluo)' }),
+    ]));
+    expect(earlier[1].gate).toBe('confirm');
+    expect(earlier[1].successor).toBeUndefined(); // a transfer AFTER an accept is not read backwards
+  });
+
   it('records BOTH directions of a gate — an accept AND a reject, each with its own why', () => {
     const tail = asEvents([
       ev('created'),

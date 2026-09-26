@@ -267,8 +267,11 @@ describe('the gate source is the CHAIN (core-design §6)', () => {
     // and it is what `ann decisions` reads back
     expect(c.decisions(TASK).decisions.at(-1)).toMatchObject({ kind: 'gate', gate: 'confirm', decision: 'accepted', why: 'the ACs are met and the doc is staged' });
     // AC-4 — the ENTRY accept was a bare "yes" (legal: the rule is bounded to the terminal
-    // gate), so it reads as a NAMED gap rather than a silent one
-    expect(c.decisions(TASK).missingWhy).toEqual(['2026-09-25 accepted at the grill gate — NO WHY RECORDED']);
+    // gate), so it reads as a NAMED gap rather than a silent one. The DATE is the event's
+    // own (the day the frame ran), never the reader's clock — read it back off the record
+    // rather than hardcoding a day that only holds until midnight.
+    const grill = c.events(TASK).find((e) => e.type === 'confirmed' && e.gate === 'grill')!;
+    expect(c.decisions(TASK).missingWhy).toEqual([`${grill.at} accepted at the grill gate — NO WHY RECORDED`]);
   });
 
   it('AC-1: a routed confirm accept with NO rationale FAILS CLOSED — the frame never invents a why', async () => {

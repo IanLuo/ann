@@ -7,6 +7,7 @@ import { Store, JourneyEvent } from '../../store/store.js';
 import { Commands, CommandResult } from '../index.js';
 import type { CaptureEnv } from '../capture.js';
 import { scanDocsDir, writeDocsManifest } from '../../store/docs.js';
+import { runValidators } from '../../flow/validators/index.js';
 
 /**
  * L1 — the command surface. These tests pin the INVARIANTS the composites encode:
@@ -525,9 +526,11 @@ describe('evidence! + complete! — the close gesture commands (leg 08 task 02)'
     c.evidence(ID, [{ sha: realSha() }]);
     const e = errorOf(c.complete(ID));
     expect(e.code).toBe('no-structured-conclusion');
-    expect(e.blocker).toContain('carry no claim');
+    // the refusal names the gap exactly: NEITHER claimed NOR transferred (12/12 AC-2)
+    expect(e.blocker).toContain('neither claimed NOR transferred');
     expect(e.blocker).toContain("'AC-1'");
     expect(e.blocker).toContain('--claims');
+    expect(e.blocker).toContain('--transfer'); // the other way out of the gap, named
     expect(c.status(ID)).toBe('accepted'); // nothing was written
     // the derivation the CARD renders is the one that refused
     expect(c.conclusion(ID).unclaimed).toEqual([{ ac: 'AC-1', acText: 'it is done' }]);
@@ -1487,5 +1490,242 @@ Success criteria:
     expect(e.code).toBe('store-refused');
     expect(e.blocker).toContain("seedGoal rejected");
     expect(new Store(root).ids()).toEqual([]); // nothing half-seeded
+  });
+});
+
+/**
+ * THE HALF ACCEPT (leg 12/12) — closing a task while its remaining scope moves to a named
+ * successor, as ONE validated act.
+ *
+ * The user's ask ("I want to halfly accept — the task I want to close, but need to open a
+ * new task for some continuing work") was already expressible in the FORMAT and unreachable
+ * from every tool: `transferred {target, scope}` had no owning command, its target was only
+ * checked LATER by check(), and a genuinely unmet AC still blocked the close — so the honest
+ * record was impossible and the operator was pushed into a false claim.
+ */
+describe('the HALF ACCEPT — one gesture, a bounded successor (leg 12/12)', () => {
+  const ID = '01-leg/01-a';
+  const NEXT = '01-leg/02-b';
+  const C3 = { intent: 'do three things', acceptanceCriteria: ['the first is done', 'the second is done', 'the third is done'] };
+  const SCOPE = 'AC-2: the second is done\nAC-3: the third is done';
+  const GATE = [ev('submitted', { gate: 'grill' }), ev('confirmed', { gate: 'grill' })];
+  const atConfirm = () => writeNode(ID, C3, [ev('created'), ...GATE, ev('submitted', { gate: 'confirm' })]);
+
+  /** The task at its CONFIRM gate, its work landed, AC-1 claimed by a CAPTURED pass. Every
+   *  node is written BEFORE the Commands is constructed (the store reads the tree once), and
+   *  the fixture's own writes happen once — the refusals below write nothing, so one fixture
+   *  serves them all. */
+  const halfReady = (pre?: () => void) => {
+    writeNode('01-leg', C3);
+    atConfirm();
+    writeNode(NEXT, C3, [ev('created')]);
+    if (pre) pre();
+    const c = cmds(stubCapture());
+    valueOf(c.capture(ID, 'npm test'));
+    valueOf(c.evidence(ID, [{ sha: realSha() }], { claims: [{ ac: 'AC-1', check: 'npm test' }] }));
+    return c;
+  };
+  const half = (c: Commands, opts: { scope?: string; target?: string; why?: string } = {}) =>
+    c.gate(ID, 'confirm', 'accept', opts.why ?? 'the first half landed; the rest moves with it', {
+      transfer: { target: opts.target ?? NEXT, scope: opts.scope ?? SCOPE },
+    });
+  const eventsText = () => readFileSync(join(nodeDir(ID), 'events.jsonl'), 'utf8');
+
+  beforeEach(() => { makeStore(); });
+  afterEach(() => { rmSync(root, { recursive: true, force: true }); });
+
+  /* ── AC-1 — the refusals, every one NAMED and with ZERO writes ───────────────── */
+
+  it('AC-1 refuses each malformed half accept BY NAME, writing nothing', () => {
+    const cases: Array<[string, (c: Commands) => CommandResult<unknown>]> = [
+      ['why-required', (c) => c.gate(ID, 'confirm', 'accept', '', { transfer: { target: NEXT, scope: SCOPE } })],
+      ['why-required', (c) => c.gate(ID, 'confirm', 'accept', '   ', { transfer: { target: NEXT, scope: SCOPE } })],
+      ['transfer-not-confirm', (c) => c.gate(ID, 'grill', 'accept', 'a why', { transfer: { target: NEXT, scope: SCOPE } })],
+      ['transfer-not-accept', (c) => c.gate(ID, 'confirm', 'reject', 'not this time', { transfer: { target: NEXT, scope: SCOPE } })],
+      ['transfer-no-target', (c) => c.gate(ID, 'confirm', 'accept', 'a why', { transfer: { target: '01-leg/nope', scope: SCOPE } })],
+      ['transfer-no-target', (c) => c.gate(ID, 'confirm', 'accept', 'a why', { transfer: { target: '   ', scope: SCOPE } })],
+      ['transfer-self', (c) => c.gate(ID, 'confirm', 'accept', 'a why', { transfer: { target: ID, scope: SCOPE } })],
+      ['transfer-empty-scope', (c) => c.gate(ID, 'confirm', 'accept', 'a why', { transfer: { target: NEXT, scope: '  \n ' } })],
+      ['transfer-unknown-ac', (c) => c.gate(ID, 'confirm', 'accept', 'a why', { transfer: { target: NEXT, scope: 'AC-9: nothing of the sort' } })],
+    ];
+    const c = halfReady();
+    const before = eventsText();
+    for (const [code, run] of cases) {
+      // the GESTURE is refused, not the node: the confirm gate is still undecided afterwards
+      expect(errorOf(run(c)).code, `expected ${code}`).toBe(code);
+      expect(eventsText()).toBe(before); // ZERO writes — byte-identical
+      expect(c.gateState(ID, 'confirm')).toBe('submitted');
+    }
+  });
+
+  it('AC-1 the why is refused FIRST — --transfer is not a way around it', () => {
+    const c = halfReady();
+    expect(errorOf(c.gate(ID, 'confirm', 'accept', '', { transfer: { target: NEXT, scope: SCOPE } })).code).toBe('why-required');
+    expect(c.events(ID).some((x) => x.type === 'transferred')).toBe(false);
+  });
+
+  it('AC-4 a SECOND identical transfer refuses by name — the scope is recorded once', () => {
+    const c = halfReady();
+    valueOf(half(c));
+    const before = eventsText();
+    const e = errorOf(half(c));
+    expect(e.code).toBe('transfer-duplicate');
+    expect(e.blocker).toContain('already records this exact transfer');
+    expect(eventsText()).toBe(before);
+    expect(c.events(ID).filter((x) => x.type === 'transferred')).toHaveLength(1);
+  });
+
+  /* ── AC-1/AC-2 — the act, the credit ────────────────────────────────────────── */
+
+  it('AC-1 THE HALF ACCEPT: one act writes accepted → transferred → completed, in that order', () => {
+    const c = halfReady();
+    const out = valueOf(half(c));
+    expect(out).toMatchObject({ gate: 'confirm', decision: 'accept', completed: true });
+    expect(out.transferred).toEqual({ target: NEXT, scope: SCOPE });
+    // ONE ORDER, and it is the one the close depends on: the transfer lands BEFORE the
+    // close it is credited by, so the record never closes first and explains itself after.
+    expect(c.events(ID).map((x) => x.type).slice(-3)).toEqual(['confirmed', 'transferred', 'completed']);
+    const t = c.events(ID).find((x) => x.type === 'transferred')!;
+    expect(t.target).toBe(NEXT);
+    expect(t.scope).toBe(SCOPE); // VERBATIM — the record keeps the text the human wrote
+    expect(c.status(ID)).toBe('done');
+    expect(c.check()).toEqual([]); // the half accept leaves the journey form-clean
+  });
+
+  it('AC-2 the conclusion reads a transferred AC as MOVED — with its target, and never as met', () => {
+    const c = halfReady();
+    valueOf(half(c));
+    const k = c.conclusion(ID);
+    expect(k.transferred).toEqual([
+      { ac: 'AC-2', acText: 'the second is done', target: NEXT },
+      { ac: 'AC-3', acText: 'the third is done', target: NEXT },
+    ]);
+    // NEITHER claimed NOR unclaimed: the claim list does not grow a false entry
+    expect(k.unclaimed).toEqual([]);
+    expect(k.claims.map((x) => x.ac)).toEqual(['AC-1']);
+  });
+
+  it('AC-2 complete! stops demanding a claim for a transferred AC — and still names the real gap', () => {
+    // the task is ACCEPTED but the evidence is not yet in: this is where complete! speaks
+    const c = halfReady();
+    valueOf(half(c, { scope: 'AC-2: the second is done\nAC-3: the third is done' }));
+    expect(c.status(ID)).toBe('done');
+    // a THIRD criterion moved nowhere is still named — neither claimed NOR transferred
+    const c2 = (() => {
+      makeStore();
+      writeNode('01-leg', C3);
+      writeNode('01-leg/03-c', C3, [ev('created'), ...GATE, ev('submitted', { gate: 'confirm' })]);
+      writeNode(NEXT, C3, [ev('created')]);
+      const x = cmds(stubCapture());
+      valueOf(x.capture('01-leg/03-c', 'npm test'));
+      // the evidence claims AC-1 and AC-3 only; AC-2 is the criterion that moves
+      valueOf(x.evidence('01-leg/03-c', [{ sha: realSha() }], { claims: [{ ac: 'AC-1', check: 'npm test' }, { ac: 'AC-3', check: 'npm test' }] }));
+      return x;
+    })();
+    valueOf(c2.gate('01-leg/03-c', 'confirm', 'accept', 'half', { transfer: { target: NEXT, scope: 'AC-2: the second is done' } }));
+    expect(c2.conclusion('01-leg/03-c').transferred.map((t) => t.ac)).toEqual(['AC-2']);
+    expect(c2.conclusion('01-leg/03-c').unclaimed).toEqual([]);
+    // …and the AC that is neither gets NAMED by the one refusal that reads this derivation
+    const c3 = (() => {
+      makeStore();
+      writeNode('01-leg', C3);
+      writeNode('01-leg/03-c', C3, [ev('created'), ...GATE, ev('submitted', { gate: 'confirm' })]);
+      writeNode(NEXT, C3, [ev('created')]);
+      const x = cmds(stubCapture());
+      valueOf(x.capture('01-leg/03-c', 'npm test'));
+      valueOf(x.evidence('01-leg/03-c', [{ sha: realSha() }], { claims: [{ ac: 'AC-1', check: 'npm test' }] }));
+      valueOf(x.gate('01-leg/03-c', 'confirm', 'accept', 'half', { transfer: { target: NEXT, scope: 'AC-2: the second is done' } }));
+      // the auto-close rode the accept; a re-open reads the SAME derivation the card renders
+      return x;
+    })();
+    expect(c3.conclusion('01-leg/03-c').unclaimed).toEqual([{ ac: 'AC-3', acText: 'the third is done' }]);
+  });
+
+  it('AC-2 a transfer of RESIDUAL scope names no AC and credits none — allowed, and it satisfies nothing', () => {
+    const c = halfReady();
+    valueOf(half(c, { scope: 'the remaining hardening work, unnamed' }));
+    expect(c.conclusion(ID).transferred).toEqual([]);
+    expect(c.conclusion(ID).unclaimed.map((u) => u.ac)).toEqual(['AC-2', 'AC-3']);
+  });
+
+  it('AC-4 a transfer to ANOTHER LEG is allowed — the format target is a leg/task id', () => {
+    const c = halfReady(() => {
+      writeNode('02-other', C3);
+      writeNode('02-other/01-c', C3, [ev('created')]);
+    });
+    expect(valueOf(half(c, { target: '02-other/01-c' })).transferred).toEqual({ target: '02-other/01-c', scope: SCOPE });
+    expect(c.conclusion(ID).transferred.every((t) => t.target === '02-other/01-c')).toBe(true);
+  });
+
+  /* ── AC-3 — nothing else moves ──────────────────────────────────────────────── */
+
+  it('AC-3 NO NEW STATE: every derived read after a half accept IS the read of an ordinary close', () => {
+    // The strongest form of "nothing else moves": run the SAME task to the same end twice —
+    // once by half accept, once by a plain confirm accept — and compare the WHOLE derived
+    // surface. Anything the transfer moved beyond its own event would show up here.
+    const reads = (kind: 'half' | 'plain') => {
+      makeStore();
+      writeNode('01-leg', C3);
+      atConfirm();
+      writeNode(NEXT, C3, [ev('created')]);
+      const c = cmds(stubCapture());
+      valueOf(c.capture(ID, 'npm test'));
+      valueOf(c.evidence(ID, [{ sha: realSha() }], { claims: [{ ac: 'AC-1', check: 'npm test' }] }));
+      if (kind === 'half') valueOf(half(c));
+      else valueOf(c.gate(ID, 'confirm', 'accept', 'the first half landed; only AC-1 is claimed'));
+      return {
+        status: c.status(ID),
+        leg: c.status('01-leg'),
+        ready: c.frontmostReady(),
+        look: c.lookBack(),
+        distance: runValidators(c.store, ID).filter((f) => f.code === 'distance-to-goal'),
+        check: c.check(),
+        verify: c.verify(),
+        types: c.events(ID).map((e) => e.type),
+      };
+    };
+    const plain = reads('plain');
+    const halfReads = reads('half');
+    // each read the AC names, pinned by name
+    expect(halfReads.status).toBe(plain.status);
+    expect(halfReads.leg).toBe(plain.leg);
+    expect(plain.look.legGate).toEqual(halfReads.look.legGate);
+    expect(halfReads.distance).toEqual(plain.distance);
+    expect(halfReads.ready).toEqual(plain.ready);
+    expect(halfReads.check).toEqual([]);
+    expect(halfReads.verify).toEqual([]);
+    // …and the catch-all: the whole surface, minus the transfer event itself, is identical
+    expect({ ...halfReads, types: [] }).toEqual({ ...plain, types: [] });
+    expect(halfReads.types.filter((t) => t !== 'transferred')).toEqual(plain.types);
+    expect(plain.types).not.toContain('transferred');
+    expect(halfReads.status).toBe('done'); // the same DONE terminal: no `partial`, no new word
+  });
+
+  /* ── AC-4 — order-independence of the F-AC16 check ──────────────────────────── */
+
+  it('AC-4 F-AC16 is order-insensitive: transfer-then-complete and complete-then-transfer both pass', () => {
+    const seq = (order: 'transfer-first' | 'complete-first') => {
+      makeStore();
+      writeNode('01-leg', C3);
+      writeNode(NEXT, C3, [ev('created')]);
+      const tail = [ev('created'), ...GATE, ev('gate-revised', { gate: { old: 'confirm', new: 'grill' }, note: 'terms moved (test)' })];
+      const transfer = ev('transferred', { target: NEXT, scope: SCOPE });
+      const completed = ev('completed');
+      writeNode(ID, C3, order === 'transfer-first' ? [...tail, transfer, completed] : [...tail, completed, transfer]);
+      return new Store(root).closureProblems();
+    };
+    expect(seq('transfer-first')).toEqual([]);
+    expect(seq('complete-first')).toEqual([]);
+    // the check still BITES: without the transfer, a close after a gate revision is flagged
+    makeStore();
+    writeNode('01-leg', C3);
+    writeNode(ID, C3, [ev('created'), ...GATE, ev('gate-revised', { gate: { old: 'confirm', new: 'grill' }, note: 'x' }), ev('completed')]);
+    expect(new Store(root).closureProblems()[0]).toContain('gate-revised but closed without transferred/deferred');
+  });
+
+  it('AC-4 the target-existence rule still bites — F-AC16 unchanged for a record written by hand', () => {
+    writeNode('01-leg', C3);
+    writeNode(ID, C3, [ev('created'), ...GATE, ev('transferred', { target: '01-leg/ghost', scope: SCOPE })]);
+    expect(new Store(root).closureProblems()[0]).toContain("transferred target '01-leg/ghost' does not exist");
   });
 });

@@ -306,7 +306,7 @@ const COMMANDS: Array<{ name: string; args: string; desc: string }> = [
   { name: 'append!', args: '<id> \'<json>\'', desc: 'WRITE — single-writer append; REFUSES the composite-owned kinds (created/submitted/confirmed/rejected/goal-met) and the RETIRED doc-artifact vocab (artifact-locked/superseded). `cancelled` (a task no longer needed — the counterpart of the submit!/gate! close) is recordable here with a REQUIRED reason' },
   { name: 'spawn!', args: '<id> \'<contract-json>\'', desc: 'WRITE — create a node; enforces the v14 contract schema + F-AC19 + id naming + the conclusion (commit-evidence)/leg gates' },
   { name: 'submit!', args: '<id> grill|confirm [confirmedSha]', desc: 'WRITE — submit finished work at a gate for the human decision (the SUCCESS half of the task close; the counterpart is cancel — no longer needed): records `submitted` — the task blocks and waits for `gate! accept|reject`; an interrupted gate stays blocked (resumable), never looks un-started. `[confirmedSha]` (confirm gate only) binds the decision to the exact bytes under review' },
-  { name: 'gate!', args: '<id> grill|confirm accept|reject [feedback]', desc: 'WRITE — human gate decision (submit + decide; the 3-reject bound is a CONSTANT owned here); a CONFIRM accept AUTO-CLOSES the task when the conclusion evidence is already present (the same rule the frame runs) — with the evidence missing the task stays `accepted` and the result names the `complete!` still owed' },
+  { name: 'gate!', args: "<id> grill|confirm accept|reject [feedback] [--transfer <target> --scope '<ACs>']", desc: "WRITE — human gate decision (submit + decide; the 3-reject bound is a CONSTANT owned here); a CONFIRM accept AUTO-CLOSES the task when the conclusion evidence is already present (the same rule the frame runs) — with the evidence missing the task stays `accepted` and the result names the `complete!` still owed. A CONFIRM accept MUST carry a why. --transfer makes it THE HALF ACCEPT (leg 12/12): the remaining scope moves to a named successor in the SAME validated act — `--scope` names the ACs that move, one per line as '<AC-id>: <the criterion, verbatim>' (the id is what the close credits). Refused NAMED with ZERO writes: the target does not exist (F-AC16 at write time, not later in check()) · the scope is empty · the gate is not confirm · the decision is not accept · the why is empty · the target is this node · an AC id the contract does not have · the identical transfer is already recorded. The task still lands `done`: the partiality lives in the checked link, never in a new status" },
   { name: 'evidence!', args: "<id> <sha>[,<sha>…] [--refs a.md,b.md] [--note '<text>'] [--claims '<json>'] [--checks '<json>']", desc: "WRITE — the CONCLUSION record (F-AC18): structured commit evidence naming the committed doc/code that carries the deliverable (commits[] non-empty, a sha per entry) plus the OPTIONAL structured conclusion (format v18, MECHANICAL since leg 12/03): --claims = one {ac, check?, statement?, evidence?} per acceptance criterion — `check` is the ac→CHECK MAPPING (the recorded run that covers the AC; `statement` is optional prose, derived from the mapping when absent) and evidence entries are POINTERS (commit sha · ref path · doc name) resolved at READ time; --checks = {command, result: pass|fail, detail?, sha?, source?} (what was RUN) — a check without a `source` is LABELLED `reported` by the writer, and `source:'captured'` is REFUSED here (engine-produced: run capture!); the shape stays the store's — a validated front over the same L1 write, provenance from RECORDED_BY, and a bad JSON argument writes nothing" },
   { name: 'capture!', args: "<id> '<command>'", desc: CAPTURE_COMMAND_DESC },
   { name: 'complete!', args: '<id> [--note \'<text>\']', desc: 'WRITE — the EXPLICIT DONE terminal (a confirm accept auto-closes on evidence, so this gesture is the accepted-without-evidence exception; an already-completed task gets an idempotent refusal): refuses without the confirm gate\'s LAST decision being an ACCEPT and without the conclusion evidence — the F-AC18 predicate (TIGHTENED, leg 12/03: a REPORTED check is refused by name; leg 12/02: so is a CAPTURED FAILURE recorded on a CITED commit — `cited-check-failed`): evidence.commits[] AND the structured conclusion (a claim per acceptance criterion, each mapped to a check the log holds) AND at least one CAPTURED pass bound to a cited commit AND no captured failure on one' },
@@ -1216,10 +1216,23 @@ export const HANDLERS: Record<string, Handler> = {
     return writeResult(ctx.commands.submit(ctx.args[1], ctx.args[2], ctx.args[3] ? { confirmedSha: ctx.args[3] } : {}));
   },
   'gate!': (ctx) => {
-    if (!getVOCAB().gates.includes(ctx.args[2]) || !['accept', 'reject'].includes(ctx.args[3] ?? '')) {
-      return usage('usage: ann gate! <id> grill|confirm accept|reject [feedback]');
-    }
-    return writeResult(ctx.commands.gate(ctx.args[1], ctx.args[2], ctx.args[3], ctx.args.slice(4).join(' ')));
+    const USAGE = "usage: ann gate! <id> grill|confirm accept|reject [feedback] [--transfer <target> --scope '<ACs>']";
+    // THE HALF ACCEPT's two flags (leg 12/12). They are taken BEFORE the positional args
+    // are read, so the why is whatever is left — and a lone flag, an unknown flag or an
+    // empty value FAILS CLOSED here rather than reaching the command as a weird feedback
+    // string (the same discipline `evidence!`'s flags follow).
+    const t = takeFlag(ctx.args.slice(1), '--transfer');
+    const s = takeFlag(t.rest, '--scope');
+    const stray = strayFlag(s.rest);
+    if (stray) return usage(`${USAGE} — unknown flag ${stray}`);
+    const hasTransfer = ctx.args.includes('--transfer');
+    const hasScope = ctx.args.includes('--scope');
+    if (hasTransfer !== hasScope) return usage(`${USAGE} — --transfer and --scope go together`);
+    if ((hasTransfer && !t.value) || (hasScope && !s.value)) return usage(`${USAGE} — --transfer needs a target and --scope needs the ACs`);
+    const [id, gate, decision, ...feedback] = s.rest;
+    if (!id || !getVOCAB().gates.includes(gate) || !['accept', 'reject'].includes(decision ?? '')) return usage(USAGE);
+    const opts = hasTransfer ? { transfer: { target: t.value, scope: s.value } } : {};
+    return writeResult(ctx.commands.gate(id, gate, decision, feedback.join(' '), opts));
   },
   'evidence!': (ctx) => {
     const refs = takeFlag(ctx.args.slice(1), '--refs');

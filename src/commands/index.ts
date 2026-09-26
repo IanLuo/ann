@@ -8,6 +8,7 @@ import { GATE_DECISION_EVENTS, READY_STATUSES, gateView, workflowState, type Gat
 import { ALLOWLIST, ALLOWLIST_NAMES, outputDetail, defaultCaptureEnv, type CaptureEnv } from './capture.js';
 import { IDEA_STALE_DAYS, ideasDir, isIdeaId, listIdeas, newIdeaId, readIdea, writeIdea, deleteIdea, type Idea } from '../store/ideas.js';
 import { decisionPoints, type DecisionPoint } from '../store/decisions.js';
+import { scopeAcs, transferCredit } from '../store/transfer.js';
 import type { OpLog } from '../abilities/obs/log.js';
 
 /** An idea's age in whole days — the number `idea list` shows and `--stale` compares.
@@ -160,6 +161,9 @@ export interface GateOutcome {
   /** A confirm accept that left the task `accepted` because the conclusion evidence is
    *  MISSING: the explicit gesture still owed (`complete!`, with its no-evidence refusal). */
   pending?: string;
+  /** THE HALF ACCEPT (leg 12/12): the successor the scope moved to, echoed back so the
+   *  caller sees the act it composed (accept + transferred) as one thing. */
+  transferred?: { target: string; scope: string };
 }
 
 /** THE GATE BRIEF (leg 12/15) — the decision material, in the order a decision needs it.
@@ -213,7 +217,15 @@ export interface ConclusionView {
    *  `captured` (the engine ran it and read the exit code: a FACT) or `reported` (the
    *  runner typed it: a CLAIM). */
   checks: CheckView[];
-  /** The contract ACs with NO claim — the reviewer's signal, and `complete!`'s refusal. */
+  /**
+   * The contract ACs the HALF ACCEPT moved to a successor (leg 12/12, AC-2) — read off
+   * `transferred.scope`, each with the target it went to. NEITHER claimed NOR unclaimed:
+   * the record says this criterion MOVED, and `complete!` stops demanding a claim for it
+   * without ever asserting it was met.
+   */
+  transferred: Array<{ ac: string; acText: string; target: string }>;
+  /** The contract ACs with NO claim and NO transfer — the reviewer's signal, and
+   *  `complete!`'s refusal (the ACs that are neither claimed NOR transferred). */
   unclaimed: Array<{ ac: string; acText: string }>;
   /** The commits this task's conclusion cites (evidence.commits[].sha). */
   cited: string[];
@@ -647,12 +659,23 @@ export class Commands {
    * CAPTURED pass bound to a cited commit), never a second predicate. With the evidence
    * ABSENT — or reported-only — the task stays honestly `accepted` and the result names
    * the gesture still owed. Grill accepts and rejects never complete.
+   *
+   * THE HALF ACCEPT (leg 12/12) — the SAME gesture with a BOUND SUCCESSOR. The user's ask:
+   * "I want to halfly accept — the task I want to close, but need to open a new task for
+   * some continuing work". The format already declared `transferred {target, scope}`; NO
+   * command owned it, so the human's one decision became two unrelated writes in two
+   * tools, the target was only checked LATER by check(), and a genuinely unmet AC still
+   * blocked the close — pushing the operator into a false claim. `opts.transfer` closes
+   * all three: validated before the first append, composed in one order, credited on the
+   * read side by `conclusion.transferred`. NOT a third verdict (the decision stays binary)
+   * and NOT a new state (no status word: the task is `done`, and the partiality lives in
+   * the checked link).
    */
-  gate(id: string, gate: string, decision: string, feedback = ''): CommandResult<GateOutcome> {
-    return this.loggedWrite('gate', [id, gate, decision, feedback], () => this.gateImpl(id, gate, decision, feedback));
+  gate(id: string, gate: string, decision: string, feedback = '', opts: { transfer?: { target?: string; scope?: string } } = {}): CommandResult<GateOutcome> {
+    return this.loggedWrite('gate', [id, gate, decision, feedback, opts], () => this.gateImpl(id, gate, decision, feedback, opts));
   }
 
-  private gateImpl(id: string, gate: string, decision: string, feedback: string): CommandResult<GateOutcome> {
+  private gateImpl(id: string, gate: string, decision: string, feedback: string, opts: { transfer?: { target?: string; scope?: string } } = {}): CommandResult<GateOutcome> {
     if (!getVOCAB().gates.includes(gate)) return fail('unknown-gate', `gate must be one of ${getVOCAB().gates.join('|')}`);
     if (decision !== 'accept' && decision !== 'reject') return fail('bad-decision', "decision must be 'accept' or 'reject'");
     if (!this.store.ids().includes(id)) return fail('no-node', `no node ${id}`);
@@ -670,11 +693,59 @@ export class Commands {
     // log through this method, so the rule is stated once. GRILL accepts stay optional
     // (Q1's default): an entry gate is cheap to re-obtain, and its contract is the thing
     // being accepted, not a choice made.
+    //
+    // THE TRANSFER RIDES THIS SAME CHECK (12/12 AC-1): the argument order is deliberate —
+    // the why is refused FIRST, so the transfer option can never become a way around it.
     if (gate === 'confirm' && decision === 'accept' && !feedback.trim()) {
       return fail(
         'why-required',
         `gate! ${id} confirm accept needs a why — it is a task's TERMINAL decision and the exact place the journey's reasons were lost. Re-run with the rationale: ann gate! ${id} confirm accept '<why>'`,
       );
+    }
+
+    // AC-1 (leg 12/12) — THE HALF ACCEPT, VALIDATED HERE AND NOWHERE ELSE. Every refusal
+    // below is decided BEFORE the first append: a refused gesture writes NOTHING (the
+    // `cancelled.reason` shape, one layer up). The composite's WRITES come after, in the
+    // one order that makes the sequence resumable — see the comment on them.
+    if (opts.transfer) {
+      const target = typeof opts.transfer.target === 'string' ? opts.transfer.target.trim() : '';
+      const scope = typeof opts.transfer.scope === 'string' ? opts.transfer.scope : '';
+      if (gate !== 'confirm') {
+        return fail('transfer-not-confirm', `a transfer rides a CONFIRM accept — this is a ${gate} decision. The entry gate accepts a contract; only the exit gate has a scope to move (12/12 AC-1)`);
+      }
+      if (decision !== 'accept') {
+        return fail('transfer-not-accept', `a transfer rides an ACCEPT — a reject has no scope to move. Reject the gate, or accept it with --transfer <target>`);
+      }
+      if (!target) {
+        return fail('transfer-no-target', `--transfer needs a target node id: the successor the remaining scope moves to (ann gate! ${id} confirm accept '<why>' --transfer <leg-or-task-id> --scope '<ACs>')`);
+      }
+      // F-AC16's rule, lifted to WRITE time: the check() finding fires on a record already
+      // written, so a raw append! could name a successor that does not exist and the
+      // journey would only notice later. Here it is refused before anything lands (Q2's
+      // default: the target must EXIST — this gesture never authors a contract).
+      if (!this.store.ids().includes(target)) {
+        return fail('transfer-no-target', `--transfer ${target}: no such leg or task. F-AC16 — a transfer must land somewhere: spawn the successor first (ann spawn! ${target} '<contract>'), then transfer to it`);
+      }
+      if (target === id) {
+        return fail('transfer-self', `--transfer ${id}: a task cannot transfer its own scope to itself — the remaining ACs would move nowhere and the close would credit a claim the record does not support`);
+      }
+      if (!scope.trim()) {
+        return fail('transfer-empty-scope', `--transfer ${target} needs a --scope: the ACs that move, one per line as '<AC-id>: <the criterion, verbatim>' (the id is what the close credits; the text is what a human rereads)`);
+      }
+      // The scope's ids are validated against THIS contract: a typo'd id would credit
+      // nothing and the record would read as a transfer that moved no criterion.
+      const known = new Set(((this.store.contractOf(id)?.acceptanceCriteria as string[] | undefined) ?? []).map((_, i) => `AC-${i + 1}`));
+      const named = scopeAcs(scope);
+      const unknown = named.filter((a) => !known.has(a));
+      if (unknown.length) {
+        return fail('transfer-unknown-ac', `--scope names ${unknown.join(', ')} — ${id} has ${known.size} acceptance criterion(s)${known.size ? ` (${[...known].join(', ')})` : ''}. Name the criteria that MOVE, or state residual scope in prose on its own line (a line naming no AC credits nothing)`);
+      }
+      // AC-4: the identical transfer is refused BY NAME rather than recorded twice — the
+      // gesture is a human act, not a replay (the flow's `close` intent stays the
+      // idempotent one, where a re-run of the same plan must not double-write).
+      if (this.store.events(id).some((e) => e.type === 'transferred' && e.target === target && e.scope === scope)) {
+        return fail('transfer-duplicate', `${id} already records this exact transfer (${named.join(' · ') || 'no AC named'} → ${target}) — a transfer is recorded once; a DIFFERENT scope or target is a new decision`);
+      }
     }
 
     const rejects = this.rejections(id, gate);
@@ -692,6 +763,15 @@ export class Commands {
     const autoClose = decision === 'accept' && gate === 'confirm' && closeBlocker === undefined
       && !this.store.events(id).some((e) => e.type === 'completed');
     try {
+      // THE COMPOSITE'S ORDER (12/12 AC-1/AC-3), and it is not arbitrary: submitted →
+      // confirmed → transferred → completed. The TRANSFER precedes the CLOSE because the
+      // close's own predicate credits it (`conclusion.transferred` leaves `unclaimed`), and
+      // because F-AC16 reads the tail — a `completed` before the `transferred` it depends
+      // on would be a record that closed first and explained itself after. THERE IS NO
+      // TRANSACTION: these are 4 sequential appends. The refusals above are what "one
+      // validated act" means here; the RESUME rule is that a re-run completes the
+      // sequence — the accepted re-accept is an existing behaviour, a duplicate transfer
+      // refuses by name before any write, and the close never lands twice.
       if (!this.undecidedSubmission(id, gate)) {
         this.store.appendEvent(this.node(id), { at: this.today, type: 'submitted', gate, note: `submitted with the decision (${this.who})` });
       }
@@ -701,6 +781,22 @@ export class Commands {
           ? { at: this.today, type: GATE_DECISION_EVENTS.accept, gate, ...(feedback ? { feedback } : {}), note: `accepted (${this.who})` }
           : { at: this.today, type: GATE_DECISION_EVENTS.reject, gate, feedback, note: `rejected (${this.who})` },
       );
+      // THE REVISION, in the same act. NOT `gate-revised`: the gate's NAME does not change
+      // (confirm → confirm) and the format gives that event only a `{old,new}` gate pair —
+      // there is no field in it for "the exit gate now covers a narrower scope", so writing
+      // one would record a revision with nothing revised (and arm F-AC16 against a fact
+      // the `transferred` event below states anyway). The transfer IS the revision's
+      // record; `gate-revised` stays what it always was — the explicit gate-terms move.
+      if (opts.transfer) {
+        const target = String(opts.transfer.target).trim();
+        this.store.appendEvent(this.node(id), {
+          at: this.today,
+          type: 'transferred',
+          target,
+          scope: String(opts.transfer.scope),
+          note: `scope moved to ${target} (${this.who})`,
+        });
+      }
       // The auto-close rides the SAME gesture — the event names itself, so the log never
       // reads like a separate `complete!`. Never on a re-accept of an already-closed task.
       if (autoClose) {
@@ -719,6 +815,7 @@ export class Commands {
       decision,
       escalated: after >= REJECT_BOUND,
       ...(autoClose ? { completed: true } : {}),
+      ...(opts.transfer ? { transferred: { target: String(opts.transfer.target).trim(), scope: String(opts.transfer.scope) } } : {}),
       ...(decision === 'accept' && gate === 'confirm' && !autoClose
         ? { pending: `${id}: the confirm gate is ACCEPTED but the task cannot close (${closeBlocker?.code ?? 'already-completed'}) — the task honestly reads 'accepted'; close it with the explicit gesture \`complete! ${id}\` once the evidence is recorded (it refuses with '${closeBlocker?.code ?? 'no-evidence'}' until then)` }
         : {}),
@@ -992,7 +1089,7 @@ export class Commands {
     if (conclusion.unclaimed.length) {
       return fail(
         'no-structured-conclusion',
-        `${id}: ${conclusion.unclaimed.length} acceptance criterion(s) carry no claim — ${conclusion.unclaimed.map((u) => `'${u.ac}' (${u.acText})`).join(' · ')}. Record how each is met: ann evidence! ${id} <sha> --claims '[{"ac":"AC-1","check":"npm test"}]' (the ac→check mapping; prose is optional)`,
+        `${id}: ${conclusion.unclaimed.length} acceptance criterion(s) are neither claimed NOR transferred — ${conclusion.unclaimed.map((u) => `'${u.ac}' (${u.acText})`).join(' · ')}. Record how each is met: ann evidence! ${id} <sha> --claims '[{"ac":"AC-1","check":"npm test"}]' (the ac→check mapping; prose is optional), or move it to a successor: ann gate! ${id} confirm accept '<why>' --transfer <target> --scope 'AC-2: <the criterion, verbatim>'`,
       );
     }
     const unbound = conclusion.claims.filter((c) => c.check && !c.bound);
@@ -1965,14 +2062,23 @@ export class Commands {
       return { command: c.command, result: c.result, source: c.source, ...(c.detail ? { detail: c.detail } : {}), ...(c.sha ? { sha: c.sha } : {}) };
     };
     const acs = ((this.store.contractOf(id)?.acceptanceCriteria as string[] | undefined) ?? []).filter((a) => typeof a === 'string');
+    // AC-2 (leg 12/12) — THE TRANSFER CREDIT. An AC the task MOVED to a successor is
+    // neither met nor unaccounted for, so it leaves `unclaimed` (which is what `complete!`
+    // refuses on) and lands in `transferred` with the target the record names. The claim
+    // match stays FIRST: a criterion that both moved AND was claimed is claimed — a claim
+    // is the stronger record, and the log can hold both across a rework.
+    const moved = transferCredit(this.store.events(id));
     const used = new Set<string>();
     const claims: ConclusionView['claims'] = [];
+    const transferred: ConclusionView['transferred'] = [];
     const unclaimed: ConclusionView['unclaimed'] = [];
     acs.forEach((ac, i) => {
       const key = this.acKey(ac);
       const match = [...latest.entries()].find(([k, c]) => !used.has(k) && (k === `ac-${i + 1}` || key.startsWith(k)));
       if (!match) {
-        unclaimed.push({ ac: `AC-${i + 1}`, acText: ac });
+        const target = moved.get(`AC-${i + 1}`);
+        if (target) transferred.push({ ac: `AC-${i + 1}`, acText: ac, target });
+        else unclaimed.push({ ac: `AC-${i + 1}`, acText: ac });
         return;
       }
       used.add(match[0]);
@@ -1981,7 +2087,7 @@ export class Commands {
     });
     // a claim that matched no AC is KEPT (an author's extra claim is data, never dropped)
     for (const [k, c] of latest.entries()) if (!used.has(k)) claims.push({ ...c, acText: '', ...(bound(c.check) ? { bound: bound(c.check)! } : {}) });
-    return { claims, checks, unclaimed, cited };
+    return { claims, checks, transferred, unclaimed, cited };
   }
 
   /** THE STRUCTURED FINDINGS, derived from the log (leg 12/09) — the ONE place a review's

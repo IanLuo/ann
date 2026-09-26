@@ -20,8 +20,11 @@ function decisionLines(d: DecisionPoint): string[] {
   const who = d.by ? ` · by ${d.by}` : '';
   const how = d.how ? ` · how: ${d.how}` : '';
   const impact = d.highImpact ? ' · HIGH-IMPACT' : '';
+  // A half accept (leg 12/12): the scope this decision moved, named on the decision itself
+  // — the transfer records no why of its own, so the accept is where it reads.
+  const successor = d.successor ? ` · scope moved to ${d.successor}` : '';
   return [
-    `  ${d.at} [${d.kind}] ${d.what}${who}${how}${impact}`,
+    `  ${d.at} [${d.kind}] ${d.what}${who}${how}${impact}${successor}`,
     `      why: ${d.why ?? '(MISSING — nothing was recorded)'}`,
   ];
 }
@@ -626,8 +629,18 @@ export const RENDERS: Record<string, Renderer> = {
     if (!v.decisions.length) lines.push('  (none yet — this is a first-time gate)');
     for (const d of v.decisions) lines.push(...decisionLines(d));
     const unclaimed = v.conclusion.unclaimed ?? [];
+    const moved = v.conclusion.transferred ?? [];
     lines.push('---', 'CONCLUSION');
-    lines.push(`  claims: ${v.conclusion.claims.length}${unclaimed.length ? ` · UNCLAIMED: ${unclaimed.map((u) => u.ac).join(', ')}` : ' · every AC claimed'} · checks: ${v.conclusion.checks.length}`);
+    // "every AC claimed" is said only when it is TRUE: a moved AC is not a claimed one.
+    const accounted = unclaimed.length
+      ? ` · UNCLAIMED: ${unclaimed.map((u) => u.ac).join(', ')}`
+      : moved.length
+        ? ''
+        : ' · every AC claimed';
+    lines.push(`  claims: ${v.conclusion.claims.length}${accounted} · checks: ${v.conclusion.checks.length}`);
+    // A transferred AC reads as MOVED, never as met (12/12 AC-2): the one line that keeps a
+    // half accept from looking like a full one on the card a human decides from.
+    if (moved.length) lines.push(`  TRANSFERRED (moved to a successor — not claimed as met): ${moved.map((t) => `${t.ac} → ${t.target}`).join(' · ')}`);
     lines.push(`  close: ${v.closeBlocker ? `REFUSED now — ${v.closeBlocker.code}` : 'a confirm accept would auto-close (the evidence bound is satisfied)'}`);
     // THE REVIEW RECORD (leg 12/09) — the gate's own material: what a review found, per
     // finding, so the human deciding this gate reads the record and not a digest of it.
