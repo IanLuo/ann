@@ -1,4 +1,4 @@
-import { TaskDetail, ResultItem, CLOSED_TASK_STATUSES } from '../store/store.js';
+import { TaskDetail, ResultItem, CLOSED_TASK_STATUSES, type LegGate } from '../store/store.js';
 import type { GoalView, DeferredTask, ReworkTask } from '../commands/index.js';
 
 /**
@@ -109,7 +109,9 @@ export interface PlanAhead {
   activeLegStatus?: string;
   frontmostReady?: { task: string; status: string };
   alsoReady: Array<{ task: string; status: string }>;
-  legGate: { met: boolean; blocker?: string };
+  /** THE ONE LEG-GATE ANSWER (12/14 AC-1): the verdict AND the leg's own counts, straight
+   *  from the store's derivation — this renderer consumes it and derives nothing of its own. */
+  legGate: LegGate;
   readyCount?: number;
   /** The outstanding deferred work — the obligations a deferred task left behind when it
    *  closed its leg (leg 12 task 01). Shown as their OWN section, never folded into the
@@ -170,14 +172,17 @@ export function renderPlan(legs: PlanLeg[], ahead: PlanAhead): string {
     out.push(`active leg: ${ahead.activeLeg} (${ahead.activeLegStatus})`);
     // The leg's OWN closure decides the review line — NEVER the absence of a ready
     // task (the derived-state lie: a `blocked` task waiting on a human, an `accepted`
-    // one awaiting complete!, and a `failed` one all leave no ready task).
+    // one awaiting complete!, and a `failed` one all leave no ready task). That fact is
+    // `legGate.complete`, CONSUMED from the store's one derivation (12/14 AC-1) rather
+    // than recomputed here: the renderer prints the names below, it does not decide
+    // whether the leg is finished.
     const activeTasks = legs.find((l) => l.id === ahead.activeLeg)?.tasks ?? [];
     const unfinished = activeTasks.filter((t) => !CLOSED_TASK_STATUSES.includes(t.status));
     const gateNote = ahead.legGate.met ? '' : ` (leg gate: ${ahead.legGate.blocker ?? 'unmet'})`;
     if (ahead.frontmostReady) {
       out.push(`frontmost-ready: ${ahead.frontmostReady.task} (${ahead.frontmostReady.status})`);
       for (const t of ahead.alsoReady) out.push(`  also ready: ${t.task} (${t.status})`);
-    } else if (unfinished.length) {
+    } else if (!ahead.legGate.complete) {
       // …and when the wait is an owed REWORK, the remedy named is the re-submission — never the
       // gated closure task, which is transfer/defer: the wrong move for a task that only needs
       // its contract fixed at the gate the human already decided (leg 12 task 06).

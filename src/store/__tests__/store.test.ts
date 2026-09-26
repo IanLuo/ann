@@ -134,7 +134,7 @@ describe('Store — the task-close vocabulary: the cancelled terminal + the acce
     writeNode('01-goal/01-a', {}, [ev('created'), ev('cancelled', { reason: 'the goal shrank' })]);
     const s = new Store(root);
     expect(s.status('01-goal')).toBe('done');
-    expect(s.legGateMet('02-next')).toEqual({ met: true });
+    expect(s.legGate('02-next')).toMatchObject({ met: true });
   });
 
   it('a cancelled task is never the leg\'s frontmost child (an open sibling drives the leg\'s status)', () => {
@@ -185,7 +185,7 @@ describe('Store — the task-close vocabulary: the cancelled terminal + the acce
     writeNode('01-goal/01-a', {}, [ev('created'), ...GATES]);
     const s = new Store(root);
     expect(s.status('01-goal')).toBe('accepted'); // the leg reports its frontmost unclosed child
-    expect(s.legGateMet('02-next').met).toBe(false); // an accepted task is not closed — the gate stays shut
+    expect(s.legGate('02-next').met).toBe(false); // an accepted task is not closed — the gate stays shut
   });
 
   it('the vocab registry declares the new words (both or neither — resource-registry §5)', () => {
@@ -248,7 +248,7 @@ describe('Store — the `deferred` terminal (leg 09: the half-implemented word w
     writeNode('01-goal/01-a', {}, [ev('created'), DEFER()]);
     const s = new Store(root);
     expect(s.status('01-goal')).toBe('done');
-    expect(s.legGateMet('02-next')).toEqual({ met: true });
+    expect(s.legGate('02-next')).toMatchObject({ met: true });
   });
 
   it('a deferred task is never the leg\'s frontmost child (an open sibling drives the leg\'s status)', () => {
@@ -623,17 +623,17 @@ describe('Store — leg gate (v8 §12/§13)', () => {
     writeNode('01-goal', {}, [ev('created'), ev('completed')]);
     writeNode('01-goal/01-a', {}, [ev('created'), ev('completed')]);
     const s = new Store(root);
-    expect(s.legGateMet('02-next').met).toBe(true); // predecessor (01-goal) tasks all done
+    expect(s.legGate('02-next').met).toBe(true); // predecessor (01-goal) tasks all done
     writeNode('01-goal/02-b', {}, [ev('created')]);
-    expect(new Store(root).legGateMet('02-next').met).toBe(false); // 02-b unfinished (fresh snapshot)
+    expect(new Store(root).legGate('02-next').met).toBe(false); // 02-b unfinished (fresh snapshot)
   });
 
   it('a childless predecessor uses its own record (L1 base step)', () => {
     writeNode('01-goal', {}, [ev('created'), ev('completed')]);
     const s = new Store(root);
-    expect(s.legGateMet('02-next').met).toBe(true);
+    expect(s.legGate('02-next').met).toBe(true);
     writeNode('01-goal', {}, [ev('created')]);
-    expect(new Store(root).legGateMet('02-next').met).toBe(false);
+    expect(new Store(root).legGate('02-next').met).toBe(false);
   });
 });
 

@@ -437,7 +437,7 @@ describe('e2e — the operate loop: the WHAT\'S NEXT card + the approve (leg 11)
     // both tasks now wait on the runner: nothing ready, so the ACTIVE leg is unfinished and
     // the authored work is to CLOSE the leg (a gated human move), never a machine close.
     // The label says the leg's OWN completeness — the leg GATE is a different fact
-    // (this leg's predecessor), answered by legGateMet, and the two must not share words
+    // (this leg's predecessor), answered by legGate, and the two must not share words
     // (leg 12 task 14: one `ann next` used to print MET and UNMET one line apart).
     const v = await card(server);
     expect(v.advance.action).toBe('closure-needed');

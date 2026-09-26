@@ -1,4 +1,5 @@
 import { AdvanceView, FrontmostReady } from '../commands/index.js';
+import type { LegGate } from '../store/store.js';
 import { CliContext, CommandExit, createContext, readOnlyRefuse } from './handlers.js';
 import { resolveChain } from '../flow/chain.js';
 import { buildAbilities } from '../abilities/index.js';
@@ -171,7 +172,7 @@ export interface WhatsNextView {
   /** The frontmost-ready task, when the derivation proposes one. */
   frontmost?: FrontmostReady;
   /** The active leg's gate: MET, or UNMET with its blocker. */
-  legGate: { met: boolean; blocker?: string };
+  legGate: LegGate;
   /** Every undecided submission on the active leg (the human's other move). */
   pendingGates: Array<{ task: string; gate: string }>;
   /** The READ's honest half of the integrity display: unchecked, and why. The verdict

@@ -1,6 +1,7 @@
 import { AdvanceView, Commands, CONTRACT_FIELDS, DeferredTask, FrontmostReady, GoalView } from '../commands/index.js';
 import type { OpLog } from '../abilities/obs/log.js';
 import { loadDocsManifest } from '../store/docs.js';
+import type { LegGate } from '../store/store.js';
 import { StepLookup, loadProjectFlow } from './chain.js';
 import { Frame } from './frame.js';
 import { InteractAbility, LlmAbility, ResearchFinding } from './types.js';
@@ -233,7 +234,7 @@ export interface DriverObservation {
   advance: AdvanceView;
   frontmost?: FrontmostReady;
   alsoReady: FrontmostReady[];
-  legGate: { met: boolean; blocker?: string };
+  legGate: LegGate;
   pendingGates: Array<{ task: string; gate: string }>;
   deferred: DeferredTask[];
   goal: { present: boolean; goalId?: string; verdict: string; structural: string };

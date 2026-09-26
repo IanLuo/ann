@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join, relative } from 'node:path';
-import { Store, JourneyEvent, NodeDir, ResultItem, TaskDetail, CLOSED_TASK_STATUSES, type CheckView, type NodeDep, type ReviewFindingInput, type ReviewFindingView } from '../store/store.js';
+import { Store, JourneyEvent, NodeDir, ResultItem, TaskDetail, CLOSED_TASK_STATUSES, NO_LEG_GATE, type LegGate, type CheckView, type NodeDep, type ReviewFindingInput, type ReviewFindingView } from '../store/store.js';
 import { blobSha, stripMarkers } from '../store/sha.js';
 import { getVOCAB } from '../store/vocab.js';
 import { GATE_DECISION_EVENTS, READY_STATUSES, gateView, workflowState, type GateLifecycle } from '../store/workflow.js';
@@ -311,7 +311,10 @@ export interface LookBack {
   activeLegStatus?: string;
   frontmostReady?: FrontmostReady;
   alsoReady: FrontmostReady[];
-  legGate: { met: boolean; blocker?: string };
+  /** THE ONE LEG-GATE ANSWER (12/14 AC-1) — the verdict and the leg's counts, from the
+   *  store's single derivation: the CLI, the card and the driver print THIS, never a
+   *  count of their own. */
+  legGate: LegGate;
   pendingGates: Array<Pick<PendingGate, 'task' | 'gate' | 'readiness' | 'closesOnAccept'>>;
   /** The OUTSTANDING DEFERRED WORK (leg 12 task 01): a deferred task closes its leg, so
    *  the pull surface (frontmost-ready / pending gates) never names it — this is the one
@@ -528,7 +531,7 @@ export class Commands {
       const clash = sibs.find((s) => s.startsWith(prefix + '-'));
       if (clash) return fail('prefix-clash', `prefix ${prefix} already used by sibling ${clash}`);
     } else {
-      const gate = this.store.legGateMet(id);
+      const gate = this.store.legGate(id);
       if (!gate.met) return fail('leg-gate', gate.blocker ?? 'leg gate unmet');
     }
 
@@ -1937,7 +1940,7 @@ export class Commands {
     const activeLeg = this.activeLeg();
     const ready = activeLeg ? this.store.tasksOf(activeLeg).filter((t) => READY_STATUSES.includes(this.store.status(t))) : [];
     const alsoReady = (ready.length ? ready.slice(1) : []).map((t) => ({ leg: activeLeg!, task: t, status: this.store.status(t) }));
-    const legGate = activeLeg ? this.store.legGateMet(activeLeg) : { met: true };
+    const legGate = activeLeg ? this.store.legGate(activeLeg) : NO_LEG_GATE;
     const pendingGates: LookBack['pendingGates'] = [];
     for (const t of this.store.tasksOf(activeLeg ?? '')) {
       for (const p of this.pendingGatesOf(t)) {
@@ -1987,9 +1990,9 @@ export class Commands {
       const blocked = tasks.filter((t) => this.store.status(t) === 'blocked').length;
       // THE LABEL SAYS WHAT IT MEANS (leg 12 task 14): this branch is the ACTIVE leg having
       // no ready task — the leg's own incompleteness — NOT the leg gate (which asks whether
-      // this leg's PREDECESSOR is finished and is answered by legGateMet). Both used to say
+      // this leg's PREDECESSOR is finished and is answered by legGate). Both used to say
       // 'leg gate', so one `ann next` printed `leg gate: MET` and `leg gate UNMET: …`.
-      const progress = this.store.legProgress(working);
+      const progress = this.store.legGate(working);
       return {
         leg: working,
         action: 'closure-needed',
@@ -2018,7 +2021,7 @@ export class Commands {
       }
       return { leg: '', action: 'none', detail: 'session open — goal seeded, no work spawned yet: the first work leg opens the session' };
     }
-    const gate = this.store.legGateMet(front);
+    const gate = this.store.legGate(front);
     if (!gate.met) return { leg: front, action: 'closure-needed', detail: `leg gate UNMET: ${gate.blocker} — close via a gated closure task (transfer/defer, F-AC16)` };
     return { leg: front, action: 'advance-leg', detail: `leg gate MET: all previous-leg tasks done — spawn tasks into ${front} carrying the epic goal` };
   }

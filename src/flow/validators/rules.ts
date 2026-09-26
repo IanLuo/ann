@@ -96,7 +96,7 @@ export const roundGate = {
     const out: RuleFinding[] = [];
     const legs = ctx.store.ids().filter((i) => !i.includes('/')).sort();
     for (let i = 1; i < legs.length; i++) {
-      const g = ctx.store.legGateMet(legs[i]);
+      const g = ctx.store.legGate(legs[i]);
       if (!g.met) out.push({ severity: 'error', code: 'round-gate', detail: `leg ${legs[i]}: ${g.blocker}`, nodeId: legs[i] });
     }
     return out;

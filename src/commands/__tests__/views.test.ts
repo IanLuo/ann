@@ -26,7 +26,7 @@ function writeNode(id: string, events: Array<Record<string, unknown>>, contract:
 const commands = () => new Commands(new Store(root), 'test');
 
 /** v6 — the seeded goal leg: CHILDLESS, created+completed on its root → legStatus
- *  derives done, and the first work leg's legGateMet opens. (goal-session-design §2) */
+ *  derives done, and the first work leg's legGate opens. (goal-session-design §2) */
 const seedGoal = (contract: unknown = { intent: 'Build the goal', acceptanceCriteria: ['the goal is met'] }) =>
   writeNode('01-goal', [ev('created'), ev('completed')], contract);
 /** A done work leg under the goal — a completed task derives the leg done. */

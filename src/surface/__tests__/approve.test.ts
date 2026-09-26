@@ -126,7 +126,9 @@ describe("care c — the card's read: the derivation, and NO pre-check on the re
     const clean = whatsNext(root);
     expect(clean.advance).toEqual({ leg: '01-leg', action: 'continue-leg', detail: NEXT });
     expect(clean.frontmost).toEqual({ leg: '01-leg', task: TASK, status: 'queued' });
-    expect(clean.legGate).toEqual({ met: true });
+    // THE ONE ANSWER (12/14 AC-1): the card carries the verdict AND the leg's counts from
+    // the store's single derivation — one open task here, nothing closed yet
+    expect(clean.legGate).toEqual({ met: true, total: 1, done: 0, blocked: 0, open: 1, complete: false });
     // THE READ CARRIES NO VERDICT (leg 12/07): the full pre-check cost ~3.3s of every page
     // load. The card says what it knows — nothing yet — and where the real answer comes from.
     expect(clean.integrity.state).toBe('unchecked');

@@ -1,7 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { TaskDetail, ResultItem } from '../../store/store.js';
+import { TaskDetail, ResultItem, type LegGate } from '../../store/store.js';
 import type { GoalView } from '../../commands/index.js';
 import { renderStatusTree, renderGateCard, renderPlan, renderGoal, redact, hasSecret, hasScalarProgress, renderDrift, renderLedger } from '../renderers.js';
+
+/** THE ONE LEG-GATE ANSWER as the renderers receive it (12/14 AC-1): the verdict AND the
+ *  leg's counts, both from the store's single derivation. The renderer may PRINT these
+ *  counts and may branch on `complete` — it derives neither, so a hand-built fixture has
+ *  to state them the way the store would. */
+const gate = (over: Partial<LegGate> = {}): LegGate => ({ met: true, total: 2, done: 2, blocked: 0, open: 0, complete: true, ...over });
 
 const detail = (over: Partial<TaskDetail> = {}): TaskDetail => ({
   id: '06-engine-build/09-s6-runner-reviewer',
@@ -103,7 +109,7 @@ describe('renderPlan (F12 — full plan)', () => {
         activeLegStatus: 'queued',
         frontmostReady: { task: '06-engine-build/09-s6-runner-reviewer', status: 'queued' },
         alsoReady: [{ task: '06-engine-build/10-s7-github-binding', status: 'queued' }],
-        legGate: { met: true },
+        legGate: gate(),
       },
     );
     expect(text).toContain('=== WHERE WE ARE ===');
@@ -128,7 +134,9 @@ describe('renderPlan (F12 — full plan)', () => {
           ],
         },
       ],
-      { activeLeg: '08-task-close', activeLegStatus: 'accepted', alsoReady: [], legGate: { met: true } },
+      // THE ONE ANSWER SAYS THE LEG IS UNFINISHED (12/14 AC-1): the counts and the verdict
+      // come from the store's single derivation, so this fixture states them the way it would
+      { activeLeg: '08-task-close', activeLegStatus: 'accepted', alsoReady: [], legGate: gate({ complete: false, total: 2, done: 1, blocked: status === 'blocked' ? 1 : 0, open: 1 }) },
     );
     expect(text).not.toContain('all spawned tasks done');
     expect(text).toContain(`no ready tasks in leg — unfinished: 08-task-close/02-implementation-close-commands (${status})`);
@@ -142,7 +150,7 @@ describe('renderPlan (F12 — full plan)', () => {
       [{ id: '09-spec-fidelity', status: 'done', superseded: false, tasks: [{ id: '09-spec-fidelity/01-validate-decision-forks', status: 'deferred' }] }],
       {
         alsoReady: [],
-        legGate: { met: true },
+        legGate: gate(),
         deferred: [
           {
             task: '09-spec-fidelity/01-validate-decision-forks',
@@ -163,7 +171,7 @@ describe('renderPlan (F12 — full plan)', () => {
   });
 
   it('no deferred work → WHAT IS AHEAD is unchanged (no DEFERRED section)', () => {
-    const text = renderPlan([{ id: '01-goal', status: 'done', superseded: false }], { alsoReady: [], legGate: { met: true } });
+    const text = renderPlan([{ id: '01-goal', status: 'done', superseded: false }], { alsoReady: [], legGate: gate() });
     expect(text).not.toContain('DEFERRED');
   });
 
@@ -175,7 +183,7 @@ describe('renderPlan (F12 — full plan)', () => {
       [{ id: '12-operate-loop', status: 'rework', superseded: false, tasks: [{ id: '12-operate-loop/05-implementation-observability-log', status: 'rework' }] }],
       {
         alsoReady: [],
-        legGate: { met: true },
+        legGate: gate(),
         rework: [
           {
             task: '12-operate-loop/05-implementation-observability-log',
@@ -195,7 +203,7 @@ describe('renderPlan (F12 — full plan)', () => {
   });
 
   it('no rework owed → WHAT IS AHEAD is unchanged (no REWORK section)', () => {
-    const text = renderPlan([{ id: '01-goal', status: 'done', superseded: false }], { alsoReady: [], legGate: { met: true } });
+    const text = renderPlan([{ id: '01-goal', status: 'done', superseded: false }], { alsoReady: [], legGate: gate() });
     expect(text).not.toContain('REWORK');
   });
 
@@ -206,7 +214,7 @@ describe('renderPlan (F12 — full plan)', () => {
         activeLeg: '12-operate-loop',
         activeLegStatus: 'rework',
         alsoReady: [],
-        legGate: { met: true },
+        legGate: gate({ complete: false, total: 1, done: 0, blocked: 0, open: 1 }),
         rework: [
           { task: '12-operate-loop/05-implementation-observability-log', leg: '12-operate-loop', gate: 'grill', feedback: 'no tracing id', since: '2026-09-14' },
         ],
@@ -222,7 +230,7 @@ describe('renderPlan (F12 — full plan)', () => {
         activeLeg: '01-leg',
         activeLegStatus: 'blocked',
         alsoReady: [],
-        legGate: { met: true },
+        legGate: gate({ complete: false, total: 1, done: 0, blocked: 1, open: 1 }),
         rework: [{ task: '02-leg/01-b', leg: '02-leg', gate: 'grill', feedback: 'x', since: '2026-09-14' }],
       },
     );
@@ -232,7 +240,7 @@ describe('renderPlan (F12 — full plan)', () => {
   it('a rejection with NO feedback still names the gate — never a blank line', () => {
     const text = renderPlan([{ id: '01-goal', status: 'done', superseded: false }], {
       alsoReady: [],
-      legGate: { met: true },
+      legGate: gate(),
       rework: [{ task: '01-goal/01-a', leg: '01-goal', gate: 'confirm', feedback: '', since: '' }],
     });
     expect(text).toContain('rework owed at the confirm gate');
@@ -242,7 +250,7 @@ describe('renderPlan (F12 — full plan)', () => {
   it('a genuinely closed leg DOES print the leg-gate review line', () => {
     const text = renderPlan(
       [{ id: '07-operator-advance', status: 'done', superseded: false, tasks: [{ id: '07-operator-advance/01-implementation-advance', status: 'done' }] }],
-      { alsoReady: [], legGate: { met: true } },
+      { alsoReady: [], legGate: gate() },
     );
     expect(text).toContain('no active leg — previous leg derived done; LEG GATE REVIEW');
   });
@@ -384,7 +392,7 @@ describe('no scalar progress — AC5', () => {
       activeLeg: '01-goal',
       activeLegStatus: 'done',
       alsoReady: [],
-      legGate: { met: true },
+      legGate: gate(),
     });
     expect(hasScalarProgress(card)).toBe(false);
     expect(hasScalarProgress(tree)).toBe(false);

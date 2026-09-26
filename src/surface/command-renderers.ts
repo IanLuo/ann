@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import type { TaskDetail, ResultItem, CheckView } from '../store/store.js';
+import type { TaskDetail, ResultItem, CheckView, LegGate } from '../store/store.js';
 import type { GoalView } from '../commands/index.js';
 import type { Brief } from '../commands/index.js';
 import { renderStatusTree, renderGateCard, renderPlan, renderDrift, renderLedger, renderGoal, deferredLines, reworkLines, execVerdict, PlanLeg, PlanAhead } from './renderers.js';
@@ -409,7 +409,7 @@ export const RENDERS: Record<string, Renderer> = {
         activeLegStatus?: string;
         frontmostReady?: { task: string; status: string };
         alsoReady: Array<{ task: string; status: string }>;
-        legGate: { met: boolean; blocker?: string };
+        legGate: LegGate;
         pendingGates: Array<{ task: string; gate: string; readiness: { ready: boolean; blockers: string[] }; closesOnAccept?: boolean }>;
         deferred?: DeferredTask[];
         rework?: ReworkTask[];

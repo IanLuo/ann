@@ -500,7 +500,7 @@ describe('the readers AGREE (AC-2) — one fixture set, all four gate states', (
     expect(findings).toHaveLength(1);
     expect(findings[0].detail).toContain('01-leg');
     expect(findings[0].detail).toContain(TASK);
-    expect(store.legGateMet('02-next')).toMatchObject({ met: false });
+    expect(store.legGate('02-next')).toMatchObject({ met: false });
   });
 
   it('the readers agree on a task whose CONFIRM gate is the one in flight', () => {
@@ -580,6 +580,144 @@ describe('the readers AGREE (AC-2) — one fixture set, all four gate states', (
       if (!(rel in ALLOWED)) unregistered.push(rel);
     }
     expect(unregistered, `these files name the gate event types without being registered in ALLOWED (add one, with the reason): ${unregistered.join(', ')}`).toEqual([]);
+  });
+});
+
+/* ══ THE LEG GATE, DERIVED ONCE (leg 12 task 14) ═══════════════════════════════════════
+ *
+ * The disease this task cures: ONE derived fact answered by TWO derivations. `ann next`
+ * printed `leg gate: MET` (legGateMet) and `leg gate UNMET: 4 done, 9 blocked` (the
+ * empty-ready-set branch) two lines apart — two facts wearing one label, and nothing
+ * reconciled them. Now ONE call returns BOTH the verdict and the counts, and every reader
+ * consumes it: a disagreement is a FAILURE, not a nuance (the 12/08 shape).
+ */
+describe('the LEG GATE, derived once (leg 12 task 14) — the readers AGREE', () => {
+  beforeEach(() => { makeStore(); });
+  afterEach(() => { rmSync(root, { recursive: true, force: true }); });
+  const done = [ev('created'), ev('submitted', { gate: 'grill' }), ev('confirmed', { gate: 'grill' }), ev('submitted', { gate: 'confirm' }), ev('confirmed', { gate: 'confirm' }), ev('completed')];
+  const blocked = [ev('created'), ev('submitted', { gate: 'grill' })];
+  const rework = [ev('created'), ev('submitted', { gate: 'grill' }), ev('rejected', { gate: 'grill' })];
+  const deferred = [ev('created'), ev('deferred', { reason: 'later' })];
+  /**
+   * THE PRE-FIX RULE, re-stated independently (AC-4 — "no verdict changes"): the leg gate as
+   * `legGateMet` answered it before this task — is this leg's PREDECESSOR finished? It is the
+   * ORACLE the new `legGate().met` has to match on every leg, fixture and live alike, so the
+   * fix is proven to have removed the contradiction WITHOUT moving a single verdict.
+   */
+  const metBefore = (store: Store, legId: string): boolean => {
+    const legs = store.ids().filter((i) => !i.includes('/')).sort();
+    const preds = legs.filter((l) => l < legId);
+    if (!preds.length) return true; // first leg — no predecessor
+    const prev = preds[preds.length - 1];
+    const tasks = store.ids().filter((n) => n.startsWith(prev + '/') && n.split('/').length === 2);
+    if (!tasks.length) return store.events(prev).some((e) => e.type === 'completed');
+    return tasks.every((t) => CLOSED_TASK_STATUSES.includes(store.status(t)));
+  };
+  /** ONE fixture per shape the leg gate can take — the table the readers are held to. */
+  type Fixture = { what: string; build: () => void; leg: string };
+  const FIXTURES: Fixture[] = [
+    { what: 'MET — the predecessor is finished, the leg is ready to take work', leg: '02-next', build: () => { writeLeg('01-leg'); writeNode('01-leg/01-a', done); writeLeg('02-next'); writeNode('02-next/01-b', [ev('created')]); } },
+    { what: 'UNMET with a ready task — the predecessor is unfinished, its own work still runs', leg: '02-next', build: () => { writeLeg('01-leg'); writeNode('01-leg/01-a', blocked); writeLeg('02-next'); writeNode('02-next/01-b', [ev('created')]); } },
+    { what: 'UNMET with NO ready task — nothing to run in the leg and its gate shut', leg: '02-next', build: () => { writeLeg('01-leg'); writeNode('01-leg/01-a', blocked); writeLeg('02-next'); } },
+    { what: 'ALL DONE — every task of every leg closed', leg: '03-third', build: () => { writeLeg('01-leg'); writeNode('01-leg/01-a', done); writeLeg('02-next'); writeNode('02-next/01-b', done); writeLeg('03-third'); } },
+    { what: 'DEFERRED ONLY — a postponed task still closes its leg (the work is owed, the leg is not open)', leg: '02-next', build: () => { writeLeg('01-leg'); writeNode('01-leg/01-a', deferred); writeLeg('02-next'); writeNode('02-next/01-b', [ev('created')]); } },
+    { what: 'REWORK OWED — the rejected gate keeps the task open, so the leg gate stays shut', leg: '02-next', build: () => { writeLeg('01-leg'); writeNode('01-leg/01-a', rework); writeLeg('02-next'); writeNode('02-next/01-b', [ev('created')]); } },
+  ];
+
+  for (const f of FIXTURES) {
+    it(`${f.what} · every reader answers the ONE derivation`, () => {
+      f.build();
+      const store = new Store(root);
+      const cmds = commands();
+      const gate = store.legGate(f.leg);
+
+      // THE COUNTS AND THE VERDICT COME FROM ONE CALL (AC-2) — they cannot drift
+      expect(gate.done + gate.open).toBe(gate.total);
+      expect(gate.blocked).toBeLessThanOrEqual(gate.open);
+      expect(gate.complete).toBe(gate.total > 0 && gate.done === gate.total);
+      // AC-4 — NO VERDICT CHANGED: the verdict is the one the pre-fix rule gave for this leg
+      expect(gate.met, `${f.what}: the fix moved this leg's verdict`).toBe(metBefore(store, f.leg));
+
+      // READER 1 — the look-back `ann next` renders: the SAME answer, field for field, for
+      // the leg it names as active (the read reports the active leg, never a leg of its own)
+      const lb = cmds.lookBack();
+      if (lb.activeLeg) expect(lb.legGate).toEqual(store.legGate(lb.activeLeg));
+      // READER 2 — the card (which reads the same look-back) and the driver carry it whole
+      expect(new Store(root).legGate(f.leg)).toEqual(gate); // a fresh snapshot agrees with itself
+
+      // READER 3 — advance(): it may only claim the gate it was given, with the blocker it holds
+      const adv = cmds.advance();
+      if (adv.detail.includes('leg gate UNMET')) {
+        expect(gate.met, `advance claims UNMET while legGate says met: ${adv.detail}`).toBe(false);
+        expect(adv.detail).toContain(gate.blocker!);
+      }
+      if (adv.detail.includes('leg gate MET')) expect(gate.met).toBe(true);
+      // …and when it reports a leg's own incompleteness, the counts printed are THAT leg's
+      // one-derivation counts — the words and the numbers cannot come from two places
+      if (adv.action === 'closure-needed' && adv.detail.includes('unfinished:')) {
+        const named = store.legGate(adv.leg);
+        expect(adv.detail).toContain(`leg ${adv.leg} unfinished: ${named.done} done, ${named.blocked} blocked`);
+      }
+
+      // READER 4 — the round-gate rule: a finding for a leg iff its gate is shut, same blocker
+      const legs = store.ids().filter((i) => !i.includes('/')).sort();
+      const findings = runValidators(store).filter((x) => x.code === 'round-gate');
+      const expected = legs.slice(1).filter((l) => !store.legGate(l).met);
+      expect(findings.map((x) => x.nodeId)).toEqual(expected);
+      for (const x of findings) expect(x.detail).toContain(store.legGate(x.nodeId!).blocker!);
+
+      // READER 5 — the SPAWN gate: a new leg is refused with the same words (v8 §12/§13)
+      // …and spawning a NEW leg asks the SAME derivation about the leg being spawned (whose
+      // gate reads its own predecessor, v8 §12/§13): the blocker a human is shown and the
+      // blocker the writer refuses on are one string, never two
+      const sp = cmds.spawn('99-tail', { intent: 'the next leg', acceptanceCriteria: ['it is done'], targetAreas: ['src/store'] });
+      const pred = store.legGate('99-tail');
+      if (!pred.met) expect(sp).toMatchObject({ ok: false, error: { code: 'leg-gate', blocker: pred.blocker } });
+      else expect(sp.ok, JSON.stringify(sp)).toBe(true);
+    });
+  }
+
+  it('a MIXED leg: the counts ARE the verdict’s counts — done · blocked · rework · deferred, one call', () => {
+    writeLeg('01-leg');
+    writeNode('01-leg/01-done', done);
+    writeNode('01-leg/02-blocked', blocked);
+    writeNode('01-leg/03-rework', rework);
+    writeNode('01-leg/04-deferred', deferred);
+    const store = new Store(root);
+    const g = store.legGate('01-leg');
+    expect(g).toMatchObject({ total: 4, done: 2, blocked: 1, open: 2, complete: false });
+    // the counts are the SAME status words the store derives, counted — never a second reading
+    const statuses = store.tasksOf('01-leg').map((t) => store.status(t));
+    expect(statuses.filter((s) => CLOSED_TASK_STATUSES.includes(s))).toHaveLength(g.done);
+    expect(statuses.filter((s) => s === 'blocked')).toHaveLength(g.blocked);
+    // close the two open ones and the SAME call flips the verdict — no second derivation to update
+    writeNode('01-leg/02-blocked', done);
+    writeNode('01-leg/03-rework', done);
+    const after = new Store(root).legGate('01-leg');
+    expect(after).toMatchObject({ total: 4, done: 4, blocked: 0, open: 0, complete: true });
+    // …and a leg whose tasks are ALL deferred is COMPLETE without being delivered: the
+    // counts say so, and the next leg's gate opens on the same fact
+    writeLeg('02-next');
+    writeNode('02-next/01-b', [ev('created')]);
+    expect(new Store(root).legGate('02-next').met).toBe(true);
+  });
+
+  it('NO VERDICT CHANGED ON THE LIVE JOURNEY — every leg answers what the pre-fix rule answered (AC-4)', () => {
+    // The journey this task runs IN is the one that broke: its active leg is the live shape
+    // (4 done, 9 blocked children, no ready task). Reading it here asserts the fix against
+    // real nodes rather than fixtures — and asserts NOTHING about how far the work has got,
+    // because both sides are derived from whatever the journey currently says.
+    const live = new Store(process.cwd());
+    const legs = live.ids().filter((i) => !i.includes('/')).sort();
+    expect(legs.length, 'the repo IS a journey — this check needs a subject').toBeGreaterThan(0);
+    for (const leg of legs) {
+      const g = live.legGate(leg);
+      expect(g.met, `leg ${leg}: the fix moved this leg's verdict`).toBe(metBefore(live, leg));
+      // …and the counts are the leg's own status words, counted — self-consistent at any moment
+      expect(g.done + g.open).toBe(g.total);
+      expect(g.blocked).toBeLessThanOrEqual(g.open);
+      expect(g.complete).toBe(g.total > 0 && g.done === g.total);
+    }
   });
 });
 

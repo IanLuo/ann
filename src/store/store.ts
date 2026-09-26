@@ -60,6 +60,31 @@ interface NodeEntry {
  *  (escalate), and a failed task is not finished work. */
 export const CLOSED_TASK_STATUSES = ['done', 'superseded', 'cancelled', 'deferred'];
 
+/** THE LEG GATE, DERIVED ONCE (leg 12 task 14 AC-1/AC-2) — both of the answers a reader
+ *  used to ask for separately: whether this leg's PREDECESSOR is finished (the gate,
+ *  v8 §12/§13) and where THIS leg stands (the counts). They travel together because they
+ *  were once printed together under one label: `legGateMet` and the empty-ready-set branch
+ *  both rendered as 'leg gate', so one `ann next` printed `leg gate: MET` and `leg gate
+ *  UNMET: 4 done, 9 blocked` two lines apart. One call now answers both. */
+export interface LegGate {
+  /** the PREDECESSOR gate: every task of this leg's predecessor is closed */
+  met: boolean;
+  /** why the gate is shut — present iff `met` is false */
+  blocker?: string;
+  /** …and this leg's own standing, from the same pass */
+  total: number;
+  done: number;
+  blocked: number;
+  open: number;
+  /** every task of THIS leg is closed. NOT the same fact as "there is no ready task":
+   *  a blocked task waiting on a human leaves no ready task and still owes its ACs. */
+  complete: boolean;
+}
+
+/** The leg gate for a journey with NO active leg (the value `ann next` reports): nothing
+ *  is shut (there is no leg to hold shut), and no leg has counts to report. */
+export const NO_LEG_GATE: LegGate = { met: true, total: 0, done: 0, blocked: 0, open: 0, complete: false };
+
 /** NOT OPEN TO RUN: the statuses that are neither open work nor work a leg can point at
  *  as its frontmost child — the closed set plus `failed` (exhausted → escalate). An
  *  `accepted` task (the confirm gate accepted, no `completed` yet) is deliberately NOT
@@ -732,18 +757,6 @@ export class Store {
     return [...out];
   }
 
-  /** THE leg's completeness + counts, derived ONCE (leg 12 task 14). `legGateMet` answers a
-   *  different question — is this leg's PREDECESSOR finished? — and the two were rendered
-   *  with the same words ('leg gate'), so one `ann next` printed `leg gate: MET` and
-   *  `leg gate UNMET: 4 done, 9 blocked` two lines apart. Every reader of the leg's own
-   *  progress consumes this; the counts and the verdict come from one pass. */
-  legProgress(legId: string): { total: number; done: number; blocked: number; open: number; complete: boolean } {
-    const tasks = this.tasksOf(legId);
-    const done = tasks.filter((t) => CLOSED_TASK_STATUSES.includes(this.taskStatus(t))).length;
-    const blocked = tasks.filter((t) => this.taskStatus(t) === 'blocked').length;
-    return { total: tasks.length, done, blocked, open: tasks.length - done, complete: tasks.length > 0 && done === tasks.length };
-  }
-
   events(id: string): JourneyEvent[] {
     return this.nodes.get(id)?.events ?? [];
   }
@@ -1412,7 +1425,7 @@ export class Store {
   /** v6 seed: a new session's goal leg. goal.md (fixed Goal:/Success criteria: sections)
    *  is the authored truth; node.json is generated 1:1 from it (the machine reads it);
    *  the `created`+`completed` seed events make legStatus derive done so the first work
-   *  leg's legGateMet opens. A goal seeds the FIRST leg of an EMPTY journey only (a
+   *  leg's legGate opens. A goal seeds the FIRST leg of an EMPTY journey only (a
    *  changed goal is a new session — archive first; re-seeding a SOLE UNCONSUMED goal is
    *  reseedGoal below, never seedGoal). The seed writes flow through the store's own
    *  write path + ledger (recordWrite) so verify stays clean from the first write.
@@ -2202,19 +2215,40 @@ export class Store {
     return s.length > 120 ? s.slice(0, 120) + '…' : s;
   }
 
-  /** Leg gate (v8 §12/§13): is every task of this leg's predecessor done? */  legGateMet(legId: string): { met: boolean; blocker?: string } {
+  /** THE LEG GATE, DERIVED ONCE (leg 12 task 14 AC-1/AC-2). TWO facts a reader used to ask
+   *  for separately — is this leg's PREDECESSOR finished (the gate, v8 §12/§13), and where
+   *  does THIS leg stand (done · blocked · open · complete) — now come back from ONE call,
+   *  so they can never be printed as two answers to one question. The old shape did exactly
+   *  that: `legGateMet` and the empty-ready-set branch rendered with the same words, and one
+   *  `ann next` printed `leg gate: MET` and `leg gate UNMET: 4 done, 9 blocked` two lines
+   *  apart. Every reader takes its answer from HERE — `ann next` · `advance()` · the
+   *  whatsnext card · the spawn gate · the round-gate rule — and the counts travel with the
+   *  verdict, so 'N done, M blocked' cannot drift from the gate it is printed beside. */
+  legGate(legId: string): LegGate {
+    const tasks = this.tasksOf(legId);
+    const done = tasks.filter((t) => CLOSED_TASK_STATUSES.includes(this.taskStatus(t))).length;
+    const blocked = tasks.filter((t) => this.taskStatus(t) === 'blocked').length;
     const legs = [...this.nodes.keys()].filter((n) => !n.includes('/')).sort();
     const preds = legs.filter((l) => l < legId);
-    if (!preds.length) return { met: true }; // first leg — no predecessor
-    const prev = preds[preds.length - 1];
-    const tasks = [...this.nodes.keys()].filter((n) => n.startsWith(prev + '/') && n.split('/').length === 2);
-    if (!tasks.length) {
-      const met = this.events(prev).some((e) => e.type === 'completed');
-      return { met, blocker: met ? undefined : `leg ${prev} (childless) has no completed record` };
+    if (!preds.length) {
+      // the first leg — no predecessor holds it shut; its own counts still answer
+      return { met: true, total: tasks.length, done, blocked, open: tasks.length - done, complete: tasks.length > 0 && done === tasks.length };
     }
+    const prev = preds[preds.length - 1];
+    const prevTasks = [...this.nodes.keys()].filter((n) => n.startsWith(prev + '/') && n.split('/').length === 2);
     // CLOSED_TASK_STATUSES (leg 08 task 01): a cancelled task is closed work like a done
     // or superseded one — it never holds the next leg's gate shut.
-    const undone = tasks.filter((t) => !CLOSED_TASK_STATUSES.includes(this.taskStatus(t)));
-    return undone.length ? { met: false, blocker: `${prev} has unfinished tasks: ${undone.join(', ')}` } : { met: true };
+    const undone = prevTasks.filter((t) => !CLOSED_TASK_STATUSES.includes(this.taskStatus(t)));
+    const met = prevTasks.length ? undone.length === 0 : this.events(prev).some((e) => e.type === 'completed');
+    const blocker = met ? undefined : prevTasks.length ? `${prev} has unfinished tasks: ${undone.join(', ')}` : `leg ${prev} (childless) has no completed record`;
+    return {
+      met,
+      ...(blocker ? { blocker } : {}),
+      total: tasks.length,
+      done,
+      blocked,
+      open: tasks.length - done,
+      complete: tasks.length > 0 && done === tasks.length,
+    };
   }
 }
