@@ -3,3 +3,4 @@
 {"at":"2026-09-27","type":"submitted","gate":"grill","note":"submitted for the grill gate (ianluo)","run":"trace-mujl0ouq-ffd8f"}
 {"at":"2026-09-27","type":"confirmed","gate":"grill","note":"accepted (ianluo)","decider":"human"}
 {"at":"2026-09-27","type":"evidence","note":"captured 'npm test' → pass (exit 0) against 049c44e7895646e14a195fca50977e1f3a1215eb (ianluo)","checks":[{"command":"npm test","result":"pass","exitCode":0,"detail":"sha1:6da3952fbc50 · Duration 69.38s (transform 3.74s, setup 0ms, import 9.23s, tests 254.08s, environment 11ms)","sha":"049c44e7895646e14a195fca50977e1f3a1215eb","source":"captured"}]}
+{"at":"2026-09-27","type":"evidence","note":"captured 'npm run typecheck' → pass (exit 0) against cf16ceffee796be7c9c9ca678f90b06bdd740ac9 (ianluo)","checks":[{"command":"npm run typecheck","result":"pass","exitCode":0,"detail":"sha1:aa1b67ee6e3c · > tsc --noEmit","sha":"cf16ceffee796be7c9c9ca678f90b06bdd740ac9","source":"captured"}]}
