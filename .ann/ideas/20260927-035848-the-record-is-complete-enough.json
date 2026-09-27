@@ -1,0 +1,11 @@
+{
+  "id": "20260927-035848-the-record-is-complete-enough",
+  "text": "THE RECORD IS COMPLETE ENOUGH TO CLOSE AND TOO COARSE TO JUDGE — the real shape of the auto-accept gap, measured 2026-09-26 on 12/13. The conclusion maps FOUR distinct criteria to ONE check: AC-1, AC-2, AC-3 and AC-4 all map to a single npm test pass (55 files, 1069 tests, one sha), and AC-5 to ann verify. So one suite-level bit stands behind four different claims. The FLOOR reads that correctly and says closeable — claim per AC, check resolved, passed, commit evidence bound — and it is right, because its question is structural. What is missing is the CONTENT of the check: the material renders the checks as \"- npm test: pass — CAPTURED FACT at <sha> — sha1:384194a6cc91 · Duration 31.94s\", and grep -c \"test(\" over the assembled 80k prompt returns ZERO. The material carries NO test code at all; test files appear only as stat lines in the change map. So the link \"this suite pass covers AC-3\" is author-typed prose that nothing on the record or in the material can confirm — and the reviewer can see that it is unconfirmed, which is why every uncertain it raised has one shape: I would need the gate! transfer-branch code or an e2e case for an unknown id; I would need a browser-level check. It is asking for criterion-level evidence. THAT REFINES THE MATERIAL FIX: the selection rule is not \"the files the ACs name\" but THE TESTS THE CLAIMS NAME, IN FULL — and the claim prose already names them (\"Five new page tests in the drill suite pin it\"), so the assembly has what it needs to select them deterministically. HONEST LIMIT THAT SURVIVES ANY MATERIAL FIX: a criterion needing non-text evidence (run 13 F8 wanted a real browser because the tests are jsdom-style) stays uncertain forever, so the accept rate cannot reach 100 percent and the defensible scope of an auto gate may be deliveries whose criteria are all text-decidable.",
+  "created": "2026-09-27T03:58:48.107Z",
+  "by": "agent",
+  "status": "open",
+  "refs": [
+    ".agents/artifacts/verdict-arm-calibration.md",
+    "src/flow/review-session.ts"
+  ]
+}
