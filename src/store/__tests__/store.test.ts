@@ -1252,8 +1252,28 @@ describe('Store — strict event schema (format v12 §3: unknown fields + shapes
 
   it('rejects malformed commits/refs on evidence', () => {
     writeNode('06-engine-build/20-d', {}, [ev('created')]);
-    expectReject('06-engine-build/20-d', { at: '2026-08-22', type: 'evidence', commits: [{ noSha: true }] } as unknown as JourneyEvent, /commits must be/);
+    expectReject('06-engine-build/20-d', { at: '2026-08-22', type: 'evidence', commits: [{ noSha: true }] } as unknown as JourneyEvent, /unknown field\(s\) 'noSha' on a commit/);
+    expectReject('06-engine-build/20-d', { at: '2026-08-22', type: 'evidence', commits: [] } as unknown as JourneyEvent, /commits must be/);
     expectReject('06-engine-build/20-d', { at: '2026-08-22', type: 'evidence', refs: [42] } as unknown as JourneyEvent, /refs must be/);
+  });
+
+  // 2026-09-27 — A NAME THAT CANNOT BE A COMMIT IS REFUSED AT THE DOOR, not discovered later.
+  // The traceability read resolves commits[].sha as a git object, but the writer used to take
+  // any non-blank string: an `evidence!` whose shell quoting broke put the tail of its own
+  // `--note` on the record as commit names (`carried`, `in`, `the`, …). Seven unresolvable
+  // "commits" landed, `ann check` exited 1, the integrity read that gates the APPROVE went
+  // fail-closed on them, and (the review worker's anchor being the LAST cited commit) the next
+  // review's findings landing was refused with `anchorSha must be a commit sha`. None of it is
+  // undoable — the log is append-only — so the guard has to be here, where the write happens.
+  it('refuses a commits[].sha that is not a git object name (the 2026-09-27 unfixable record)', () => {
+    writeNode('06-engine-build/20-d', {}, [ev('created')]);
+    const E = (commits: unknown): JourneyEvent => ({ at: '2026-08-22', type: 'evidence', commits } as unknown as JourneyEvent);
+    const s = new Store(root);
+    for (const bad of ['carried', 'not a field of the outcome object.', 'abc123', 'ZZZZZZZ', '']) {
+      expect(() => s.appendEvent(s.resolveNode('06-engine-build/20-d'), E([{ sha: bad }]))).toThrow(/commit sha must be a git object name \(7-40 hex\)/);
+    }
+    // …and the shape the whole journey already uses still lands: a real name, with optional prose
+    expect(() => s.appendEvent(s.resolveNode('06-engine-build/20-d'), E([{ sha: realSha(), note: 'what it carried' }]))).not.toThrow();
   });
 
   // v18 §3 — the STRUCTURED VERIFICATION shapes (claims[]/checks[]), policed here at

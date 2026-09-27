@@ -295,6 +295,35 @@ export const legacyPath = (p: string): string =>
  *  A CHECK-REPORTING rule only: no write path reads it. */
 const V9_CUTOFF = '2026-08-21';
 
+/** A COMMIT's shape (F-AC18, format v10 §9) — {sha, note?}. `sha` must be a git object
+ *  NAME: 7-40 hex, the same rule `checkShapeProblem` applies to a check's sha and the writer
+ *  applies to an evidence ANCHOR.
+ *
+ *  WHY THIS IS HERE RATHER THAN ONLY IN `ann check` (2026-09-27). The traceability read
+ *  resolved `commits[].sha` as a git name, but the WRITER accepted any non-blank string, so
+ *  a value that could never resolve entered the archive — and the archive is append-only. The
+ *  operator then owns a journey whose `ann check` reports a problem no gesture can clear, and
+ *  the integrity read that gates the APPROVE is fail-closed on it, so one bad argument stalls
+ *  every advance. MEASURED: an `evidence!` whose `--note` lost its shell quoting parsed the
+ *  tail of the prose as commit names (`carried`, `in`, `the`, …), which put seven
+ *  unresolvable "commits" on the record, made `ann check` exit 1, and (because the review
+ *  worker's anchor is the last cited commit) refused the next review's findings landing with
+ *  `anchorSha must be a commit sha`. A guard at the door is the whole fix: the value is
+ *  checkable at write time, and the door is the only place it can be checked too late.
+ *
+ *  `note` stays optional prose — what the commit carried, in the author's words. */
+function commitShapeProblem(c: unknown): string | undefined {
+  if (!c || typeof c !== 'object' || Array.isArray(c)) return 'each commit must be an object';
+  const r = c as Record<string, unknown>;
+  const unknown = Object.keys(r).filter((k) => !['sha', 'note'].includes(k));
+  if (unknown.length) return `unknown field(s) '${unknown.join(', ')}' on a commit (sha · note)`;
+  if (typeof r.sha !== 'string' || !/^[0-9a-f]{7,40}$/.test(r.sha)) {
+    return `commit sha must be a git object name (7-40 hex), got ${JSON.stringify(r.sha)} — a name that cannot resolve in git is a conclusion about nothing (traceability, format v10 §9)`;
+  }
+  if (r.note !== undefined && typeof r.note !== 'string') return `commit '${r.sha}'.note must be a string when present`;
+  return undefined;
+}
+
 /** A CLAIM's shape (format v18 §3, MECHANICAL since leg 12/03): {ac, check?, statement?,
  *  evidence?} — how one acceptance criterion is met. `check` is the MECHANICAL MAPPING:
  *  the act (a recorded check's command) that substantiates THIS AC; `statement` is
@@ -1923,10 +1952,18 @@ export class Store {
     }
     if (e.type === 'evidence') {
       // commits[] is the CONCLUSION shape (F-AC18): when present it is non-empty and every
-      // entry names a commit. An empty commit list concludes nothing — refuse it here so
-      // the single writer is the one place the shape lives (leg 08 task 02).
-      if (e.commits !== undefined && (!Array.isArray(e.commits) || !e.commits.length || !e.commits.every((c) => typeof (c as { sha?: unknown })?.sha === 'string' && (c as { sha: string }).sha))) {
-        throw new Error('append rejected: evidence.commits must be a non-empty [{sha, note?}, …] — an empty commit list concludes nothing');
+      // entry names a git object that RESOLVES. An empty commit list concludes nothing, and a
+      // name that cannot be a git object is refused HERE rather than at `ann check` — the
+      // archive is append-only, so a bad name accepted here is a problem no gesture can ever
+      // clear (see `commitShapeProblem`). Refused by NAME, like every other shape here.
+      if (e.commits !== undefined) {
+        if (!Array.isArray(e.commits) || !e.commits.length) {
+          throw new Error('append rejected: evidence.commits must be a non-empty [{sha, note?}, …] — an empty commit list concludes nothing');
+        }
+        for (const c of e.commits) {
+          const problem = commitShapeProblem(c);
+          if (problem) throw new Error(`append rejected: evidence.commits — ${problem}`);
+        }
       }
       if (e.refs !== undefined && (!Array.isArray(e.refs) || !e.refs.every((r) => typeof r === 'string'))) {
         throw new Error('append rejected: evidence.refs must be [path, …]');
