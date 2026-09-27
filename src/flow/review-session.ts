@@ -334,7 +334,7 @@ export function buildReviewMaterial(commands: Commands, id: string): ReviewMater
     add(
       'submission.claims',
       [
-        'HOW EACH CRITERION IS CLAIMED MET — the MAPPING is the author\'s; the resolution beside it is the RECORD\'s. A suite-level run mapped to a criterion is the author asserting that the whole run covers it: check whether the evidence below actually does.',
+        'HOW EACH CRITERION IS CLAIMED MET. The criterion text is the CONTRACT\'s own `acceptanceCriteria` entry, verbatim, and the statement and the mapping are as the RECORD holds them; every VALUE below is read from the record, and only the labels around them ("claimed:", "requires:", this paragraph) are the assembly\'s. The MAPPING is the author\'s and the resolution beside it is the RECORD\'s — a suite-level run mapped to a criterion is the author asserting that the whole run covers it, so check whether the evidence below actually does.',
         ...claims.map((c) => `${c.ac} — ${c.acText}\n  claimed: ${c.statement || '(no statement recorded — the mapping stands alone)'}\n  requires: ${boundCheck(c)}`),
         ...unclaimed.map((u) => `${u.ac} — ${u.acText}\n  UNCLAIMED — neither claimed nor transferred. Say so rather than passing over it.`),
       ].join('\n'),
@@ -342,30 +342,106 @@ export function buildReviewMaterial(commands: Commands, id: string): ReviewMater
     );
   }
 
-  // 5 · THE CRITERION-LEVEL EVIDENCE (leg 12/23 AC-2): the TEST bodies the reviewed range
-  //     touches, at the anchor sha, in full. A claim's `requires` above resolves to a run, and
-  //     a run's content is the only thing that can answer whether it covers the criterion. The
-  //     SELECTION is deterministic and stated in the material — every test file the range
-  //     changes, at the anchor — so it is derived, never hand-picked, and a reader can see
-  //     what was chosen and what a later bound dropped.
+  // 5 · THE CRITERION-LEVEL EVIDENCE (leg 12/23 AC-2): the TEST bodies behind the claims, at
+  //     the anchor sha. A claim's `requires` above resolves to a RUN, and a run's content is
+  //     the only thing that can answer whether it covers the criterion — a `npm test` pass
+  //     says 55 files were green, never WHICH assertion meets AC-3.
+  //
+  //     THE SELECTION IS DERIVED FROM TWO READS, and both are named in the material:
+  //       · the test files the REVIEWED RANGE touches (`git diff --name-only <range>`), and
+  //       · the test files THE CLAIMS THEMSELVES name as evidence pointers.
+  //     The second is not decoration. Measured: the first version selected from the range
+  //     alone, and the reviewer's F1 named the hole exactly — a claim whose tests live in a
+  //     file the range does not touch was not carried at all, which is the ordinary shape of
+  //     a change that adds one assertion to a suite it never rewrote. A claim's own evidence
+  //     pointer is the author saying "this is where I stand behind it", and it is a `brief`
+  //     field, so it is derived like everything else here.
+  //
+  //     THE CUT IS PER FILE (reviewer's F8). Slicing the JOINED bodies at a budget truncated
+  //     whichever file straddled it, with no marker saying so — a file that reads as complete
+  //     and is not. Each file now either arrives whole or stops with a marker inside its own
+  //     block saying how much is missing and where the rest is; nothing is silently partial.
   if (range) {
-    const changed = (git(store.root, ['diff', '--name-only', range]) ?? '')
+    const isTest = (p: string): boolean => !p.includes(' ') && (p.includes('__tests__/') || p.endsWith('.test.ts'));
+    const touched = (git(store.root, ['diff', '--name-only', range]) ?? '')
       .split('\n')
       .map((p) => p.trim())
-      .filter((p) => !!p && (p.includes('__tests__/') || p.endsWith('.test.ts')));
-    if (changed.length) {
-      const bodies = changed
-        .map((p) => {
-          const body = head ? git(store.root, ['show', `${head}:${p}`]) : undefined;
-          return `--- ${p}${body ? '' : ` (NOT readable at ${head || 'the anchor'})`}\n${body ?? ''}`.trim();
-        })
-        .join('\n\n');
-      add(
-        'submission.tests',
-        `${cut(bodies, TEST_CHARS)}\n(THE SELECTION: every test file the reviewed range changes, at its anchor sha — ${changed.length} file(s). WHAT IS NOT HERE, so an uncertain about it is a KNOWN boundary rather than an unseen one: runtime behaviour no test text carries (a real browser, a real network), and any test file the range does not touch. Raise either as \`uncertain\` and say what you would need.)`,
-        'repo metadata',
-      );
+      .filter((p) => !!p && isTest(p));
+    // path → the claims that named it, with the run each of them maps to (the AC-2 "mapped
+    // check's command" made visible where it matters: beside the file it is evidence for)
+    const namedBy = new Map<string, string[]>();
+    for (const c of claims) {
+      for (const p of c.evidence) {
+        const path = p.trim();
+        if (!path || !isTest(path)) continue;
+        const what = c.statement ? ` — "${c.statement.length > 50 ? `${c.statement.slice(0, 50)}…` : c.statement}"` : '';
+        namedBy.set(path, [...(namedBy.get(path) ?? []), `${c.ac}${c.check ? ` → ${c.check}` : ''}${what}`]);
+      }
     }
+    // CLAIM-NAMED FIRST, and this is not cosmetic: `selected` is consumed in order under a
+    // budget, so whichever source goes last is the first thing dropped. Ordering the range
+    // first would mean a file a claim names and the range never touched lands at the END and
+    // is the first casualty of the cut — SELECTED and still NOT CARRIED, which is F1's actual
+    // harm surviving the fix. What the author pointed at as their evidence outranks the
+    // sweep of everything the range happened to touch.
+    const selected = [...namedBy.keys(), ...touched.filter((p) => !namedBy.has(p))];
+
+    const parts: string[] = [];
+    const carried: string[] = [];
+    const cutShort: string[] = [];
+    const dropped: string[] = [];
+    const unreadable: string[] = [];
+    let used = 0;
+    for (const p of selected) {
+      const named = namedBy.get(p);
+      const caption = `--- ${p}${named ? `  [named as evidence by: ${named.join(' · ')}]` : ''}`;
+      const body = head ? git(store.root, ['show', `${head}:${p}`]) : undefined;
+      if (body === undefined) {
+        // SELECTED BUT UNREADABLE IS STATED, NOT SKIPPED QUIETLY — the same rule as the cut.
+        parts.push(`${caption}\n(NOT readable at ${head || 'the anchor'} — the file is selected but its bytes could not be read, so it is NOT below.)`);
+        unreadable.push(p);
+        continue;
+      }
+      const room = TEST_CHARS - used;
+      if (body.length <= room) {
+        parts.push(`${caption}\n${body}`);
+        used += body.length;
+        carried.push(p);
+        continue;
+      }
+      // THE FILE SAYS WHAT IS MISSING (F8). Partial is fine; partial that reads as whole is
+      // not — the old code sliced the JOINED text, so whichever file straddled the budget was
+      // carried truncated and silent about it.
+      if (room > 0) {
+        // THE HOUSE FORM for a cut, per file: what is missing, out of how much, and WHERE THE
+        // REST IS — the same shape the patch above uses ("the full range is in git"), pointed
+        // at this file at the anchor instead of at a range.
+        parts.push(
+          `${caption}\n${body.slice(0, room)}\n[THIS FILE IS CUT: the last ${(body.length - room).toLocaleString()} of its ${body.length.toLocaleString()} chars are NOT below — the full file is at ${head}:${p} in git. What is missing is the END OF THE FILE, not a summary of it.]`,
+        );
+        carried.push(p);
+        cutShort.push(p);
+        used = TEST_CHARS;
+      } else {
+        dropped.push(p);
+      }
+    }
+    const note = (paths: string[], label: string): string => (paths.length ? `${paths.length} ${label} — ${paths.join(', ')}` : `none ${label}`);
+
+    // THE SECTION IS EMITTED WHENEVER THERE IS A RANGE, even with nothing selected (F2): the
+    // boundary is the point. A range that changes no test file used to produce NO section at
+    // all, so the reviewer had to DISCOVER that the evidence it wanted was never coming — and
+    // AC-4 asks the material to name what falls outside the selection WHERE IT APPLIES.
+    add(
+      'submission.tests',
+      [
+        parts.join('\n\n'),
+        `(THE SELECTION — derived, never hand-picked: the test files the reviewed range changes (${touched.length}) and the test files the claims name as evidence (${namedBy.size}), ${selected.length} distinct, read at the anchor sha ${head || '(unresolved)'}. OF THOSE, ${carried.length} carried below: ${note(cutShort, 'CUT with its own length stated')} · ${note(unreadable, 'selected but unreadable')} · ${note(dropped, 'NOT carried — the budget ended first')}.`,
+        `ON THE THREE CLAIM-SIDE FACTS: exactly one of them can SELECT a file, because an evidence pointer IS a path. The mapped check's command and the claim's own statement are carried BESIDE the file — in its caption and in the claims section above — and not used to choose it: one is a command name and the other is prose, and matching either against filenames would be invention wearing the word "derived". A claim-named file is ordered before the range's sweep, so it is carried, not merely counted.`,
+        `WHAT IS NOT HERE, so that an uncertain about it is a KNOWN boundary rather than an unseen one: any test file neither the range nor a claim names${selected.length ? '' : ' — and this range selects NONE, so no test text is carried at all'} · runtime behaviour no test text carries (a real browser, a real network) · whatever the cut above states it dropped. Raise any of them as \`uncertain\` and say what you would need.)`,
+      ].join('\n'),
+      'repo metadata',
+    );
   }
 
   // 6 · THE CAPTURED CHECKS — each at the sha its run saw, and marked FACT vs CLAIM.

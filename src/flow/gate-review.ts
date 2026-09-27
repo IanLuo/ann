@@ -160,10 +160,19 @@ const openDefects = (findings: readonly ReviewFindingInput[]): string =>
  *  on, and an accept that went through over three open questions while saying nothing about
  *  them is a decision nobody can audit. A `matches` is neither: it is a criterion the
  *  reviewer asserted, and listing it here would hand the human a "concern" that is the
- *  opposite of one. */
+ *  opposite of one.
+ *
+ *  THE SELECTION AND THE COUNT COME FROM HERE, and that is the point of the split: the
+ *  accept's why used to count `severity === 'uncertain'` inline while THIS function also
+ *  gathered `quality`, so the number and the list beside it were two independent readings of
+ *  the same question and could disagree. One predicate, one answer. (The rule makes an open
+ *  `quality` unreachable at an accept, so the two readings agree today — which is exactly the
+ *  kind of agreement nobody notices breaking.) */
+const openConcernsOf = (findings: readonly ReviewFindingInput[]): ReviewFindingInput[] =>
+  findings.filter((f) => f.status === 'open' && f.severity !== 'matches' && f.severity !== 'gap' && f.severity !== 'regression');
+
 const openConcerns = (findings: readonly ReviewFindingInput[]): string =>
-  findings
-    .filter((f) => f.status === 'open' && f.severity !== 'matches' && f.severity !== 'gap' && f.severity !== 'regression')
+  openConcernsOf(findings)
     .map((f) => `${f.id} [${f.severity}] ${f.where} — ${f.text}`)
     .join(' · ');
 
@@ -267,9 +276,9 @@ export const runGateReview = async (
     // that fired over open `uncertain`s while reading as "nothing left open" would be the
     // silent decision this area exists to prevent. The questions are named, and they are
     // also on the record: this is the prose, `reviewFindings` is the data.
+    const carried = openConcernsOf(findings);
     const concerns = openConcerns(findings);
-    const openCount = findings.filter((f) => f.status === 'open' && f.severity === 'uncertain').length;
-    const why = concerns ? `${settled} — CARRIED WITH ${openCount} OPEN QUESTION(S), raised and not decided: ${concerns}` : settled;
+    const why = concerns ? `${settled} — CARRIED WITH ${carried.length} OPEN QUESTION(S), raised and not decided: ${concerns}` : settled;
     const g = commands.gate(id, 'confirm', 'accept', why, { actor });
     if (!g.ok) return { ok: false, absent: `the review worker's accept could not be recorded (${g.error.code}: ${g.error.blocker}) — the submission stands` };
     return { ok: true, verdict: 'accept', why, findings: findings.length, ...(run ? { run } : {}) };

@@ -427,19 +427,50 @@ describe('AC-1 · the claims are CARRIED, each beside the run the record resolve
     // rather than going quiet — an unreviewed criterion is exactly what a reviewer must see
     expect(claims).toContain('AC-1 — the findings land on the addressed node');
     expect(claims).toContain('UNCLAIMED');
-    expect(claims).not.toContain('claimed:');
+    // no INVENTED claim line — the header's own sentence names the label, so the assertion is
+    // about the rendered field rather than about the word appearing anywhere
+    expect(claims).not.toMatch(/^ {2}claimed: /m);
+  });
+
+  it("carries the criterion VERBATIM — the contract's own text, whole, not a label derived from it", () => {
+    // The reviewer's F3, and it is a fair question to ask of any prose the assembly writes:
+    // is `acText` the contract's own criterion, or the engine's summary of it? It must be the
+    // former, because the whole review is "does the delivery meet THIS", and a paraphrased
+    // criterion is a criterion nobody agreed to. The proof is EXACT EQUALITY against a
+    // criterion long and peculiar enough that no truncation, elision or re-wrap survives it:
+    // it carries an ellipsis, a backtick, an em-dash and a distinctive tail, and the test
+    // asserts every one of them arrives.
+    const AC = 'AC-1 — the worker emits the FULL sentence … including `code`, an em—dash, and the tail token ZZQQ-end-of-criterion';
+    writeNode(
+      '01-leg/01-a',
+      { ...CONTRACT, acceptanceCriteria: [AC.replace(/^AC-1 — /, '')] },
+      [
+        ev('created'),
+        ev('submitted', { gate: 'grill' }),
+        ev('confirmed', { gate: 'grill' }),
+        ev('evidence', { commits: [{ sha: 'abc1234', note: 'the delivery' }], claims: [{ ac: 'AC-1', check: 'npm test', statement: 'it lands' }] }),
+      ],
+    );
+    const claims = buildReviewMaterial(commands(), '01-leg/01-a').context.find((c) => c.label === 'submission.claims')!.text;
+
+    expect(claims).toContain(AC);
+    expect(claims).toContain('ZZQQ-end-of-criterion');
   });
 });
 
 describe('AC-2 · the criterion-level evidence is CARRIED, and its BOUND is stated', () => {
-  it('carries the test files the reviewed range changes, at their anchor sha', () => {
+  const testsOf = (id: string) => {
     const repoRoot = fileURLToPath(new URL('../../..', import.meta.url));
-    const m = buildReviewMaterial(new Commands(new Store(repoRoot), 'test'), '12-operate-loop/08-implementation-one-gate-derivation');
-    const tests = m.context.find((c) => c.label === 'submission.tests')!.text;
+    const m = buildReviewMaterial(new Commands(new Store(repoRoot), 'test'), id);
+    return { m, tests: m.context.find((c) => c.label === 'submission.tests')?.text };
+  };
+
+  it('carries real test BYTES at the anchor sha, and the selection is DERIVED', () => {
+    const { m, tests } = testsOf('12-operate-loop/08-implementation-one-gate-derivation');
 
     // real test BYTES — not a stat line in the change map, which is all the material had
     // before and the reason every `uncertain` was a request for what this now carries
-    expect(tests).toContain('--- src/e2e/service.e2e.test.ts');
+    expect(tests).toMatch(/^--- src\/.*\.test\.ts/m);
     expect(tests).toContain('describe(');
     expect(tests).toContain('it(');
     // the selection is DERIVED (the test files the range touches), so it moves with the
@@ -447,19 +478,77 @@ describe('AC-2 · the criterion-level evidence is CARRIED, and its BOUND is stat
     expect(m.range).toContain('..');
   });
 
-  it('declares the CUT the way the diff declares its own, and names what is NOT carried', () => {
-    const repoRoot = fileURLToPath(new URL('../../..', import.meta.url));
-    const m = buildReviewMaterial(new Commands(new Store(repoRoot), 'test'), '12-operate-loop/08-implementation-one-gate-derivation');
-    const tests = m.context.find((c) => c.label === 'submission.tests')!.text;
+  it('SELECTS ON THE CLAIMS TOO, and a claim-named file is carried BEFORE the range sweep', () => {
+    // 12/02 is the measured case, not a constructed one: its range touches three test files
+    // and its claims name two, and ONE of the named files — src/flow/__tests__/
+    // semantic-driver.test.ts — the range never touches. Under the original range-only
+    // selection that file was not carried at all; under a range-FIRST ordering it would have
+    // been selected last and been the first thing the budget dropped, which is the same harm
+    // wearing a different hat. This is the ordinary shape of "one assertion added to a suite
+    // nobody rewrote", which is why the reviewer called it a gap rather than an edge.
+    const { tests } = testsOf('12-operate-loop/02-implementation-semantic-driver');
+    const selection = tests!.split('\n').find((l) => l.startsWith('(THE SELECTION'))!;
 
-    // a partial view is never mistaken for the whole — the same inline disclosure the
-    // patch above it carries
-    expect(tests).toMatch(/chars cut/);
-    // THE LIMITS ARE NAMED (AC-4): what no test text carries is a KNOWN boundary, so an
-    // `uncertain` raised against it can be SEEN to be asking for something already declared
-    // absent — rather than the reviewer discovering, at the end, that it was never there
-    expect(tests).toContain('THE SELECTION:');
-    expect(tests).toContain('test file the range does not touch');
+    // the two reads are both stated, and they are stated as DIFFERENT numbers — a selection
+    // naming only one input could not show this
+    expect(selection).toMatch(/test files the reviewed range changes \(\d+\)/);
+    expect(selection).toMatch(/test files the claims name as evidence \(2\)/);
+    // and the outside-named file ARRIVES, FIRST, captioned with the claim and the run it is
+    // evidence for — AC-2's "mapped check's command" made visible where it is actually used
+    const blocks = tests!.split(/^--- /m).slice(1);
+    expect(blocks[0]).toMatch(/^src\/flow\/__tests__\/semantic-driver\.test\.ts {2}\[named as evidence by: AC-\d+ → npm test — "/);
+    expect(blocks[0]).not.toContain('NOT readable');
+    expect(blocks[0]).toContain('describe(');
+    // it is NOT in the range, so no range-only selection could have carried it — asserted
+    // against the material's own accounting rather than against my reading of git
+    expect(selection).toMatch(/range changes \(3\)/);
+  });
+
+  it('a range that selects NOTHING still emits the section, stating the empty selection', () => {
+    // AC-4 requires the material to name what falls outside the selection WHERE IT APPLIES.
+    // The original code guarded the whole section on `changed.length`, so this delivery —
+    // a range that touches no test file — carried NO section and NO boundary: the reviewer
+    // had to DISCOVER that the evidence it wanted was never coming, which is the difference
+    // between a known boundary and an unseen one.
+    const { m, tests } = testsOf('02-archive-access/02-implementation-sessions-listing');
+    expect(m.range).toContain('..');
+    expect(tests).toBeDefined();
+    expect(tests).toContain('range changes (0)');
+    expect(tests).toContain('this range selects NONE, so no test text is carried at all');
+    expect(tests).toContain('a real browser'); // the boundary is still named, not replaced by silence
+  });
+
+  it('DECLARES A CUT PER FILE, with the numbers — never a truncated body that reads as whole', () => {
+    // The cut used to slice the JOINED bodies at the budget, so whichever file straddled it
+    // arrived truncated and SILENT about it. A partial view is fine; a partial view that
+    // cannot be told apart from the whole is the one thing this must not do.
+    const { tests } = testsOf('12-operate-loop/08-implementation-one-gate-derivation');
+    // split into per-file blocks at the captions, so "which file is this marker in" is
+    // answered by the material's own structure rather than by my reading of it
+    const blocks = tests!.split(/^--- /m).slice(1);
+    const cut = blocks.filter((b) => b.includes('THIS FILE IS CUT'));
+
+    // EXACTLY ONE, and it carries the numbers: how much is missing and out of how much. Not a
+    // bare "…", which is the form that reads as a continuation rather than a loss.
+    expect(cut).toHaveLength(1);
+    expect(cut[0]).toMatch(/\[THIS FILE IS CUT: the last [\d,]+ of its [\d,]+ chars are NOT below/);
+    expect(cut[0]).toContain('END OF THE FILE, not a summary');
+    // and it says WHERE THE REST IS, the way the patch's own cut says "the full range is in
+    // git" — a disclosure a reader can act on rather than a shrug
+    expect(cut[0]).toMatch(/the full file is at [0-9a-f]{7,}:\S+\.test\.ts in git/);
+    expect(cut[0]).toMatch(/^src\/.*\.test\.ts/); // the marker sits INSIDE the file's own block
+
+    // THE POINT: the files that fit are clean, so the two are distinguishable — a property of
+    // a FILE, which is exactly what slicing the joined string could not state
+    const whole = blocks.filter((b) => b.includes('describe(') && !b.includes('THIS FILE IS CUT'));
+    expect(whole.length).toBeGreaterThan(0);
+  });
+
+  it('names what is NOT carried — the files the budget dropped, by path', () => {
+    const { tests } = testsOf('12-operate-loop/08-implementation-one-gate-derivation');
+    expect(tests).toContain('(THE SELECTION —');
+    expect(tests).toMatch(/NOT carried — the budget ended first — src\//);
+    expect(tests).toContain('neither the range nor a claim names');
     expect(tests).toContain('a real browser');
   });
 });
