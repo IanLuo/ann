@@ -33,6 +33,10 @@ import { deriveGateVerdict, GATE_REVIEW_PROVENANCE, runGateReview } from '../gat
  *     call the model at all.
  *   · AC-6 — every absence (an unparseable reply, an empty review, a provider that throws)
  *     decides NOTHING: the submission stands and the reason is named.
+ *   · 12/27 AC-2 — and it is RECORDED, naming WHICH absence it was. The three causes this
+ *     file can reach are three different names (`unreachable` · `unparseable` · `empty`);
+ *     the fourth, `unavailable`, can only be reached from outside the worker — the seam
+ *     throwing before it exists — and is covered in the CLI's own suite.
  */
 
 let root: string;
@@ -380,7 +384,7 @@ describe('AC-1/AC-2/AC-5 (12/27) · every arm is on the record, and the DECIDING
   };
 
   it('AC-2 — an UNREACHABLE provider names itself on the node', async () => {
-    await absenceCase({ async complete() { throw new Error('provider-unavailable: provider x failed after 3 retries: fetch failed'); } }, 'unavailable');
+    await absenceCase({ async complete() { throw new Error('provider-unavailable: provider x failed after 3 retries: fetch failed'); } }, 'unreachable');
   });
 
   it('AC-2 — an UNPARSEABLE reply names itself on the node', async () => {
@@ -389,6 +393,24 @@ describe('AC-1/AC-2/AC-5 (12/27) · every arm is on the record, and the DECIDING
 
   it('AC-2 — an EMPTY review names itself on the node', async () => {
     await absenceCase(model(JSON.stringify({ findings: [] })).llm, 'empty');
+  });
+
+  it('AC-2 — a write the STORE refuses is SAID, and is not a fifth absence', async () => {
+    // The one absence with no record behind it, because the write IS what failed. It gets a
+    // sentence on the surface carrying the store's own refusal, NOT a fifth name in
+    // `REVIEW_ABSENCES`: inventing `unwritable` would say "we recorded an absence" about the
+    // one case where we provably did not.
+    const c = atConfirm();
+    writeFileSync(join(root, '.ann', 'journey', '.ledger.json'), '{{{ not json');
+    const after = cmds(); // the store scans at construction, so the corrupt ledger is the one it sees
+    const r = await runGateReview(after, abilities(model('I looked at it and it is fine.').llm), TASK, { run: 'run-7' });
+    expect(r).toMatchObject({ ok: false });
+    const said = String((r as { absent: string }).absent);
+    expect(said).toContain('strict JSON findings record'); // the REASON survives the failed write
+    expect(said).toContain('AND THE OUTCOME COULD NOT BE RECORDED');
+    expect(said).toContain('store-refused'); // …and the store's own words, never a generic one
+    expect(after.brief(TASK).review).toBeUndefined(); // nothing landed, so no standing is claimed
+    stillTheHumans(after);
   });
 });
 

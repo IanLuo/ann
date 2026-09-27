@@ -194,9 +194,11 @@ export type GateReviewResult =
   /** The rule declined: the submission STANDS, nothing is decided, no rejection is burned,
    *  and the card goes back to the human exactly as it reads today. */
   | { ok: true; verdict: 'human'; reason: string; findings: number; run?: string }
-  /** THE WORKER'S ABSENCE (AC-6): no provider, an unreachable endpoint, a refusal, an
-   *  unparseable reply — the submission stands and the human decides, and the reason is
-   *  NAMED so an outage can never silently look like a human gate. */
+  /** THE WORKER'S ABSENCE (AC-6): an unbuildable worker, an unreachable endpoint, a refusal,
+   *  an unparseable reply, a reply with nothing in it — the submission stands and the human
+   *  decides, and the reason is NAMED so an outage can never silently look like a human gate.
+   *  Which of the four it was is on the record too (`REVIEW_ABSENCES`), named at the exact
+   *  place the worker stopped. */
   | { ok: false; absent: string };
 
 /**
@@ -206,8 +208,9 @@ export type GateReviewResult =
  *       its next action is not a rejection — so it does not run at all and the human
  *       decides for real. The check is here rather than inside the loop because it must
  *       not cost a model call to discover.
- *   2 · ONE MODEL CALL, and ONE ONLY. Every failure path below is fail-closed: an
- *       unparseable or empty reply is an ABSENCE, never an accept and never a rejection.
+ *   2 · ONE MODEL CALL, and ONE ONLY. Every failure path below is fail-closed: a call that
+ *       cannot be made, and an unparseable or empty reply, are each an ABSENCE — never an
+ *       accept and never a rejection — and each names where it stopped (AC-2).
  *   3 · THE FINDINGS LAND THROUGH THE ONE WRITER, as they are asserted, before any
  *       decision — so a worker that decides and a worker that crashes both leave the same
  *       record of what it found.
@@ -269,7 +272,7 @@ export const runGateReview = async (
       maxTokens: opts.maxTokens ?? REVIEW_MAX_TOKENS,
     });
   } catch (e) {
-    return absent('unavailable', `the review worker could not run — ${(e as Error).message}`);
+    return absent('unreachable', `the review worker could not be reached — ${(e as Error).message}`);
   }
   const parsed = parseGateReview(raw);
   if (!parsed) {

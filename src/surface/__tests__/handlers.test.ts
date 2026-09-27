@@ -893,8 +893,35 @@ describe('gate! --review — the worker against a submission already standing (l
       expect(confirmGate()).toBe('submitted');
       const added = addedEvents();
       expect(added).toHaveLength(1);
-      expect(added[0]).toMatchObject({ type: 'evidence', outcome: { verdict: 'absent', why: 'unavailable' } });
+      // UNREACHABLE, not unavailable: the provider was CONFIGURED and the call was made (the
+      // spy was reached) — it is the endpoint that did not answer. `unavailable` is the other
+      // seam, where the worker could not be BUILT at all, and the two are deliberately not one
+      // word (12/27 AC-2).
+      expect(added[0]).toMatchObject({ type: 'evidence', outcome: { verdict: 'absent', why: 'unreachable' } });
       expect('findings' in added[0]).toBe(false); // an absence lands an OUTCOME, never an empty findings list
+    });
+
+    it('UNAVAILABLE — the worker cannot be BUILT, and that is a different name from unreachable', async () => {
+      // The seam `runGateReview` can never see (12/27 AC-2): the registry has no usable
+      // provider, so the adapter is never built — the throw happens BEFORE the worker exists
+      // and the worker's own writer never runs. It is `unavailable` — nothing was called —
+      // where the test above is `unreachable` — a call was made and nothing answered. One word
+      // for both would send the reader to the wrong remedy: configure a provider, versus wait
+      // for an endpoint.
+      writeFileSync(
+        join(root, '.ann', 'rules', 'adapter', 'provider.json'),
+        JSON.stringify({ defaultProvider: 'ghost', defaults: { maxTokens: 2048, temperature: 0, retries: 0, backoffMs: 1, backoffMaxMs: 1, timeoutMs: 3000 }, providers: [] }),
+      );
+      const r = await attempt('12-operate/01-a', 'confirm', '--review');
+      expect(r.refused?.code).toBe('review-absent');
+      expect(r.refused?.message).toContain('the review worker is unavailable');
+      expect(r.refused?.message).toContain('providers[] must be non-empty'); // the CAUSE, not a generic failure
+      expect(fetchSpy).not.toHaveBeenCalled(); // there was no adapter to call with
+      expect(confirmGate()).toBe('submitted');
+      const added = addedEvents();
+      expect(added).toHaveLength(1);
+      expect(added[0]).toMatchObject({ type: 'evidence', outcome: { verdict: 'absent', why: 'unavailable' } });
+      expect('findings' in added[0]).toBe(false);
     });
 
     it('an UNPARSEABLE reply is an absence too — never an accept, never a rejection', async () => {
@@ -903,7 +930,7 @@ describe('gate! --review — the worker against a submission already standing (l
       expect(r.refused?.code).toBe('review-absent');
       expect(r.refused?.message).toContain('strict JSON findings record');
       expect(confirmGate()).toBe('submitted');
-      // the SAME record as the unavailable arm, naming which absence it was (AC-2)
+      // the SAME record as the unreachable arm, naming which absence it was (AC-2)
       expect(addedEvents()).toEqual([expect.objectContaining({ type: 'evidence', outcome: expect.objectContaining({ verdict: 'absent', why: 'unparseable' }) })]);
     });
   });
@@ -949,7 +976,8 @@ describe('gate! --review — the worker against a submission already standing (l
       });
       const r = await attempt('12-operate/01-a', 'confirm', '--review');
       const text = emitText(r.refused);
-      expect(text).toContain('the review worker could not run'); // the CAUSE, named
+      expect(text).toContain('the review worker could not be reached'); // the CAUSE, named — and WHICH cause
+      expect(text).toContain('connect ECONNREFUSED'); // …the endpoint's own words, not a generic failure
       expect(text).toContain('NOTHING was decided and the submission stands'); // the consequence
       expect(text).toContain(`ann gate! ${TASK} confirm accept|reject '<why>'`); // the way out
     });

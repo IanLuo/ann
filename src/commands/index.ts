@@ -2425,7 +2425,9 @@ export class Commands {
     }
     // An absent outcome is un-writable without its `why` (the writer refuses one), so the
     // fallback is a defensive read of legacy/hand-written history — never a crash, and never
-    // an invented kind.
+    // an invented kind. Which of the four it names is exactly what such a record does not say,
+    // so the fallback is the one that claims the LEAST: nothing was called (`unreachable` and
+    // `unparseable` both assert a call was made and got somewhere).
     const why = outcome.why ?? 'unavailable';
     const label = 'ABSENT' as const;
     return { kind: 'absent', label, why, reason: outcome.reason, at: outcome.at, line: `${label} — the review worker did not answer (${why}) at ${outcome.at}: ${outcome.reason}` };

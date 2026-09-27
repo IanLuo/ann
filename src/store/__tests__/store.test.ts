@@ -1337,7 +1337,7 @@ describe('Store — strict event schema (format v12 §3: unknown fields + shapes
   // leave no record at all: a `human` verdict wrote only its findings, and an ABSENCE wrote
   // nothing on every path but the frame's console note. Same discipline as a finding — the
   // shape is strict at the single writer, and the vocabulary is CLOSED, so a card never has to
-  // interpret a word to know which of the three it is reading.
+  // interpret a word to know which of the four it is reading.
   it('rejects a malformed review outcome, and accepts an outcome-only landing (no findings)', () => {
     writeNode('06-engine-build/20-o', {}, [ev('created')]);
     const O = (outcome: unknown, extra: Record<string, unknown> = {}): JourneyEvent => ({ at: '2026-08-22', type: 'evidence', outcome, ...extra } as unknown as JourneyEvent);
@@ -1348,9 +1348,17 @@ describe('Store — strict event schema (format v12 §3: unknown fields + shapes
     expectReject('06-engine-build/20-o', O({ ...okHuman, verdict: 'accept' }), /verdict must be 'human' or 'absent'/);
     expectReject('06-engine-build/20-o', O({ ...okHuman, verdict: 'rework' }), /verdict must be 'human' or 'absent'/);
     expectReject('06-engine-build/20-o', O({ ...okHuman, extra: 1 }), /unknown field\(s\) 'extra'/);
-    // an ABSENCE names itself; the three names are the recordable ones and no other
+    // an ABSENCE names itself; the FOUR names are the recordable ones and no other. Each is a
+    // distinct place a worker stops — unbuildable, unreachable, unreadable reply, empty reply —
+    // so the writer's list is the contract's list, one for one.
     expectReject('06-engine-build/20-o', O({ ...okAbsent, why: undefined }), /an absent outcome needs 'why'/);
-    expectReject('06-engine-build/20-o', O({ ...okAbsent, why: 'unwritable' }), /needs 'why' — one of unavailable\|unparseable\|empty/);
+    expectReject('06-engine-build/20-o', O({ ...okAbsent, why: 'unwritable' }), /needs 'why' — one of unavailable\|unreachable\|unparseable\|empty/);
+    // (its OWN node, so the read-back below sees exactly the two landings this test names)
+    writeNode('06-engine-build/20-p', {}, [ev('created')]);
+    for (const why of ['unavailable', 'unreachable', 'unparseable', 'empty'] as const) {
+      const sw = s();
+      expect(() => sw.appendEvent(sw.resolveNode('06-engine-build/20-p'), O({ ...okAbsent, why, reason: `stopped at ${why}` }) as unknown as JourneyEvent)).not.toThrow();
+    }
     // a DECLINE is not a failure: it carries no `why`, and the reason is the whole record of it
     expectReject('06-engine-build/20-o', O({ ...okHuman, why: 'empty' }), /only an absence carries a 'why'/);
     expectReject('06-engine-build/20-o', O({ ...okHuman, reason: '  ' }), /needs 'reason'/);

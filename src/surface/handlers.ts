@@ -145,7 +145,10 @@ async function attemptGateReview(ctx: CliContext, id: string): Promise<GateRevie
     // no provider registered, or an adapter that will not construct — throws BEFORE the
     // worker is called, so the worker's own writer never runs. It lands the same record on
     // the same writer, from outside, or an out-of-provider machine leaves no trace that a
-    // review was ever asked for.
+    // review was ever asked for. This is `unavailable`, and it is the whole of `unavailable`:
+    // the worker that cannot be BUILT. A worker that is built and cannot be REACHED is the
+    // worker's own `unreachable` (gate-review.ts), and the two are kept apart because one is
+    // fixed by configuring a provider and the other by waiting for an endpoint.
     const reason = `the review worker is unavailable — ${(e as Error).message}`;
     ctx.commands.landFindings(id, [], {
       note: 'gate review — NO REVIEW (unavailable) · the worker could not be built',
@@ -218,7 +221,11 @@ async function reviewStandingSubmission(
   // (12/22 AC-6): the operator's gesture was `submit!`, and the gate's being theirs is the
   // fallback they already expect. At an explicit `--review` the operator ASKED and did not
   // get one, so a silent degradation would swallow the request by dressing it as a
-  // degradation. Nothing is written either way, and the submission stands either way.
+  // degradation. NOTHING IS DECIDED either way, no rejection is burned, and the submission
+  // stands either way — the absence ITSELF is on the record in both (12/27 AC-2, landed by
+  // `attemptGateReview` or by the worker); so are the four REFUSALS above, which write
+  // nothing because they decide before a review is ever asked for: a review nobody requested
+  // cannot be absent.
   if (!r.ok) {
     return boom('review-absent', `${r.absent} — NOTHING was decided and the submission stands: ann gate! ${a.id} confirm accept|reject '<why>'`);
   }

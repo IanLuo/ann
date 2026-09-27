@@ -376,16 +376,28 @@ export type ReviewSeverity = (typeof REVIEW_SEVERITIES)[number];
 export const REVIEW_STATUSES = ['open', 'resolved'] as const;
 
 /** A REVIEW'S ABSENCE, NAMED (leg 12/27) — a closed vocabulary, because "the review did not
- *  run" has distinct causes and a card that cannot tell them apart cannot say what to do
- *  next: `unavailable` (no provider · a refusal · a call that failed — the provider's own
- *  code rides the reason), `unparseable` (a reply with no readable findings object), `empty`
- *  (a reply with no findings at all — an empty review is not a record).
+ *  run" has distinct causes and a card that cannot tell them apart cannot say what to do next.
+ *  The four are the four places the worker stops, and each names WHERE it stopped:
+ *
+ *    · `unavailable`  the worker could not be BUILT — no provider registered, or an adapter
+ *                     that will not construct. A configuration problem: nothing was called.
+ *    · `unreachable`  the worker could not be REACHED — the call itself failed (a refused
+ *                     connection, a timeout, an HTTP failure, retries exhausted). An outage:
+ *                     the provider exists and did not answer.
+ *    · `unparseable`  a reply arrived and is not the strict JSON findings record — the worker
+ *                     answered, and the answer is not a record.
+ *    · `empty`        a reply arrived with no findings at all — an empty review is not a
+ *                     record either, so nothing is decided on it.
+ *
+ *  `unavailable` and `unreachable` are kept APART rather than collapsed: one is fixed by
+ *  configuring a provider and the other by waiting for an endpoint, and a single word would
+ *  send the reader to the wrong remedy. The provider's own message rides the reason in both.
  *
  *  There is deliberately NO member for the store REFUSING a write: that absence is the one
  *  that cannot be recorded, because the write is what failed. It is named on the surface
  *  instead, carrying the store's own refusal — the operator sees a store that will not
  *  write, which is a different problem from a provider that will not answer. */
-export const REVIEW_ABSENCES = ['unavailable', 'unparseable', 'empty'] as const;
+export const REVIEW_ABSENCES = ['unavailable', 'unreachable', 'unparseable', 'empty'] as const;
 export type ReviewAbsence = (typeof REVIEW_ABSENCES)[number];
 
 /** A FINDING's shape (leg 12/09) — the structured record a REVIEW lands, so that what a

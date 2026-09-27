@@ -418,9 +418,10 @@ export class Frame {
    * exactly as it reads today:
    *   · the rule declined (an open `uncertain` with no defect): no rejection is burned;
    *   · the reject bound is reached: the worker is OUT and a human decides for real;
-   *   · the worker is ABSENT (no provider, a refusal, an unparseable reply): NAMED on the
-   *     console and on the frame's result, so an outage can never quietly look like the
-   *     human gate this used to be (AC-6).
+   *   · the worker is ABSENT (an unbuildable worker, an unreachable endpoint, a refusal, an
+   *     unparseable or empty reply — the four `REVIEW_ABSENCES`, each named at the point the
+   *     worker stopped): NAMED on the console, on the frame's result AND on the node, so an
+   *     outage can never quietly look like the human gate this used to be (AC-6, 12/27 AC-2).
    *
    * A decision it DOES make is stamped as the worker's, with the reviewing run, and goes
    * through `commands.gate` — the same writer a human's decision goes through, so there is

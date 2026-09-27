@@ -339,8 +339,9 @@ at a person — which is the property that makes an automatic gate safe to have 
 
 ### 7.7 The worker's absence degrades to the human, visibly
 
-No provider, an unreachable endpoint, a refusal: the worker cannot run. The submission stands and
-the card is presented exactly as today.
+No provider, an unreachable endpoint, a refusal, a reply with nothing readable in it: the worker
+cannot run. The submission stands, the card is presented exactly as today, and WHICH of the four it
+was is named on the node as well as on the console (§7.11).
 
 **Fail-OPEN toward the human, not fail-closed.** The reviewer is an ADDITION, so its absence must
 degrade to the behaviour that existed before it; a journey must not stall because an endpoint is
@@ -458,10 +459,10 @@ this as its mirror image — a gate that says nothing, so everything must be re-
 | **accept** | the decision itself: `confirmed`, actor `worker` | `commands.gate` — unchanged, §7.4 |
 | **rework** | the decision itself: `rejected`, actor `worker`, the worker's own feedback | `commands.gate` — unchanged, §7.4 |
 | **human** | an OUTCOME riding the findings landing: that a review RAN, its date, the anchor sha it was read at, the run id, the findings count, and the reason the rule derived it | the ONE findings writer — `evidence.outcome` beside `evidence.findings` on one event |
-| **absent** | the same class of record, with NO findings: WHICH absence it was (`unavailable` · `unparseable` · `empty`) and the reason, plus the run id | the same writer, on all three paths — `submit!`, `gate! --review`, the frame |
+| **absent** | the same class of record, with NO findings: WHICH absence it was (`unavailable` · `unreachable` · `unparseable` · `empty`) and the reason, plus the run id | the same writer, on all three paths — `submit!`, `gate! --review`, the frame |
 | **bound** | **nothing** — and the absence of a record is the correct record | derived, from the rejection events, where the other outcomes are stated |
 
-Four things this table settles that were being inferred:
+Six things this table settles that were being inferred:
 
 - **The two deciding arms are already recorded, and are deliberately not restated.** Their
   decision IS the record; an `outcome` field beside them would be a second account of one fact,
@@ -471,10 +472,29 @@ Four things this table settles that were being inferred:
   in the log. The bound is a property of the gate — `REJECT_BOUND` burned rejections — and it is
   read from the events that already say so, at no model-call cost. It takes PRECEDENCE over any
   recorded outcome: when the worker is out, what an earlier pass concluded is not the live fact.
-- **The contract's four absences collapse to three recordable ones.** `unreachable` is not a
-  distinct case: the provider layer reports a dead endpoint as unavailability, so a fourth name
-  would describe a path that does not exist. And a write the STORE refuses cannot be recorded at
-  all — the write is what failed — so it is `ann check`'s business, not an outcome value's.
+- **The contract's four absences are four RECORDABLE names, one per place the worker stops.**
+  They are kept apart because the remedy differs and a single word sends the reader to the wrong
+  one: `unavailable` — the worker could not be **built** (no provider registered, an adapter that
+  will not construct), which is fixed by configuring a provider; `unreachable` — the worker could
+  not be **reached** (the call threw: a refused connection, a timeout, an HTTP failure), which is
+  fixed by waiting for an endpoint; `unparseable` — an answer arrived and is not the strict JSON
+  findings record; `empty` — an answer arrived with no findings at all. The first is landed by
+  `attemptGateReview` (the seam throws before the worker exists, so the worker's own writer never
+  runs); the other three are landed by `runGateReview` itself, each at the exact line the worker
+  stopped. All four ride the same writer with the same shape, so a reader tells them apart by one
+  field rather than by the shape of the record.
+  A write the STORE refuses is the one absence that cannot be recorded at all — the write is what
+  failed — so it is `ann check`'s business, not an outcome value's; `landFindings` returning not-ok
+  puts the store's own refusal in the REASON on the surface rather than inventing a fifth name.
+- **A refused `--review` is not an absent review, and writes nothing.** The four refusals
+  (`review-with-flag`, `review-not-confirm`, `review-takes-no-decision`, `review-no-submission`)
+  are decided BEFORE `attemptGateReview` is called. Each says the gesture does not apply — there is
+  no submission for a worker to review, or the flag composes with nothing — so no review was asked
+  for and none can be absent. Recording one would put a review's outcome on a node on which no
+  review was ever requested, which is the class of false record `outcomeShapeProblem` refuses. What
+  AC-2 requires on every path is that an absence is recorded ONCE — and `attemptGateReview` is the
+  single seam every path that actually runs the worker goes through, so the record cannot be
+  duplicated by which door was used.
 - **The three lines are composed once, in the engine** (`ReviewStanding.line`), and printed
   verbatim by three surfaces: `ann brief`, the served card, and the page's next-line. The page's
   script cannot import engine code, so wording placed in a renderer would have to be written
@@ -486,9 +506,9 @@ Four things this table settles that were being inferred:
 **Corrections this makes to §7.10.** The `--review` sketch there reads `human → an OUTCOME …
 nothing written` and `absent → a NAMED FAILURE, exit 1, zero writes`. Both were true when
 written and are now false in one word each: nothing is **decided** and no rejection is burned,
-but the OUTCOME itself lands through the findings writer — including for an absence. The
-`--review` refusals (the four named ones) still write nothing at all, which is the claim §7.10
-was really making: nothing is spent and nothing changes about the gate before a decision exists.
+but the OUTCOME itself lands through the findings writer — including for an absence. §7.10's real
+claim survives intact and is narrower than it reads: nothing is SPENT and nothing about the gate
+changes before a decision exists.
 
 **One visible consequence, recorded rather than discovered later.** An outcome-only landing is an
 `evidence` event with no commits and no refs, so it appears in the RESULTS list as an
@@ -549,6 +569,7 @@ identical.
 | 7.7 | `src/surface/*` (card) | the reviewer's absence is named on the card |
 | 7.11 | `src/store/store.ts` (`outcomeShapeProblem`) · `src/commands/index.ts` (`landFindings`) | `evidence.outcome`: the closed shape a non-deciding arm writes, through the findings writer |
 | 7.11 | `src/flow/gate-review.ts` (`runGateReview`) · `src/surface/handlers.ts` (`attemptGateReview`) | both non-deciding arms land the outcome — the CLI's two doors plus the frame's |
+| 7.11 | `src/store/store.ts` (`REVIEW_ABSENCES`) | the four absences, one per place the worker stops: built · reached · read · non-empty |
 | 7.11 | `src/commands/index.ts` (`reviewStanding`) · `src/surface/*` | the three standings, composed ONCE and printed by `ann brief`, the card and the page |
 | 7.10 | `src/surface/handlers.ts` (`gate!` → `reviewStandingSubmission`) | the `--review` gesture: the four named refusals, then the SAME `runGateReview` call |
 | 7.10 | `src/surface/service.ts` (`POST /api/gate`) | no field of the route may carry a flag — the gesture stays CLI-only by construction |

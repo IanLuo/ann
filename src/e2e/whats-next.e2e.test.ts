@@ -709,11 +709,13 @@ describe('e2e — the exit gate drills into a result: `ann results <id> <n>` ove
     expect(doc.detail.gates.confirm.state).toBe('submitted'); // the EXIT gate
     // commit · ref (the conclusion's structured evidence) · the CAPTURE's own evidence
     // record (leg 12/03 — a recorded act is a result too, and it is numbered like the rest)
-    // · the REVIEW's own record (leg 12/27 — `submit!` reached for the worker, this fixture has
-    // no provider, and that absence is now ON THE LOG instead of vanishing: an evidence event
-    // with no commits or refs is an informational row, exactly as a findings landing already was)
+    // · the REVIEW's own record (leg 12/27 — `submit!` reached for the worker, this fixture's
+    // provider is a dead port, and that absence is now ON THE LOG instead of vanishing: an
+    // evidence event with no commits or refs is an informational row, exactly as a findings
+    // landing already was. UNREACHABLE, not unavailable: the adapter BUILT fine and the CALL
+    // was the thing that failed — two different names for two different remedies)
     expect(doc.results.map((r) => r.kind)).toEqual(['commit', 'ref', 'evidence', 'evidence']);
-    expect(doc.results[3].label).toContain('gate review — NO REVIEW (unavailable)');
+    expect(doc.results[3].label).toContain('gate review — NO REVIEW (unreachable)');
     expect(doc.results[0].sha).toBe(sha);
     expect(doc.results[1].path).toBe('src/thing.ts');
     // …and the same item comes back from the drill route at that index
