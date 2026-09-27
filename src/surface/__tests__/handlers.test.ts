@@ -1,11 +1,14 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { Store } from '../../store/store.js';
 import { createContext, HANDLERS, CliContext } from '../handlers.js';
 import { RENDERS, type NodeCard } from '../command-renderers.js';
+import { resetProviderRegistryCache } from '../../abilities/llm/registry.js';
+import { runGateReview } from '../../flow/gate-review.js';
+import type { Abilities, LlmAbility } from '../../flow/types.js';
 
 /**
  * The CLI HANDLERS (surface) — two regressions:
@@ -150,17 +153,23 @@ describe('gate! — the half accept\'s flags parse CLOSED (leg 12/12)', () => {
     expect(calls).toEqual([['01-leg/01-a', 'grill', 'accept', '', {}]]);
   });
 
-  it('refuses a LONE flag, a missing value and an unknown flag — nothing reaches the command', () => {
+  it('refuses a LONE flag, a missing value and an unknown flag — nothing reaches the command', async () => {
     const calls: unknown[][] = [];
-    const run = (args: string[]) => {
-      let thrown: { code?: string; message?: string } | undefined;
-      try { HANDLERS['gate!'](stubCtx(args, (...a) => { calls.push(a); return { ok: true, value: {} }; })); } catch (e) { thrown = e as { code?: string; message?: string }; }
-      return thrown;
+    // `gate!` is ASYNC since leg 12/26 (the `--review` gesture awaits the worker), so a
+    // refusal arrives as a REJECTED PROMISE rather than a synchronous throw. The refusal
+    // itself is unchanged — it is still decided before any command is reached.
+    const run = async (args: string[]) => {
+      try {
+        await HANDLERS['gate!'](stubCtx(args, (...a) => { calls.push(a); return { ok: true, value: {} }; }));
+        return undefined;
+      } catch (e) {
+        return e as { code?: string; message?: string };
+      }
     };
-    expect(run(['gate!', '01-leg/01-a', 'confirm', 'accept', 'why', '--transfer', '01-leg/02-b'])?.message).toContain('go together');
-    expect(run(['gate!', '01-leg/01-a', 'confirm', 'accept', 'why', '--scope', 'x'])?.message).toContain('go together');
-    expect(run(['gate!', '01-leg/01-a', 'confirm', 'accept', 'why', '--transfer', '--scope', 'x'])?.message).toContain('needs a target');
-    expect(run(['gate!', '01-leg/01-a', 'confirm', 'accept', 'why', '--bogus', 'x'])?.message).toContain('unknown flag --bogus');
+    expect((await run(['gate!', '01-leg/01-a', 'confirm', 'accept', 'why', '--transfer', '01-leg/02-b']))?.message).toContain('go together');
+    expect((await run(['gate!', '01-leg/01-a', 'confirm', 'accept', 'why', '--scope', 'x']))?.message).toContain('go together');
+    expect((await run(['gate!', '01-leg/01-a', 'confirm', 'accept', 'why', '--transfer', '--scope', 'x']))?.message).toContain('needs a target');
+    expect((await run(['gate!', '01-leg/01-a', 'confirm', 'accept', 'why', '--bogus', 'x']))?.message).toContain('unknown flag --bogus');
     expect(calls).toEqual([]); // not one write was reached
   });
 });
@@ -675,5 +684,306 @@ describe('README command table — the copy stays aligned with `ann commands`', 
       rows.push(l);
     }
     expect(rows).toEqual(table);
+  });
+});
+
+/**
+ * `ann gate! <id> confirm --review` — THE WORKER, AGAINST A SUBMISSION ALREADY STANDING
+ * (leg 12/26).
+ *
+ * The gesture fills one hole: `submit!` is the worker's only door (12/22), so a gate OPENED
+ * BEFORE the worker existed in the running binary — or opened while the worker was absent —
+ * could never be reviewed at all. These tests run the REAL handler over a REAL store fixture,
+ * so "zero writes" is MEASURED (every byte under the temp root, before and after) rather than
+ * asserted from a stub having no calls.
+ */
+describe('gate! --review — the worker against a submission already standing (leg 12/26)', () => {
+  const TASK = '12-operate/01-a';
+  const MATCH = [{ id: 'F1', severity: 'matches', where: 'src/x.ts:1', text: 'AC-1 walked and met', status: 'open' }];
+  const GAP = [{ id: 'F1', severity: 'gap', where: 'src/x.ts:1', text: 'AC-1 is not met', status: 'open' }];
+  const QUALITY = [{ id: 'F1', severity: 'quality', where: 'src/x.ts:1', text: 'the bytes will cost someone later', status: 'open' }];
+  const reply = (findings: unknown[], summary = 'every criterion walked against the delivered bytes') => JSON.stringify({ findings, summary });
+
+  /** The live shape the flag exists for: a grill accepted, a confirm SUBMITTED and undecided.
+   *  `rejects` pushes the worker past its bound; `decided` closes the gate. */
+  const standing = (opts: { rejects?: number; decided?: boolean } = {}) => [
+    ev('created'),
+    ev('submitted', { gate: 'grill' }),
+    ev('confirmed', { gate: 'grill' }),
+    ...Array.from({ length: opts.rejects ?? 0 }, () => ev('rejected', { gate: 'confirm', feedback: 'not yet' })),
+    ev('submitted', { gate: 'confirm' }),
+    ...(opts.decided ? [ev('confirmed', { gate: 'confirm', decider: 'human' })] : []),
+  ];
+
+  /** A fixture provider registry: the gesture needs one to reach the adapter at all, and a
+   *  test must not depend on the machine's own ~/.ann config. `retries: 0` so the absence
+   *  arm fails on the FIRST attempt instead of backing off three times. */
+  function writeRegistry() {
+    mkdirSync(join(root, '.ann', 'rules', 'adapter'), { recursive: true });
+    writeFileSync(
+      join(root, '.ann', 'rules', 'adapter', 'provider.json'),
+      JSON.stringify({
+        defaultProvider: 'stub',
+        defaults: { maxTokens: 2048, temperature: 0, retries: 0, backoffMs: 1, backoffMaxMs: 1, timeoutMs: 3000 },
+        providers: [{ id: 'stub', kind: 'http', baseUrl: 'env:ANN_LLM_BASE_URL || http://127.0.0.1:1/v1', defaultModel: 'stub-model' }],
+      }),
+    );
+  }
+
+  /** EVERY BYTE UNDER A DIRECTORY — the zero-writes claim, measured. */
+  function tree(d: string): string {
+    const out: string[] = [];
+    for (const e of readdirSync(d, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+      const p = join(d, e.name);
+      out.push(e.isDirectory() ? tree(p) : `${p}\n${readFileSync(p, 'utf8')}`);
+    }
+    return out.join('\n');
+  }
+  /** THE JOURNEY RECORD — the record this gesture must not touch. Deliberately NOT the whole
+   *  temp root: reaching the adapter at all appends to `logs/provider.jsonl` (the provider
+   *  oplog, written by the transport itself, one line per attempt). That is the call being
+   *  recorded, not a decision being taken, and a "zero writes" that swept it in would be
+   *  measuring the wrong thing. */
+  const record = () => tree(join(root, '.ann', 'journey'));
+
+  const argv = (...args: string[]) => ['gate!', ...args];
+  /** The gesture's outcome, or the NAMED refusal it threw. */
+  const attempt = async (...args: string[]) => {
+    try {
+      return { outcome: await HANDLERS['gate!'](createContext(root, argv(...args))) };
+    } catch (e) {
+      return { refused: e as { code?: string; message?: string; text?: string; exitCode?: number } };
+    }
+  };
+  /** The confirm gate as the ENGINE derives it — read through the CLI's own commands, never
+   *  from a second reading of the events file. */
+  const confirmGate = () => createContext(root, []).commands.brief(TASK).gates.confirm;
+  const eventsRaw = () => readFileSync(join(dir(TASK), 'events.jsonl'), 'utf8');
+
+  let fetchSpy: ReturnType<typeof vi.fn>;
+  let before: string;
+  let savedBase: string | undefined;
+  beforeEach(() => {
+    resetProviderRegistryCache(); // a module-level cache: the fixture must be the one loaded
+    savedBase = process.env.ANN_LLM_BASE_URL;
+    process.env.ANN_LLM_BASE_URL = 'http://127.0.0.1:1/v1'; // a dead port: only a stubbed fetch answers
+    fetchSpy = vi.fn(async () => new Response(JSON.stringify({ choices: [{ message: { content: reply(MATCH) } }] }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchSpy);
+    writeNode(TASK, standing());
+    writeRegistry();
+    before = record();
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    resetProviderRegistryCache();
+    if (savedBase === undefined) delete process.env.ANN_LLM_BASE_URL;
+    else process.env.ANN_LLM_BASE_URL = savedBase;
+  });
+
+  describe('AC-1 · the four things the gesture REFUSES — named, before anything is spent', () => {
+    it.each([
+      ['review-with-flag', ['12-operate/01-a', 'confirm', '--review', '--force']],
+      ['review-with-flag', ['12-operate/01-a', 'confirm', '--review', '--transfer', '12-operate/02-b', '--scope', 'AC-2']],
+      ['review-not-confirm', ['12-operate/01-a', 'grill', '--review']],
+      ['review-not-confirm', ['12-operate/01-a', '--review']],
+      ['review-takes-no-decision', ['12-operate/01-a', 'confirm', 'accept', '--review']],
+      ['review-takes-no-decision', ['12-operate/01-a', 'confirm', 'reject', 'it is not done', '--review']],
+    ])('%s: ann gate! %s', async (code, args) => {
+      const r = await attempt(...args);
+      expect(r.refused?.code).toBe(code);
+      expect(r.refused?.exitCode).toBe(1);
+      expect(fetchSpy).not.toHaveBeenCalled(); // no model call was spent deciding to refuse
+      expect(record()).toBe(before); // and not one byte of the record moved
+    });
+
+    it('review-no-submission: a DECIDED gate, and a gate never opened', async () => {
+      // decided: a human already accepted the confirm, so there is nothing standing to review
+      writeNode(TASK, standing({ decided: true }));
+      const decided = await attempt('12-operate/01-a', 'confirm', '--review');
+      expect(decided.refused?.code).toBe('review-no-submission');
+      expect(decided.refused?.message).toContain('already decided, or never opened');
+
+      // never opened: the grill was accepted and no confirm was ever submitted
+      writeNode(TASK, [ev('created'), ev('submitted', { gate: 'grill' }), ev('confirmed', { gate: 'grill' })]);
+      const never = await attempt('12-operate/01-a', 'confirm', '--review');
+      expect(never.refused?.code).toBe('review-no-submission');
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it('the refusals come BEFORE the node lookup, so a refusal is never a typo report', async () => {
+      // `--review --force` on a node that does not exist still reports the FLAG composition:
+      // the gesture refuses on its own shape first, which is what makes each code a fact about
+      // the command rather than about the journey.
+      const r = await attempt('99-nope/01-x', 'confirm', '--review', '--force');
+      expect(r.refused?.code).toBe('review-with-flag');
+    });
+  });
+
+  describe('AC-3 · three answers that stand, and one that FAILS', () => {
+    it('ACCEPT — reported with the finding count and the why, and it lands as the WORKER', async () => {
+      fetchSpy.mockImplementation(async () => new Response(JSON.stringify({ choices: [{ message: { content: reply(MATCH, 'the delivery walks AC-1') } }] }), { status: 200 }));
+      const { outcome } = await attempt('12-operate/01-a', 'confirm', '--review');
+      const v = (outcome as { value: { value: { gate: string; review: { ok: true; verdict: string; why: string; findings: number } } } }).value.value;
+      expect(v.review).toMatchObject({ ok: true, verdict: 'accept', findings: 1, why: 'the delivery walks AC-1' });
+
+      // THE ONE WRITER, THE ENGINE-STAMPED ACTOR (AC-2): the accept is a `confirmed` event
+      // written by `commands.gate` with decider 'worker' — no new event type, no new state.
+      const raw = eventsRaw();
+      expect(raw).toContain('"decider":"worker"');
+      expect(confirmGate()).toBe('accepted');
+
+      // the findings landed through the SAME writer, twice-stamped as the worker's
+      expect(raw).toContain('gate review — 1 finding(s)');
+    });
+
+    it('REWORK — the rejection routes the re-execution, carrying the worker\'s own feedback', async () => {
+      fetchSpy.mockImplementation(async () => new Response(JSON.stringify({ choices: [{ message: { content: reply(GAP, 'AC-1 is not met') } }] }), { status: 200 }));
+      const { outcome } = await attempt('12-operate/01-a', 'confirm', '--review');
+      const v = (outcome as { value: { value: { review: { verdict: string; feedback: string; findings: number } } } }).value.value;
+      expect(v.review).toMatchObject({ verdict: 'rework', findings: 1 });
+      expect(v.review.feedback).toContain('AC-1 is not met');
+      const raw = eventsRaw();
+      expect(raw).toContain('"type":"rejected"');
+      expect(raw).toContain('"decider":"worker"');
+    });
+
+    it('HUMAN — a truthful OUTCOME, exit 0, naming the reason: nothing written, nothing burned', async () => {
+      fetchSpy.mockImplementation(async () => new Response(JSON.stringify({ choices: [{ message: { content: reply(QUALITY, 'the bytes are localized but defective') } }] }), { status: 200 }));
+      const { outcome, refused } = await attempt('12-operate/01-a', 'confirm', '--review');
+      expect(refused).toBeUndefined(); // an outcome, NOT a failure
+      const v = (outcome as { value: { value: { review: { verdict: string; reason: string } } } }).value.value;
+      expect(v.review.verdict).toBe('human');
+      expect(v.review.reason).toContain('a human decides');
+      expect(confirmGate()).toBe('submitted'); // undecided
+      expect(eventsRaw()).not.toContain('"decider"'); // no decision was written
+    });
+
+    it('THE BOUND — the worker is OUT, and the human card costs no model call (AC-5)', async () => {
+      writeNode(TASK, standing({ rejects: 3 }));
+      const { outcome, refused } = await attempt('12-operate/01-a', 'confirm', '--review');
+      expect(refused).toBeUndefined();
+      const v = (outcome as { value: { value: { review: { verdict: string; reason: string; findings: number } } } }).value.value;
+      expect(v.review).toMatchObject({ verdict: 'human', findings: 0 });
+      expect(v.review.reason).toContain('the review worker is OUT');
+      expect(fetchSpy).not.toHaveBeenCalled(); // the bound is checked BEFORE anything is spent
+      expect(confirmGate()).toBe('submitted');
+    });
+
+    it('ABSENCE — a NAMED FAILURE, not a degradation: the operator asked and did not get one', async () => {
+      fetchSpy.mockImplementation(async () => {
+        throw new Error('connect ECONNREFUSED 127.0.0.1:1');
+      });
+      const r = await attempt('12-operate/01-a', 'confirm', '--review');
+      expect(r.refused?.code).toBe('review-absent');
+      expect(r.refused?.exitCode).toBe(1);
+      expect(r.refused?.message).toContain('NOTHING was decided and the submission stands');
+      // ZERO WRITES, and the submission is exactly where it was — the case AC-3 separates
+      // from the visible degradation a `submit!` gets (12/22 AC-6).
+      expect(record()).toBe(before);
+      expect(confirmGate()).toBe('submitted');
+    });
+
+    it('an UNPARSEABLE reply is an absence too — never an accept, never a rejection', async () => {
+      fetchSpy.mockImplementation(async () => new Response(JSON.stringify({ choices: [{ message: { content: 'I reviewed it and it looks fine to me.' } }] }), { status: 200 }));
+      const r = await attempt('12-operate/01-a', 'confirm', '--review');
+      expect(r.refused?.code).toBe('review-absent');
+      expect(r.refused?.message).toContain('strict JSON findings record');
+      expect(record()).toBe(before);
+    });
+  });
+
+  describe('the REPORTED TEXT — one rendering of one verdict, two doors', () => {
+    /** The text the binary PRINTS for a failure — `emit`'s own choice: the `text` field when
+     *  the failure carries one, else the message. */
+    const emitText = (e: { text?: string; message?: string } | undefined): string => e?.text ?? e?.message ?? '';
+    const env = (args: string[]) => ({ args, json: false, root, kind: 'project' as const });
+    /** The flag's stdout, through the SAME renderer the binary's emit() calls. */
+    const flagText = (review: unknown) =>
+      RENDERS['gate!']({ ok: true, value: { gate: 'confirm', review } }, env(['gate!', TASK, 'confirm', '--review']));
+    const submitText = (review: unknown) =>
+      RENDERS['submit!']({ ok: true, value: { gate: 'confirm', review } }, env(['submit!', TASK, 'confirm']));
+
+    it.each([
+      ['accept', { ok: true, verdict: 'accept', why: 'the delivery walks AC-1', findings: 1 }, 'review ✓ accepted (1 finding(s)): the delivery walks AC-1'],
+      ['rework', { ok: true, verdict: 'rework', feedback: 'AC-1 is not met', findings: 3 }, 'review ✗ rework (3 finding(s)) — the rejection routes the re-execution:'],
+      ['human', { ok: true, verdict: 'human', reason: 'the review recorded 2 finding(s) and left an open concern', findings: 2 }, 'review … YOURS (2 finding(s)) — the review recorded 2 finding(s) and left an open concern'],
+    ])('%s is REPORTED with the finding count and the worker\'s own words', (_v, review, expected) => {
+      const text = flagText(review);
+      expect(text.split('\n')[0]).toBe(`gate confirm: review → ${TASK}`);
+      expect(text).toContain(expected);
+    });
+
+    it('the three decided verdicts render BYTE-IDENTICALLY to the ones `submit!` prints', () => {
+      // The shared rendering is the whole point (AC-2): two doors onto one worker cannot be
+      // allowed to tell the operator different things about the same decision. The ABSENCE is
+      // deliberately NOT shared — `submit!` degrades visibly, `--review` FAILS — so this test
+      // compares verdicts only, and the difference is pinned in the AC-3 block above.
+      for (const review of [
+        { ok: true, verdict: 'accept', why: 'why', findings: 1 },
+        { ok: true, verdict: 'rework', feedback: 'the defect', findings: 3 },
+        { ok: true, verdict: 'human', reason: 'a human decides', findings: 2 },
+      ]) {
+        expect(flagText(review).split('\n').slice(1)).toEqual(submitText(review).split('\n').slice(1));
+      }
+    });
+
+    it('the failure the flag reports is its OWN — an absence names what was asked for and not got', async () => {
+      fetchSpy.mockImplementation(async () => {
+        throw new Error('connect ECONNREFUSED 127.0.0.1:1');
+      });
+      const r = await attempt('12-operate/01-a', 'confirm', '--review');
+      const text = emitText(r.refused);
+      expect(text).toContain('the review worker could not run'); // the CAUSE, named
+      expect(text).toContain('NOTHING was decided and the submission stands'); // the consequence
+      expect(text).toContain(`ann gate! ${TASK} confirm accept|reject '<why>'`); // the way out
+    });
+  });
+
+  describe('AC-2 · one worker, one writer, one path', () => {
+    it('the flag sends `runGateReview` the SAME material a direct call sends — same bytes', async () => {
+      const fixture = eventsRaw(); // the standing submission, before the flag touches it
+
+      // THROUGH THE FLAG: the prompt the adapter actually POSTed.
+      await attempt('12-operate/01-a', 'confirm', '--review');
+      const body = JSON.parse(String((fetchSpy.mock.calls[0]?.[1] as { body: string }).body)) as { messages: Array<{ content: string }> };
+      const viaFlag = body.messages[0]!.content;
+
+      // THROUGH A DIRECT CALL on a byte-identical root. No wrapper in between, so the material
+      // must not differ — and the verdict must be the one the rule derives from the same reply.
+      const other = mkdtempSync(join(tmpdir(), 'ann-direct-'));
+      try {
+        const otherDir = join(other, '.ann', 'journey', 'legs', TASK);
+        mkdirSync(otherDir, { recursive: true });
+        writeFileSync(join(otherDir, 'node.json'), JSON.stringify({ id: TASK, contract: { intent: 'Build the thing', acceptanceCriteria: ['AC-1'] }, createdAt: '2026-09-01' }));
+        writeFileSync(join(otherDir, 'events.jsonl'), fixture);
+        const prompts: string[] = [];
+        const llm: LlmAbility = {
+          async complete(req) {
+            prompts.push(req.prompt);
+            return reply(MATCH);
+          },
+        };
+        const abilities = { llm, interact: {} } as unknown as Abilities;
+        const ctxB = createContext(other, ['journey']);
+        const r = await runGateReview(ctxB.commands, abilities, TASK, { run: ctxB.log.runId });
+        expect(r).toMatchObject({ ok: true, verdict: 'accept', findings: 1 });
+        expect(prompts[0]).toBe(viaFlag);
+      } finally {
+        rmSync(other, { recursive: true, force: true });
+      }
+    });
+
+    it('the flag introduces NO event type and NO state — the record gains only what the writer writes', async () => {
+      fetchSpy.mockImplementation(async () => new Response(JSON.stringify({ choices: [{ message: { content: reply(MATCH) } }] }), { status: 200 }));
+      await attempt('12-operate/01-a', 'confirm', '--review');
+      const added = eventsRaw()
+        .split('\n')
+        .filter(Boolean)
+        .slice(standing().length)
+        .map((l) => (JSON.parse(l) as { type: string }).type);
+      // Two events, both types the store already had a vocabulary for: the findings landing
+      // and the ONE writer's decision. `--review` adds no vocabulary of its own (AC-2).
+      expect(added).toEqual(['evidence', 'confirmed']);
+    });
   });
 });

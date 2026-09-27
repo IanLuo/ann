@@ -295,6 +295,21 @@ async function route(root: string, approver: Approver, log: OpLog, req: Incoming
     if (typeof payload.id !== 'string' || typeof payload.gate !== 'string' || typeof payload.decision !== 'string') {
       return sendJson(res, 400, jsonDoc(usageError('POST /api/gate needs {id: string, gate: string, decision: string, feedback?: string}')));
     }
+    // NO FIELD OF THIS ROUTE MAY CARRY A CLI FLAG (leg 12/26 AC-4). The route dispatches the
+    // CLI's own argv, so a value that IS a flag stops being a value and becomes a GESTURE:
+    // `{decision: "--review"}` would run the exit gate's review worker and `{feedback:
+    // "--force"}` would override an escalated objection — the served card deciding by
+    // accident of what a string happened to spell. Both are refused here, by name, so
+    // `gate! --review` is CLI-only BY CONSTRUCTION rather than by the accident that no caller
+    // has tried it. A flag is what the CLI's own parser calls one: a `--`-prefixed token.
+    const flagged = (['id', 'gate', 'decision', 'feedback'] as const).find((f) => typeof payload[f] === 'string' && (payload[f] as string).startsWith('--'));
+    if (flagged) {
+      return sendJson(
+        res,
+        400,
+        jsonDoc(usageError(`POST /api/gate: '${flagged}' carries a CLI flag ('${String(payload[flagged])}'), not a value — this route decides a gate with {id, gate, decision, feedback} and no field of it is a gesture`)),
+      );
+    }
     const feedback = typeof payload.feedback === 'string' ? payload.feedback : '';
     const argv = ['gate!', payload.id, payload.gate, payload.decision, ...(feedback ? [feedback] : [])];
     const out = dispatch(root, argv, log);

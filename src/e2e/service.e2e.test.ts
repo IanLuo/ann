@@ -482,3 +482,59 @@ describe('e2e — the DEFERRED surface in the service + the served page (leg 12 
     expect(page.body).toContain('renderDeferred((r[0].doc.ahead || {}).deferred)'); // fed by the journey route
   });
 });
+
+/**
+ * `POST /api/gate` CARRIES VALUES, NEVER FLAGS (leg 12/26 AC-4).
+ *
+ * The route dispatches the CLI's OWN argv, so a field whose value IS a flag stops being a
+ * value and becomes a GESTURE: `{decision: "--review"}` would run the exit gate's review
+ * worker and `{feedback: "--force"}` would override an escalated objection — the served card
+ * deciding by accident of what a string happened to spell. Both are refused by NAME, at the
+ * route, so `gate! --review` is CLI-only BY CONSTRUCTION rather than by the accident that no
+ * caller has tried it. The pin is deliberate: a later hand adding a field to this route has to
+ * DELETE these tests, not merely forget them.
+ */
+describe('e2e — POST /api/gate carries values, never flags (leg 12/26 AC-4)', () => {
+  let root: string;
+  let server!: Server;
+  const G1 = '01-alpha/01-a'; // the route's target
+  const G2 = '01-alpha/02-b'; // the CLI's own write, for the parity comparison
+
+  beforeAll(async () => {
+    root = newProject();
+    cli(root, ['spawn!', LEG1, CONTRACT('the alpha leg')]);
+    for (const t of [G1, G2]) {
+      cli(root, ['spawn!', t, CONTRACT('do a thing')]);
+      cli(root, ['submit!', t, 'grill']);
+    }
+    server = await serve(root, ['--port', '0']);
+  }, 60_000);
+
+  afterAll(() => {
+    server?.kill();
+    if (root) rmSync(root, { recursive: true, force: true });
+  });
+
+  it('refuses a flag-shaped field by name — the review worker is unreachable from the route', async () => {
+    const before = cli(root, ['--json', 'journey', G1]).stdout;
+    for (const body of [
+      { id: G1, gate: 'confirm', decision: '--review' }, // the gesture, smuggled as the decision
+      { id: G1, gate: '--review', decision: 'accept' }, // …or as the gate
+      { id: G1, gate: 'grill', decision: 'accept', feedback: '--force' }, // …or as the feedback
+    ]) {
+      const r = await post(server.url + '/api/gate', body);
+      expect(r.status).toBe(400);
+      expect(r.body).toContain('carries a CLI flag');
+    }
+    // NOT ONE DECISION LANDED: the journey is byte-identical to what it was before the three
+    expect(cli(root, ['--json', 'journey', G1]).stdout).toBe(before);
+  });
+
+  it('an extra `review` field decides NOTHING differently — the argv comes from the named four', async () => {
+    const posted = await post(server.url + '/api/gate', { id: G1, gate: 'grill', decision: 'accept', feedback: 'the why', review: true });
+    expect(posted.status).toBe(200);
+    const viaCli = cli(root, ['--json', 'gate!', G2, 'grill', 'accept', 'the why']);
+    expect(viaCli.code).toBe(0);
+    expect(posted.body).toBe(viaCli.stdout); // the same write document, field or no field
+  });
+});

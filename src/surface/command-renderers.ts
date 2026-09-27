@@ -327,6 +327,36 @@ export interface UsageDoc {
   footer: string[];
 }
 
+/**
+ * THE WORKER'S THREE DECIDED OUTCOMES, rendered ONCE for the two gestures that can reach
+ * them (leg 12/26).
+ *
+ * `submit!` runs the worker as the door to a NEW submission; `gate! --review` runs the same
+ * worker against a submission ALREADY standing. Both report the same three verdicts, so they
+ * report the same lines — two renderings of one verdict is exactly how two doors drift into
+ * telling the operator different things about one decision.
+ *
+ * THE ABSENCE IS DELIBERATELY NOT HERE. It is the one outcome the two gestures report
+ * DIFFERENTLY (12/26 AC-3): at a submission nobody asked to review, the absence degrades
+ * visibly to the human (12/22 AC-6); at an explicit `--review` the operator asked and did
+ * not get one, so it FAILS. Sharing that line would erase the distinction the node draws.
+ */
+function reviewVerdictLines(r: Extract<GateReviewOutcome, { ok: true }>, gate: string): string[] {
+  if (r.verdict === 'accept') {
+    return [
+      `  review ✓ accepted (${r.findings} finding(s)): ${r.why}`,
+      "  (a confirm accept auto-closes when the conclusion evidence is present; otherwise the task reads 'accepted' and `complete!` is owed)",
+    ];
+  }
+  if (r.verdict === 'rework') {
+    return [`  review ✗ rework (${r.findings} finding(s)) — the rejection routes the re-execution:`, `    ${r.feedback}`];
+  }
+  return [
+    `  review … YOURS (${r.findings} finding(s)) — ${r.reason}`,
+    `  the submission stands, no rejection is burned: ${gate} accept|reject '<why>'`,
+  ];
+}
+
 /* ── RENDERS — canonical-name → the stdout text for that command's value ────── */
 
 export const RENDERS: Record<string, Renderer> = {
@@ -975,22 +1005,28 @@ export const RENDERS: Record<string, Renderer> = {
       if (!r.ok) {
         lines.push(`  NO REVIEW — ${r.absent}`);
         lines.push(`  the submission stands and the gate is YOURS: ${gate} accept|reject '<why>'`);
-      } else if (r.verdict === 'accept') {
-        lines.push(`  review ✓ accepted (${r.findings} finding(s)): ${r.why}`);
-        lines.push('  (a confirm accept auto-closes when the conclusion evidence is present; otherwise the task reads \'accepted\' and `complete!` is owed)');
-      } else if (r.verdict === 'rework') {
-        lines.push(`  review ✗ rework (${r.findings} finding(s)) — the rejection routes the re-execution:`);
-        lines.push(`    ${r.feedback}`);
       } else {
-        lines.push(`  review … YOURS (${r.findings} finding(s)) — ${r.reason}`);
-        lines.push(`  the submission stands, no rejection is burned: ${gate} accept|reject '<why>'`);
+        lines.push(...reviewVerdictLines(r, gate));
       }
     }
     return block(lines);
   },
   'gate!': (value, env) => {
+    const id = env.args[1];
+    // `ann gate! <id> confirm --review` (leg 12/26): the SAME worker the `submit!` branch
+    // above reports, run against a submission that already STANDS. Same verdicts, so the
+    // same lines — one rendering, two doors (see `reviewVerdictLines`).
+    if (env.args.includes('--review')) {
+      const v = (value as { ok: true; value: { gate: string; review: GateReviewOutcome } }).value;
+      // An ABSENCE cannot reach a renderer here: `reviewStandingSubmission` FAILS on one
+      // instead of returning it (12/26 AC-3 — the operator asked for a review and did not
+      // get one), so the only reviews that survive to this line are the three the worker
+      // decided.
+      const r = v.review as Extract<GateReviewOutcome, { ok: true }>;
+      return block([`gate ${v.gate}: review → ${id}`, ...reviewVerdictLines(r, `ann gate! ${id} confirm`)]);
+    }
     const v = (value as { ok: true; value: { gate: string; decision: string; escalated: boolean; completed?: boolean; pending?: string } }).value;
-    const lines = [`gate ${v.gate}: ${v.decision} → ${env.args[1]}`];
+    const lines = [`gate ${v.gate}: ${v.decision} → ${id}`];
     if (v.completed) lines.push('  (completed with the accept — the conclusion evidence was already present)');
     if (v.pending) lines.push(`  ${v.pending}`);
     if (v.escalated) lines.push('  (reject bound reached — the next rejection escalates to a human design decision)');

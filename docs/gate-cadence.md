@@ -374,6 +374,50 @@ it is detectable rather than prevented — §7.5 records the actor, and the acce
 the carried questions, so the ratio is cheap to read. The implementation should keep it cheap to
 read rather than assume the worker is well-behaved.
 
+### 7.10 The re-review — the worker's door was the SUBMISSION, so a standing gate had none
+
+§7.2 gives the worker exactly one door: the confirm **submission**. `submit!` refuses a
+re-submission by name (`already-submitted`), the frame stops at `blocked-at-gate` before it
+reaches `reviewGate`, and no route builds a review. So a gate ALREADY OPEN — opened before the
+worker existed in the running binary, or opened while the worker was absent (§7.7) — could not
+be reviewed at all. Measured 2026-09-27: **eight confirm gates stood undecided with no review on
+any of them**, every one of them opened before the worker shipped. D-1's premise (the human
+leaves the exit gate) held only for gates opened after it, and every gate already standing was
+the human's by accident of timing rather than by design.
+
+`ann gate! <id> confirm --review` closes that gap. It is a second **caller** of the same worker
+against the submission already standing, never a second path: one worker, one writer, one
+derivation, no new event type, no new state, no new loop. The verdict lands through
+`commands.gate` with the engine-stamped worker actor, exactly as it does at a fresh submission.
+
+```text
+gate! <id> confirm --review
+  ├─ the four refusals — decided BEFORE anything is spent, zero writes
+  │    review-not-confirm        the gate is not 'confirm' (a grill: the entry gate is the human's, §3.2)
+  │    review-takes-no-decision  an accept|reject given BESIDE the flag: the flag IS the decision request
+  │    review-no-submission      no undecided submission stands (already decided, or never opened)
+  │    review-with-flag          --force, or --transfer/--scope, composed with it
+  └─ runGateReview(<id>) — the SAME call `submit!` and the frame make
+       accept  → reported with the findings count and the why
+       rework  → reported with the worker's own feedback; the rejection routes the re-execution
+       human   → an OUTCOME, exit 0, naming the reason: nothing written, no rejection burned
+       absent  → a NAMED FAILURE, exit 1, zero writes — see below
+```
+
+**The absence is the one place the two doors differ, and deliberately.** §7.7's rule — absence
+degrades to the human, visibly — governs a submission **nobody asked** to review: the operator's
+gesture was `submit!`, and the gate's being theirs is the fallback they already expect. At an
+explicit `--review` the operator **asked and did not get one**, so degrading silently would
+swallow the request by dressing it as a degradation. It fails instead, by name, with the
+submission untouched.
+
+**CLI-only, and unreachable from every route by construction.** `POST /api/gate` decides a gate
+with `{id, gate, decision, feedback}`; it carries no gesture flags, and the flag cannot be
+smuggled as a value either — the route refuses any field whose value is a `--`-prefixed token,
+so `{decision: "--review"}` is a 400 rather than a review, and `{feedback: "--force"}` is a 400
+rather than an override. This is why the served page can never re-review: the gesture is a
+terminal one, and the route would have to grow both a field and an `await` to reach it.
+
 ## 8. Hazards the implementation must carry
 
 - **The model's material and the human's material must be ONE assembly.** `brief` is documented
@@ -425,6 +469,8 @@ read rather than assume the worker is well-behaved.
 | 7.5 | `src/store/store.ts` (gate shape check, beside `:1763-1766`) | the decision gains engine-stamped provenance |
 | 7.6 | `src/commands/index.ts:655-660` | force-approve as a gesture; restructure/block routed to `spawn!`+`cancelled` / `deferred` |
 | 7.7 | `src/surface/*` (card) | the reviewer's absence is named on the card |
+| 7.10 | `src/surface/handlers.ts` (`gate!` → `reviewStandingSubmission`) | the `--review` gesture: the four named refusals, then the SAME `runGateReview` call |
+| 7.10 | `src/surface/service.ts` (`POST /api/gate`) | no field of the route may carry a flag — the gesture stays CLI-only by construction |
 | 8 | `src/flow/review-session.ts:229` | `buildReviewMaterial` consumes `brief` — one assembly |
 | 8 | `src/store/store.ts` (acceptance record) | the reviewing run id, so self-accept is checkable |
 

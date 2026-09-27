@@ -145,6 +145,76 @@ async function attemptGateReview(ctx: CliContext, id: string): Promise<GateRevie
   }
 }
 
+/**
+ * `ann gate! <id> confirm --review` — RUN THE EXIT GATE'S WORKER AGAINST THE SUBMISSION
+ * ALREADY STANDING (leg 12/26).
+ *
+ * THE HOLE THIS FILLS, and why it is a second CALLER and not a second path: the worker's only
+ * door was the `submit!` gesture (12/22), so a gate ALREADY OPEN — opened before the worker
+ * existed in the running binary, or opened while the worker was ABSENT — could never be
+ * reviewed at all. `submit!` refuses a re-submission by name (`already-submitted`), the frame
+ * returns `blocked-at-gate` before it ever reaches `reviewGate` (`frame.ts:318`), and no route
+ * builds a review. MEASURED 2026-09-27: EIGHT confirm gates stood undecided with no review on
+ * any of them, so D-1's premise (the human LEAVES the exit gate) held only for gates opened
+ * after the worker shipped. This flag is the gesture that was missing.
+ *
+ * IT WRITES NOTHING OF ITS OWN. The review's accept or rework lands through `commands.gate` —
+ * the same writer a human's decision goes through, with the worker's engine-stamped actor —
+ * and the four refusals below are decided BEFORE `attemptGateReview` is called, so a refused
+ * gesture spends no model call and lands zero events. They live HERE rather than in `gateImpl`
+ * because this gesture never reaches `gateImpl` with a decision of its own: the WORKER's
+ * decision goes through it, the flag does not.
+ *
+ * UNREACHABLE FROM EVERY ROUTE, BY CONSTRUCTION (AC-4), and twice over: this function is the
+ * only thing `gate!` returns a PROMISE for, and the service's `resolveDispatch` refuses a
+ * Promise by name — so `POST /api/gate` could not run it without first growing an `await`.
+ * The route's own guard closes the second door, a flag smuggled as a VALUE (`{decision:
+ * '--review'}`), before the argv is ever built.
+ */
+async function reviewStandingSubmission(
+  ctx: CliContext,
+  a: { id?: string; gate?: string; decision?: string; hasTransfer: boolean; force: boolean },
+): Promise<Outcome> {
+  const run = `ann gate! ${a.id ?? '<id>'} confirm --review`;
+  if (a.hasTransfer || a.force) {
+    return boom(
+      'review-with-flag',
+      `--review is its own gesture and composes with neither --force (there is no recorded objection to override — the WORKER decides here, not you) nor --transfer/--scope (a decision that has not been made has no scope to move). Run it alone: ${run}`,
+    );
+  }
+  if (a.gate !== 'confirm') {
+    return boom(
+      'review-not-confirm',
+      `--review runs the EXIT gate's worker, so the gate must be 'confirm' — this is ${a.gate ? `'${a.gate}'` : 'no gate'}. The entry gate stays the human's (gate-cadence §3.2, §7.2): a grill accepts a CONTRACT, and no worker answers one. Decide it yourself: ann gate! ${a.id ?? '<id>'} grill accept|reject '<why>'`,
+    );
+  }
+  if (a.decision !== undefined) {
+    return boom('review-takes-no-decision', `--review IS the decision request, so it takes no 'accept'/'reject' — that is two gestures in one command. Run: ${run}`);
+  }
+  if (!a.id || !ctx.store.ids().includes(a.id)) return boom('no-node', `no node ${a.id ?? '(none)'}`);
+  // THE SUBMISSION MUST BE UNDECIDED. A DECIDED gate is decided: re-reviewing one would ask
+  // the worker for a second decision over a first, which is not this gesture's to invent. An
+  // unopened gate has nothing standing to review at all. Both read as the same fact here —
+  // there is no submission for the worker to review — and both are true.
+  if (!ctx.commands.undecidedSubmission(a.id, 'confirm')) {
+    return boom(
+      'review-no-submission',
+      `${a.id} has no UNDECIDED confirm submission — the worker reviews a submission that STANDS, and this gate has none (already decided, or never opened). Open one first: ann submit! ${a.id} confirm`,
+    );
+  }
+  const r = await attemptGateReview(ctx, a.id);
+  // AN ABSENCE HERE IS A FAILURE, and the difference from `submit!` is the whole point (12/26
+  // AC-3). At a submission NOBODY ASKED to review, degrading visibly to the human is right
+  // (12/22 AC-6): the operator's gesture was `submit!`, and the gate's being theirs is the
+  // fallback they already expect. At an explicit `--review` the operator ASKED and did not
+  // get one, so a silent degradation would swallow the request by dressing it as a
+  // degradation. Nothing is written either way, and the submission stands either way.
+  if (!r.ok) {
+    return boom('review-absent', `${r.absent} — NOTHING was decided and the submission stands: ann gate! ${a.id} confirm accept|reject '<why>'`);
+  }
+  return { ok: true, value: { ok: true, value: { gate: 'confirm', review: r } } };
+}
+
 /* ── the ctx ────────────────────────────────────────────────────────────────── */
 
 export interface CliContext {
@@ -1254,8 +1324,14 @@ export const HANDLERS: Record<string, Handler> = {
     const review = await attemptGateReview(ctx, id);
     return { ok: true, value: { ok: true, value: { ...r.value, review } } };
   },
+  // NOT `async`, and the `--review` branch is the only one that returns a PROMISE. That is
+  // the design, not an accident of typing: `resolveDispatch` in the service refuses a Promise
+  // by name (`not-exposed`), and that rule is what keeps every async command off the served
+  // surface. So `gate! --review` is unreachable from `POST /api/gate` BY CONSTRUCTION — the
+  // route would have to grow an `await` first — while the plain accept/reject stays the SYNC
+  // gate write the route has always dispatched (leg 12/26 AC-4).
   'gate!': (ctx) => {
-    const USAGE = "usage: ann gate! <id> grill|confirm accept|reject [feedback] [--transfer <target> --scope '<ACs>'] [--force]";
+    const USAGE = "usage: ann gate! <id> grill|confirm accept|reject [feedback] [--transfer <target> --scope '<ACs>'] [--force] | ann gate! <id> confirm --review";
     // THE HALF ACCEPT's two flags (leg 12/12). They are taken BEFORE the positional args
     // are read, so the why is whatever is left — and a lone flag, an unknown flag or an
     // empty value FAILS CLOSED here rather than reaching the command as a weird feedback
@@ -1266,7 +1342,11 @@ export const HANDLERS: Record<string, Handler> = {
     // OFF THE RECORD by the command, so a caller cannot type an objection the log does not
     // hold — and the flag reaches no `decider` field: who decided is engine-stamped.
     const force = ctx.args.includes('--force');
-    const argv = ctx.args.slice(1).filter((a) => a !== '--force');
+    // `--review` is a BOOLEAN too, stripped here beside `--force` and for the same reason:
+    // whatever follows it is read as the positionals it is. It carries no argument because it
+    // IS the decision request — see `reviewStandingSubmission` below (leg 12/26).
+    const review = ctx.args.includes('--review');
+    const argv = ctx.args.slice(1).filter((a) => a !== '--force' && a !== '--review');
     const t = takeFlag(argv, '--transfer');
     const s = takeFlag(t.rest, '--scope');
     const stray = strayFlag(s.rest);
@@ -1276,6 +1356,7 @@ export const HANDLERS: Record<string, Handler> = {
     if (hasTransfer !== hasScope) return usage(`${USAGE} — --transfer and --scope go together`);
     if ((hasTransfer && !t.value) || (hasScope && !s.value)) return usage(`${USAGE} — --transfer needs a target and --scope needs the ACs`);
     const [id, gate, decision, ...feedback] = s.rest;
+    if (review) return reviewStandingSubmission(ctx, { id, gate, decision, hasTransfer, force });
     if (!id || !getVOCAB().gates.includes(gate) || !['accept', 'reject'].includes(decision ?? '')) return usage(USAGE);
     const opts = { ...(hasTransfer ? { transfer: { target: t.value, scope: s.value } } : {}), ...(force ? { force: true } : {}) };
     return writeResult(ctx.commands.gate(id, gate, decision, feedback.join(' '), opts));
