@@ -418,6 +418,29 @@ so `{decision: "--review"}` is a 400 rather than a review, and `{feedback: "--fo
 rather than an override. This is why the served page can never re-review: the gesture is a
 terminal one, and the route would have to grow both a field and an `await` to reach it.
 
+**The first run, measured (2026-09-27).** The flag was run against all eight standing confirm
+gates — every one of them opened 2026-09-25/26, before the worker existed in the running binary.
+Seven model calls, plus one gate at the bound which cost none:
+
+| gate | verdict | what happened |
+|---|---|---|
+| 11-decision-record | accept (14 findings) | closed; 5 questions carried in the why |
+| 14-leg-gate-derivation | accept (10) | closed; 3 carried |
+| 21-every-write-commits | accept (18) | closed; 4 carried |
+| 22-automatic-exit-gate | accept (15) | closed; 6 carried |
+| 10-idea-area | **rework** (10) | three `gap`s: the delivered `idea` gesture is not the one AC-2 spells |
+| 12-accept-with-transfer | **rework** (12) | the composed act omits the `gate-revised` half AC-1 names |
+| 13-transfer-affordance | human (10) | an open `quality`, no contract defect — nothing written, no rejection burned |
+| 23-criterion-evidence | human (0) | at the bound: the worker is out, and the check cost NO model call |
+
+Four closes, two reworks owed, two still the human's; `ann check` and `ann verify` clean after
+every write. Two things this establishes that the design only asserted: the bound really is
+checked before anything is spent (§7.6), and a `rework` on a days-old delivery is the engine
+working rather than a dead end — the delivery returns as a second round with its own evidence,
+exactly as a human's rejection does. This node's own confirm gate was then routed to rework by
+its own worker, on one real defect (the record above was not in the reviewed bytes), which is
+the loop doing what §7 says it does.
+
 ## 8. Hazards the implementation must carry
 
 - **The model's material and the human's material must be ONE assembly.** `brief` is documented
