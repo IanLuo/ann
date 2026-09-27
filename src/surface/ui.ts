@@ -496,6 +496,16 @@ export const UI_HTML = `<!doctype html>
 
   function nextLine(detail, gate) {
     var v = detail.next || {};
+    // THE WORKER'S STANDING COMES FIRST (leg 12/27). A confirm gate the review worker has
+    // already DECLINED, could not REACH, or been locked out of at the bound is not 'waiting on
+    // a decision' — a review has happened, and the ENGINE's own sentence for it (composed in
+    // Commands, exactly as the terminal and the served card print it) is the whole answer.
+    // It wins over the submitted-gate override below because the engine only publishes a
+    // standing while the confirm gate reads SUBMITTED and UNDECIDED — the same condition —
+    // so whenever this branch fires, the accept is still the human's to give, and the
+    // sentence says what the worker did instead of hiding it behind 'decide it now'.
+    var standing = (detail.brief || {}).review;
+    if (standing) return standing.line;
     var verdict = v.verdict;
     if (gate && gateState(detail, gate).state === 'submitted') verdict = 'decide-now';
     switch (verdict) {
@@ -726,6 +736,12 @@ export const UI_HTML = `<!doctype html>
       // an omission, named — a finding the latest pass did not re-assess), where it points,
       // and what it says.
       var fv = brief.findings || {};
+      // THE WORKER'S STANDING (leg 12/27) — the engine's own sentence, printed verbatim: the
+      // same bytes 'ann brief' prints, so the page and the terminal cannot say different things
+      // about one gate. It is the fact 12/13 (reviewed, declined, silent about it) and 12/23
+      // (at the bound, never reviewed, silent about it) could not state, and it is why the
+      // next-line above no longer has to mean four things at once.
+      if (brief.review) field(node, 'review', brief.review.line);
       if (fv.reviews) {
         field(node, 'review', fv.reviews + ' pass' + (fv.reviews === 1 ? '' : 'es') + ' (latest ' + fv.at + ') · cited at ' + (fv.anchor || '(none)'));
         (fv.findings || []).forEach(function (f) {

@@ -441,6 +441,61 @@ exactly as a human's rejection does. This node's own confirm gate was then route
 its own worker, on one real defect (the record above was not in the reviewed bytes), which is
 the loop doing what §7 says it does.
 
+### 7.11 (added 2026-09-27) — where each arm is recorded, including the two that were not
+
+§7.4 gives the rule four outcomes. §7.5-§7.7 gave the two DECIDING ones a record and left the
+other two to the caller's memory. Measured 2026-09-27, on the two gates above: `12/13` **was**
+reviewed — one pass, ten findings, one open `quality` (`transferNotLive` returns `undefined` when
+the confirm read itself fails) — and `12/23` was **never** reviewed, because three rejections
+were already burned and `runGateReview` returned the human card before the model call. The two
+cards carried the SAME next-line, `waiting on a decision — confirm (exit) is in WAITING ON YOU`,
+so the reviewer that ran, the reason it declined, and the bound that stopped it were absent from
+the bytes a human reads. The operator's own complaint (§7's premise: *"too much to read"*) has
+this as its mirror image — a gate that says nothing, so everything must be re-derived by hand.
+
+| The arm | What is recorded | Through |
+|---|---|---|
+| **accept** | the decision itself: `confirmed`, actor `worker` | `commands.gate` — unchanged, §7.4 |
+| **rework** | the decision itself: `rejected`, actor `worker`, the worker's own feedback | `commands.gate` — unchanged, §7.4 |
+| **human** | an OUTCOME riding the findings landing: that a review RAN, its date, the anchor sha it was read at, the run id, the findings count, and the reason the rule derived it | the ONE findings writer — `evidence.outcome` beside `evidence.findings` on one event |
+| **absent** | the same class of record, with NO findings: WHICH absence it was (`unavailable` · `unparseable` · `empty`) and the reason, plus the run id | the same writer, on all three paths — `submit!`, `gate! --review`, the frame |
+| **bound** | **nothing** — and the absence of a record is the correct record | derived, from the rejection events, where the other outcomes are stated |
+
+Four things this table settles that were being inferred:
+
+- **The two deciding arms are already recorded, and are deliberately not restated.** Their
+  decision IS the record; an `outcome` field beside them would be a second account of one fact,
+  and would have to be kept from drifting from the decision it restates. The writer refuses a
+  deciding verdict in `outcome` **by name**, so the two cannot disagree.
+- **The bound is derived, not written.** A review that never ran must not put a review's outcome
+  in the log. The bound is a property of the gate — `REJECT_BOUND` burned rejections — and it is
+  read from the events that already say so, at no model-call cost. It takes PRECEDENCE over any
+  recorded outcome: when the worker is out, what an earlier pass concluded is not the live fact.
+- **The contract's four absences collapse to three recordable ones.** `unreachable` is not a
+  distinct case: the provider layer reports a dead endpoint as unavailability, so a fourth name
+  would describe a path that does not exist. And a write the STORE refuses cannot be recorded at
+  all — the write is what failed — so it is `ann check`'s business, not an outcome value's.
+- **The three lines are composed once, in the engine** (`ReviewStanding.line`), and printed
+  verbatim by three surfaces: `ann brief`, the served card, and the page's next-line. The page's
+  script cannot import engine code, so wording placed in a renderer would have to be written
+  three times — which is how one gate ends up with two different sentences, the failure this
+  section exists to remove. Each line names its reason, and the reason is the RECORD's own words,
+  never a re-reading of the severities (`deriveGateVerdict` stays the only thing that names an
+  arm, §7.4).
+
+**Corrections this makes to §7.10.** The `--review` sketch there reads `human → an OUTCOME …
+nothing written` and `absent → a NAMED FAILURE, exit 1, zero writes`. Both were true when
+written and are now false in one word each: nothing is **decided** and no rejection is burned,
+but the OUTCOME itself lands through the findings writer — including for an absence. The
+`--review` refusals (the four named ones) still write nothing at all, which is the claim §7.10
+was really making: nothing is spent and nothing changes about the gate before a decision exists.
+
+**One visible consequence, recorded rather than discovered later.** An outcome-only landing is an
+`evidence` event with no commits and no refs, so it appears in the RESULTS list as an
+informational row (`ann results <id>`) — exactly as a findings landing already does. Repeated
+absences of the same kind collapse to one row by the list's own dedupe, since the note is
+identical.
+
 ## 8. Hazards the implementation must carry
 
 - **The model's material and the human's material must be ONE assembly.** `brief` is documented
@@ -492,6 +547,9 @@ the loop doing what §7 says it does.
 | 7.5 | `src/store/store.ts` (gate shape check, beside `:1763-1766`) | the decision gains engine-stamped provenance |
 | 7.6 | `src/commands/index.ts:655-660` | force-approve as a gesture; restructure/block routed to `spawn!`+`cancelled` / `deferred` |
 | 7.7 | `src/surface/*` (card) | the reviewer's absence is named on the card |
+| 7.11 | `src/store/store.ts` (`outcomeShapeProblem`) · `src/commands/index.ts` (`landFindings`) | `evidence.outcome`: the closed shape a non-deciding arm writes, through the findings writer |
+| 7.11 | `src/flow/gate-review.ts` (`runGateReview`) · `src/surface/handlers.ts` (`attemptGateReview`) | both non-deciding arms land the outcome — the CLI's two doors plus the frame's |
+| 7.11 | `src/commands/index.ts` (`reviewStanding`) · `src/surface/*` | the three standings, composed ONCE and printed by `ann brief`, the card and the page |
 | 7.10 | `src/surface/handlers.ts` (`gate!` → `reviewStandingSubmission`) | the `--review` gesture: the four named refusals, then the SAME `runGateReview` call |
 | 7.10 | `src/surface/service.ts` (`POST /api/gate`) | no field of the route may carry a flag — the gesture stays CLI-only by construction |
 | 8 | `src/flow/review-session.ts:229` | `buildReviewMaterial` consumes `brief` — one assembly |

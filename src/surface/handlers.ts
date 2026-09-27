@@ -141,7 +141,17 @@ async function attemptGateReview(ctx: CliContext, id: string): Promise<GateRevie
     const abilities = buildAbilities(getAdapter(undefined, ctx.root, { runId: ctx.log.runId, traceId: ctx.log.traceId }));
     return await runGateReview(ctx.commands, abilities, id, { run: ctx.log.runId });
   } catch (e) {
-    return { ok: false, absent: `the review worker is unavailable — ${(e as Error).message}` };
+    // THE ONE ABSENCE `runGateReview` CANNOT SEE (12/27 AC-2): the seam itself failing —
+    // no provider registered, or an adapter that will not construct — throws BEFORE the
+    // worker is called, so the worker's own writer never runs. It lands the same record on
+    // the same writer, from outside, or an out-of-provider machine leaves no trace that a
+    // review was ever asked for.
+    const reason = `the review worker is unavailable — ${(e as Error).message}`;
+    ctx.commands.landFindings(id, [], {
+      note: 'gate review — NO REVIEW (unavailable) · the worker could not be built',
+      outcome: { verdict: 'absent', why: 'unavailable', reason, count: 0, run: ctx.log.runId },
+    });
+    return { ok: false, absent: reason };
   }
 }
 

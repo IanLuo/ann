@@ -759,6 +759,14 @@ describe('gate! --review — the worker against a submission already standing (l
    *  from a second reading of the events file. */
   const confirmGate = () => createContext(root, []).commands.brief(TASK).gates.confirm;
   const eventsRaw = () => readFileSync(join(dir(TASK), 'events.jsonl'), 'utf8');
+  /** What the gesture APPENDED to the node's log — the fixture is `standing()`, so everything
+   *  past it is this run's writes and nothing else. */
+  const addedEvents = () =>
+    eventsRaw()
+      .split('\n')
+      .filter(Boolean)
+      .slice(standing().length)
+      .map((l) => JSON.parse(l) as Record<string, unknown> & { type: string });
 
   let fetchSpy: ReturnType<typeof vi.fn>;
   let before: string;
@@ -877,10 +885,16 @@ describe('gate! --review — the worker against a submission already standing (l
       expect(r.refused?.code).toBe('review-absent');
       expect(r.refused?.exitCode).toBe(1);
       expect(r.refused?.message).toContain('NOTHING was decided and the submission stands');
-      // ZERO WRITES, and the submission is exactly where it was — the case AC-3 separates
-      // from the visible degradation a `submit!` gets (12/22 AC-6).
-      expect(record()).toBe(before);
+      // NOTHING WAS DECIDED, and the submission is exactly where it was — the case AC-3
+      // separates from the visible degradation a `submit!` gets (12/22 AC-6). The ONE write is
+      // the absence ITSELF (12/27 AC-2): an absence that leaves no trace is indistinguishable,
+      // later, from a gate nobody ever asked about.
+      expect(eventsRaw()).not.toContain('"decider"');
       expect(confirmGate()).toBe('submitted');
+      const added = addedEvents();
+      expect(added).toHaveLength(1);
+      expect(added[0]).toMatchObject({ type: 'evidence', outcome: { verdict: 'absent', why: 'unavailable' } });
+      expect('findings' in added[0]).toBe(false); // an absence lands an OUTCOME, never an empty findings list
     });
 
     it('an UNPARSEABLE reply is an absence too — never an accept, never a rejection', async () => {
@@ -888,7 +902,9 @@ describe('gate! --review — the worker against a submission already standing (l
       const r = await attempt('12-operate/01-a', 'confirm', '--review');
       expect(r.refused?.code).toBe('review-absent');
       expect(r.refused?.message).toContain('strict JSON findings record');
-      expect(record()).toBe(before);
+      expect(confirmGate()).toBe('submitted');
+      // the SAME record as the unavailable arm, naming which absence it was (AC-2)
+      expect(addedEvents()).toEqual([expect.objectContaining({ type: 'evidence', outcome: expect.objectContaining({ verdict: 'absent', why: 'unparseable' }) })]);
     });
   });
 
@@ -985,5 +1001,78 @@ describe('gate! --review — the worker against a submission already standing (l
       // and the ONE writer's decision. `--review` adds no vocabulary of its own (AC-2).
       expect(added).toEqual(['evidence', 'confirmed']);
     });
+  });
+});
+
+describe('the OUTCOME on the two surfaces a human reads (leg 12/27 AC-4)', () => {
+  /* One record, three sentences, TWO surfaces: `ann brief` and the node card (`ann confirm` /
+   * `ann detail` / `ann journey` share `nodeCardLines`). Both print the ENGINE's own
+   * `brief.review.line` — the page's `nextLine` prints it too, and it cannot import engine
+   * code, so the sentence is composed once in `Commands` and printed verbatim here. The three
+   * lines must be DISTINGUISHABLE: `next: waiting-on-decision` alone said all three at once. */
+  const TASK = '12-operate/01-implementation-a';
+  const FINDINGS = [{ id: 'F1', severity: 'matches', where: 'src/x.ts:1', text: 'AC-1 walked and met', status: 'open', provenance: 'stub-model' }];
+
+  /** The live shape: a grill accepted, a confirm SUBMITTED and undecided. `outcome` rides the
+   *  findings landing, exactly where the worker puts it — WITH findings for the human arm (it
+   *  read a delivery and left the decision), WITHOUT them for an absence (there was nothing to
+   *  read). `rejects` replaces both with the bound (the live 12/23 shape: three burned
+   *  rejections, then a re-submission). */
+  const node = (opts: { outcome?: Record<string, unknown>; rejects?: number; findings?: boolean } = {}) => {
+    const base = [ev('created'), ev('submitted', { gate: 'grill' }), ev('confirmed', { gate: 'grill' })];
+    if (opts.rejects) {
+      return [
+        ...base,
+        ...Array.from({ length: opts.rejects }, () => ev('rejected', { gate: 'confirm', feedback: 'not yet' })),
+        ev('submitted', { gate: 'confirm' }),
+      ];
+    }
+    const landing = opts.outcome
+      ? [ev('evidence', { note: 'gate review', anchorSha: 'abc1234', ...(opts.findings ? { findings: FINDINGS } : {}), outcome: opts.outcome })]
+      : [];
+    return [...base, ev('submitted', { gate: 'confirm' }), ...landing];
+  };
+  const card = () => (HANDLERS.confirm(createContext(root, ['confirm', TASK])) as { value: { detail: NodeCard } }).value.detail;
+  const briefText = () => {
+    const ctx = createContext(root, ['brief', TASK]);
+    return RENDERS.brief((HANDLERS.brief(ctx) as { value: unknown }).value, ctx.renderEnv());
+  };
+  const cardText = () => RENDERS.confirm({ detail: card(), results: [] }, createContext(root, ['confirm']).renderEnv());
+
+  it('REVIEWED AND LEFT — the review ran, decided nothing, and says what a human is for', () => {
+    writeNode(TASK, node({ findings: true, outcome: { verdict: 'human', reason: 'an open `quality` is never mine to accept — a human decides', count: 1, run: 'run-42' } }));
+    const line = `REVIEWED AND LEFT — a review ran (1 finding(s), 2026-09-01) and decided nothing: an open \`quality\` is never mine to accept — a human decides`;
+    expect(briefText()).toContain(line);
+    expect(cardText()).toContain(`  ${line}`);
+    expect(cardText()).toContain('FINDINGS (a review\'s record — 1 pass');
+    // the finding itself is still there — the outcome is an ADDITION, never a replacement
+    expect(cardText()).toContain('AC-1 walked and met');
+  });
+
+  it('AT THE BOUND — the worker is out, and the card says so WITHOUT a model call', () => {
+    writeNode(TASK, node({ rejects: 3 }));
+    const text = cardText();
+    expect(text).toContain('AT THE BOUND — the review worker is out of rejections and no review will run here');
+    expect(text).toContain('3 of 3 rejections are burned at the confirm gate');
+    // the lie this replaces: the card said the gate was merely waiting on a decision
+    expect(text).toContain('FINDINGS (a review\'s record — no review has landed)');
+    expect(briefText()).toContain('AT THE BOUND');
+  });
+
+  it('ABSENT — a review that did not answer is on the card too, naming WHICH absence', () => {
+    writeNode(TASK, node({ outcome: { verdict: 'absent', why: 'unparseable', reason: 'the reply was not a strict JSON findings record', count: 0 } }));
+    const line = `ABSENT — the review worker did not answer (unparseable) at 2026-09-01: the reply was not a strict JSON findings record`;
+    expect(briefText()).toContain(line);
+    expect(cardText()).toContain(`  ${line}`);
+    expect(cardText()).not.toContain('REVIEWED AND LEFT');
+    expect(cardText()).not.toContain('AT THE BOUND');
+  });
+
+  it('NO REVIEW AT ALL is still the fourth thing — the surfaces do not invent a standing', () => {
+    writeNode(TASK, node());
+    expect(cardText()).toContain("FINDINGS (a review's record — no review has landed)");
+    expect(cardText()).not.toContain('AT THE BOUND');
+    expect(cardText()).not.toContain('ABSENT');
+    expect(briefText()).toContain('next: waiting-on-decision (confirm)');
   });
 });

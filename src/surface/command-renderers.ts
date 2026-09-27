@@ -239,6 +239,7 @@ const nodeCardLines = (c: NodeCard): string[] => {
   // prints), never a second read of the log.
   const rv = c.brief.findings;
   lines.push('---', `FINDINGS (a review's record — ${rv.reviews ? `${rv.reviews} pass${rv.reviews === 1 ? '' : 'es'}, latest ${rv.at}${rv.anchor ? `, cited at ${rv.anchor}` : ''}` : 'no review has landed'})`);
+  if (c.brief.review) lines.push(`  ${c.brief.review.line}`);
   if (!rv.findings.length) lines.push('  (none recorded — ann review! <id> reviews the delivery at its confirm gate)');
   for (const f of rv.findings) {
     lines.push(`  ${f.id}  [${f.severity}]  ${f.status}${f.stale ? ' · NOT RE-ASSESSED by the latest pass' : ''}  ${f.where}`);
@@ -645,8 +646,17 @@ export const RENDERS: Record<string, Renderer> = {
     const lines: string[] = [];
     lines.push(`BRIEF: ${v.id} (${v.isLeg ? 'leg' : 'task'})`);
     lines.push(
-      `status: ${v.status} · grill ${v.gates.grill} · confirm ${v.gates.confirm} · next: ${v.next.verdict}${v.next.gate ? ` (${v.next.gate})` : ''}`,
+      // THE NEXT-LINE IS THE STANDING WHEN THERE IS ONE (leg 12/27): `waiting-on-decision` names
+      // one of four different situations, and a gate a review has already declined, could not
+      // reach, or been locked out of at the bound is not waiting on a decision in the sense that
+      // word used to carry. The label is the ENGINE's (`brief.review.label`) — the same slot the
+      // page's next-line fills — and the whole sentence follows on the next line.
+      `status: ${v.status} · grill ${v.gates.grill} · confirm ${v.gates.confirm} · next: ${v.review ? v.review.label : `${v.next.verdict}${v.next.gate ? ` (${v.next.gate})` : ''}`}`,
     );
+    // THE WORKER'S STANDING (leg 12/27), right under the next-line slot it fills: the sentence
+    // is the ENGINE's (`brief.review.line`) because the card and the page print the same one,
+    // and it is the reason `next: waiting-on-decision` no longer has to mean four things.
+    if (v.review) lines.push(v.review.line);
     if (v.blockers.length) lines.push(`blockers: ${v.blockers.join(' · ')}`);
     lines.push('---', 'CONTRACT');
     lines.push(`  intent: ${v.intent || '(none)'}`);

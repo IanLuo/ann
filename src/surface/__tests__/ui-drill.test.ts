@@ -364,6 +364,43 @@ describe('the served page — a submitted gate is never an unlock claim (leg 12/
     expect(tab.get('card-what').textContent).toContain('approving it closes the task when the conclusion evidence is recorded');
   });
 
+  /* AC-4 (leg 12/27) — THE WORKER'S STANDING ON THE PAGE. `nextLine` is client-side script
+   * that cannot import the engine, so the sentence is composed once in `Commands`
+   * (`brief.review.line`) and printed here VERBATIM. Three standings, three different lines —
+   * the point of the node is that a confirm gate a review has already DECLINED, could not
+   * REACH, or been locked out of at the bound is not four meanings of 'waiting on a decision'.
+   * The page must add no fourth wording of any of them. */
+  const standingCard = (review: Record<string, unknown> | undefined) => {
+    const brief = { decisions: [], conclusion: { claims: [], unclaimed: [], checks: [], transferred: [] }, ...(review ? { review } : {}) };
+    return { ...gateCard({ brief }), next: { verdict: 'waiting-on-decision', gate: 'confirm' } };
+  };
+  const bootStanding = async (review: Record<string, unknown> | undefined) => {
+    const tab = boot({ ...reads(card()), [`/api/confirm?id=${TASK}`]: standingCard(review) }, '#drill=gate&id=' + encodeURIComponent(TASK) + '&gate=confirm');
+    await flush();
+    return tab;
+  };
+
+  it('AC-4 — the page prints the engine’s sentence, one per standing, and invents none', async () => {
+    const lines = [
+      'REVIEWED AND LEFT — a review ran (1 finding(s), 2026-09-12) and decided nothing: an open `quality` is not mine to accept',
+      'ABSENT — the review worker did not answer (unavailable) at 2026-09-12: the worker could not be built',
+      'AT THE BOUND — the review worker is out of rejections and no review will run here: 3 of 3 rejections are burned at the confirm gate',
+    ];
+    for (const line of lines) {
+      const tab = await bootStanding({ kind: 'human', line });
+      expect(tab.get('card-next').textContent).toContain(line);
+      // the standing is also a FIELD on the card, beside the findings it belongs to
+      expect(tab.get('card-node').textContent).toContain(line);
+      // …and the meaningless fallback it replaces is gone
+      expect(tab.get('card-next').textContent).not.toContain('waiting on a decision');
+    }
+    // NO standing at all is still the fourth thing, and it is NOT one of the three: a submitted
+    // gate with no review reads as the plain decision it is (nothing has reviewed this delivery)
+    const none = await bootStanding(undefined);
+    expect(none.get('card-next').textContent).toContain('decide it now — accepting confirm lets it land');
+    for (const line of lines) expect(none.get('card-next').textContent).not.toContain(line.split(' —')[0]);
+  });
+
   /* AC-1 (leg 12/11) — THE FORM ASKS BEFORE IT WRITES. A confirm accept with no rationale
    * is refused by `gate!`; the page does not let the human reach that refusal by accident,
    * it asks for the why first. Cancelling writes NOTHING. */

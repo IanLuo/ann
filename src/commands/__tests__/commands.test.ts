@@ -927,6 +927,115 @@ describe('landFindings — THE FINDINGS RECORD (leg 12/09 AC-2 · AC-4)', () => 
   });
 });
 
+describe("the review OUTCOME — what the worker did, on the record (leg 12/27)", () => {
+  beforeEach(() => { makeStore(); writeNode('01-leg', CONTRACT); });
+  afterEach(() => { rmSync(root, { recursive: true, force: true }); });
+
+  const GATE = [ev('submitted', { gate: 'grill' }), ev('confirmed', { gate: 'grill' })];
+  const atConfirm = (extra: Array<Record<string, unknown>> = []) =>
+    writeNode('01-leg/01-a', CONTRACT, [ev('created'), ...GATE, ev('submitted', { gate: 'confirm' }), ...extra]);
+  const F = (over: Record<string, unknown> = {}) => ({ id: 'F1', severity: 'quality' as const, where: 'src/a.ts:1', text: 'x', status: 'open' as const, provenance: 'gate review worker (model)', ...over });
+  const HUMAN = { verdict: 'human' as const, reason: 'an open quality with no defect against the contract', count: 1, run: 'run-7' };
+  const ABSENT = { verdict: 'absent' as const, why: 'unavailable' as const, reason: 'the review worker could not run — provider-unavailable', count: 0 };
+
+  it('AC-1 — a landing may carry an outcome and NO findings, and only an outcome-less empty landing is refused', () => {
+    atConfirm();
+    const c = cmds();
+    // the absence lands NOTHING to find — the case the writer used to refuse, and the whole
+    // reason an absence left no trace on every path but one
+    expect(valueOf(c.landFindings('01-leg/01-a', [], { outcome: ABSENT, note: 'no review' }))).toEqual({ findings: 0 });
+    const absent = c.events('01-leg/01-a').at(-1)!;
+    expect(absent.findings).toBeUndefined();
+    expect(absent.outcome).toEqual(ABSENT);
+    // …and an event that says NOTHING is still not a record of anything
+    expect(errorOf(c.landFindings('01-leg/01-a', [])).code).toBe('no-findings');
+    // the deep shape is the single writer's: a deciding verdict is refused BY NAME, nothing written
+    const deciding = errorOf(c.landFindings('01-leg/01-a', [], { outcome: { ...HUMAN, verdict: 'accept' as never } }));
+    expect(deciding.code).toBe('store-refused');
+    expect(deciding.blocker).toContain("verdict must be 'human' or 'absent'");
+    expect(c.events('01-leg/01-a').filter((x) => x.type === 'evidence')).toHaveLength(1);
+  });
+
+  it("AC-1 — the outcome rides the review's OWN event, and the LATEST landing's outcome is the fact", () => {
+    atConfirm();
+    const c = cmds();
+    valueOf(c.landFindings('01-leg/01-a', [F()], { outcome: HUMAN, anchorSha: 'a1a5056' }));
+    const e = c.events('01-leg/01-a').at(-1)!;
+    expect(e.findings).toHaveLength(1);
+    expect(e.outcome).toEqual(HUMAN); // ONE review, ONE record: findings and their verdict together
+    expect(e.anchorSha).toBe('a1a5056'); // the bytes the review was run over
+    expect(c.reviewFindings('01-leg/01-a').outcome).toEqual({ ...HUMAN, at: String(e.at) }); // the date is the EVENT's, never the outcome's to assert
+    // a re-review REPLACES the outcome rather than stacking beside it — the same latest-wins
+    // model a finding's status follows
+    valueOf(c.landFindings('01-leg/01-a', [F({ status: 'resolved' })], { outcome: { ...HUMAN, reason: 'the bytes settled it', count: 0 } }));
+    expect(c.reviewFindings('01-leg/01-a').outcome!.reason).toBe('the bytes settled it');
+    expect(c.reviewFindings('01-leg/01-a').outcome!.count).toBe(0);
+  });
+
+  it('AC-1 — a HUMAN verdict leaves the gate, the rejections and the decisions BYTE-IDENTICAL', () => {
+    atConfirm();
+    const c = cmds();
+    const before = c.events('01-leg/01-a');
+    const gatesBefore = c.brief('01-leg/01-a').gates;
+    const decisionsBefore = c.brief('01-leg/01-a').decisions;
+    expect(valueOf(c.landFindings('01-leg/01-a', [F()], { outcome: HUMAN }))).toEqual({ findings: 1 });
+    // the record gains an OUTCOME, never a decision: no rejection burned, no decision event
+    expect(c.rejections('01-leg/01-a', 'confirm')).toBe(0);
+    expect(c.brief('01-leg/01-a').gates).toEqual(gatesBefore);
+    expect(c.brief('01-leg/01-a').decisions).toEqual(decisionsBefore);
+    expect(c.events('01-leg/01-a').slice(0, before.length)).toEqual(before); // history untouched, one event appended
+    expect(c.status('01-leg/01-a')).toBe('blocked');
+    expect(c.detail('01-leg/01-a').next).toEqual({ gate: 'confirm', verdict: 'waiting-on-decision' });
+  });
+
+  it('AC-3/AC-4 — the standing: REVIEWED AND LEFT · AT THE BOUND · ABSENT, three distinct lines off the record', () => {
+    atConfirm();
+    const c = cmds();
+    // nothing recorded and no bound: the worker has simply not been given this submission
+    expect(c.brief('01-leg/01-a').review).toBeUndefined();
+
+    // REVIEWED AND LEFT — read from the record, never re-derived from the severities
+    valueOf(c.landFindings('01-leg/01-a', [F()], { outcome: HUMAN }));
+    const left = c.brief('01-leg/01-a').review!;
+    expect(left.kind).toBe('human');
+    expect(left.line).toContain('REVIEWED AND LEFT');
+    expect(left.line).toContain(HUMAN.reason);
+    expect(left).toMatchObject({ findings: 1, run: 'run-7' });
+    // dated by the landing, not by the caller — and the LABEL is what the next-line slot prints
+    if (left.kind !== 'human') throw new Error('expected the human arm');
+    expect(left.label).toBe('REVIEWED AND LEFT');
+    expect(left.at).toBe(String(c.events('01-leg/01-a').at(-1)!.at));
+
+    // ABSENT — the worker did not answer, and WHICH absence it was is on the line
+    valueOf(c.landFindings('01-leg/01-a', [], { outcome: ABSENT }));
+    const gone = c.brief('01-leg/01-a').review!;
+    expect(gone.kind).toBe('absent');
+    expect(gone).toMatchObject({ why: 'unavailable' });
+    expect(gone.line).toContain('ABSENT');
+    expect(gone.line).toContain('unavailable');
+
+    // AT THE BOUND — DERIVED from the rejection events, needing no record and no model call,
+    // and it takes PRECEDENCE: when the worker is out, an earlier pass's outcome is not the
+    // live fact (which is exactly why 12/23, never reviewed, can still say so)
+    // the state 12/23 is in: the bound is spent and the gate is OPEN AGAIN (a re-submission is
+    // what puts it back in front of the worker — and is the whole reason a bound gate reads
+    // `submitted` rather than `rejected`, and so can be spoken about at all)
+    const spent = [...c.events('01-leg/01-a'), ...Array.from({ length: REJECT_BOUND }, (_, i) => ev('rejected', { gate: 'confirm', feedback: `no ${i}` })), ev('submitted', { gate: 'confirm' })];
+    writeNode('01-leg/01-a', CONTRACT, spent);
+    const boundStore = new Store(root);
+    const atBound = new Commands(boundStore, 'test', stubCapture());
+    const bound = atBound.brief('01-leg/01-a').review!;
+    expect(bound.kind).toBe('bound');
+    expect(bound.line).toContain('AT THE BOUND');
+    expect(bound.line).toContain(`of ${REJECT_BOUND} rejections`);
+    // three DISTINCT lines — the one sentence that used to mean four different things
+    expect(new Set([left.line, gone.line, bound.line]).size).toBe(3);
+    // …and a DECIDED gate has no standing to state: the decision is the record
+    writeNode('01-leg/02-b', CONTRACT, [ev('created'), ...GATE, ev('submitted', { gate: 'confirm' }), ev('confirmed', { gate: 'confirm', feedback: 'ok' })]);
+    expect(new Commands(new Store(root), 'test', stubCapture()).brief('01-leg/02-b').review).toBeUndefined();
+  });
+});
+
 describe('capture! — the CAPTURED check (leg 12 task 03: the record is a consequence, not a claim)', () => {
   beforeEach(() => { makeStore(); writeNode('01-leg', CONTRACT); });
   afterEach(() => { rmSync(root, { recursive: true, force: true }); });

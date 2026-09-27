@@ -1333,6 +1333,40 @@ describe('Store — strict event schema (format v12 §3: unknown fields + shapes
     expect(s2.events('06-engine-build/20-n').filter((e) => e.type === 'evidence').length).toBe(REVIEW_SEVERITIES.length);
   });
 
+  // leg 12/27 — THE REVIEW OUTCOME. The two arms of the worker that decide NOTHING used to
+  // leave no record at all: a `human` verdict wrote only its findings, and an ABSENCE wrote
+  // nothing on every path but the frame's console note. Same discipline as a finding — the
+  // shape is strict at the single writer, and the vocabulary is CLOSED, so a card never has to
+  // interpret a word to know which of the three it is reading.
+  it('rejects a malformed review outcome, and accepts an outcome-only landing (no findings)', () => {
+    writeNode('06-engine-build/20-o', {}, [ev('created')]);
+    const O = (outcome: unknown, extra: Record<string, unknown> = {}): JourneyEvent => ({ at: '2026-08-22', type: 'evidence', outcome, ...extra } as unknown as JourneyEvent);
+    const okAbsent = { verdict: 'absent', why: 'unavailable', reason: 'no provider', count: 0 };
+    const okHuman = { verdict: 'human', reason: 'an open quality with no defect', count: 3 };
+    // THE DECIDING ARMS ARE REFUSED BY NAME: an accept and a rework ARE the `confirmed`/
+    // `rejected` event, and a copy beside a gate that may never be decided is drift.
+    expectReject('06-engine-build/20-o', O({ ...okHuman, verdict: 'accept' }), /verdict must be 'human' or 'absent'/);
+    expectReject('06-engine-build/20-o', O({ ...okHuman, verdict: 'rework' }), /verdict must be 'human' or 'absent'/);
+    expectReject('06-engine-build/20-o', O({ ...okHuman, extra: 1 }), /unknown field\(s\) 'extra'/);
+    // an ABSENCE names itself; the three names are the recordable ones and no other
+    expectReject('06-engine-build/20-o', O({ ...okAbsent, why: undefined }), /an absent outcome needs 'why'/);
+    expectReject('06-engine-build/20-o', O({ ...okAbsent, why: 'unwritable' }), /needs 'why' — one of unavailable\|unparseable\|empty/);
+    // a DECLINE is not a failure: it carries no `why`, and the reason is the whole record of it
+    expectReject('06-engine-build/20-o', O({ ...okHuman, why: 'empty' }), /only an absence carries a 'why'/);
+    expectReject('06-engine-build/20-o', O({ ...okHuman, reason: '  ' }), /needs 'reason'/);
+    expectReject('06-engine-build/20-o', O({ ...okHuman, count: -1 }), /'count' must be a non-negative integer/);
+    expectReject('06-engine-build/20-o', O({ ...okHuman, count: 2.5 }), /'count' must be a non-negative integer/);
+    expectReject('06-engine-build/20-o', O({ ...okHuman, run: ' ' }), /'run' must be a non-empty string/);
+    const s2 = s();
+    // the ABSENCE lands with NO findings at all — the case every writer used to refuse
+    expect(() => s2.appendEvent(s2.resolveNode('06-engine-build/20-o'), O(okAbsent) as unknown as JourneyEvent)).not.toThrow();
+    expect(() => s2.appendEvent(s2.resolveNode('06-engine-build/20-o'), O(okHuman, { anchorSha: 'a1a5056' }) as unknown as JourneyEvent)).not.toThrow();
+    // …and both read back exactly as they were written, the `at` supplied by the event
+    const outcomes = s2.events('06-engine-build/20-o').filter((e) => e.outcome !== undefined).map((e) => e.outcome);
+    expect(outcomes).toEqual([okAbsent, okHuman]);
+    expect(s2.events('06-engine-build/20-o').filter((e) => e.outcome !== undefined).every((e) => e.findings === undefined)).toBe(true);
+  });
+
   it('a captured check must be self-consistent: sha + exitCode + detail, result DERIVED from the exit code', () => {
     writeNode('06-engine-build/20-l', {}, [ev('created')]);
     const s2 = s();

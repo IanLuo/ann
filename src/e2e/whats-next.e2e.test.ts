@@ -705,11 +705,15 @@ describe('e2e — the exit gate drills into a result: `ann results <id> <n>` ove
     // results — the page numbers the drill from THIS list's order
     const card = await get(server.url + '/api/confirm?id=' + encodeURIComponent(FIRST));
     expect(card.status).toBe(200);
-    const doc = JSON.parse(card.body) as { detail: { gates: { confirm: { state: string } } }; results: Array<{ kind: string; sha?: string; path?: string }> };
+    const doc = JSON.parse(card.body) as { detail: { gates: { confirm: { state: string } } }; results: Array<{ kind: string; sha?: string; path?: string; label?: string }> };
     expect(doc.detail.gates.confirm.state).toBe('submitted'); // the EXIT gate
     // commit · ref (the conclusion's structured evidence) · the CAPTURE's own evidence
     // record (leg 12/03 — a recorded act is a result too, and it is numbered like the rest)
-    expect(doc.results.map((r) => r.kind)).toEqual(['commit', 'ref', 'evidence']);
+    // · the REVIEW's own record (leg 12/27 — `submit!` reached for the worker, this fixture has
+    // no provider, and that absence is now ON THE LOG instead of vanishing: an evidence event
+    // with no commits or refs is an informational row, exactly as a findings landing already was)
+    expect(doc.results.map((r) => r.kind)).toEqual(['commit', 'ref', 'evidence', 'evidence']);
+    expect(doc.results[3].label).toContain('gate review — NO REVIEW (unavailable)');
     expect(doc.results[0].sha).toBe(sha);
     expect(doc.results[1].path).toBe('src/thing.ts');
     // …and the same item comes back from the drill route at that index
@@ -754,7 +758,7 @@ describe('e2e — the exit gate drills into a result: `ann results <id> <n>` ove
     // …and the LISTING route is unchanged by the optional index (no `&n=` → the whole list)
     const list = await get(server.url + `/api/results?id=${encodeURIComponent(FIRST)}`);
     expect(list.status).toBe(200);
-    expect((JSON.parse(list.body) as { items: unknown[] }).items.length).toBe(3);
+    expect((JSON.parse(list.body) as { items: unknown[] }).items.length).toBe(4);
   });
 });
 

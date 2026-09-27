@@ -88,7 +88,11 @@ function atConfirm(id = TASK): Commands {
   return c;
 }
 
-/** A task at its confirm gate with the bound ALREADY exhausted — the escalation's door. */
+/** A task at its confirm gate with the bound ALREADY exhausted — the escalation's door, in
+ *  the state `12/23` is actually in: the bound is spent AND the gate is OPEN AGAIN, because a
+ *  re-submission is what puts a spent gate back in front of the worker. (Three rejections and
+ *  no re-submission would leave the gate reading `rejected`, which is the rework state and not
+ *  an open decision at all.) */
 function atBound(id = TASK): Commands {
   const rejected = (n: number) => Array.from({ length: n }, () => ev('rejected', { gate: 'confirm', feedback: 'not yet' }));
   writeNode(id, CONTRACT, [
@@ -97,6 +101,7 @@ function atBound(id = TASK): Commands {
     ev('confirmed', { gate: 'grill' }),
     ev('submitted', { gate: 'confirm' }),
     ...rejected(REJECT_BOUND),
+    ev('submitted', { gate: 'confirm' }),
   ]);
   return cmds(); // the store SCANS at construction — the fixture is on disk first
 }
@@ -290,6 +295,100 @@ describe('AC-5 · the bound is read BEFORE anything is spent', () => {
     expect(r).toMatchObject({ ok: true, verdict: 'human' });
     expect(m.calls()).toBe(0); // the bound must not COST a model call to discover
     expect(String((r as { reason: string }).reason)).toContain('--force');
+  });
+
+  it('AC-3 (12/27) — the bound writes NOTHING, and the STANDING names it off the rejection events', async () => {
+    const c = atBound();
+    const before = JSON.stringify(c.events(TASK));
+    await runGateReview(c, abilities(model(reply([SEV('matches')])).llm), TASK, { run: 'run-7' });
+    // no outcome event, no evidence event, no decision: the bound is a property of the GATE,
+    // and recording it would put a review's outcome in the log for a review that never ran.
+    expect(JSON.stringify(c.events(TASK))).toBe(before);
+    expect(c.reviewFindings(TASK).outcome).toBeUndefined();
+    // …and the fact is still READABLE, derived where every other outcome is stated, at NO cost
+    const standing = c.brief(TASK).review!;
+    expect(standing.kind).toBe('bound');
+    expect(standing.line).toContain('AT THE BOUND');
+    expect(standing.line).toContain(`${REJECT_BOUND} of ${REJECT_BOUND} rejections`);
+  });
+});
+
+describe('AC-1/AC-2/AC-5 (12/27) · every arm is on the record, and the DECIDING ones are not restated', () => {
+  it('AC-1 — the DECLINING arm rides its own review: findings + outcome on ONE event, gate untouched', async () => {
+    const c = atConfirm();
+    const decisionsBefore = c.brief(TASK).decisions;
+    const r = await runGateReview(c, abilities(model(reply([SEV('quality')])).llm), TASK, { run: 'run-7' });
+    expect(r).toMatchObject({ ok: true, verdict: 'human', findings: 1 });
+    // the landing, typed as the RECORD it is: the store's event view carries `outcome` as free
+    // JSON, and this is the test that reads the writer's shape back out of the log
+    type Landing = { type: string; findings: unknown[]; anchorSha?: string; outcome: { verdict: string; reason: string; count: number; run?: string } };
+    const landed = c.events(TASK).at(-1)! as unknown as Landing;
+    expect(landed.type).toBe('evidence');
+    expect(landed.findings).toHaveLength(1); // ONE review, ONE record — never findings without their verdict
+    expect(landed.anchorSha).toBeTruthy(); // the commit the citations were read at (AC-1)
+    expect(landed.outcome).toMatchObject({ verdict: 'human', count: 1, run: 'run-7' });
+    expect(c.rejections(TASK, 'confirm')).toBe(0); // no rejection burned
+    expect(c.brief(TASK).decisions).toEqual(decisionsBefore); // no decision event written
+    stillTheHumans(c);
+    // AC-5 — the recorded outcome IS what the rule returned for the findings it recorded
+    expect(landed.outcome.verdict).toBe(deriveGateVerdict(c.reviewFindings(TASK).findings));
+    // …and the card's ONE read of it says REVIEWED AND LEFT, with the arm's own reason
+    const standing = c.brief(TASK).review!;
+    expect(standing.kind).toBe('human');
+    expect(standing.line).toContain('REVIEWED AND LEFT');
+    expect(standing.line).toContain(String(landed.outcome.reason));
+    expect(standing).toMatchObject({ findings: 1, run: 'run-7' });
+  });
+
+  /** An arm's effect on ONE fresh fixture — the store SCANS at construction, so each arm needs
+   *  its own root (the shared `beforeEach` gives every `it` exactly one). */
+  const decidingArm = async (severity: ReviewSeverity, verdict: 'accept' | 'rework') => {
+    const c = atConfirm();
+    const r = await runGateReview(c, abilities(model(reply([SEV(severity)])).llm), TASK, { run: 'run-7' });
+    expect(r).toMatchObject({ ok: true, verdict });
+    // the decision IS the record; a second statement beside it is the drift the writer refuses
+    expect(c.events(TASK).filter((e) => e.outcome !== undefined)).toEqual([]);
+    expect(c.events(TASK).filter((e) => e.type === (verdict === 'accept' ? 'confirmed' : 'rejected') && e.gate === 'confirm')).toHaveLength(1);
+    // a decided gate has no standing to state — the decision is in hand, not the worker's opinion
+    expect(c.brief(TASK).review).toBeUndefined();
+  };
+
+  it('AC-5 — the DECIDING arm that ACCEPTS restates nothing (the `confirmed` event is the record)', async () => {
+    await decidingArm('matches', 'accept');
+  });
+
+  it('AC-5 — the DECIDING arm that REWORKS restates nothing (the `rejected` event is the record)', async () => {
+    await decidingArm('gap', 'rework');
+  });
+
+  /** An absence's effect on ONE fresh fixture, asserted the same way for every cause. */
+  const absenceCase = async (llm: LlmAbility, why: string) => {
+    const c = atConfirm();
+    const r = await runGateReview(c, abilities(llm), TASK, { run: 'run-7' });
+    expect(r).toMatchObject({ ok: false });
+    const outcome = c.reviewFindings(TASK).outcome!;
+    expect(outcome).toMatchObject({ verdict: 'absent', why, count: 0, run: 'run-7' });
+    // the reason is the arm's own words, and it is the SAME string the operator is shown
+    expect(String((r as { absent: string }).absent)).toContain(outcome.reason);
+    // ONCE: one landing, no findings (there were none to find), and no separate outcome event
+    expect(c.events(TASK).filter((e) => e.outcome !== undefined)).toHaveLength(1);
+    expect(c.events(TASK).filter((e) => e.outcome !== undefined).every((e) => e.findings === undefined)).toBe(true);
+    stillTheHumans(c); // the submission stands, nothing is decided
+    // …and the card says it rather than the one sentence that means four things
+    expect(c.brief(TASK).review).toMatchObject({ kind: 'absent', why });
+    expect(c.brief(TASK).review!.line).toContain('ABSENT');
+  };
+
+  it('AC-2 — an UNREACHABLE provider names itself on the node', async () => {
+    await absenceCase({ async complete() { throw new Error('provider-unavailable: provider x failed after 3 retries: fetch failed'); } }, 'unavailable');
+  });
+
+  it('AC-2 — an UNPARSEABLE reply names itself on the node', async () => {
+    await absenceCase(model('I looked at it and it is fine.').llm, 'unparseable');
+  });
+
+  it('AC-2 — an EMPTY review names itself on the node', async () => {
+    await absenceCase(model(JSON.stringify({ findings: [] })).llm, 'empty');
   });
 });
 

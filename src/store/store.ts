@@ -375,6 +375,19 @@ export type ReviewSeverity = (typeof REVIEW_SEVERITIES)[number];
  *  `resolved` is a claim that evidence covers it, and the next pass re-checks it. */
 export const REVIEW_STATUSES = ['open', 'resolved'] as const;
 
+/** A REVIEW'S ABSENCE, NAMED (leg 12/27) — a closed vocabulary, because "the review did not
+ *  run" has distinct causes and a card that cannot tell them apart cannot say what to do
+ *  next: `unavailable` (no provider · a refusal · a call that failed — the provider's own
+ *  code rides the reason), `unparseable` (a reply with no readable findings object), `empty`
+ *  (a reply with no findings at all — an empty review is not a record).
+ *
+ *  There is deliberately NO member for the store REFUSING a write: that absence is the one
+ *  that cannot be recorded, because the write is what failed. It is named on the surface
+ *  instead, carrying the store's own refusal — the operator sees a store that will not
+ *  write, which is a different problem from a provider that will not answer. */
+export const REVIEW_ABSENCES = ['unavailable', 'unparseable', 'empty'] as const;
+export type ReviewAbsence = (typeof REVIEW_ABSENCES)[number];
+
 /** A FINDING's shape (leg 12/09) — the structured record a REVIEW lands, so that what a
  *  review found is CHECKABLE rather than a digest nobody can act on. 12/08's rejection
  *  stored a 3241-char prose summary as gate feedback and its per-finding list survived only
@@ -408,6 +421,34 @@ function findingShapeProblem(f: unknown): string | undefined {
   return undefined;
 }
 
+/** A REVIEW OUTCOME's shape (leg 12/27) — strict at the single writer, like a finding's.
+ *  ONLY the two arms that decide NOTHING are recordable: `human` (the rule declined) and
+ *  `absent` (the worker did not answer). An `accept` and a `rework` ARE the decision event —
+ *  a second statement of them beside a gate that may never have been decided is exactly the
+ *  drift this field must not introduce, so the writer refuses them by name. */
+function outcomeShapeProblem(o: unknown): string | undefined {
+  if (!o || typeof o !== 'object' || Array.isArray(o)) return 'the outcome must be an object';
+  const r = o as Record<string, unknown>;
+  const unknown = Object.keys(r).filter((k) => !['verdict', 'why', 'reason', 'count', 'run'].includes(k));
+  if (unknown.length) return `unknown field(s) '${unknown.join(', ')}' on the outcome (verdict · why · reason · count · run)`;
+  if (r.verdict !== 'human' && r.verdict !== 'absent') {
+    return `the outcome's verdict must be 'human' or 'absent', got ${JSON.stringify(r.verdict)} — an accept and a rework ARE the decision event and are never restated beside it`;
+  }
+  if (r.verdict === 'absent') {
+    if (!(REVIEW_ABSENCES as readonly unknown[]).includes(r.why)) {
+      return `an absent outcome needs 'why' — one of ${REVIEW_ABSENCES.join('|')} (WHICH absence this was), got ${JSON.stringify(r.why)}`;
+    }
+  } else if (r.why !== undefined) {
+    return "only an absence carries a 'why' — the rule declining is not a failure, and the reason is the whole record of it";
+  }
+  if (typeof r.reason !== 'string' || !r.reason.trim()) return "the outcome needs 'reason' — why the rule declined (or what the absence was), in its own words";
+  if (typeof r.count !== 'number' || !Number.isInteger(r.count) || r.count < 0) {
+    return `the outcome's 'count' must be a non-negative integer — how many findings the pass landed, got ${JSON.stringify(r.count)}`;
+  }
+  if (r.run !== undefined && (typeof r.run !== 'string' || !r.run.trim())) return "the outcome's 'run' must be a non-empty string when present — the reviewing run";
+  return undefined;
+}
+
 /** ONE recorded FINDING as the log holds it — the shared reading of a review, so the card,
  *  the gate and any rework can never read a finding differently. */
 export interface ReviewFindingView {
@@ -424,6 +465,27 @@ export interface ReviewFindingView {
  *  to assert: it is the event's, stamped by the writer and read back per finding, so a
  *  `file:line` always says which pass read it. */
 export type ReviewFindingInput = Omit<ReviewFindingView, 'at'>;
+
+/** THE OUTCOME OF A REVIEW THAT DECIDED NOTHING (leg 12/27) — the two arms that leave the
+ *  gate to the human, ON THE RECORD. It rides the findings landing it already accompanies (a
+ *  review stays ONE record), and it exists because the other two arms need no field: an
+ *  accept and a rework ARE the `confirmed`/`rejected` event. The three facts a human needs
+ *  and could not get — that a review RAN, WHY it declined, and whether it ran at all — are
+ *  here, read by the brief and the card and never re-derived from the severities: the rule
+ *  that names an arm stays the only thing that names one. */
+export interface ReviewOutcomeView {
+  verdict: 'human' | 'absent';
+  /** WHICH absence, present exactly when the verdict is `absent`. */
+  why?: ReviewAbsence;
+  /** Why the rule declined (or what the absence was), in the arm's own words. */
+  reason: string;
+  /** How many findings the pass landed — 0 for an absence, which lands none. */
+  count: number;
+  /** The reviewing run, when there was one. */
+  run?: string;
+  /** When the outcome landed (the landing event's own `at`). */
+  at: string;
+}
 
 /** ONE recorded CHECK as the log holds it — the shared reading of a run: the command,
  *  the result, and `source` (captured = the engine ran it and read the real exit code — a
@@ -1757,7 +1819,7 @@ export class Store {
       created: ['at', 'type', 'note'],
       activated: ['at', 'type', 'note'],
       extended: ['at', 'type', 'note'],
-      evidence: ['at', 'type', 'note', 'commits', 'refs', 'answers', 'trace', 'claims', 'checks', 'findings', 'anchorSha'],
+      evidence: ['at', 'type', 'note', 'commits', 'refs', 'answers', 'trace', 'claims', 'checks', 'findings', 'anchorSha', 'outcome'],
       'artifact-locked': ['at', 'type', 'note', 'artifact'],
       completed: ['at', 'type', 'note'],
       failed: ['at', 'type', 'note'],
@@ -1902,6 +1964,13 @@ export class Store {
       // verdicts. Optional (a review may cite nothing), a sha when present.
       if (e.anchorSha !== undefined && (typeof e.anchorSha !== 'string' || !/^[0-9a-f]{7,40}$/.test(e.anchorSha))) {
         throw new Error('append rejected: evidence.anchorSha must be a commit sha (7-40 hex) — the commit the findings were read at');
+      }
+      // THE REVIEW OUTCOME (leg 12/27): the two arms of the worker that decide NOTHING, on the
+      // record. Optional, and legal WITHOUT findings — an absence lands no findings, and that
+      // is precisely the case that used to leave nothing behind at all.
+      if (e.outcome !== undefined) {
+        const problem = outcomeShapeProblem(e.outcome);
+        if (problem) throw new Error(`append rejected: evidence.outcome — ${problem}`);
       }
     }
     if (e.type === 'transferred' && (typeof e.target !== 'string' || typeof e.scope !== 'string')) {

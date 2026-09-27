@@ -1,5 +1,5 @@
 import { Commands, REJECT_BOUND } from '../commands/index.js';
-import type { ReviewFindingInput, ReviewFindingView } from '../store/store.js';
+import type { ReviewAbsence, ReviewFindingInput, ReviewFindingView } from '../store/store.js';
 import {
   REVIEW_FINDINGS_MODE,
   REVIEW_GRILL_MODE,
@@ -214,6 +214,12 @@ export type GateReviewResult =
  *   4 · THE RULE READS THE SEVERITIES and the decision goes through `commands.gate`, the
  *       SAME writer a human's decision goes through (AC-3). No new event type, no new
  *       state, no new loop.
+ *   5 · EVERY ARM IS ON THE RECORD (12/27). The two that DECIDE need nothing extra — the
+ *       decision event IS the record. The two that leave the gate to the human are the ones
+ *       that used to leave nothing: `human` rides its own review's findings landing as an
+ *       `outcome`, and an ABSENCE lands an outcome-only record through the same writer, from
+ *       every path. The BOUND is the exception and is not written at all — it is a property
+ *       of the gate, derived where it is read (12/27 AC-3).
  */
 export const runGateReview = async (
   commands: Commands,
@@ -232,6 +238,30 @@ export const runGateReview = async (
   }
 
   const material = buildReviewMaterial(commands, id);
+  const run = opts.run?.trim() || undefined;
+
+  /**
+   * THE ABSENCE, ON THE RECORD (12/27 AC-2) — through the ONE writer, reached by every path
+   * that runs the worker (the frame, `ann submit!`, `ann gate! --review`), so the three stop
+   * disagreeing about what an absent review leaves behind. The submission STANDS in every case
+   * and the gate stays the human's; what changes is that the reason is ON THE NODE rather than
+   * only on a console a later reader never sees.
+   *
+   * No `anchorSha`: an anchor is the commit a review's citations were READ at, and nothing was
+   * read. Claiming one would be the class of false claim the anchor exists to prevent.
+   *
+   * A record that could not be written is SAID — an absence nobody can read is the defect this
+   * arm exists to remove. That is the one absence with no record behind it, because the write
+   * is what failed (see `REVIEW_ABSENCES`).
+   */
+  const absent = (why: ReviewAbsence, reason: string): GateReviewResult => {
+    const landed = commands.landFindings(id, [], {
+      note: `gate review — NO REVIEW (${why}) · ${GATE_REVIEW_PROVENANCE}`,
+      outcome: { verdict: 'absent', why, reason, count: 0, ...(run ? { run } : {}) },
+    });
+    return { ok: false, absent: landed.ok ? reason : `${reason} — AND THE OUTCOME COULD NOT BE RECORDED (${landed.error.code}: ${landed.error.blocker})` };
+  };
+
   let raw: string;
   try {
     raw = await abilities.llm.complete({
@@ -239,17 +269,27 @@ export const runGateReview = async (
       maxTokens: opts.maxTokens ?? REVIEW_MAX_TOKENS,
     });
   } catch (e) {
-    return { ok: false, absent: `the review worker could not run — ${(e as Error).message}` };
+    return absent('unavailable', `the review worker could not run — ${(e as Error).message}`);
   }
   const parsed = parseGateReview(raw);
   if (!parsed) {
-    return { ok: false, absent: 'the review worker did not return the strict JSON findings record — nothing was decided and the submission stands' };
+    return absent('unparseable', 'the review worker did not return the strict JSON findings record — nothing was decided and the submission stands');
   }
 
   const findings = shapeFindings(parsed.items, GATE_REVIEW_PROVENANCE);
   if (!findings.length) {
-    return { ok: false, absent: 'the review worker returned NO findings — an empty review is not a record, so nothing was decided and the submission stands' };
+    return absent('empty', 'the review worker returned NO findings — an empty review is not a record, so nothing was decided and the submission stands');
   }
+
+  // THE RULE RUNS BEFORE THE LANDING, and this is the ONE ordering change 12/27 makes. The
+  // rule is PURE and touches no record, so the property the old order protected is untouched —
+  // the findings still land before any DECISION (`commands.gate` below) — and it buys what Q1
+  // asked for: the declining arm's outcome rides the SAME event as its findings, so one review
+  // stays ONE record and no reader can see findings without their verdict.
+  const verdict = deriveGateVerdict(findings);
+  const concerns = openConcerns(findings);
+  const settled = parsed.summary || `the review walked every criterion and left no defect open (${findings.length} finding(s))`;
+  const humanReason = `the review recorded ${findings.length} finding(s) and left ${concerns ? 'an open concern with no defect against the contract' : 'nothing open'}${concerns ? `: ${concerns}` : ''} — a human decides (no rejection is burned by a question the worker could not settle)${parsed.summary ? `. ${parsed.summary}` : ''}`;
   const landed = commands.landFindings(id, findings, {
     ...(material.anchor ? { anchorSha: material.anchor } : {}),
     // THE ACTOR, NAMED ONCE AND CORRECTLY. This read `(${REVIEW_PROVENANCE} worker)`, which
@@ -259,25 +299,25 @@ export const runGateReview = async (
     // with GATE_REVIEW_PROVENANCE above); it was the note a human reads that lied, and only
     // a real run shows it — no unit test asserts prose nobody thought to check.
     note: `gate review — ${findings.length} finding(s) (${GATE_REVIEW_PROVENANCE})`,
+    // THE DECLINING ARM IS RECORDED HERE, on its own review's event (AC-1). The DECIDING arms
+    // are NOT: an accept and a rework land through `commands.gate` below, and a copy of that
+    // verdict beside a gate that may never be decided is exactly the drift this field must
+    // not introduce (the writer refuses one by name).
+    ...(verdict === 'human' ? { outcome: { verdict: 'human' as const, reason: humanReason, count: findings.length, ...(run ? { run } : {}) } } : {}),
   });
   if (!landed.ok) {
     return { ok: false, absent: `the review worker's findings could not be recorded (${landed.error.code}: ${landed.error.blocker}) — nothing was decided` };
   }
 
-  const verdict = deriveGateVerdict(findings);
-  const run = opts.run?.trim() || undefined;
   const actor = { kind: 'worker' as const, ...(run ? { run } : {}) };
-  const summary = parsed.summary;
 
   if (verdict === 'accept') {
-    const settled = summary || `the review walked every criterion and left no defect open (${findings.length} finding(s))`;
     // AN ACCEPT THAT CARRIES QUESTIONS SAYS SO, IN ITS OWN WHY. A why is required on every
     // confirm accept (12/11) and it is the line a human reads on the card — so an accept
     // that fired over open `uncertain`s while reading as "nothing left open" would be the
     // silent decision this area exists to prevent. The questions are named, and they are
     // also on the record: this is the prose, `reviewFindings` is the data.
     const carried = openConcernsOf(findings);
-    const concerns = openConcerns(findings);
     const why = concerns ? `${settled} — CARRIED WITH ${carried.length} OPEN QUESTION(S), raised and not decided: ${concerns}` : settled;
     const g = commands.gate(id, 'confirm', 'accept', why, { actor });
     if (!g.ok) return { ok: false, absent: `the review worker's accept could not be recorded (${g.error.code}: ${g.error.blocker}) — the submission stands` };
@@ -285,19 +325,19 @@ export const runGateReview = async (
   }
 
   if (verdict === 'rework') {
-    const defects = openDefects(findings);
-    const feedback = `${defects}${summary ? ` — ${summary}` : ''}`;
+    const feedback = `${openDefects(findings)}${parsed.summary ? ` — ${parsed.summary}` : ''}`;
     const g = commands.gate(id, 'confirm', 'reject', feedback, { actor });
     if (!g.ok) return { ok: false, absent: `the review worker's rejection could not be recorded (${g.error.code}: ${g.error.blocker}) — the submission stands` };
     return { ok: true, verdict: 'rework', feedback, findings: findings.length, ...(run ? { run } : {}) };
   }
 
-  const concerns = openConcerns(findings);
   return {
     ok: true,
     verdict: 'human',
     findings: findings.length,
     ...(run ? { run } : {}),
-    reason: `the review recorded ${findings.length} finding(s) and left ${concerns ? 'an open concern with no defect against the contract' : 'nothing open'}${concerns ? `: ${concerns}` : ''} — a human decides (no rejection is burned by a question the worker could not settle)${summary ? `. ${summary}` : ''}`,
+    // THE SAME STRING THAT IS ON THE RECORD (AC-1), composed once above: the console narration
+    // and the node's own outcome can never read differently.
+    reason: humanReason,
   };
 };

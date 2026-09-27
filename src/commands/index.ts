@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join, relative } from 'node:path';
-import { Store, JourneyEvent, NodeDir, ResultItem, TaskDetail, CLOSED_TASK_STATUSES, NO_LEG_GATE, type LegGate, type CheckView, type NodeDep, type ReviewFindingInput, type ReviewFindingView } from '../store/store.js';
+import { Store, JourneyEvent, NodeDir, ResultItem, TaskDetail, CLOSED_TASK_STATUSES, NO_LEG_GATE, type LegGate, type CheckView, type NodeDep, type ReviewFindingInput, type ReviewFindingView, type ReviewOutcomeView, type ReviewAbsence } from '../store/store.js';
 import { blobSha, stripMarkers } from '../store/sha.js';
 import { getVOCAB } from '../store/vocab.js';
 import { GATE_DECISION_EVENTS, READY_STATUSES, gateView, workflowState, type GateLifecycle } from '../store/workflow.js';
@@ -230,6 +230,12 @@ export interface Brief {
    *  gate read exposes it. A gate that shows the conclusions but not the findings is the
    *  gate 12/08 had: its rejection carried a prose digest and nothing checkable. */
   findings: ReviewFindingsView;
+  /** THE WORKER'S LIVE STANDING at this node's confirm gate (leg 12/27) — `undefined` when
+   *  there is nothing to say (no open submission, or an open one the worker has not been
+   *  given). Present, it is the ONE answer to "did the worker look, and what did it do?" —
+   *  the fact `12/13` (reviewed, declined, and silent about it) and `12/23` (at the bound,
+   *  never reviewed, and silent about it) could not state. */
+  review?: ReviewStanding;
   /** Why the close would REFUSE right now (the F-AC18 predicate: a captured pass bound to a
    *  cited commit), or absent when a confirm accept would auto-close. */
   closeBlocker?: { code: string; message?: string };
@@ -292,7 +298,41 @@ export interface ReviewFindingsView {
    *  oracle run produced two false MOVED verdicts by re-checking line numbers at HEAD when
    *  they had been read one commit earlier. */
   anchor: string;
+  /** THE WORKER'S OUTCOME, when the latest thing it did was decline or fail to answer (leg
+   *  12/27) — read from the landing that carries it, never re-derived from severities. A
+   *  review that DECIDED lands no outcome here: its decision is `confirmed`/`rejected` on the
+   *  gate and is read from there. */
+  outcome?: ReviewOutcomeView;
 }
+
+/**
+ * WHAT THE REVIEW WORKER DID WITH THIS GATE (leg 12/27) — the one read behind the card, the
+ * brief and the next-line, so three surfaces can never say three things about one gate.
+ *
+ * THE THREE FACTS, and where each comes from. `human` and `absent` are READ off the record
+ * (`findings.outcome`) — the worker said so when it ran. `bound` is DERIVED, because the bound
+ * is a property of the GATE and not of a review: no review runs at it, so there is nothing to
+ * record, and a gate that reached the bound before this existed (`12/23` is exactly that)
+ * would still read blank. It is derived from the rejection events, which ARE the record, and
+ * it takes PRECEDENCE: when the worker is out, what an earlier pass concluded is not the live
+ * fact. There is no fourth case — a gate the worker ACCEPTED or REWORKED is decided and is
+ * not waiting on anyone.
+ *
+ * `label` and `line` ARE the words, composed here and printed verbatim by three surfaces (the
+ * served card, the page's next-line, `ann brief`). Wording lives beside the derivation for the
+ * same reason the readiness blockers do: the alternative is three copies of one sentence, which
+ * is how the card and the CLI end up saying different things about the same gate — the defect
+ * this node exists to remove. `label` is what the NEXT-LINE slot prints in place of
+ * `waiting-on-decision`; `line` is the whole sentence, reason included, and the reason is the
+ * record's own words, never a re-reading of the severities.
+ */
+export type ReviewStanding =
+  /** The rule declined: a review ran, found what it found, and left the gate to the human. */
+  | { kind: 'human'; label: 'REVIEWED AND LEFT'; reason: string; at: string; findings: number; run?: string; line: string }
+  /** The worker did not answer — named, so an outage never reads as a human gate. */
+  | { kind: 'absent'; label: 'ABSENT'; why: ReviewAbsence; reason: string; at: string; line: string }
+  /** The worker is OUT: the reject bound is exhausted, so no review runs any more. */
+  | { kind: 'bound'; label: 'AT THE BOUND'; reason: string; rejections: number; line: string };
 
 export interface FrontmostReady {
   leg: string;
@@ -1010,11 +1050,16 @@ export class Commands {
    * landing moves nothing that a close reads — `conclusion(id).cited`, the close-evidence
    * blocker and the confirm-accept auto-close are all untouched by a review, and a session
    * can therefore never close a task as a side effect of reviewing it (AC-4).
+   *
+   * THE OUTCOME RIDES IT (leg 12/27): the worker's two NON-deciding arms — the rule declined,
+   * or the worker never answered — land here too, on the same event, so a review stays ONE
+   * record and a reader can never see findings without their verdict. An outcome-only landing
+   * (an absence, which found nothing) is the case this writer used to refuse.
    */
   landFindings(
     id: string,
     findings: ReviewFindingInput[],
-    opts: { anchorSha?: string; note?: string } = {},
+    opts: { anchorSha?: string; note?: string; outcome?: Omit<ReviewOutcomeView, 'at'> } = {},
   ): CommandResult<{ findings: number }> {
     return this.loggedWrite('review', [id, findings, opts], () => this.landFindingsImpl(id, findings, opts));
   }
@@ -1022,22 +1067,28 @@ export class Commands {
   private landFindingsImpl(
     id: string,
     findings: ReviewFindingInput[],
-    opts: { anchorSha?: string; note?: string },
+    opts: { anchorSha?: string; note?: string; outcome?: Omit<ReviewOutcomeView, 'at'> },
   ): CommandResult<{ findings: number }> {
     if (!id.includes('/')) return fail('leg-gate-write', 'leg roots carry no review — findings belong to tasks');
     if (!this.store.ids().includes(id)) return fail('no-node', `no node ${id}`);
-    if (!Array.isArray(findings) || !findings.length) {
+    // THE ONE THING THAT CHANGED IN 12/27: a landing may carry an OUTCOME and no findings.
+    // An absent review landed nothing to find — refusing it by the findings rule is what kept
+    // the absence off the record on every path but one. A landing with NEITHER is still
+    // refused: an event that says nothing is not a record of anything.
+    if ((!Array.isArray(findings) || !findings.length) && !opts.outcome) {
       return fail('no-findings', 'a findings landing requires at least one finding — a review that found nothing records no findings');
     }
     // Thin front only: the deep shape (severity vocabulary, status, provenance) is the single
-    // writer's — a malformed finding is refused BY NAME there, never softened here.
+    // writer's — a malformed finding is refused BY NAME there, never softened here. The
+    // outcome's shape is the writer's too (`outcomeShapeProblem`).
     try {
       this.store.appendEvent(this.node(id), {
         at: this.today,
         type: 'evidence',
         note: opts.note?.trim() ? opts.note : `review findings landed (${this.who})`,
-        findings,
+        ...(findings.length ? { findings } : {}),
         ...(opts.anchorSha ? { anchorSha: opts.anchorSha } : {}),
+        ...(opts.outcome ? { outcome: opts.outcome } : {}),
       });
     } catch (e) {
       return fail('store-refused', (e as Error).message);
@@ -1296,6 +1347,11 @@ export class Commands {
     // the card, the human and the review worker all read the same predicate the close
     // enforces — never the evidence half alone.
     const closeBlocker = this.closeBlocker(id);
+    // THE REVIEW RECORD, read ONCE and consumed twice (leg 12/27): the findings list and the
+    // worker's standing are the same read of the same events, so the brief cannot print a
+    // standing its own findings section contradicts.
+    const findings = this.reviewFindings(id);
+    const review = this.reviewStanding(id, d.gates.confirm.state, findings.outcome);
     return {
       id,
       isLeg: d.isLeg,      status: d.status,
@@ -1319,7 +1375,8 @@ export class Commands {
       referencedBy: d.deps.referencedBy,
       decisions,
       conclusion: this.conclusion(id),
-      findings: this.reviewFindings(id),
+      findings,
+      ...(review ? { review } : {}),
       ...(closeBlocker ? { closeBlocker } : {}),
       ...(noteText
         ? {
@@ -2293,8 +2350,17 @@ export class Commands {
     let reviews = 0; // LANDINGS, not findings — a pass that found nothing still counts
     let at = '';
     let anchor = '';
+    let outcome: ReviewOutcomeView | undefined;
     for (const e of this.store.events(id)) {
-      if (e.type !== 'evidence' || !Array.isArray(e.findings)) continue;
+      if (e.type !== 'evidence') continue;
+      // THE OUTCOME (leg 12/27): landed by the two arms that decide nothing, on the same event
+      // as the findings when there are any — so the LATEST landing's outcome is the fact, and a
+      // re-review that decides or declines replaces it rather than stacking beside it.
+      if (e.outcome && typeof e.outcome === 'object') {
+        const o = e.outcome as Omit<ReviewOutcomeView, 'at'>;
+        outcome = { ...o, at: String(e.at ?? '') };
+      }
+      if (!Array.isArray(e.findings)) continue;
       reviews++;
       at = String(e.at ?? '');
       if (typeof e.anchorSha === 'string') anchor = e.anchorSha;
@@ -2321,7 +2387,48 @@ export class Commands {
     // (a rejection stored as prose, a rework that claimed "all fixed"), so an omission is
     // reported as an omission rather than quietly dropped from the list.
     const findings = [...latest.values()].map((f) => ({ ...f, ...(f.pass < reviews ? { stale: true } : {}) }));
-    return { findings, reviews, at, anchor };
+    return { findings, reviews, at, anchor, ...(outcome ? { outcome } : {}) };
+  }
+
+  /**
+   * THE WORKER'S LIVE STANDING at `id`'s confirm gate (leg 12/27) — ONE composition, so the
+   * card, `ann brief` and the page's next-line can never disagree about the same gate.
+   *
+   * A DECIDED gate has no standing to state: when the worker accepted or reworked, the
+   * decision is the record and the surfaces already print it. What is left is exactly the
+   * state this node exists for — an OPEN submission the worker did not decide — and it has
+   * three causes, read in the order that makes the bound win: at the bound the worker is OUT
+   * (nothing ran, nothing was recorded, and an older outcome would be a stale fact); below it,
+   * the last landing says whether it declined (`human`) or never answered (`absent`); and
+   * failing both, the worker has simply not been given this submission — say nothing.
+   */
+  private reviewStanding(id: string, confirm: string, outcome: ReviewOutcomeView | undefined): ReviewStanding | undefined {
+    if (confirm !== 'submitted') return undefined;
+    const rejections = this.rejections(id, 'confirm');
+    if (rejections >= REJECT_BOUND) {
+      const reason = `${rejections} of ${REJECT_BOUND} rejections are burned at the confirm gate — the review worker is OUT (its next action is not a rejection) and a human decides for real`;
+      const label = 'AT THE BOUND' as const;
+      return { kind: 'bound', label, rejections, reason, line: `${label} — the review worker is out of rejections and no review will run here: ${reason}` };
+    }
+    if (!outcome) return undefined;
+    if (outcome.verdict === 'human') {
+      const label = 'REVIEWED AND LEFT' as const;
+      return {
+        kind: 'human',
+        label,
+        reason: outcome.reason,
+        at: outcome.at,
+        findings: outcome.count,
+        ...(outcome.run ? { run: outcome.run } : {}),
+        line: `${label} — a review ran (${outcome.count} finding(s), ${outcome.at}) and decided nothing: ${outcome.reason}`,
+      };
+    }
+    // An absent outcome is un-writable without its `why` (the writer refuses one), so the
+    // fallback is a defensive read of legacy/hand-written history — never a crash, and never
+    // an invented kind.
+    const why = outcome.why ?? 'unavailable';
+    const label = 'ABSENT' as const;
+    return { kind: 'absent', label, why, reason: outcome.reason, at: outcome.at, line: `${label} — the review worker did not answer (${why}) at ${outcome.at}: ${outcome.reason}` };
   }
 
   /** The comparison key for an AC (and a claim's `ac`): case/whitespace-insensitive, so

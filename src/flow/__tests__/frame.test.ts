@@ -170,12 +170,47 @@ describe('the frame runs the fixed frame end to end', () => {
     // the ORDER is the design's: the wait names the gap, the record lands, and only THEN is
     // the exit gate opened, decided and closed.
     const types = c.events(TASK).map((e) => e.type);
-    expect(types).toEqual(['created', 'submitted', 'confirmed', 'activated', 'waiting', 'evidence', 'evidence', 'submitted', 'confirmed', 'completed']);
+    // THE THIRD `evidence` IS THE REVIEW'S OUTCOME (12/27): this run's worker had no provider
+    // to answer it ('a completion' is not the strict JSON findings record), so it was ABSENT —
+    // and an absence now lands on the node instead of only on the console, between the
+    // submission it was made against and the human's decision that followed.
+    expect(types).toEqual(['created', 'submitted', 'confirmed', 'activated', 'waiting', 'evidence', 'evidence', 'submitted', 'evidence', 'confirmed', 'completed']);
+    expect(c.brief(TASK).findings.outcome).toMatchObject({ verdict: 'absent', why: 'unparseable', count: 0 });
     expect(r2.committed?.spawned).toEqual(['01-leg/02-a']); // the deferred spawn recorded HERE, at commit
     expect(c.ids()).toContain('01-leg/02-a');
     // look-back is a DERIVED READ at L1 (§1) — the frame reads it, never assumes it
     expect(r2.lookBack?.pendingGates).toEqual([]);
     expect(r2.advance).toBeTruthy();
+  });
+
+  it("AC-2 (12/27) — the frame's absent review is on the NODE, and the console note is unchanged", async () => {
+    const c = setup();
+    chainFile([{ id: 'envision' }]);
+    await run(c, [mkStep('envision')]); // run 1: the grill is decided, the doc staged, the WAIT written
+    const r2 = await conclude(c, [mkStep('envision')]);
+    expect(r2.stop).toBe('completed');
+    // THE CONSOLE NOTE IS NOT REPLACED (12/22 AC-6): the operator still sees the absence as it
+    // happens, named with the reason the record carries.
+    expect(r2.notices.some((n) => n.includes('NO REVIEW') && n.includes('strict JSON'))).toBe(true);
+    // …and the node says so too: the class of record the CLI's two doors write, from the third
+    // path — the one that used to be the ONLY one that said anything, and said it nowhere durable.
+    expect(c.brief(TASK).findings.outcome).toMatchObject({ verdict: 'absent', why: 'unparseable', reason: expect.stringContaining('strict JSON findings record') });
+    // the human accepted afterwards, so the gate is DECIDED and there is no standing left to
+    // state — the decision is the record now, and this is why the standing is scoped to an OPEN
+    // submission rather than to any node with an outcome in its history.
+    expect(c.brief(TASK).review).toBeUndefined();
+  });
+
+  it('ONE record per review — the decision adds no second outcome beside the gate (12/27 AC-5)', async () => {
+    const c = setup();
+    chainFile([{ id: 'envision' }]);
+    await run(c, [mkStep('envision')]);
+    const r2 = await conclude(c, [mkStep('envision')]);
+    expect(r2.stop).toBe('completed');
+    // the absent review landed ONE outcome, and the human's accept that followed it — a real
+    // decision — added NO second statement of what the worker concluded.
+    expect(c.events(TASK).filter((e) => e.outcome !== undefined)).toHaveLength(1);
+    expect(c.events(TASK).filter((e) => e.type === 'confirmed' && e.gate === 'confirm')).toHaveLength(1);
   });
 
   it('activate/completed are idempotent — a re-run adds no duplicate lifecycle events', async () => {
