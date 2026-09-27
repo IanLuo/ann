@@ -492,16 +492,32 @@ describe('AC-2 · the criterion-level evidence is CARRIED, and its BOUND is stat
     // the two reads are both stated, and they are stated as DIFFERENT numbers — a selection
     // naming only one input could not show this
     expect(selection).toMatch(/test files the reviewed range changes \(\d+\)/);
-    expect(selection).toMatch(/test files the claims name as evidence \(2\)/);
+    expect(selection).toMatch(/test files the claims name \(2,/);
     // and the outside-named file ARRIVES, FIRST, captioned with the claim and the run it is
     // evidence for — AC-2's "mapped check's command" made visible where it is actually used
     const blocks = tests!.split(/^--- /m).slice(1);
-    expect(blocks[0]).toMatch(/^src\/flow\/__tests__\/semantic-driver\.test\.ts {2}\[named as evidence by: AC-\d+ → npm test — "/);
+    expect(blocks[0]).toMatch(/^src\/flow\/__tests__\/semantic-driver\.test\.ts {2}\[named as evidence by: AC-\d+ → npm test/);
     expect(blocks[0]).not.toContain('NOT readable');
     expect(blocks[0]).toContain('describe(');
     // it is NOT in the range, so no range-only selection could have carried it — asserted
     // against the material's own accounting rather than against my reading of git
     expect(selection).toMatch(/range changes \(3\)/);
+  });
+
+  it('SELECTS ON THE STATEMENT AND THE MAPPED CHECK TOO — the other two claim-side inputs AC-2 names', () => {
+    // The evidence pointer is the easy input because it IS a path. The other two are prose
+    // and a command name, and the reviewer read the criterion as naming all three: so the
+    // test paths an author writes into their own statement, or into the command/detail the
+    // claim maps to, are extracted by pattern and select. 12/22 is the measured case — its
+    // AC-1 and AC-5 statements name src/commands/__tests__/commands.test.ts, and no evidence
+    // pointer does.
+    const { tests } = testsOf('12-operate-loop/22-implementation-automatic-exit-gate');
+    expect(tests).toContain('(named in its statement)');
+    // and the file the STATEMENT named is the one carried first, so the route that selected
+    // it is visible in the material rather than inferable from the code
+    const blocks = tests!.split(/^--- /m).slice(1);
+    expect(blocks[0]).toMatch(/^src\/commands\/__tests__\/commands\.test\.ts {2}\[named as evidence by: AC-1 → npm test \(named in its statement\)/);
+    expect(blocks[0]).not.toContain('NOT readable');
   });
 
   it('a range that selects NOTHING still emits the section, stating the empty selection', () => {

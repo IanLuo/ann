@@ -367,16 +367,28 @@ export function buildReviewMaterial(commands: Commands, id: string): ReviewMater
       .split('\n')
       .map((p) => p.trim())
       .filter((p) => !!p && isTest(p));
-    // path → the claims that named it, with the run each of them maps to (the AC-2 "mapped
-    // check's command" made visible where it matters: beside the file it is evidence for)
+    // ALL THREE CLAIM-SIDE FACTS ARE INPUTS HERE. AC-2 names three, and an evidence pointer
+    // is the obvious one because it IS a path. The other two are prose and a command name,
+    // and they are read the same way rather than waved at: a test path the author wrote into
+    // their own statement, or into the command/detail the claim maps to, is a DERIVED signal
+    // — the extraction is a path pattern over text the record already holds, not a judgement
+    // about what matters. A token that names nothing at the anchor is not dropped in silence:
+    // it lands in the "selected but unreadable" count below, the same bucket an evidence
+    // pointer to a missing path lands in.
+    const TEST_PATH = /[A-Za-z0-9_./-]*(?:__tests__\/[A-Za-z0-9_./-]+|[A-Za-z0-9_-]+\.(?:test|spec))\.(?:ts|tsx|mjs|js)/g;
+    const pathsIn = (text: string): string[] => [...new Set(text.match(TEST_PATH) ?? [])].filter(isTest);
     const namedBy = new Map<string, string[]>();
     for (const c of claims) {
+      const head = `${c.ac}${c.check ? ` → ${c.check}` : ''}`;
+      const name = (path: string, via: string): void => {
+        namedBy.set(path, [...(namedBy.get(path) ?? []), `${head}${via}`]);
+      };
       for (const p of c.evidence) {
         const path = p.trim();
-        if (!path || !isTest(path)) continue;
-        const what = c.statement ? ` — "${c.statement.length > 50 ? `${c.statement.slice(0, 50)}…` : c.statement}"` : '';
-        namedBy.set(path, [...(namedBy.get(path) ?? []), `${c.ac}${c.check ? ` → ${c.check}` : ''}${what}`]);
+        if (path && isTest(path)) name(path, '');
       }
+      for (const path of pathsIn(c.statement ?? '')) name(path, ' (named in its statement)');
+      for (const path of pathsIn(`${c.check ?? ''} ${c.bound?.detail ?? ''}`)) name(path, ' (named by its check)');
     }
     // CLAIM-NAMED FIRST, and this is not cosmetic: `selected` is consumed in order under a
     // budget, so whichever source goes last is the first thing dropped. Ordering the range
@@ -436,8 +448,8 @@ export function buildReviewMaterial(commands: Commands, id: string): ReviewMater
       'submission.tests',
       [
         parts.join('\n\n'),
-        `(THE SELECTION — derived, never hand-picked: the test files the reviewed range changes (${touched.length}) and the test files the claims name as evidence (${namedBy.size}), ${selected.length} distinct, read at the anchor sha ${head || '(unresolved)'}. OF THOSE, ${carried.length} carried below: ${note(cutShort, 'CUT with its own length stated')} · ${note(unreadable, 'selected but unreadable')} · ${note(dropped, 'NOT carried — the budget ended first')}.`,
-        `ON THE THREE CLAIM-SIDE FACTS: exactly one of them can SELECT a file, because an evidence pointer IS a path. The mapped check's command and the claim's own statement are carried BESIDE the file — in its caption and in the claims section above — and not used to choose it: one is a command name and the other is prose, and matching either against filenames would be invention wearing the word "derived". A claim-named file is ordered before the range's sweep, so it is carried, not merely counted.`,
+        `(THE SELECTION — derived, never hand-picked: the test files the reviewed range changes (${touched.length}) and the test files the claims name (${namedBy.size}, by evidence pointer, statement or mapped check — each route labelled in the captions), ${selected.length} distinct, read at the anchor sha ${head || '(unresolved)'}. OF THOSE, ${carried.length} carried below: ${note(cutShort, 'CUT with its own length stated')} · ${note(unreadable, 'selected but unreadable')} · ${note(dropped, 'NOT carried — the budget ended first')}.`,
+        `ON THE THREE CLAIM-SIDE FACTS — ALL THREE SELECT, each by its own route and each named in the caption of every file it chose: an EVIDENCE POINTER directly (a pointer is a path), and the claim's own STATEMENT or the mapped CHECK'S COMMAND/DETAIL by the test paths written into them (extracted by pattern, so it is derived from what the record already holds rather than from anyone's judgement about what matters). A token that names nothing at the anchor shows up below as selected-but-unreadable. Claim-named files are ordered before the range's sweep, so a file an author pointed at is CARRIED, not merely counted.`,
         `WHAT IS NOT HERE, so that an uncertain about it is a KNOWN boundary rather than an unseen one: any test file neither the range nor a claim names${selected.length ? '' : ' — and this range selects NONE, so no test text is carried at all'} · runtime behaviour no test text carries (a real browser, a real network) · whatever the cut above states it dropped. Raise any of them as \`uncertain\` and say what you would need.)`,
       ].join('\n'),
       'repo metadata',
