@@ -492,7 +492,7 @@ describe('AC-2 · the criterion-level evidence is CARRIED, and its BOUND is stat
     // the two reads are both stated, and they are stated as DIFFERENT numbers — a selection
     // naming only one input could not show this
     expect(selection).toMatch(/test files the reviewed range changes \(\d+\)/);
-    expect(selection).toMatch(/test files the claims name \(2,/);
+    expect(selection).toMatch(/test files the claims name \(2 distinct path\(s\) named by \d+ of \d+ claim\(s\)/);
     // and the outside-named file ARRIVES, FIRST, captioned with the claim and the run it is
     // evidence for — AC-2's "mapped check's command" made visible where it is actually used
     const blocks = tests!.split(/^--- /m).slice(1);
@@ -518,6 +518,35 @@ describe('AC-2 · the criterion-level evidence is CARRIED, and its BOUND is stat
     const blocks = tests!.split(/^--- /m).slice(1);
     expect(blocks[0]).toMatch(/^src\/commands\/__tests__\/commands\.test\.ts {2}\[named as evidence by: AC-1 → npm test \(named in its statement\)/);
     expect(blocks[0]).not.toContain('NOT readable');
+  });
+
+  it('a delivery whose RANGE cannot be derived still emits the section, saying so', () => {
+    // The reviewer's F14, and it is the sharpest form of AC-4's rule: guarding the section on
+    // a derivable range meant the ONE case where derivation itself had failed was the one
+    // case that said nothing — no section, no boundary, nothing for the reviewer to raise an
+    // `uncertain` against. A missing range is a fact about the material, so it is stated.
+    // The fixture cites a sha this repo does not hold, which is exactly that case.
+    atConfirm();
+    const m = buildReviewMaterial(commands(), '01-leg/01-a');
+    const tests = m.context.find((c) => c.label === 'submission.tests')!.text;
+    expect(m.range).toBeFalsy();
+    expect(tests).toContain('NO RANGE COULD BE DERIVED from the conclusion');
+    expect(tests).toContain('read at the anchor sha abc1234'); // the cited sha is the anchor, in-repo or not
+    expect(tests).toContain('a real browser'); // the limit is named even when nothing is carried
+  });
+
+  it('counts FILES and CLAIMS separately — the number a reader would take for one is not the other', () => {
+    // The reviewer's F15: the summary reported a count of distinct PATHS under a phrase a
+    // reader would take for a count of CLAIMS, so a claim naming three files and a claim
+    // naming none read the same. Both facts are now stated, each named for what it counts.
+    const { tests } = testsOf('12-operate-loop/22-implementation-automatic-exit-gate');
+    const selection = tests!.split('\n').find((l) => l.startsWith('(THE SELECTION'))!;
+    const paths = Number(selection.match(/claims name \((\d+) distinct path/)![1]);
+    const namedClaims = Number(selection.match(/named by (\d+) of (\d+) claim/)![1]);
+    const allClaims = Number(selection.match(/named by (\d+) of (\d+) claim/)![2]);
+    expect(paths).toBeGreaterThan(0);
+    expect(namedClaims).toBeLessThanOrEqual(allClaims);
+    expect(selection).toContain('a count of FILES, never of claims');
   });
 
   it('a range that selects NOTHING still emits the section, stating the empty selection', () => {
