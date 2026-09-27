@@ -353,3 +353,113 @@ describe('AC-5 · the material is DERIVED, and every named input is in it', () =
     expect(REVIEW_PROFILE.defaultMaxRounds).toBeGreaterThan(0);
   });
 });
+
+/**
+ * 12/23 · THE CRITERION-LEVEL EVIDENCE — the fix for the reason `auto accept` was inert.
+ *
+ * MEASURED 2026-09-26, driving the worker against the configured provider on a clone: a
+ * delivery the floor had certified closeable drew `uncertain` after `uncertain`, and every
+ * one of them asked for the same thing — the evidence behind a CLAIM. `brief` already held
+ * it (`conclusion.claims`, with the engine's own resolution of each mapping); the material
+ * carried only the flat `checks` list, so four criteria mapped to one `npm test` pass were
+ * indistinguishable from four separately-verified ones, and no test text was carried at all.
+ *
+ * WHAT IS PINNED: the mapping reaches the reviewer WITH the record's resolution of it (AC-1);
+ * the test content behind a claim is carried, selected by a rule and BOUNDED with its bound
+ * stated (AC-2); and the material names its own limits rather than leaving the reviewer to
+ * discover them (AC-4).
+ */
+
+/** A task at confirm whose conclusion CLAIMS its criteria — a mapping for the material to
+ *  render, and one that exercises all three of its cases at once: a claim that RESOLVES, a
+ *  claim whose check was never run, and an AC never claimed at all. The checks are REPORTED
+ *  (written as events, never executed) so the fixture stays hermetic and fast. */
+const claiming = () =>
+  writeNode(
+    '01-leg/01-a',
+    { ...CONTRACT, acceptanceCriteria: ['the first thing lands', 'the second thing lands', 'the third thing lands'] },
+    [
+      ev('created'),
+      ev('submitted', { gate: 'grill' }),
+      ev('confirmed', { gate: 'grill' }),
+      ev('evidence', {
+        commits: [{ sha: 'abc1234', note: 'the delivery' }],
+        checks: [{ command: 'npm test', result: 'pass', source: 'reported', detail: '9/9' }],
+        claims: [
+          { ac: 'AC-1', check: 'npm test', statement: 'the suite pins it' },
+          { ac: 'AC-2', check: 'npm run typecheck', statement: 'the check that was never run' },
+        ],
+      }),
+    ],
+  );
+
+describe('AC-1 · the claims are CARRIED, each beside the run the record resolves for it', () => {
+  it('renders the mapping WITH its resolution, and NAMES the unbound and the unclaimed', () => {
+    claiming();
+    const m = buildReviewMaterial(commands(), '01-leg/01-a');
+    const claims = m.context.find((c) => c.label === 'submission.claims')!.text;
+
+    // the author's half — the statement and which run they stand behind …
+    expect(claims).toContain('AC-1 — the first thing lands');
+    expect(claims).toContain('claimed: the suite pins it');
+    // … and the RECORD's half, marked as the record's: a reported check is a typed claim,
+    // and the reviewer is told which of the two it is looking at
+    expect(claims).toContain('npm test — pass (REPORTED CLAIM');
+
+    // A CLAIM WHOSE RUN NEVER HAPPENED IS SAID, NOT DROPPED. Omitting it would read as "no
+    // claim here", which is the opposite of what the record holds — the failure mode this
+    // whole section exists to close.
+    expect(claims).toContain('AC-2 — the second thing lands');
+    expect(claims).toContain('npm run typecheck — UNBOUND');
+
+    // an AC neither claimed nor transferred is NAMED for the same reason: silence about it
+    // is the one reading a reviewer cannot tell apart from "there is nothing here"
+    expect(claims).toContain('AC-3 — the third thing lands');
+    expect(claims).toContain('UNCLAIMED');
+  });
+
+  it('is assembled from the record, never typed — no claims means every AC reads UNCLAIMED', () => {
+    atConfirm(); // the fixture's evidence carries a CHECK but no claims
+    withDocs();
+    const m = buildReviewMaterial(commands(), '01-leg/01-a');
+    const claims = m.context.find((c) => c.label === 'submission.claims')!.text;
+    // nothing is invented: with no mapping on the record the section states that, per AC,
+    // rather than going quiet — an unreviewed criterion is exactly what a reviewer must see
+    expect(claims).toContain('AC-1 — the findings land on the addressed node');
+    expect(claims).toContain('UNCLAIMED');
+    expect(claims).not.toContain('claimed:');
+  });
+});
+
+describe('AC-2 · the criterion-level evidence is CARRIED, and its BOUND is stated', () => {
+  it('carries the test files the reviewed range changes, at their anchor sha', () => {
+    const repoRoot = fileURLToPath(new URL('../../..', import.meta.url));
+    const m = buildReviewMaterial(new Commands(new Store(repoRoot), 'test'), '12-operate-loop/08-implementation-one-gate-derivation');
+    const tests = m.context.find((c) => c.label === 'submission.tests')!.text;
+
+    // real test BYTES — not a stat line in the change map, which is all the material had
+    // before and the reason every `uncertain` was a request for what this now carries
+    expect(tests).toContain('--- src/e2e/service.e2e.test.ts');
+    expect(tests).toContain('describe(');
+    expect(tests).toContain('it(');
+    // the selection is DERIVED (the test files the range touches), so it moves with the
+    // delivery rather than being a list someone maintains
+    expect(m.range).toContain('..');
+  });
+
+  it('declares the CUT the way the diff declares its own, and names what is NOT carried', () => {
+    const repoRoot = fileURLToPath(new URL('../../..', import.meta.url));
+    const m = buildReviewMaterial(new Commands(new Store(repoRoot), 'test'), '12-operate-loop/08-implementation-one-gate-derivation');
+    const tests = m.context.find((c) => c.label === 'submission.tests')!.text;
+
+    // a partial view is never mistaken for the whole — the same inline disclosure the
+    // patch above it carries
+    expect(tests).toMatch(/chars cut/);
+    // THE LIMITS ARE NAMED (AC-4): what no test text carries is a KNOWN boundary, so an
+    // `uncertain` raised against it can be SEEN to be asking for something already declared
+    // absent — rather than the reviewer discovering, at the end, that it was never there
+    expect(tests).toContain('THE SELECTION:');
+    expect(tests).toContain('test file the range does not touch');
+    expect(tests).toContain('a real browser');
+  });
+});

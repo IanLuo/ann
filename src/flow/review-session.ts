@@ -181,6 +181,16 @@ const STAT_CHARS = 4000;
  *  The pathspec is `:(top,exclude)` — REPO-ROOT-anchored, not cwd-relative — so the exclusion
  *  names the same path whatever directory the store resolves from, and (a pathspec of pure
  *  exclusions) it also keeps the diff REPO-WIDE rather than scoped to that directory. */
+/** THE CRITERION-LEVEL EVIDENCE GETS ITS OWN BUDGET (leg 12/23). A claim maps a criterion to a
+ *  RUN, and a run is a suite-level pass — so on the measured task FOUR distinct criteria all
+ *  mapped to one `npm test` pass, and the material carried no test content at all (`grep -c
+ *  'test('` over the assembled prompt returned 0). The reviewer could therefore see THAT a
+ *  suite was green and never whether its assertions covered the criterion, which is why every
+ *  `uncertain` it raised was a request for exactly this: "I would need an e2e case for an
+ *  unknown id". It has no way to fetch one, so the evidence arrives with the material or not at
+ *  all. */
+const TEST_CHARS = 40000;
+
 const DIFF_EXCLUDES = ['.ann/journey'];
 
 const SHA = /^[0-9a-f]{7,40}$/;
@@ -303,7 +313,62 @@ export function buildReviewMaterial(commands: Commands, id: string): ReviewMater
     );
   }
 
-  // 4 · THE CAPTURED CHECKS — each at the sha its run saw, and marked FACT vs CLAIM.
+  // 4 · THE CLAIMS, EACH BESIDE THE RUN THE RECORD RESOLVES FOR IT (leg 12/23 AC-1). This is
+  //     the gap that made the accept arm inert, and it was a PURE OMISSION: `brief` already
+  //     exposed `conclusion.claims` — the author's mapping, with the engine's resolution of it
+  //     — and the material carried only the `checks` list below. So a reviewer read an
+  //     UNORDERED list of runs and could not tell which one the author stood behind for which
+  //     criterion: four criteria mapped to one `npm test` pass were indistinguishable from four
+  //     separately-verified criteria. The mapping is the AUTHOR's; the resolution (result,
+  //     source, sha, detail) is the RECORD's, and the two are labelled as such so a reviewer
+  //     knows which half is a claim.
+  const claims = b.conclusion.claims;
+  const unclaimed = b.conclusion.unclaimed;
+  if (claims.length || unclaimed.length) {
+    const boundCheck = (c: (typeof claims)[number]): string => {
+      if (!c.check) return 'NO CHECK MAPPED — claimed with no recorded run behind it';
+      if (!c.bound) return `${c.check} — UNBOUND: the record names this run but the log holds NO run of it`;
+      const k = c.bound;
+      return `${k.command} — ${k.result} (${k.source === 'captured' ? 'CAPTURED FACT (the engine ran it)' : 'REPORTED CLAIM (someone typed it)'}${k.sha ? ` at ${k.sha}` : ', no sha recorded'})${k.detail ? ` · ${k.detail}` : ''}`;
+    };
+    add(
+      'submission.claims',
+      [
+        'HOW EACH CRITERION IS CLAIMED MET — the MAPPING is the author\'s; the resolution beside it is the RECORD\'s. A suite-level run mapped to a criterion is the author asserting that the whole run covers it: check whether the evidence below actually does.',
+        ...claims.map((c) => `${c.ac} — ${c.acText}\n  claimed: ${c.statement || '(no statement recorded — the mapping stands alone)'}\n  requires: ${boundCheck(c)}`),
+        ...unclaimed.map((u) => `${u.ac} — ${u.acText}\n  UNCLAIMED — neither claimed nor transferred. Say so rather than passing over it.`),
+      ].join('\n'),
+      'repo metadata',
+    );
+  }
+
+  // 5 · THE CRITERION-LEVEL EVIDENCE (leg 12/23 AC-2): the TEST bodies the reviewed range
+  //     touches, at the anchor sha, in full. A claim's `requires` above resolves to a run, and
+  //     a run's content is the only thing that can answer whether it covers the criterion. The
+  //     SELECTION is deterministic and stated in the material — every test file the range
+  //     changes, at the anchor — so it is derived, never hand-picked, and a reader can see
+  //     what was chosen and what a later bound dropped.
+  if (range) {
+    const changed = (git(store.root, ['diff', '--name-only', range]) ?? '')
+      .split('\n')
+      .map((p) => p.trim())
+      .filter((p) => !!p && (p.includes('__tests__/') || p.endsWith('.test.ts')));
+    if (changed.length) {
+      const bodies = changed
+        .map((p) => {
+          const body = head ? git(store.root, ['show', `${head}:${p}`]) : undefined;
+          return `--- ${p}${body ? '' : ` (NOT readable at ${head || 'the anchor'})`}\n${body ?? ''}`.trim();
+        })
+        .join('\n\n');
+      add(
+        'submission.tests',
+        `${cut(bodies, TEST_CHARS)}\n(THE SELECTION: every test file the reviewed range changes, at its anchor sha — ${changed.length} file(s). WHAT IS NOT HERE, so an uncertain about it is a KNOWN boundary rather than an unseen one: runtime behaviour no test text carries (a real browser, a real network), and any test file the range does not touch. Raise either as \`uncertain\` and say what you would need.)`,
+        'repo metadata',
+      );
+    }
+  }
+
+  // 6 · THE CAPTURED CHECKS — each at the sha its run saw, and marked FACT vs CLAIM.
   add(
     'checks',
     bullets(
@@ -315,7 +380,7 @@ export function buildReviewMaterial(commands: Commands, id: string): ReviewMater
     'runtime/tool output',
   );
 
-  // 5 · THE RESOLVED DEFINING INPUTS — at their recorded sha, with the doc's own head. The
+  // 7 · THE RESOLVED DEFINING INPUTS — at their recorded sha, with the doc's own head. The
   //     excerpt rides the brief (12/22 AC-6), so the reviewer reads the same excerpt the
   //     card would and neither can be reading a different revision of it.
   for (const d of b.inputs) {
@@ -326,7 +391,7 @@ export function buildReviewMaterial(commands: Commands, id: string): ReviewMater
     );
   }
 
-  // 6 · ANY PRIOR FINDINGS — a review is usually a RE-review, and this is the list it flips.
+  // 8 · ANY PRIOR FINDINGS — a review is usually a RE-review, and this is the list it flips.
   const prior = b.findings;
   if (prior.findings.length) {
     add(
