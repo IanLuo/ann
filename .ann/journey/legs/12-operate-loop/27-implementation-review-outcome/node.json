@@ -1,0 +1,45 @@
+{
+  "id": "12-operate-loop/27-implementation-review-outcome",
+  "contract": {
+    "intent": "THE WORKER'S OUTCOME IS ON THE RECORD ONLY WHEN IT DECIDES. `runGateReview` derives ONE of four outcomes from findings the model never chose, and the two that decide are durable: `accept` and `rework` land through `commands.gate` — a real decision, with the worker's engine-stamped actor, no new event type. The other two leave NOTHING. `human` (an open `quality`, or a review that found nothing) returns its verdict and its reason TO THE CALLER and writes only the findings, so the node records that a review happened and what it found, and never that it was REVIEWED AND LEFT. The ABSENCE (no provider, an unreachable endpoint, an unparseable reply, an empty findings list) is worse, because the paths DISAGREE: the frame writes a note — `src/flow/frame.ts:433`, `EXIT GATE <id>: NO REVIEW — <absent>. The submission stands and the gate is the human's` — while the CLI's `submit!` and `gate! --review` write nothing at all. ONE event, three paths, and only one of them has a record. MEASURED TODAY, and this is the whole node: `12/13-transfer-affordance` WAS reviewed (1 pass, 10 findings, one open `quality` at `src/surface/service.ts:405-470` — `transferNotLive` returns `undefined` when the confirm read itself fails) and `12/23-criterion-evidence` was NEVER reviewed (3 rejections already burned, so `runGateReview` returned the human card at `src/flow/gate-review.ts:225` BEFORE the model call) — and the two cards carry THE SAME NEXT-LINE: `waiting on a decision — confirm (exit) is in WAITING ON YOU`. The reviewer that ran, the reason it declined, and the bound that stopped it are all absent from the bytes the human reads. THIS NODE PUTS EVERY ARM ON THE RECORD. WHAT IS EXPLICITLY OUT OF SCOPE: the DECISION itself (this records an OUTCOME, never a verdict — the gate stays the human's and no rejection is burned); the GRILL (the worker never runs at an entry gate); the interactive `ann review!` session (its findings already land through the same writer, and it is structurally barred from deciding); the arms' SEMANTICS (which severity routes where is `deriveGateVerdict`'s, untouched — this node records what the rule returned, never re-derives it).",
+    "acceptanceCriteria": [
+      "AC-1 — THE HUMAN ARM IS RECORDED, AND THE GATE IS UNTOUCHED. A `human` verdict writes, through ONE writer: that a review RAN, its date, the anchor sha it was run over, the run id, the findings count, and the reason the rule derived it (an open `quality`; or a review that found nothing). The gate stays `submitted`, NO rejection is burned, and no decision event is written — the record gains an OUTCOME, never a decision. Pinned by test: a `human` review leaves the gate state, the rejection count and the decision list byte-identical, and adds exactly the outcome.",
+      "AC-2 — THE ABSENCE IS RECORDED ON EVERY PATH, ONCE. An absence writes, from the CLI's `submit!` and from `gate! --review`, the same class of record the frame already writes — so the three paths stop disagreeing about what an absent review leaves behind. The submission stands and the gate stays the human's in every case, and the record names WHICH absence it was (unavailable, unreachable, unparseable, empty). Pinned by test: the same failing provider produces the same outcome record on all three paths.",
+      "AC-3 — THE BOUND IS NAMED, WITHOUT A CALL. A confirm gate at the reject bound reads, from the record, that the worker is OUT and the decision is the human's — today that state is derivable only by counting rejections and knowing the constant, which is exactly why `12/23` cannot be reviewed and does not say so. The read costs NO model call, and it is stated where the other outcomes are stated rather than in a separate place.",
+      "AC-4 — THE CARD AND THE BRIEF SAY IT. The served card and `ann brief` read the outcome FROM THE RECORD — never by re-deriving the rule from severities — and the next-line stops claiming `waiting on a decision` for a gate the worker has already declined: REVIEWED AND LEFT, AT THE BOUND, and ABSENT become three distinct lines, each naming its reason, instead of one sentence that means four different things. Pinned by test on the assembled brief and on the page.",
+      "AC-5 — NO NEW EVENT TYPE, NO NEW STATE, NO SECOND DERIVATION. The outcome rides an EXISTING write (the findings landing it already accompanies), `deriveGateVerdict` remains the ONLY thing that names an arm, and no reader recomputes a verdict the record already holds — one writer, one rule, one read. Pinned by test: no new event type reaches the log, and the recorded outcome equals what the rule returned for the same findings.",
+      "AC-6 — NO REGRESSION, AND THE TWO LIVE CASES PROVE IT. `12/13-transfer-affordance` (reviewed, left for a `quality`) and `12/23-criterion-evidence` (at the bound, never reviewed) each read correctly afterward — the first says it was reviewed and why it was left, the second says the worker is out. `npm test` green, `npm run typecheck` and `npm run build` clean, `ann check` + `ann verify` clean on the live journey, the checks recorded via `capture!`, committed with structured evidence (F-AC18)."
+    ],
+    "workType": "implementation",
+    "targetAreas": [
+      "src/flow",
+      "src/surface",
+      "docs"
+    ],
+    "requiredInputs": [
+      "gate-cadence"
+    ],
+    "expectedOutputs": [
+      "the outcome record for the human arm and for the absence, written through one writer on every path (src/flow, src/commands)",
+      "the bound read as a named outcome where the other outcomes are named, at no model-call cost (src/flow)",
+      "the card and `ann brief` reading the outcome from the record: reviewed-and-left · at the bound · absent, each with its reason (src/surface)",
+      "tests: the gate untouched by a human verdict, one outcome per path for the same absence, no new event type, and the recorded outcome equal to the rule's (src/flow, src/surface)",
+      "docs/gate-cadence.md: the four arms and where each is recorded, including the two that were not (docs)"
+    ]
+  },
+  "openQuestions": [
+    {
+      "id": "Q1",
+      "question": "Where does the outcome LIVE — a field on the EXISTING findings record (`brief.findings.verdict` + `.reason`, one writer, nothing new in the log) or its own evidence event per review? The first keeps one review as one record; the second makes each outcome independently addressable in the event list, at the cost of a review being readable as findings without its verdict.",
+      "blocking": false,
+      "defaultIfUnanswered": "The FINDINGS RECORD — the outcome is about that review, the findings already land through one writer, and a reader that can see findings without their verdict is the defect this node exists to remove."
+    },
+    {
+      "id": "Q2",
+      "question": "Does this node DEPEND on `12/24-implementation-verdict-arm` (queued)? If 24 changes which arms exist, the record must cover the new arms too — but a declared `dependsOn` on a queued node stalls this one until 24 lands.",
+      "blocking": false,
+      "defaultIfUnanswered": "NO declared dependency: the record is written from the verdict the rule RETURNS, whatever the arms become, so a new or re-cut arm is covered by construction rather than by ordering."
+    }
+  ],
+  "createdAt": "2026-09-27"
+}
