@@ -1,0 +1,28 @@
+{
+  "id": "12-operate-loop/24-implementation-verdict-arm",
+  "contract": {
+    "intent": "`uncertain` IS RAISED, NOT DECIDED. The worker's verdict rule as first written sent any open `uncertain` to the human, and that made `accept` UNREACHABLE — measured 2026-09-27 against the configured provider on deliveries the floor had certified closeable: FOUR runs, FOUR `human`, ZERO `accept`. The clean first pass of one landed EIGHT `matches` and FIVE `uncertain`s with nothing wrong anywhere in the delivery. The cause is in the severity's OWN definition: `uncertain` is \"a real concern you CANNOT localize to a file and line\", so there is nothing for the author to fix, the bytes never change, and the next pass re-states it (the material instructs the reviewer to, and it does) — as a blocker it is PERMANENT. A rule that requires a flawless review is a rule that never accepts, and a gate that is never accepted automatically is a gate the human never left, which is the entire burden leg 12 exists to remove. THIS NODE CARRIES THE CORRECTION. It is NOT a threshold change and NOT leniency: an accept must still be CARRIED by at least one finding that is not `uncertain` — the same invariant that already sends an EMPTY finding list to the human — so a reviewer that is vague cannot accept by being vague, and a review that settled nothing reads exactly as it does today. The questions are not swallowed either: they stay on the record as findings AND the accept's own `why` names them, so the decision is auditable in both directions. WHAT IS EXPLICITLY OUT OF SCOPE: the other arms (`gap`/`regression` → rework, `quality` → human, resolved findings out of the way) keep their semantics untouched; the material assembly is node 23's and is not revisited here; and the model is still never asked for a verdict.",
+    "acceptanceCriteria": [
+      "AC-1 — THE ARM IS CORRECTED, AND IT IS STATED AS A TABLE RATHER THAN A SENTENCE. `deriveGateVerdict` derives: an open `gap`/`regression` → `rework` · an open `quality` → `human` · findings that settled nothing but questions → `human` · `uncertain` BESIDE at least one finding that is not `uncertain` → `accept` · no findings at all → `human`. Pinned by test at every edge, including the two that keep the guard honest: `[uncertain]` ALONE is `human` (nothing settled establishes nothing) and `[uncertain, quality]` is `human` (a localized defect still blocks).",
+      "AC-2 — AN ACCEPT THAT CARRIES QUESTIONS SAYS SO, IN ITS OWN WHY. A why is required on every confirm accept (12/11) and it is the line a human reads on the card, so an accept that fired over open `uncertain`s while reading as \"nothing left open\" would be the silent decision this area exists to prevent. The recorded why NAMES the carried questions and their count, and the same questions are on the record as findings — one is the prose, the other is the data, and neither is the only place they live. Pinned by test.",
+      "AC-3 — THE OTHER ARMS ARE UNTOUCHED, AND THE CHANGE IS RECORDED WHERE IT WILL BE READ. `quality`, `gap`, `regression` and the resolved-finding rule derive exactly what they derived before (the pre-existing edges stay pinned); the model is still never asked for a verdict, so a reply that prose-announces one changes nothing; and `docs/gate-cadence.md` §7.4 carries the corrected table WITH the measurement that forced it, so the next reader finds the arithmetic rather than the conclusion. §7.9 keeps the escape-hatch hazard the old row was guarding against, narrowed and honest about what survives.",
+      "AC-4 — THE ACCEPT FIRES, DEMONSTRATED END TO END. The worker, run against the configured provider, returns `accept` on a delivery with no open defect and the accept CLOSES the task through the existing writer with `decider: worker` — a new event type, a new state or a second write path would be a FAILURE of this AC, not a detail of it. The demonstration names its delivery, its findings and its verdict, and the harness that produced it stays usable so the claim can be re-checked rather than believed.",
+      "AC-5 — NO REGRESSION. `npm test` green, `npm run typecheck` and `npm run build` clean, captured checks recorded via capture!, `ann check` + `ann verify` clean on the live journey, committed with structured evidence (F-AC18)."
+    ],
+    "workType": "implementation",
+    "targetAreas": [
+      "src/flow"
+    ],
+    "requiredInputs": [
+      "gate-cadence"
+    ],
+    "expectedOutputs": [
+      "the corrected verdict rule, `uncertain` non-blocking and non-carrying (src/flow)",
+      "the accept's why carrying the open questions and their count (src/flow)",
+      "tests: every edge of the new table, the two guard cases, and the pre-existing arms still pinned (src/flow)",
+      "the spec doc corrected with the measurement that forced the change, and the hazard section kept honest (docs)",
+      "the recorded demonstration: the worker accepts a clean delivery and the task closes with decider: worker"
+    ]
+  },
+  "createdAt": "2026-09-27"
+}
