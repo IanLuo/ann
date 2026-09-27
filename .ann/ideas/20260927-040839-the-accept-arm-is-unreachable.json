@@ -1,0 +1,11 @@
+{
+  "id": "20260927-040839-the-accept-arm-is-unreachable",
+  "text": "THE ACCEPT ARM IS UNREACHABLE — MEASURED, AND THE MATERIAL WAS NOT THE (ONLY) CAUSE. After landing the claims + criterion-level test content (a1a4d7b), the worker was re-run against the configured provider on the clone of 12/13, four ways: with priors (8 findings, F6/F7/F8 restated verbatim), and with the PRIOR.FINDINGS section ablated (13 findings once, 8 once — different sets, different ids, so the model IS re-deriving and the priors section is anchoring the restatement). Every run returned human. The first pass on a delivery the floor had certified closeable genuinely raises uncertains on ordinary, well-delivered code — run A landed EIGHT matches and FIVE uncertains and nothing else, nothing wrong anywhere. So the blocker is not the material and not the rule: the accept arm requires a FLAWLESS review, and a text reviewer asked to say when it cannot verify a criterion will never deliver one. Two structural facts follow. (1) AN uncertain HAS NO EXIT: it means \"a real concern you CANNOT localize to a file and line\", so there is nothing for the author to fix, the bytes do not change, and the next pass re-states it by design (\"re-state each one at its status in the current bytes — keep its id\"). The finding is immortal and so is the gate. (2) F7 IS ANSWERABLE AND WAS NOT ANSWERED FROM THE MATERIAL: transferNotLive defers on an unreadable node, and gateImpl refuses it first (src/commands/index.ts:748, no-node, ZERO writes) — the answer lives in UNCHANGED code the diff never carries, which is the calibration doc own diagnosis. Appending that exact code to the prompt did NOT resolve F7, so carrying more unchanged code is not the lever either. The lever is the arm: uncertain must stop blocking an accept (recorded as an open question on the record, not as a gate blocker), or auto accept will stay at zero forever.",
+  "created": "2026-09-27T04:08:39.304Z",
+  "by": "agent",
+  "status": "open",
+  "refs": [
+    "20260926-135139-auto-accept-is-inert-measured",
+    "20260927-035848-the-record-is-complete-enough"
+  ]
+}
