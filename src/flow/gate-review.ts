@@ -24,9 +24,20 @@ import type { Abilities } from './types.js';
  *
  * THE THREE ARMS, and the middle one is load-bearing:
  *   · an OPEN `gap` or `regression`  → REWORK (the existing reject → re-execute loop);
- *   · an OPEN `uncertain`/`quality` with no defect → THE HUMAN — not an accept, and NO
- *     rejection burned, so uncertainty can neither rubber-stamp a delivery nor deadlock it;
- *   · every finding `matches` or resolved → ACCEPT, the one automatic outcome.
+ *   · an OPEN `quality` — defective bytes with no contract defect → THE HUMAN, with no
+ *     rejection burned;
+ *   · nothing outstanding but `uncertain` → ACCEPT, carried by the findings that DID settle
+ *     something, with the questions recorded rather than decided.
+ *
+ * WHY `uncertain` DOES NOT BLOCK (changed 2026-09-27, on measurement — see the rule below).
+ * The arm as first written sent any open `uncertain` to the human, and that made `accept`
+ * unreachable: MEASURED against the configured provider on deliveries the floor had
+ * certified closeable, FOUR runs returned `human` and zero returned `accept`, and the clean
+ * first pass of one of them landed EIGHT `matches` and FIVE `uncertain`s with nothing wrong
+ * anywhere in the delivery. A reviewer asked to say when it cannot verify a criterion from
+ * text will always have something to say, so a rule that requires a flawless review is a
+ * rule that never accepts — and a gate that is never accepted automatically is a gate the
+ * human never left, which is the burden this whole area exists to remove.
  *
  * WHY THIS IS NOT `ann review!`. That session is interactive, terminal-only, and
  * STRUCTURALLY BARRED from deciding: `landFindings` writes `evidence` and nothing else, and
@@ -50,14 +61,22 @@ export type GateVerdict = 'accept' | 'rework' | 'human';
  * testable without a provider and replayable after the fact: the same findings always
  * derive the same outcome, and the record shows which findings produced it.
  *
- * The three deliberate readings:
+ * The deliberate readings:
  *   · NO FINDINGS AT ALL derives `human`, not `accept`. An empty list is not a clean
  *     delivery — it is a reviewer that said nothing, and nothing is not evidence of
- *     anything. An accept must be CARRIED by at least one `matches`.
+ *     anything.
  *   · `quality` is an OPEN concern with no contract defect: it must not auto-rework (nothing
- *     is broken) and must not auto-accept (something is wrong), so it goes to the human
- *     with the `uncertain` arm. The AC names `uncertain` for this row; `quality` is the
- *     other severity that means "real, not a defect", and the row is defined by that.
+ *     is broken) and must not auto-accept (something is wrong), so it goes to the human.
+ *     The severity vocabulary defines it as "the delivered bytes are defective in a way that
+ *     will cost someone later" — localized, actionable, and not this rule's to wave through.
+ *   · `uncertain` IS RAISED, NOT DECIDED. It means "a real concern you CANNOT localize to a
+ *     file and line", so there is nothing for the author to fix, the bytes never change, and
+ *     the next pass re-states it: as a BLOCKER it is permanent, and it made `accept`
+ *     unreachable on every delivery measured. It therefore does not block — but it cannot
+ *     CARRY an accept either, which is the same invariant as the empty list: a set of
+ *     findings that settled nothing establishes nothing. One finding that is not
+ *     `uncertain` — a `matches`, or a prior finding the current bytes resolved — is what an
+ *     accept stands on, and the open questions ride the record beside it.
  *   · a RESOLVED finding of any severity is out of the way — the record's own "the current
  *     bytes settle this", which is what makes a rework's second review able to accept.
  */
@@ -72,8 +91,8 @@ export const deriveGateVerdict = (findings: readonly Pick<ReviewFindingView, 'se
   // unreachable for any spec-compliant reviewer: the three arms would be two.
   const open = findings.filter((f) => f.status === 'open' && f.severity !== 'matches');
   if (open.some((f) => f.severity === 'gap' || f.severity === 'regression')) return 'rework';
-  if (open.length) return 'human';
-  return 'accept';
+  if (open.some((f) => f.severity === 'quality')) return 'human';
+  return findings.some((f) => f.severity !== 'uncertain') ? 'accept' : 'human';
 };
 
 /**
@@ -136,9 +155,12 @@ const openDefects = (findings: readonly ReviewFindingInput[]): string =>
     .join(' · ');
 
 /** The open concerns that are NOT defects — what the human is handed when the rule declines
- *  to decide. Naming them is the point: an escalation that says only "unclear" is a card a
- *  person cannot act on. A `matches` is neither: it is a criterion the reviewer asserted,
- *  and listing it here would hand the human a "concern" that is the opposite of one. */
+ *  to decide, and what an accept CARRIES when it fires over them. Naming them is the point
+ *  in both directions: an escalation that says only "unclear" is a card a person cannot act
+ *  on, and an accept that went through over three open questions while saying nothing about
+ *  them is a decision nobody can audit. A `matches` is neither: it is a criterion the
+ *  reviewer asserted, and listing it here would hand the human a "concern" that is the
+ *  opposite of one. */
 const openConcerns = (findings: readonly ReviewFindingInput[]): string =>
   findings
     .filter((f) => f.status === 'open' && f.severity !== 'matches' && f.severity !== 'gap' && f.severity !== 'regression')
@@ -239,7 +261,15 @@ export const runGateReview = async (
   const summary = parsed.summary;
 
   if (verdict === 'accept') {
-    const why = summary || `the review found no open defect: ${findings.length} finding(s), every criterion walked and none left open`;
+    const settled = summary || `the review walked every criterion and left no defect open (${findings.length} finding(s))`;
+    // AN ACCEPT THAT CARRIES QUESTIONS SAYS SO, IN ITS OWN WHY. A why is required on every
+    // confirm accept (12/11) and it is the line a human reads on the card — so an accept
+    // that fired over open `uncertain`s while reading as "nothing left open" would be the
+    // silent decision this area exists to prevent. The questions are named, and they are
+    // also on the record: this is the prose, `reviewFindings` is the data.
+    const concerns = openConcerns(findings);
+    const openCount = findings.filter((f) => f.status === 'open' && f.severity === 'uncertain').length;
+    const why = concerns ? `${settled} — CARRIED WITH ${openCount} OPEN QUESTION(S), raised and not decided: ${concerns}` : settled;
     const g = commands.gate(id, 'confirm', 'accept', why, { actor });
     if (!g.ok) return { ok: false, absent: `the review worker's accept could not be recorded (${g.error.code}: ${g.error.blocker}) — the submission stands` };
     return { ok: true, verdict: 'accept', why, findings: findings.length, ...(run ? { run } : {}) };

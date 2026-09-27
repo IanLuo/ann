@@ -161,11 +161,17 @@ describe('AC-2 · the verdict is DERIVED, never asked — and the rule is over S
     // an open defect REWORKS — the existing reject → re-execute loop, not a new one
     expect(v([SEV('gap')])).toBe('rework');
     expect(v([SEV('regression')])).toBe('rework');
-    // an open concern with NO defect goes to the human: it must not auto-rework (nothing is
-    // broken) and must not auto-accept (something is wrong). `quality` is the other severity
-    // that means "real, not a defect", so it takes the same arm.
-    expect(v([SEV('uncertain')])).toBe('human');
+    // an open `quality` — defective bytes, no contract defect — goes to the human: it must
+    // not auto-rework (nothing is broken) and must not auto-accept (something is wrong)
     expect(v([SEV('quality')])).toBe('human');
+    expect(v([SEV('quality'), SEV('matches', 'open', 'F2')])).toBe('human');
+    // `uncertain` DOES NOT BLOCK (changed 2026-09-27) — it is a question with no file:line,
+    // so nothing the author can fix and nothing the next pass can settle. But it cannot
+    // CARRY an accept either: a review that settled nothing establishes nothing, which is
+    // the same invariant as the empty list above.
+    expect(v([SEV('uncertain')])).toBe('human'); // nothing settled — the guard, not the arm
+    expect(v([SEV('uncertain'), SEV('uncertain', 'open', 'F2')])).toBe('human');
+    expect(v([SEV('uncertain'), SEV('matches', 'open', 'F2')])).toBe('accept');
     // the ONE automatic outcome
     expect(v([SEV('matches')])).toBe('accept');
     // a RESOLVED finding is out of the way at any severity — this is what lets a rework's
@@ -187,6 +193,23 @@ describe('AC-2 · the verdict is DERIVED, never asked — and the rule is over S
     expect(prompt).toContain('AC-1: the thing lands'); // the criteria, as constraints
     expect(prompt).toContain('npm test: pass — CAPTURED FACT'); // the checks, at their sha
     expect(prompt).toContain('STRICT JSON'); // the reply contract the parse below enforces
+  });
+
+  it('an ACCEPT FIRES OVER AN OPEN QUESTION — recorded in the why, never silently', async () => {
+    const c = atConfirm();
+    const m = model(reply([SEV('matches', 'open', 'F1'), SEV('uncertain', 'open', 'F2')]));
+    const r = await runGateReview(c, abilities(m.llm), TASK, { run: 'run-7' });
+    expect(r).toMatchObject({ ok: true, verdict: 'accept', findings: 2 });
+    // THE TASK IS CLOSED — the whole point of the change: a reviewer that walked every
+    // criterion and settled them does not hand the gate to a human over a question that
+    // has no file:line and therefore no fix.
+    expect(c.status(TASK)).toBe('done');
+    expect(c.rejections(TASK, 'confirm')).toBe(0); // a question burns no rejection
+    // …AND THE QUESTION IS ON THE RECORD TWICE, because a human reads the why and a machine
+    // reads the findings: neither can be the only place it lives
+    expect(String((r as { why: string }).why)).toContain('CARRIED WITH 1 OPEN QUESTION(S)');
+    expect(String((r as { why: string }).why)).toContain('F2 [uncertain]');
+    expect(c.reviewFindings(TASK).findings.map((f) => f.severity)).toContain('uncertain');
   });
 
   it('a reply that PROSE-ANNOUNCES a verdict decides nothing — prose is not a severity', async () => {
@@ -301,7 +324,7 @@ describe('AC-6 · absence degrades to the human, visibly', () => {
     stillTheHumans(c);
   });
 
-  it('an open concern with no defect hands the gate BACK to the human — and burns no rejection', async () => {
+  it('a review that SETTLED NOTHING hands the gate back to the human — and burns no rejection', async () => {
     const c = atConfirm();
     const findings = shapeFindings([SEV('uncertain')], 'gate review worker (model)');
     const r = await runGateReview(c, abilities(model(reply([SEV('uncertain')])).llm), TASK, { run: 'run-7' });

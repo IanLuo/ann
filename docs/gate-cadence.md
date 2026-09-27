@@ -221,7 +221,7 @@ submit! <id> confirm
        └─ the worker reviews — model (§7.4)
             rework    → `rejected`, the findings as feedback → the derived `rework` state
             accept    → `confirmed`, the verdict as the rationale → auto-close if F-AC18 holds
-            uncertain → nothing written; the card goes to the HUMAN
+            human     → nothing written; the card goes to the HUMAN
             absent    → nothing written; the card goes to the HUMAN (§7.7)
 ```
 
@@ -268,13 +268,29 @@ The verdict is a **closed rule over severities**, in one place, deterministic:
 | The findings, at `status: open` | Verdict | Why |
 |---|---|---|
 | any `gap` or `regression` | **rework** | a defect the reviewer can name |
-| any `uncertain`, no defect | **human** | the reviewer's ignorance is exactly when a person should look |
-| only `matches` (and resolved others) | **accept** | nothing found against the ACs |
+| any `quality` | **human** | defective bytes with no contract defect — localized, so a person should look |
+| `uncertain`, and nothing else | **human** | a review that settled nothing establishes nothing (the same invariant as an empty list) |
+| `uncertain` beside findings that settled something | **accept** | the questions are raised, not decided — they ride the record, and the why names them |
 
-**The middle row is the design.** Without it a reviewer that is vague accepts by default —
-`uncertain` would be a free pass, and leniency would be the cheapest output the model could
-produce. With it the worker cannot accept by not knowing, and it cannot stall either, because
-`uncertain` burns no rejection (only D-2's defects do).
+**`uncertain` does not block, and that is a correction made on measurement (2026-09-27).** The
+first rule sent any open `uncertain` to the human, on the reasoning directly below — and it made
+`accept` **unreachable**. The worker was driven against the configured provider on deliveries the
+floor had certified closeable, and **four runs returned `human`; none returned `accept`**. The
+clean first pass of one landed *eight* `matches` and *five* `uncertain`s with nothing wrong
+anywhere in the delivery.
+
+The reason is in the severity's own definition: `uncertain` is *"a real concern you CANNOT
+localize to a file and line"*. There is therefore nothing for the author to fix, the bytes never
+change, and the next pass **re-states it** — the material tells the reviewer to, and it does. As
+a blocker it is permanent, and a gate that is never accepted automatically is a gate the human
+never left, which is the burden this section exists to remove.
+
+**What keeps the original concern.** A reviewer that is vague cannot accept by being vague: an
+accept must be **carried** — at least one finding that is not `uncertain` must stand behind it,
+and a review that landed only questions goes to the human exactly as the old middle row did. The
+questions are not swallowed either: they are on the record as findings, and the accept's
+rationale names them (`CARRIED WITH n OPEN QUESTION(S)`), so the decision stays auditable and
+`uncertain` still burns no rejection (only D-2's defects do).
 
 The model therefore cannot *say* accept. It can only **find**, and the engine decides from what
 was found. That keeps the decision auditable — the accept's rationale IS the finding set that
@@ -349,11 +365,14 @@ a defect of it:
 
 ### 7.9 The honest reading of §7.4's middle row
 
-`uncertain → human` is the safety valve, and it is also the escape hatch: a worker that marks
-everything `uncertain` returns every gate to the human, which is the status quo wearing the new
-machinery. That failure is detectable (§7.5 records the actor, so the ratio is visible) but not
-prevented. The implementation should make the ratio cheap to read rather than assume the worker
-is well-behaved.
+Written when `uncertain` still sent a gate to the human, and kept because the hazard it names
+survives the correction: a worker that marks **everything** `uncertain` and settles nothing is
+still sent to the human by the carried-exactly-nothing rule, so the escape hatch is narrower but
+not sealed. A worker that marks most things `uncertain` *while settling some* now accepts, and
+the questions ride a decision a human did not read. That is the trade the correction makes, and
+it is detectable rather than prevented — §7.5 records the actor, and the accept's own why names
+the carried questions, so the ratio is cheap to read. The implementation should keep it cheap to
+read rather than assume the worker is well-behaved.
 
 ## 8. Hazards the implementation must carry
 
