@@ -341,8 +341,61 @@ describe('AC-5 · the material is DERIVED, and every named input is in it', () =
     expect(diff).not.toContain('+++ b/.ann/journey');
     // …and the exclusion is DISCLOSED, never silent
     expect(diff).toContain('omits .ann/journey');
-    // the cut is declared inline, so a partial view is never mistaken for the whole
+    // CARRIED WHOLE (2026-09-28). This used to assert the opposite — that 12/08's patch was
+    // cut — because the budget was 60,000 while this file's own comment recorded 12/08's
+    // patch as 137,547 chars. The assertion was pinning the defect. It now pins the fix.
+    expect(diff).not.toMatch(/chars cut/);
+    expect(diff).toContain('+++ b/src/store/store.ts');
+  });
+
+  // THE CASE THE RAISE CANNOT REACH, and the reason the two rules beside the budget still
+  // matter. 12/05's delivery is 604,779 chars — larger than any budget that still fits a
+  // context window. So the cut is NOT abolished, it is made HONEST: declared inline, and
+  // named by a change map that is always complete.
+  it('a delivery too large for ANY budget is still cut — and still says so', () => {
+    const repoRoot = fileURLToPath(new URL('../../..', import.meta.url));
+    const m = buildReviewMaterial(new Commands(new Store(repoRoot), 'test'), '12-operate-loop/05-implementation-observability-log');
+    const byLabel = new Map(m.context.map((c) => [c.label, c]));
+    const diff = byLabel.get('submission.diff')!.text;
     expect(diff).toMatch(/chars cut/);
+    // the map is complete, so nothing is INVISIBLE — only unread
+    expect(byLabel.get('submission.changedFiles')!.text).toContain('files changed');
+  });
+
+  // A MATERIAL LIMIT IS NOT A DELIVERY DEFECT (2026-09-28). The defect: `gap` read "a
+  // contract requirement is not met, or a part of it is absent" — a sentence equally true of
+  // a patch the budget cut — so on 12/27 the reviewer filed a cut file as a `gap`, and
+  // `deriveGateVerdict` routes an open `gap` to REWORK. Two reworks burned two of the three
+  // rejections the bound allows, on a delivery that same review matched five times.
+  it('separates a DELIVERY defect from a MATERIAL limit in the severity contract', () => {
+    // `gap` is about the delivery, and says so in its own entry…
+    expect(REVIEW_FINDINGS_MODE).toContain('the DELIVERY fails a contract requirement');
+    expect(REVIEW_FINDINGS_MODE).toContain('absent FROM THE DELIVERY');
+    // …and it rules the material limit OUT, by name, where a reader will meet it
+    expect(REVIEW_FINDINGS_MODE).toContain('Bytes the MATERIAL did not carry are NOT this');
+    expect(REVIEW_FINDINGS_MODE).toContain('Raise those as "uncertain"');
+    // `uncertain` is where that limit GOES — settlement, not only localization, is its bar
+    expect(REVIEW_FINDINGS_MODE).toContain('you cannot SETTLE');
+    expect(REVIEW_FINDINGS_MODE).toContain('the MATERIAL did not carry the bytes that would settle it');
+  });
+
+  it('tells the reviewer a cut is a QUESTION, not a defect — and that the map still names the file', () => {
+    const repoRoot = fileURLToPath(new URL('../../..', import.meta.url));
+    const m = buildReviewMaterial(new Commands(new Store(repoRoot), 'test'), '12-operate-loop/05-implementation-observability-log');
+    const tests = m.context.find((c) => c.label === 'submission.tests')!.text;
+    expect(tests).toContain('Raise any of them as `uncertain` and say what you would need — NOT as `gap`');
+    expect(tests).toContain('The change map above is complete, so a file whose hunks were cut is still NAMED');
+  });
+
+  // THE REGRESSION THAT STARTED THIS, read from the material rather than asserted: at the old
+  // budget 12/27's patch cut `src/store/store.ts`, which is the one hunk its reviewer asked
+  // for by name. It is carried now, so the question cannot arise.
+  it("carries the hunk 12/27's reviewer asked for by name — src/store/store.ts", () => {
+    const repoRoot = fileURLToPath(new URL('../../..', import.meta.url));
+    const m = buildReviewMaterial(new Commands(new Store(repoRoot), 'test'), '12-operate-loop/27-implementation-review-outcome');
+    const diff = m.context.find((c) => c.label === 'submission.diff')!.text;
+    expect(diff).toContain('+++ b/src/store/store.ts');
+    expect(diff).not.toMatch(/chars cut/);
   });
 
   it('a profile that declares no findings hook is untouched — the material is the only difference', () => {

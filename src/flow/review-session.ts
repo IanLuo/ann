@@ -87,10 +87,10 @@ Each finding is an object with EXACTLY these five fields:
 - "id": a short stable handle — 'F1', 'F2', … in order. A finding that a PRIOR list already recorded KEEPS ITS PRIOR ID; that is what lets a rework flip it.
 - "severity": one of exactly
     "matches"    — the criterion IS met and the bytes show it (state it: that is how a reviewer's silence becomes wrong)
-    "gap"        — a contract requirement is not met, or a part of it is absent
+    "gap"        — the DELIVERY fails a contract requirement: the bytes are PRESENT and do not do what the criterion says, or something the criterion requires is absent FROM THE DELIVERY. Bytes the MATERIAL did not carry are NOT this — a patch the stated budget cut is the material's own limit, not the delivery's defect, and filing it here routes a REWORK for something the delivery may well satisfy. Raise those as "uncertain".
     "regression" — something that worked is now broken by these bytes
     "quality"    — it works, but the delivered bytes are defective in a way that will cost someone later
-    "uncertain"  — a real concern you CANNOT localize to a file and line. Use this rather than inventing a pointer.
+    "uncertain"  — a real concern you cannot SETTLE: either you cannot localize it to a file and line, or the MATERIAL did not carry the bytes that would settle it (name the file the change map shows and the cut states it dropped). Use this rather than inventing a pointer, and rather than convicting on bytes you were never shown.
 - "where": the location in the reviewed bytes as 'path:line' (e.g. 'src/store/store.ts:1819'). For "uncertain", give the coarsest true pointer you have ('src/store/store.ts' or 'the diff, hunk 3'). NEVER a guess and NEVER blank.
 - "text": what was found, in one or two sentences a person can act on WITHOUT reading this conversation. Name the criterion it bears on. Not a restatement of the location.
 - "status": "open" or "resolved". "open" for anything you are raising now. "resolved" ONLY for a prior finding the current bytes demonstrably settle — and when you mark one resolved, say in its "text" what evidence settles it.
@@ -157,17 +157,42 @@ export const REVIEW_MAX_TOKENS = 4096;
  *  The first budget tried here was 12,000, which carried 8.7% of it: the oracle then came
  *  back `uncertain` on EVERY criterion, because the patch was cut before the first source
  *  body, and it reproduced none of the three code-visible findings AC-5 names as its stated
- *  minimum. The number below carries a delivery of that size, which is what "the inputs are
- *  sufficient" has to mean in practice; the oracle at this budget verified seven criteria
- *  from the bytes (see the node's record). A LARGER delivery is still cut — and that is why
- *  the cut length is written inline and why the change map above the patch is complete, so a
- *  file whose hunks were cut is always NAMED rather than invisible. */
-const DIFF_CHARS = 60000;
+ *  minimum. This comment then set the number to 60,000 while SAYING it "carries a delivery
+ *  of that size" — it did not, and it never had: the figure recorded here was 137,547.
+ *
+ *  RE-MEASURED (2026-09-28), over every node in leg 12: NINE of 25 deliveries exceed 60,000
+ *  chars — 05-observability-log 604,779 · 22-automatic-exit-gate 165,281 · 08-one-gate-
+ *  derivation 138,646 · 09-review-session 110,058 · 27-review-outcome 102,495 · 11-decision-
+ *  record 91,263 · 10-idea-area 75,922 · 12-accept-with-transfer 74,399 · 07-responsive-card
+ *  65,639. So the under-budget was not an edge case but a third of the leg, and on 12/27 it
+ *  was load-bearing: the cut dropped `src/store/store.ts`, the reviewer raised the missing
+ *  hunk as a `gap`, and the rule routes an open `gap` to REWORK — twice, burning two of the
+ *  three rejections the bound allows, on a delivery the same review matched five times.
+ *
+ *  The number below covers every delivery measured except 05, which at 604,779 overflows any
+ *  budget that still fits a context window. That case is what the two rules beside this one
+ *  are for: the cut length is written inline, the change map above the patch is complete so a
+ *  file whose hunks were cut is always NAMED rather than invisible, and the severity contract
+ *  now says a named-but-cut file is a QUESTION (`uncertain`) and never a delivery defect
+ *  (`gap`). A cut is therefore a CONTEXT cost, not a correctness one. */
+const DIFF_CHARS = 180000;
 
 /** The change MAP gets its own (smaller) budget: `--stat` is one line per file, so this is
  *  room for hundreds of them — and it is what makes the cap on the patch above survivable,
- *  because a file whose patch was cut is still NAMED. */
-const STAT_CHARS = 4000;
+ *  because a file whose patch was cut is still NAMED.
+ *
+ *  RE-MEASURED (2026-09-28), over every node in leg 12: the widest map is 12/05's at 4,047
+ *  chars, and it was the ONLY one over the 4,000 this used to be — so the guarantee above
+ *  ("still NAMED rather than invisible") was false by 47 chars on exactly the delivery whose
+ *  patch is cut hardest, and the cut fell on the SUMMARY line, dropping the file count with
+ *  it. A guarantee that fails on the one case it exists for is not a guarantee. The map
+ *  carries no path exclusion — it names the record's own churn too, deliberately, so that
+ *  nothing is invisible — which is why it is budgeted separately from the patch.
+ *
+ *  The number below leaves room for roughly a thousand files, which is far beyond any
+ *  delivery this journey has produced; a map is one line per file and cheap, so the risk of
+ *  raising it is a long review prompt, never a wrong one. */
+const STAT_CHARS = 12000;
 
 /** The one path the patch leaves out, and why. `.ann/journey` is the RECORD of the work —
  *  the node's own `events.jsonl` churn — not the delivered artifact, and it is already carried
@@ -461,7 +486,7 @@ export function buildReviewMaterial(commands: Commands, id: string): ReviewMater
         parts.join('\n\n'),
         `(THE SELECTION — derived, never hand-picked: the test files the reviewed range changes (${range ? touched.length : 'NO RANGE COULD BE DERIVED from the conclusion\'s citations, so this half is empty'}) and the test files the claims name (${namedBy.size} distinct path(s) named by ${namingClaims} of ${claims.length} claim(s) — a count of FILES, never of claims, so a claim naming three and a claim naming none are not the same number here), ${selected.length} distinct, read at the anchor sha ${head || 'UNRESOLVED'}. OF THOSE, ${carried.length} carried below: ${note(cutShort, 'CUT with its own length stated')} · ${note(unreadable, 'selected but unreadable')} · ${note(dropped, 'NOT carried — the budget ended first')}.`,
         `ON THE THREE CLAIM-SIDE FACTS — ALL THREE SELECT, each by its own route and each named in the caption of every file it chose: an EVIDENCE POINTER directly (a pointer is a path), and the claim's own STATEMENT or the mapped CHECK'S COMMAND/DETAIL by the test paths written into them (extracted by pattern, so it is derived from what the record already holds rather than from anyone's judgement about what matters). A token that names nothing at the anchor shows up below as selected-but-unreadable. Claim-named files are ordered before the range's sweep, so a file an author pointed at is CARRIED, not merely counted.`,
-        `WHAT IS NOT HERE, so that an uncertain about it is a KNOWN boundary rather than an unseen one: any test file neither the range nor a claim names${selected.length ? '' : ' — and this range selects NONE, so no test text is carried at all'} · runtime behaviour no test text carries (a real browser, a real network) · whatever the cut above states it dropped. Raise any of them as \`uncertain\` and say what you would need.)`,
+        `WHAT IS NOT HERE, so that an uncertain about it is a KNOWN boundary rather than an unseen one: any test file neither the range nor a claim names${selected.length ? '' : ' — and this range selects NONE, so no test text is carried at all'} · runtime behaviour no test text carries (a real browser, a real network) · whatever the cut above states it dropped. Raise any of them as \`uncertain\` and say what you would need — NOT as \`gap\`: a gap is a defect in the DELIVERY, and these are limits of the MATERIAL, which the delivery may well satisfy. The change map above is complete, so a file whose hunks were cut is still NAMED: point at it by name.)`,
       ].join('\n'),
       'repo metadata',
     );

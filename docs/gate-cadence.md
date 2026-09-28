@@ -296,6 +296,49 @@ The model therefore cannot *say* accept. It can only **find**, and the engine de
 was found. That keeps the decision auditable — the accept's rationale IS the finding set that
 produced it (§3.3) — and it means a model that hallucinates a verdict in prose changes nothing.
 
+### 7.4a A material limit is not a delivery defect
+
+The table above is a closed rule, and it is only as good as the words fed into it. `gap` used to
+read *"a contract requirement is not met, or a part of it is absent"* — a sentence equally true of
+a patch the material's own budget cut. So a **limit of the material** could be filed as a **defect
+of the delivery**, and the rule would route it to `rework`.
+
+That is measured, not hypothetical. On `12/27` the delivery is **102,495 chars** against a
+`DIFF_CHARS` of 60,000, so the patch cut `src/store/store.ts` — the one hunk its reviewer asked
+for by name. The worker raised it as a `gap`; the rule returned `rework`; the re-execution
+produced the same material and the same `gap`, so it returned `rework` again — **two of the three
+rejections the bound allows, burned on a delivery that same review matched five times.** The six
+`uncertain` findings and five `matches` beside it never blocked at all.
+
+The fix is in what the reviewer is **told**, never in the rule — `deriveGateVerdict` is untouched,
+because a definition let a material limit be filed as a delivery defect, not because a severity
+routes the wrong way:
+
+| Word | What it is about | A file the budget cut |
+|---|---|---|
+| `gap` / `regression` | the **DELIVERY** — the bytes are present and fail the criterion, or something it requires is absent *from the delivery* | never this |
+| `uncertain` | a concern the reviewer cannot **settle** — because it cannot localize it, **or** because the material did not carry the bytes | this one, named by the file the map shows |
+
+**Why a cut is a question and not a defect.** The budget's own rule already decided it: the change
+map is always complete and is emitted *above* the patch, so a file whose hunks were cut is
+**named, never invisible**. A named file is something a reviewer can ask about; it is not something
+it can convict. What the delivery does is unknown until the bytes are read — and "unknown" is
+exactly what `uncertain` means, and exactly what the rule declines to block on.
+
+**The budgets, set from measurement (2026-09-28).** Over this leg's 25 nodes, **ten** deliveries
+exceeded 60,000 chars (05-observability-log 604,779 · 22-automatic-exit-gate 165,281 ·
+08-one-gate-derivation 138,646 · 09-review-session 110,058 · 27-review-outcome 102,495 ·
+11-decision-record 91,263 · 10-idea-area 75,922 · 12-accept-with-transfer 74,399 ·
+07-responsive-card 65,639 · 06-rework-visible 65,440) — so the under-budget was a third of the leg,
+not an edge case. `DIFF_CHARS` moves to **180,000**, which carries every one of them except `05`;
+`05` at 604,779 overflows any budget that still fits a context window, and it is the case the two
+rules above exist for. `STAT_CHARS` moves to **12,000**: the widest map in the leg is `05`'s at
+4,047 against the old 4,000 — so *"still NAMED rather than invisible"* was false by 47 chars on the
+one delivery whose patch is cut hardest, and the cut fell on the summary line. A guarantee that
+fails on the case it exists for is not a guarantee.
+
+So a cut is now a **context** cost, not a **correctness** one.
+
 ### 7.5 The record must say who decided
 
 §3.3 requires a rationale on accept; with a worker the rationale is the verdict. But a `confirmed`
