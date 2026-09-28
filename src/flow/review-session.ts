@@ -160,11 +160,14 @@ export const REVIEW_MAX_TOKENS = 4096;
  *  minimum. This comment then set the number to 60,000 while SAYING it "carries a delivery
  *  of that size" — it did not, and it never had: the figure recorded here was 137,547.
  *
- *  RE-MEASURED (2026-09-28), over every node in leg 12: NINE of 25 deliveries exceed 60,000
+ *  RE-MEASURED (2026-09-28), over every node in leg 12: TEN of 25 deliveries exceed 60,000
  *  chars — 05-observability-log 604,779 · 22-automatic-exit-gate 165,281 · 08-one-gate-
  *  derivation 138,646 · 09-review-session 110,058 · 27-review-outcome 102,495 · 11-decision-
  *  record 91,263 · 10-idea-area 75,922 · 12-accept-with-transfer 74,399 · 07-responsive-card
- *  65,639. So the under-budget was not an edge case but a third of the leg, and on 12/27 it
+ *  65,639 · 06-rework-visible 65,440. (This list first went in as NINE, missing 06 — caught
+ *  by the review of the change itself, which is the second time in this node that a number
+ *  written from a sorted excerpt was wrong at the tail.) So the under-budget was not an edge
+ *  case but a third of the leg, and on 12/27 it
  *  was load-bearing: the cut dropped `src/store/store.ts`, the reviewer raised the missing
  *  hunk as a `gap`, and the rule routes an open `gap` to REWORK — twice, burning two of the
  *  three rejections the bound allows, on a delivery the same review matched five times.
