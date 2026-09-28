@@ -1,1 +1,2 @@
 {"at":"2026-09-28","type":"created","note":"spawned by bookkeeper (ianluo)"}
+{"at":"2026-09-28","type":"evidence","note":"captured 'npm test' → pass (exit 0) against ef2f707deb85b6877ee4c793c26329bc72b940ac (ianluo)","checks":[{"command":"npm test","result":"pass","exitCode":0,"detail":"sha1:02e5ed8e3cc7 · Duration 68.63s (transform 4.72s, setup 0ms, import 10.36s, tests 262.49s, environment 30ms)","sha":"ef2f707deb85b6877ee4c793c26329bc72b940ac","source":"captured"}]}
