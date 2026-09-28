@@ -1,0 +1,43 @@
+{
+  "id": "12-operate-loop/28-implementation-review-cut-severity",
+  "contract": {
+    "intent": "THE REVIEWER IS TOLD TO READ A MATERIAL LIMIT AS A DELIVERY DEFECT, SO A CUT PATCH BLOCKS THE GATE ON A THIRD OF THIS LEG. The material's severity list defines `gap` as \"a contract requirement is not met, or a part of it is absent\" — a sentence that does not distinguish absent from the DELIVERY from absent from the MATERIAL — while the same material's boundary section already asks for `uncertain` on bytes it did not carry. MEASURED on 12/27: its delivery is 102,495 chars against DIFF_CHARS = 60000, so the patch cut src/store/store.ts, src/store/__tests__/store.test.ts, src/surface/handlers.ts, src/surface/command-renderers.ts and src/surface/ui.ts. The worker raised F4 with severity `gap` — \"the store.ts hunk defining REVIEW_ABSENCES is not in the provided diff\" — and `deriveGateVerdict` returns REWORK for an open `gap`, while the SIX `uncertain` findings and FIVE `matches` recorded by that same review do not block at all. So one material limit forced a rework twice over on a delivery the same review matched five times, and it burned two of the three rejections the bound allows. NOT A 12/27 QUIRK: 9 of this leg's 25 nodes carry a delivery larger than the budget — 05-observability-log 604,779 · 22-automatic-exit-gate 165,281 · 08-one-gate-derivation 138,646 · 09-review-session 110,058 · 27-review-outcome 102,495 · 11-decision-record 91,263 · 10-idea-area 75,922 · 12-accept-with-transfer 74,399 · 07-responsive-card 65,639. THE DESIGN ALREADY DECIDED THIS AND THE MATERIAL CONTRADICTS IT: the budget's own comment accepts that a larger delivery is cut, and makes the cut survivable by keeping the change MAP complete \"so a file whose hunks were cut is always NAMED rather than invisible\" — a named file is a boundary the reviewer can ask about, not a defect it can convict. The fix is what the reviewer is TOLD, never what the rule does: `deriveGateVerdict` is untouched, because the defect is a definition that lets a material limit be filed as a delivery defect, not a severity that routes wrongly.",
+    "acceptanceCriteria": [
+      "AC-1 — `gap` MEANS A DEFECT IN THE DELIVERY, AND ITS DEFINITION SAYS SO. The severity list states that `gap` is the DELIVERY failing a requirement — the bytes are PRESENT and do not do what the criterion says, or something the criterion requires is absent FROM THE DELIVERY — and states, in the same entry, that bytes the MATERIAL does not carry are not this. Pinned by test: the profile's `gap` text carries both halves, so a reader cannot take the old ambiguous sentence as the whole rule.",
+      "AC-2 — A MATERIAL LIMIT IS `uncertain`, WITH A POINTER AND A REQUEST. `uncertain` admits, beside \"cannot localize to a file and line\", the case of a concern that cannot be SETTLED because the material did not carry the bytes — so a claim unverifiable for want of a cut file is a QUESTION carrying its pointer (\"the change map names src/store/store.ts; the patch cut it\") rather than a blocking defect. The material's boundary section names the cut as the MATERIAL's own limit and keeps asking for `uncertain` on it, and the two halves agree. Pinned by test on both texts.",
+      "AC-3 — THE BUDGET IS SET FROM THE MEASUREMENT, NOT FROM TASTE. `DIFF_CHARS` is raised to a value the comment justifies from the measured distribution of this leg's deliveries, and the comment states that the cut is now a CONTEXT tradeoff rather than a correctness one — because the reviewer is TOLD what a cut is, a delivery that still overflows costs context, not a rework. Pinned by test: the constant equals the value the stated rationale names.",
+      "AC-4 — THE RULE THAT DECIDES IS UNTOUCHED. `deriveGateVerdict` is NOT changed: `gap`/`regression` still route REWORK, `quality` still routes THE HUMAN, and `uncertain` still does not block. The defect was a definition that let a material limit be filed as a delivery defect — not a severity that routes the wrong way — so the fix is in what the reviewer is told, and the rule reads exactly as it did. Pinned by test: the verdict for each severity mix is unchanged.",
+      "AC-5 — NO REGRESSION, AND THE MATERIAL FOR 12/27 NOW CARRIES IT. `npm test` green, `npm run typecheck` and `npm run build` clean, `ann check` + `ann verify` clean on the live journey, the checks recorded via `capture!`, committed with structured evidence (F-AC18). And the material BUILT for `12/27` — read from `buildReviewMaterial`, not asserted — states the new rule and, at the raised budget, carries `src/store/store.ts` in its patch rather than cutting it. The 12/27 review is NOT re-run: that gate stands at 2 of 3 rejections and one more `rework` would put the worker out of it for good, so the proof is the material itself, which costs no call and burns no rejection."
+    ],
+    "workType": "implementation",
+    "targetAreas": [
+      "src/flow",
+      "docs"
+    ],
+    "requiredInputs": [
+      "gate-cadence"
+    ],
+    "expectedOutputs": [
+      "the two severity definitions separating a delivery defect from a material limit (src/flow)",
+      "the material boundary section and the budget comment agreeing with those definitions (src/flow)",
+      "DIFF_CHARS raised, with the measured distribution stated beside it (src/flow)",
+      "tests: both definitions pinned, and the deciding rule proven unchanged (src/flow)",
+      "docs/gate-cadence.md §7: what a cut patch is, and why it is a question rather than a defect (docs)"
+    ]
+  },
+  "openQuestions": [
+    {
+      "id": "Q1",
+      "question": "Should a cut file be `uncertain`, or does the material need a THIRD word — a distinct severity for \"the material did not carry this\"? A new severity is a vocabulary change (it reaches the findings contract, the rule, and every reader), where reusing `uncertain` changes nothing but the definitions. The cost of reuse is that a reviewer's \"I could not check this\" and \"this is genuinely doubtful\" arrive under one name.",
+      "blocking": false,
+      "defaultIfUnanswered": "REUSE `uncertain`. It already means \"a real concern I cannot settle\", the rule already declines to block on it, and a new severity would put a material-budget fact into the findings vocabulary where it would outlive the budget it describes."
+    },
+    {
+      "id": "Q2",
+      "question": "Should the material bound what each claim may ask for, rather than only stating the cut? A reviewer that knows which FILE each claim needs could be told when that file was cut, so the question it raises is specific from the start — but that is a per-claim resolution the material does not do anywhere today.",
+      "blocking": false,
+      "defaultIfUnanswered": "NO — state the cut, name the files, and let the reviewer point. The claim-side selection already orders claim-named files FIRST so a pointed-at file is carried rather than merely counted, which is the same problem solved at the budget rather than at the prompt."
+    }
+  ],
+  "createdAt": "2026-09-28"
+}
